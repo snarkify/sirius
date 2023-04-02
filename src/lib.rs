@@ -1,6 +1,6 @@
 #[allow(dead_code)]
 
-mod standard_gate;
+pub mod standard_gate;
 
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},

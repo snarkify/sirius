@@ -169,7 +169,7 @@ impl<F: PrimeField> StandardGate<F> {
         Ok(c_cell)
     }
 
-    fn expose_public(
+    pub fn expose_public(
         &self,
         mut layouter: impl Layouter<F>,
         value: AssignedCell<F, F>,
