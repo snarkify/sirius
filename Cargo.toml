@@ -11,3 +11,7 @@ halo2_proofs = { git = "https://github.com/chaosma/zcash-halo2", package="halo2_
 ff = "0.13"
 group = "0.13"
 pasta_curves = "0.5"
+sha3 = "0.8.2"
+rayon = "1.5.3"
+
+
