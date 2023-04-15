@@ -183,78 +183,24 @@ impl<F: PrimeField> StandardGate<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use halo2_proofs::{plonk::Circuit, circuit::{SimpleFloorPlanner, Layouter}};
+    use crate::polynomial::Expression;
     use pasta_curves::Fp;
 
-    #[derive(Clone)]
-    struct FibonacciCircuitConfig {
-        config: StandardGateConfig,
-    }
-
-    impl FibonacciCircuitConfig {
-        fn standard_gate<F: PrimeField>(&self) -> StandardGate<F> {
-            StandardGate::new(self.config.clone())
-        }
-    }
-    
-    #[derive(Default)]
-    struct FibonacciCircuit<F: PrimeField> {
-        x0: F,
-        y0: F,
-        x1: F,
-        y1: F,
-    }
-
-    impl<F: PrimeField> FibonacciCircuit<F> {
-        pub fn new(x0: u32, y0: u32) -> Self {
-            FibonacciCircuit { 
-                x0: F::from(x0 as u64),
-                y0: F::from(y0 as u64),
-                x1: F::from(y0 as u64),
-                y1: F::from(x0 as u64 + y0 as u64),
-            }
-        }
-    }
-
-    impl<F: PrimeField> Circuit<F> for FibonacciCircuit<F> {
-        type Config = FibonacciCircuitConfig;
-        type FloorPlanner = SimpleFloorPlanner;
-
-        fn without_witnesses(&self) -> Self {
-            Self::default()
-        }
-
-        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            let config = StandardGate::<F>::configure(meta);
-            FibonacciCircuitConfig { config }
-        }
-
-        fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
-            let standard_gate = config.standard_gate();
-            let vs = layouter.assign_region(||"region 0", |region|{
-                let offset = 0;
-                let ctx = &mut RegionCtx::new(region, offset);
-                let x0 = Value::known(self.x0);
-                let y0 = Value::known(self.y0);
-                standard_gate.add(ctx, x0, y0)
-            })?;
-            standard_gate.expose_public(layouter.namespace(||"y0"), vs[1].clone(), 0)?;
-            standard_gate.expose_public(layouter.namespace(||"y1"), vs[2].clone(), 1)?;
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn test_fibonacci_expr() {
-        use crate::polynomial::{Expression, MultiPolynomial};
-        use pasta_curves::Fp;
+    fn standard_gate_expressions() -> (Vec<Vec<Expression<Fp>>>,(usize,usize,usize)) {
         let mut cs = ConstraintSystem::<Fp>::default();
-        let _ = FibonacciCircuit::<Fp>::configure(&mut cs);
+        let _ = StandardGate::<Fp>::configure(&mut cs);
         let num_fixed = cs.num_fixed_columns();
         let num_instance = cs.num_instance_columns();
+        let num_advice = cs.num_advice_columns();
         let gates: Vec<Vec<Expression<Fp>>> = cs.gates().iter().map(|gate| {
             gate.polynomials().iter().map(|expr| Expression::from_halo2_expr(expr, (num_fixed, num_instance))).collect()
         }).collect();
+        (gates, (num_fixed, num_instance, num_advice))
+    }
+
+    #[test]
+    fn test_standard_gate_expr() {
+        let (gates, _) = standard_gate_expressions();
         for (i, gate) in gates.iter().enumerate() {
             println!("------gate {}-------", i);
             for (j, poly) in gate.iter().enumerate() {
@@ -263,4 +209,13 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_standard_gate_cross_term() {
+        let (gates, meta) = standard_gate_expressions();
+        println!("meta: {:?}", meta);
+        let expr = gates[0][0].clone();
+        let multipoly = expr.expand();
+        let expr1 = multipoly.fold_transform(meta);
+        println!("standard gate fold transform: {}", expr1);
+    }
 }

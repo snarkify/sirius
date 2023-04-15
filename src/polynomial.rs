@@ -31,39 +31,6 @@ pub enum Expression<F> {
     Scaled(Box<Expression<F>>, F),
 }
 
-pub struct ExpressionIterator<F> {
-    pub expressions: Vec<Expression<F>>,
-}
-
-impl<F: Clone> Iterator for ExpressionIterator<F> {
-    type Item = Expression<F>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.expressions.pop() {
-          Some(Expression::Sum(a, b)) => {
-              self.expressions.push(*a);
-              self.expressions.push(*b);
-              self.next()
-          }
-          Some(item) => {
-              Some(item)
-          }
-          None => None,
-        }
-    }
-}
-
-impl<F: Clone> IntoIterator for Expression<F> {
-    type Item = Expression<F>;
-    type IntoIter = ExpressionIterator<F>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        ExpressionIterator {
-            expressions: vec![self]
-        }
-    }
-}
-
 impl<F:PrimeField> Display for Expression<F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.visualize())
@@ -72,7 +39,7 @@ impl<F:PrimeField> Display for Expression<F> {
 impl<F: PrimeField> Expression<F> {
     pub fn poly_set(&self, set: &mut HashSet<(i32, usize)>) {
         match self {
-            Expression::Constant(c) => (),
+            Expression::Constant(_) => (),
             Expression::Polynomial(poly) => {
                 set.insert((poly.rotation.0, poly.index));
             }
@@ -131,6 +98,41 @@ impl<F: PrimeField> Expression<F> {
         self._expand(&index_to_poly)
     }
 
+
+    pub fn fold_transform(&self, meta: (usize, usize, usize)) -> Self {
+        match self {
+            Expression::Constant(c) => Expression::Constant(*c),
+            Expression::Polynomial(poly) => {
+                if poly.index < meta.0 {
+                    return Expression::Polynomial(*poly);
+                } 
+                // u1, u2 is added
+                let r = Expression::Polynomial(Query{index: meta.0+2*(meta.1+meta.2+1), rotation:Rotation(0)});
+                let index_shift = meta.1 + meta.2 + 1;
+                let y = Expression::Polynomial(Query{index: poly.index + index_shift, rotation:poly.rotation});
+                Expression::Polynomial(*poly) + r * y
+            }
+            Expression::Negated(a) => {
+                let a = a.fold_transform(meta);
+                -a
+            }
+            Expression::Sum(a, b) => {
+                let a = a.fold_transform(meta);
+                let b = b.fold_transform(meta);
+                a + b
+            }
+            Expression::Product(a, b) => {
+                let a = a.fold_transform(meta);
+                let b = b.fold_transform(meta);
+                a * b
+            }
+            Expression::Scaled(a, k) => {
+                let a = a.fold_transform(meta);
+                a * *k
+            }
+        }
+    }
+
     fn visualize(&self) -> String {
         match self {
             Expression::Constant(c) => trim_leading_zeros(format!("{:?}", c)),
@@ -157,9 +159,10 @@ impl<F: PrimeField> Expression<F> {
                 let b = b.visualize();
                 format!("({} * {})", a, b)
             }
-            Expression::Scaled(a, _) => {
+            Expression::Scaled(a, k) => {
                 let a = a.visualize();
-                format!("c * {}", a)
+                let k = trim_leading_zeros(format!("{:?}", k));
+                format!("{} * {}", k, a)
             }
         }
     }
@@ -192,6 +195,7 @@ impl<F: PrimeField> Expression<F> {
            _ => unimplemented!("not supported"),
        }
     }
+
 }
 
 impl<F: PrimeField> Neg for Expression<F> {
@@ -236,7 +240,7 @@ pub struct Monomial<F: PrimeField> {
 
 impl<F: PrimeField> Display for Monomial<F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.coeff != F::ONE {
+        if self.coeff != F::ONE || self.degree() == 0 {
             let coeff_str = trim_leading_zeros(format!("{:?}", self.coeff));
             write!(f, "{}", coeff_str)?;
         }
@@ -272,6 +276,27 @@ impl<F: PrimeField> Monomial<F> {
             coeff, 
             exponents,
         }
+    }
+
+    pub fn homogeneous(&self, degree: usize, u_index: usize) -> Self {
+        let mut mono = self.clone();
+        mono.arity += 1;
+        mono.exponents.push(degree-self.degree());
+        mono.index_to_poly.push((0, u_index));
+        mono.poly_to_index.insert((0, u_index), mono.arity); 
+        mono
+    }
+
+    pub fn to_expression(&self) -> Expression<F> {
+        let mut expr = Expression::Constant(F::ONE);
+        for (i, exp) in self.exponents.iter().enumerate() {
+            let (rot, idx) = self.index_to_poly[i];
+            for _ in 0..(*exp) {
+                let x0 = Expression::<F>::Polynomial(Query{index: idx, rotation: Rotation(rot)});
+                expr = Expression::Product(Box::new(expr), Box::new(x0));
+            }
+        }
+        expr
     }
 
     pub fn is_same_class(&self, other: &Self) -> bool {
@@ -321,10 +346,6 @@ impl<F: PrimeField> Monomial<F> {
         self.coeff += other.coeff;
     }
 
-    pub fn compute_cross_terms(&self, degree: usize) { //-> Expression<F> {
-        if self.degree() < degree {
-        }
-    }
 }
 
 impl<F: PrimeField> PartialEq for Monomial<F> {
@@ -362,6 +383,7 @@ impl<F:PrimeField> Ord for Monomial<F>{
 }
 
 
+#[derive(Clone)]
 pub struct MultiPolynomial<F: PrimeField> {
     pub arity: usize,
     pub monomials: Vec<Monomial<F>>,
@@ -401,6 +423,31 @@ impl<F: PrimeField> MultiPolynomial<F> {
         deg
     }
 
+    pub fn homogeneous(&self, meta:(usize,usize,usize)) -> Self {
+        let degree = self.degree();
+        let u_index = meta.0 + meta.1 + meta.2;
+        let monos = self.monomials.iter().map(|f| f.homogeneous(degree, u_index)).collect();
+        Self {
+            arity: self.arity + 1,
+            monomials: monos,
+        }
+    }
+
+    pub fn to_expression(&self) -> Expression<F> {
+        let mut expr = Expression::Constant(F::ZERO);
+        for mono in self.monomials.iter() {
+            expr = Expression::Sum(Box::new(expr), Box::new(mono.to_expression()));
+        }
+        expr
+    }
+
+
+    // p(X1,X2,...) -> p(X1+r*Y1,X2+r*Y2,...)
+    // meta: size of |fixed_columns|instance_columns|advice_columns|
+    pub fn fold_transform(&self, meta: (usize, usize, usize)) -> Self {
+        self.homogeneous(meta).to_expression().fold_transform(meta).expand()
+    }
+
     pub fn reduce(&mut self)  {
         if self.monomials.len() <= 1 {
             return
@@ -431,7 +478,7 @@ impl<F: PrimeField> Neg for MultiPolynomial<F> {
         let mut monomials = vec![];
         for monomial in self.monomials.iter() {
             let mut tmp = monomial.clone();
-            tmp.coeff = - monomial.coeff;
+            tmp.coeff = monomial.coeff.neg();
             monomials.push(tmp);
         }
 
@@ -499,18 +546,31 @@ mod tests {
     use pasta_curves::{Fp, pallas};
 
     #[test]
-    fn simple_expr_1() {
+    fn test_expression() {
+        let expr1: Expression<Fp> = Expression::Polynomial(Query{index: 0, rotation: Rotation(0)}) - Expression::Constant(pallas::Base::from_str_vartime("1").unwrap()); 
+        let expr2: Expression<Fp> = Expression::Polynomial(Query { index: 1, rotation: Rotation(0) }) * pallas::Base::from(2); 
+        let expr = expr1.clone() * expr1 + expr2;
+        println!("expr={}, expand={}", expr, expr.expand());
+    }
+
+    #[test]
+    fn test_homogeneous() {
+        let expr1: Expression<Fp> = Expression::Polynomial(Query{index: 0, rotation: Rotation(0)}) + Expression::Constant(pallas::Base::from_str_vartime("1").unwrap()); 
+        let expr2: Expression<Fp> =  Expression::<Fp>::Polynomial(Query{index: 0, rotation: Rotation(0)}) * Expression::<Fp>::Polynomial(Query{index: 1, rotation: Rotation(0)});
+        let expr3 = expr1.clone() + expr2.clone();
+        println!("expr1={}, homo={}", expr1.expand(), expr1.expand().homogeneous((0,0,2)));
+        println!("expr2={}, homo={}", expr2.expand(), expr2.expand().homogeneous((0,0,2)));
+        println!("expr3={}, homo={}", expr3.expand(), expr3.expand().homogeneous((0,0,2)));
+    }
+
+    #[test]
+    fn test_poly_to_expr() {
         let expr1: Expression<Fp> = Expression::Polynomial(Query{index: 0, rotation: Rotation(-1)}) + Expression::Polynomial(Query{index:2, rotation: Rotation(0)}) + Expression::Polynomial(Query{index: 1, rotation: Rotation(1)});
         let expr2: Expression<Fp> =  Expression::<Fp>::Polynomial(Query{index: 0, rotation: Rotation(0)}) + Expression::<Fp>::Polynomial(Query{index: 1, rotation: Rotation(0)});
         let expr = expr1 * expr2;
         println!("expr={}, expand={}", expr, expr.expand());
-    }
-    #[test]
-    fn simple_expr_2() {
-        let expr1: Expression<Fp> = Expression::Polynomial(Query{index: 0, rotation: Rotation(0)}) + Expression::Constant(pallas::Base::from_str_vartime("1").unwrap()); 
-        let expr2: Expression<Fp> =  Expression::Constant(pallas::Base::from_str_vartime("1").unwrap());
-        let expr = expr1.clone() * expr1 + expr2;
-        println!("expr={}, expand={}", expr, expr.expand());
+        println!("back_to_expr={}", expr.expand().to_expression());
+
     }
 }
 
