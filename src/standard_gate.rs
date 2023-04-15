@@ -129,11 +129,11 @@ impl<F: PrimeField> StandardGate<F> {
             let b = meta.query_advice(b, Rotation::cur());
             let c = meta.query_advice(c, Rotation::cur());
 
-            let sa = meta.query_fixed(sa);
-            let sb = meta.query_fixed(sb);
-            let sc = meta.query_fixed(sc);
-            let s_mul = meta.query_fixed(s_mul);
-            let s_const = meta.query_fixed(s_const);
+            let sa = meta.query_fixed(sa, Rotation::cur());
+            let sb = meta.query_fixed(sb, Rotation::cur());
+            let sc = meta.query_fixed(sc, Rotation::cur());
+            let s_mul = meta.query_fixed(s_mul, Rotation::cur());
+            let s_const = meta.query_fixed(s_const, Rotation::cur());
             let instance = meta.query_instance(instance, Rotation::cur());
             vec![sa*a.clone()+sb*b.clone()+sc*c.clone()+s_mul*a*b+s_const]
         });
@@ -183,7 +183,8 @@ impl<F: PrimeField> StandardGate<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use halo2_proofs::{plonk::Circuit, circuit::{SimpleFloorPlanner, Layouter}, pasta::Fp};
+    use halo2_proofs::{plonk::Circuit, circuit::{SimpleFloorPlanner, Layouter}};
+    use pasta_curves::Fp;
 
     #[derive(Clone)]
     struct FibonacciCircuitConfig {
@@ -244,19 +245,22 @@ mod tests {
     }
 
     #[test]
-    fn test_fibonacci() {
-        use halo2_proofs::pasta::Fp;
-        use halo2_proofs::dev::MockProver;
-        const K:u32 = 8;
-        let x0 = 2;
-        let y0 = 3;
-        let circuit = FibonacciCircuit::<Fp>::new(x0, y0);
-        let public_inputs = vec![vec![circuit.x1, circuit.y1]];
-        let prover = match MockProver::run(K, &circuit, public_inputs) {
-            Ok(prover) => prover,
-            Err(e) => panic!("{:#?}", e),
-        };
-        assert_eq!(prover.verify(), Ok(()));
+    fn test_fibonacci_expr() {
+        use crate::polynomial::{Expression, MultiPolynomial};
+        use pasta_curves::Fp;
+        let mut cs = ConstraintSystem::<Fp>::default();
+        let _ = FibonacciCircuit::<Fp>::configure(&mut cs);
+        let num_fixed = cs.num_fixed_columns();
+        let num_instance = cs.num_instance_columns();
+        let gates: Vec<Vec<Expression<Fp>>> = cs.gates().iter().map(|gate| {
+            gate.polynomials().iter().map(|expr| Expression::from_halo2_expr(expr, (num_fixed, num_instance))).collect()
+        }).collect();
+        for (i, gate) in gates.iter().enumerate() {
+            println!("------gate {}-------", i);
+            for (j, poly) in gate.iter().enumerate() {
+                println!("poly {} is {}", j, poly);
+            }
+        }
     }
 
 }

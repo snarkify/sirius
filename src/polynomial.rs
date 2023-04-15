@@ -1,4 +1,5 @@
 use halo2_proofs::poly::Rotation;
+use halo2_proofs::plonk::Expression as PE;
 use ff::PrimeField;
 use std::{
     collections::{HashMap, HashSet},
@@ -163,6 +164,34 @@ impl<F: PrimeField> Expression<F> {
         }
     }
 
+    // we need (num_fixed_columns, num_instance_columns) to recover
+    pub fn from_halo2_expr(expr: &PE<F>, meta: (usize, usize)) -> Self {
+       match expr {
+           PE::Constant(c) => Expression::Constant(*c),
+           PE::Fixed(query) => Expression::Polynomial(Query{index: query.column_index(), rotation: query.rotation()}),
+           PE::Instance(query) => Expression::Polynomial(Query{index: meta.0 + query.column_index(), rotation: query.rotation()}),
+           PE::Advice(query) => Expression::Polynomial(Query{index: meta.0 + meta.1 + query.column_index(), rotation: query.rotation()}),
+           PE::Negated(a) => {
+               let a = Self::from_halo2_expr(a, meta);
+               -a
+           }
+           PE::Sum(a, b) => {
+               let a = Self::from_halo2_expr(a, meta);
+               let b = Self::from_halo2_expr(b, meta);
+               a + b
+           }
+           PE::Product(a, b) => {
+               let a = Self::from_halo2_expr(a, meta);
+               let b = Self::from_halo2_expr(b, meta);
+               a * b
+           }
+           PE::Scaled(a, k) => {
+               let a = Self::from_halo2_expr(a, meta);
+               a * *k
+           }
+           _ => unimplemented!("not supported"),
+       }
+    }
 }
 
 impl<F: PrimeField> Neg for Expression<F> {
@@ -290,6 +319,11 @@ impl<F: PrimeField> Monomial<F> {
     pub fn add(&mut self, other: &Self) {
         assert!(self == other);
         self.coeff += other.coeff;
+    }
+
+    pub fn compute_cross_terms(&self, degree: usize) { //-> Expression<F> {
+        if self.degree() < degree {
+        }
     }
 }
 
