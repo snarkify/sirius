@@ -448,6 +448,28 @@ impl<F: PrimeField> MultiPolynomial<F> {
         self.homogeneous(meta).to_expression().fold_transform(meta).expand()
     }
 
+    // get coefficient of X^k, where X identified by (ratation, index) in 0..arity, k=degree
+    pub fn coeff_of(&self, var: (i32, usize), degree: usize) -> Self {
+        assert!(self.monomials.len()>0);
+        assert!(self.monomials[0].poly_to_index.contains_key(&var));
+
+        let index = self.monomials[0].poly_to_index.get(&var).unwrap();
+        let mut index_to_poly = self.monomials[0].index_to_poly.clone();
+        index_to_poly.remove(*index);
+
+        let mut poly = Self::new(self.arity-1);
+
+        for mono in self.monomials.iter() {
+            if mono.exponents[*index] == degree {
+                let mut exponents = mono.exponents.clone();
+                exponents.remove(*index); 
+                let tmp = Monomial::new(index_to_poly.clone(), mono.coeff, exponents); 
+                poly.monomials.push(tmp);
+            }
+        }
+        poly
+    }
+
     pub fn reduce(&mut self)  {
         if self.monomials.len() <= 1 {
             return

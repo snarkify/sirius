@@ -215,7 +215,14 @@ mod tests {
         println!("meta: {:?}", meta);
         let expr = gates[0][0].clone();
         let multipoly = expr.expand();
-        let expr1 = multipoly.fold_transform(meta);
-        println!("standard gate fold transform: {}", expr1);
+        let res = multipoly.fold_transform(meta);
+        println!("standard gate fold transform: {}", res);
+        let r_index = meta.0 + 2*(meta.1+meta.2+1);
+        let cross_term = res.coeff_of((0,r_index), 1);
+        let q1 = res.coeff_of((0, r_index), 0);
+        let q2 = res.coeff_of((0, r_index), 2);
+        println!("cross_term: {}", cross_term);
+        println!("q1: {}", q1);
+        println!("q2: {}", q2);
     }
 }
