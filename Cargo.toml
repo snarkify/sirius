@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 rand = "0.8"
-halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2", package="halo2_proofs" }
+halo2_proofs = { git = "https://github.com/chaosma/halo2", package="halo2_proofs", branch="pse" }
 ff = "0.13"
 group = "0.13"
 pasta_curves = "0.5"
@@ -15,4 +15,4 @@ sha3 = "0.8.2"
 rayon = "1.5.3"
 
 [patch."https://github.com/privacy-scaling-explorations/halo2"]
-halo2_proofs = { path = "/Users/chao/opensource/halo2/pse-halo2/halo2_proofs" }
+halo2_proofs = { path = "/Users/chao/opensource/halo2/halo2/halo2_proofs" }
