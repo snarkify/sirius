@@ -29,3 +29,12 @@ pub fn parallelize<T, F>(v: &mut [T], f: F)
           parallelize_iter(v.chunks_mut(chunk_size).zip((0..).step_by(chunk_size)), f);
       }
  }
+
+
+
+pub(crate) fn trim_leading_zeros(hex: String) -> String {
+    let without_prefix = hex.as_str().trim_start_matches("0x");
+    let trimmed = without_prefix.trim_start_matches('0');
+    format!("0x{}", trimmed)
+}
+

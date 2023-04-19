@@ -5,6 +5,7 @@ use halo2_proofs::{
         FloorPlanner, Fixed, Instance, Selector, Error},
 };
 use std::collections::HashMap;
+use crate::utils::trim_leading_zeros;
 
 
 pub struct TableData<F:PrimeField> {
@@ -30,6 +31,10 @@ impl<F: PrimeField> TableData<F> {
     pub fn assembly<ConcreteCircuit: Circuit<F>>(&mut self, circuit: &ConcreteCircuit) -> Result<(), Error> {
         let mut meta = ConstraintSystem::default();
         let config = ConcreteCircuit::configure(&mut meta);
+        let n = 1u64 << self.k;
+        self.fixed = vec![vec![F::ZERO.into(); n as usize]; meta.num_fixed_columns()];  
+        self.instance = vec![vec![F::ZERO; n as usize]; meta.num_instance_columns()];  
+        self.advice = vec![vec![F::ZERO.into(); n as usize]; meta.num_advice_columns()];  
         ConcreteCircuit::FloorPlanner::synthesize(
             self,
             circuit,
@@ -166,10 +171,42 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
 
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::examples::fibonacci::{FiboIteration, FiboCircuit};
+    use prettytable::{Table, row, Row, Cell};
 
 
+    #[test]
+    fn test_assembly() {
+        use halo2curves::pasta::Fp;
+        //use pasta_curves::Fp;
+        const K:u32 = 8;
+        let num_iters = 100;
+        let fibo_iter = FiboIteration::new(num_iters, 1, 1);
+        let circuit = FiboCircuit::<Fp>::new(fibo_iter.1);
+        let zn = circuit.seq.last().unwrap();
+        let public_inputs = vec![vec![fibo_iter.0[0], fibo_iter.0[1], zn.x_i_plus_1, zn.y_i_plus_1]];
+        let mut td = TableData::new(K, public_inputs);
+        //let _ = td.assembly::<FibonacciCircuit<Fp>>(&circuit);
+        let _ = td.assembly(&circuit);
+
+        let mut table = Table::new();
+        table.add_row(row![ "a", "b", "c"]);
+        let row = 10;
+        let col = 3;
+        for i in 0..row {
+            let mut row = vec![];
+            for j in 0..col {
+                if let Some(val) = td.advice.get(j).and_then(|v| v.get(i)) {
+                    row.push(trim_leading_zeros(format!("{:?}", val.evaluate())));
+                }
+            }
+            table.add_row(Row::new(row.iter().map(|s| Cell::new(s)).collect()));
+        }
+        table.printstd();
+    }
 
 }

@@ -184,7 +184,8 @@ impl<F: PrimeField> StandardGate<F> {
 mod tests {
     use super::*;
     use crate::polynomial::Expression;
-    use pasta_curves::Fp;
+    // use pasta_curves::Fp;
+    use halo2curves::pasta::Fp;
 
     fn standard_gate_expressions() -> (Vec<Vec<Expression<Fp>>>,(usize,usize,usize)) {
         let mut cs = ConstraintSystem::<Fp>::default();

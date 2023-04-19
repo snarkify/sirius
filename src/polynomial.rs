@@ -8,12 +8,7 @@ use std::{
     fmt,
     ops::{Add, Mul, Neg, Sub},
 };
-
-fn trim_leading_zeros(hex: String) -> String {
-    let without_prefix = hex.as_str().trim_start_matches("0x");
-    let trimmed = without_prefix.trim_start_matches('0');
-    format!("0x{}", trimmed)
-}
+use crate::utils::trim_leading_zeros;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Query {
@@ -565,7 +560,8 @@ impl<F: PrimeField> Mul<F> for MultiPolynomial<F> {
 mod tests {
     use super::*;
     use ff::PrimeField;
-    use pasta_curves::{Fp, pallas};
+     // use pasta_curves::{Fp, pallas};
+    use halo2curves::pasta::{pallas, Fp};
 
     #[test]
     fn test_expression() {
