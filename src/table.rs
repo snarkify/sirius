@@ -5,7 +5,6 @@ use halo2_proofs::{
         FloorPlanner, Fixed, Instance, Selector, Error},
 };
 use std::collections::HashMap;
-use crate::utils::trim_leading_zeros;
 
 
 pub struct TableData<F:PrimeField> {
@@ -63,7 +62,7 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
             A: FnOnce() -> AR,
             AR: Into<String>,
         {
-            // TODO: add selector support when needed
+            // TODO: add selector support by converting to selector to fixed column 
 
             Ok(())
         }

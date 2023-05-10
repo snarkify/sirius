@@ -8,8 +8,8 @@ use ff::PrimeField;
 
 #[derive(Debug)]
 pub struct RegionCtx<'a, F: PrimeField> {
-    region: Region<'a, F>,
-    offset: usize,
+    pub region: Region<'a, F>,
+    pub offset: usize,
 }
 
 impl<'a, F:PrimeField> RegionCtx<'a, F> {
@@ -62,6 +62,10 @@ impl<'a, F:PrimeField> RegionCtx<'a, F> {
 
     pub fn next(&mut self) {
         self.offset += 1
+    }
+
+    pub fn reset(&mut self) {
+        self.offset = 0
     }
 }
 
