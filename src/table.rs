@@ -176,6 +176,7 @@ mod tests {
     use super::*;
     use crate::examples::fibonacci::{FiboIteration, FiboCircuit};
     use prettytable::{Table, row, Row, Cell};
+    use crate::utils::trim_leading_zeros;
 
 
     #[test]

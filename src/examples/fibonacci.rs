@@ -3,19 +3,6 @@ use halo2_proofs::circuit::{SimpleFloorPlanner, Layouter, Value};
 use ff::PrimeField;
 use crate::standard_gate::{StandardGateConfig,StandardGate, RegionCtx};
 
-// use halo2_proofs::dev::MockProver;
-// use pasta_curves::{Fp,EqAffine};
-use halo2_proofs::poly::ipa::commitment::{IPACommitmentScheme, ParamsIPA};
-use halo2_proofs::poly::ipa::multiopen::ProverIPA;
-use halo2_proofs::poly::{VerificationStrategy, ipa::strategy::SingleStrategy};
-use halo2_proofs::poly::commitment::ParamsProver;
-use halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
-use halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk, verify_proof};
-use halo2curves::pasta::{vesta, EqAffine, Fp};
-use rand_core::OsRng;
-
-
-
 // (x_i_plus_1, y_i_plus_1) <-- (y_i, x_i + y_i)
 #[derive(Clone, Debug)]
 pub(crate) struct FiboIteration<F: PrimeField> {
@@ -112,39 +99,54 @@ impl<F: PrimeField> Circuit<F> for FiboCircuit<F> {
 }
 
 
-fn main() {
-    println!("-----running FibonacciCircuit-----");
-    const K:u32 = 8;
-    let num_iters = 100;
-    let fibo_iter = FiboIteration::new(num_iters, 1, 1);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // use halo2_proofs::dev::MockProver;
+    // use pasta_curves::{Fp,EqAffine};
+    use halo2_proofs::poly::ipa::commitment::{IPACommitmentScheme, ParamsIPA};
+    use halo2_proofs::poly::ipa::multiopen::ProverIPA;
+    use halo2_proofs::poly::{VerificationStrategy, ipa::strategy::SingleStrategy};
+    use halo2_proofs::poly::commitment::ParamsProver;
+    use halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
+    use halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk, verify_proof};
+    use halo2curves::pasta::{vesta, EqAffine, Fp};
+    use rand_core::OsRng;
 
-    type Scheme = IPACommitmentScheme<EqAffine>;
-    let params: ParamsIPA<vesta::Affine> = ParamsIPA::<EqAffine>::new(K);
-    let circuit = FiboCircuit::<Fp>::new(fibo_iter.1);
-
-    let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
-    let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
-
-    let zn = circuit.seq.last().unwrap();
-    let public_inputs = vec![vec![fibo_iter.0[0], fibo_iter.0[1], zn.x_i_plus_1, zn.y_i_plus_1]];
-    let pi: &[&[Fp]] = &public_inputs.iter().map(|v| v.as_slice()).collect::<Vec<_>>()[..];
-    let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
-    create_proof::<IPACommitmentScheme<_>, ProverIPA<_>, _, _, _, _>(&params, &pk, &[circuit], &[pi], OsRng, &mut transcript)
-          .expect("proof generation should not fail");
-
-    let proof = transcript.finalize();
-    let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-    let strategy = SingleStrategy::new(&params);
-    let res = verify_proof(&params, pk.get_vk(), strategy, &[pi], &mut transcript);
-    println!("{:?}", res);
-
-    /*
-    let prover = match MockProver::run(K, &circuit, public_inputs) {
-        Ok(prover) => prover,
-        Err(e) => panic!("{:#?}", e),
-    };
-    assert_eq!(prover.verify(), Ok(()));
-    */
-    println!("-----everything works fine-----");
+    #[test]
+    pub fn test_fibonacci() {
+        println!("-----running FibonacciCircuit-----");
+        const K:u32 = 8;
+        let num_iters = 100;
+        let fibo_iter = FiboIteration::new(num_iters, 1, 1);
+    
+        type Scheme = IPACommitmentScheme<EqAffine>;
+        let params: ParamsIPA<vesta::Affine> = ParamsIPA::<EqAffine>::new(K);
+        let circuit = FiboCircuit::<Fp>::new(fibo_iter.1);
+    
+        let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
+        let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
+    
+        let zn = circuit.seq.last().unwrap();
+        let public_inputs = vec![vec![fibo_iter.0[0], fibo_iter.0[1], zn.x_i_plus_1, zn.y_i_plus_1]];
+        let pi: &[&[Fp]] = &public_inputs.iter().map(|v| v.as_slice()).collect::<Vec<_>>()[..];
+        let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
+        create_proof::<IPACommitmentScheme<_>, ProverIPA<_>, _, _, _, _>(&params, &pk, &[circuit], &[pi], OsRng, &mut transcript)
+              .expect("proof generation should not fail");
+    
+        let proof = transcript.finalize();
+        let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+        let strategy = SingleStrategy::new(&params);
+        let res = verify_proof(&params, pk.get_vk(), strategy, &[pi], &mut transcript);
+        println!("{:?}", res);
+    
+        /*
+        let prover = match MockProver::run(K, &circuit, public_inputs) {
+            Ok(prover) => prover,
+            Err(e) => panic!("{:#?}", e),
+        };
+        assert_eq!(prover.verify(), Ok(()));
+        */
+        println!("-----everything works fine-----");
+    }
 }
-
