@@ -1,11 +1,13 @@
-use poseidon::{self, SparseMDSMatrix, Spec};
+use poseidon::{self, Spec};
 use halo2_proofs::{
-    circuit::{Layouter, SimpleFloorPlanner, Value, AssignedCell},
-    plonk::{Advice, Assignment, Assigned, Circuit, ConstraintSystem, Column, 
+    circuit::{Value, AssignedCell},
+    plonk::{Advice, ConstraintSystem, Column, 
         Fixed, Expression, Error},
     poly::Rotation};
 use ff::PrimeField;
 use std::marker::PhantomData;
+use std::mem;
+use std::convert::TryInto;
 use crate::standard_gate::RegionCtx;
 
 #[derive(Clone, Debug)]
@@ -26,6 +28,7 @@ pub struct PoseidonConfig<F: PrimeField, const T: usize, const RATE: usize> {
 pub struct PoseidonChip<F: PrimeField, const T: usize, const RATE: usize> {
     config: PoseidonConfig<F, T, RATE>,
     spec: Spec<F, T, RATE>,
+    buf: Vec<F>,
 }
 
 impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
@@ -33,6 +36,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
         Self {
             config,
             spec,
+            buf: Vec::new()
         }
     }
 
@@ -101,7 +105,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
     }
 
     pub fn first_round(&self, ctx: &mut RegionCtx<'_, F>, inputs: Vec<F>, state_idx: usize, state: Option<[AssignedCell<F, F>; T]>) -> Result<AssignedCell<F, F>, Error> {
-        assert!(inputs.len() <= T-1); // RATE = T-1
+        assert!(inputs.len() <= RATE); 
         let mut s_cell = None;
         let s_val = match state {
             Some(s) => {
@@ -141,7 +145,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
         Ok(out)
     }
 
-    // round_idx \in [0; r_f - 1] indicates the starting round of either first half full or second half full
+    // round_idx \in [0; r_f - 1] indicates the round index of either first half full or second half full
     pub fn full_round(&self, ctx: &mut RegionCtx<'_, F>, is_first_half_full: bool, round_idx: usize, state_idx: usize, state: &[AssignedCell<F,F>; T]) -> Result<AssignedCell<F,F>,Error> {
         let mut state_vals = [Value::known(F::ZERO); T];
         let q_1_vals = [F::ZERO; T];
@@ -222,5 +226,64 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
         Ok(out)
     }
 
-}
+    pub fn permutation(&self, ctx: &mut RegionCtx<'_, F>, inputs: Vec<F>, init_state: Option<[AssignedCell<F, F>; T]>) -> Result<[AssignedCell<F, F>; T], Error> {
+        let mut state = Vec::new();
+        for i in 0..T {
+            let si = self.first_round(ctx, inputs.clone(), i, init_state.clone())?;
+            state.push(si);
+        }
 
+        let r_f = self.spec.r_f() / 2;
+        let r_p = self.spec.constants().partial().len();
+
+        for round_idx in 0..r_f {
+            let mut next_state = Vec::new();
+            for state_idx in 0..T {
+                let si = self.full_round(ctx, true, round_idx, state_idx, state[..].try_into().unwrap())?;
+                next_state.push(si);
+            }
+            state = next_state;
+        }
+
+        for round_idx in 0..r_p {
+            let mut next_state = Vec::new();
+            for  state_idx in 0..T {
+                let si = self.partial_round(ctx, round_idx, state_idx, state[..].try_into().unwrap())?;
+                next_state.push(si);
+            }
+            state = next_state;
+        }
+
+        for round_idx in 0..r_f {
+            let mut next_state = Vec::new();
+            for  state_idx in 0..T {
+                let si = self.full_round(ctx, false, round_idx, state_idx, state[..].try_into().unwrap())?;
+                next_state.push(si);
+            }
+            state = next_state;
+        }
+        let res: [AssignedCell<F, F>; T] = state.try_into().unwrap();
+        Ok(res)
+    }
+
+    pub fn update(&mut self, inputs: Vec<F>) {
+        self.buf.extend(inputs)
+    }
+
+    pub fn squeeze(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedCell<F, F>, Error> {
+        let buf = mem::take(&mut self.buf);
+        let exact = buf.len() % RATE == 0;
+        let mut state = None;
+        for chunk in buf.chunks(RATE) {
+            let next_state = self.permutation(ctx, chunk.to_vec(), state)?;
+            state = Some(next_state);
+        }
+        if exact {
+            let next_state = self.permutation(ctx, Vec::new(), state)?;
+            state = Some(next_state);
+        }
+
+        let res = state.clone().unwrap();
+        Ok(res[1].clone())
+    }
+}

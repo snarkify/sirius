@@ -138,7 +138,7 @@ impl<F: PrimeField> StandardGate<F> {
             let sc = meta.query_fixed(sc, Rotation::cur());
             let s_mul = meta.query_fixed(s_mul, Rotation::cur());
             let s_const = meta.query_fixed(s_const, Rotation::cur());
-            let instance = meta.query_instance(instance, Rotation::cur());
+            // let instance = meta.query_instance(instance, Rotation::cur());
             vec![sa*a.clone()+sb*b.clone()+sc*c.clone()+s_mul*a*b+s_const]
         });
 
