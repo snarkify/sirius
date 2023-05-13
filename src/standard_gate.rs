@@ -64,8 +64,8 @@ impl<'a, F:PrimeField> RegionCtx<'a, F> {
         self.offset += 1
     }
 
-    pub fn reset(&mut self) {
-        self.offset = 0
+    pub(crate) fn reset(&mut self, offset: usize) {
+        self.offset = offset
     }
 }
 

@@ -4,6 +4,7 @@ use std::{iter, mem};
 
 // adapted from: https://github.com/privacy-scaling-explorations/snark-verifier
 
+#[derive(Clone, Debug)]
 struct State<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> {
     inner: [F; T],
 }
@@ -16,7 +17,9 @@ impl<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> Stat
     }
 
     fn sbox_full(&mut self, constants: &[F; T]) {
-        let pow5 = |v: &F| { v.square() * v.square() * v };
+        let pow5 = |v: &F| { 
+           v.square() * v.square() * v
+        };
         for (state, constant) in self.inner.iter_mut().zip(constants.iter()) {
             *state = pow5(state) + *constant; 
         }
@@ -27,7 +30,7 @@ impl<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> Stat
         self.inner[0] = pow5(&self.inner[0]) + *constant;
     }
 
-    fn first_round(&mut self, inputs: &[F], pre_constants: &[F; T]) {
+    fn pre_round(&mut self, inputs: &[F], pre_constants: &[F; T]) {
         assert!(RATE == T - 1);
         assert!(inputs.len() <= RATE);
 
@@ -86,6 +89,7 @@ impl<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> Stat
 }
 
 
+#[derive(Clone, Debug)]
 pub struct PoseidonHash<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> {
     spec: Spec<F, T, RATE>,
     state: State<F, T, RATE>,
@@ -130,7 +134,7 @@ impl<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> Pose
 
         // First half of the full rounds
         let constants = self.spec.constants().start();
-        self.state.first_round(inputs, &constants[0]);
+        self.state.pre_round(inputs, &constants[0]);
         for constants in constants.iter().skip(1).take(r_f - 1) {
             self.state.sbox_full(constants);
             self.state.apply_mds(&mds);
@@ -164,18 +168,21 @@ mod tests {
 
     #[test]
     fn test_poseidon_hash() {
-        const T: usize = 17;
-        const RATE: usize = 16;
-        const R_F: usize = 8;
-        const R_P: usize = 10;
+        const T: usize = 3;
+        const RATE: usize = 2;
+        const R_F: usize = 4;
+        const R_P: usize = 3;
         type PH = PoseidonHash<Fp, T, RATE>;
         let mut poseidon = PH::new(R_F, R_P);
         let mut input = Vec::new();
-        for i in 0..20 {
+        for i in 0..5 {
             input.push(Fp::from(i as u64));
         }
         poseidon.update(&input[..]);
         let output = poseidon.squeeze();
-        println!("hash = {:?}", output);
+        // hex = 0x1cd3150d8e12454ff385da8a4d864af6d0f021529207b16dd6c3d8f2b52cfc67
+        let out_hash = Fp::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();
+        println!("output = {:?}", output);
+        assert_eq!(output, out_hash);
     }
 }
