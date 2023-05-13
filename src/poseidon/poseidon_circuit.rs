@@ -287,3 +287,13 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
         Ok(res[1].clone())
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_poseidon_circuit() {
+    }
+}

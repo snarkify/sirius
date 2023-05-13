@@ -156,3 +156,26 @@ impl<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> Pose
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use halo2curves::pasta::Fp;
+
+    #[test]
+    fn test_poseidon_hash() {
+        const T: usize = 17;
+        const RATE: usize = 16;
+        const R_F: usize = 8;
+        const R_P: usize = 10;
+        type PH = PoseidonHash<Fp, T, RATE>;
+        let mut poseidon = PH::new(R_F, R_P);
+        let mut input = Vec::new();
+        for i in 0..20 {
+            input.push(Fp::from(i as u64));
+        }
+        poseidon.update(&input[..]);
+        let output = poseidon.squeeze();
+        println!("hash = {:?}", output);
+    }
+}
