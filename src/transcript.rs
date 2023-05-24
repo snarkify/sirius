@@ -1,5 +1,5 @@
 use halo2_proofs::arithmetic::CurveAffine;
-use std::io::{self, Read, Write};
+use std::io;
 
 pub trait Transcript<C: CurveAffine> {
     fn squeeze_challenge(&mut self) -> C::Scalar;

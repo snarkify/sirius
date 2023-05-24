@@ -54,7 +54,7 @@ impl<C:CurveAffine> PlonkStructure<C> {
       S: &PlonkStructure<C>,
       U1: &RelaxedPlonkInstance<C>,
       W1: &RelaxedPlonkWitness<C>,
-      U2: &PlonkInstance<C>,
+      _U2: &PlonkInstance<C>,
       W2: &PlonkWitness<C>,
     ) -> (Vec<C::Scalar>, C) {
         // TODO: make it systematically for general expression

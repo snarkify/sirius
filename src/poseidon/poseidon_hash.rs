@@ -182,7 +182,6 @@ mod tests {
         let output = poseidon.squeeze();
         // hex = 0x1cd3150d8e12454ff385da8a4d864af6d0f021529207b16dd6c3d8f2b52cfc67
         let out_hash = Fp::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();
-        println!("output = {:?}", output);
         assert_eq!(output, out_hash);
     }
 }

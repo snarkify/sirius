@@ -1,5 +1,5 @@
 use halo2_proofs::arithmetic::{CurveAffine, CurveExt, best_multiexp};
-use group::{Curve, Group};
+use group::Curve;
 use sha3::digest::{ExtendableOutput, Input};
 use sha3::Shake256;
 use std::io::Read;

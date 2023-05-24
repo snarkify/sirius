@@ -207,9 +207,11 @@ mod tests {
     fn test_standard_gate_expr() {
         let (gates, _) = standard_gate_expressions();
         for (i, gate) in gates.iter().enumerate() {
-            println!("------gate {}-------", i);
             for (j, poly) in gate.iter().enumerate() {
-                println!("poly {} is {}", j, poly);
+                if i == 0 && j == 0 {
+                    // i.e. (((((ql * a1) + (qr * b1)) + (qo * c1)) + ((qm * a1) * b1)) + qc)
+                    assert_eq!(format!("{}", poly), "(((((Z_0 * Z_6) + (Z_1 * Z_7)) + (Z_2 * Z_8)) + ((Z_3 * Z_6) * Z_7)) + Z_4)");
+                }
             }
         }
     }
@@ -217,17 +219,18 @@ mod tests {
     #[test]
     fn test_standard_gate_cross_term() {
         let (gates, meta) = standard_gate_expressions();
-        println!("meta: {:?}", meta);
         let expr = gates[0][0].clone();
         let multipoly = expr.expand();
         let res = multipoly.fold_transform(meta);
-        println!("standard gate fold transform: {}", res);
         let r_index = meta.0 + 2*(meta.1+meta.2+1);
-        let cross_term = res.coeff_of((0,r_index), 1);
-        let q1 = res.coeff_of((0, r_index), 0);
-        let q2 = res.coeff_of((0, r_index), 2);
-        println!("cross_term: {}", cross_term);
-        println!("q1: {}", q1);
-        println!("q2: {}", q2);
+        let r0 = res.coeff_of((0, r_index), 0);
+        let r1 = res.coeff_of((0,r_index), 1);
+        let r2 = res.coeff_of((0, r_index), 2);
+        // coeff of r^0: (qm)(a1)(b1) + (ql)(a1)(u1) + (qr)(b1)(u1) + (qo)(c1)(u1) + (qc)(u1^2)
+        assert_eq!(format!("{}", r0), "(Z_3)(Z_6)(Z_7) + (Z_0)(Z_6)(Z_9) + (Z_1)(Z_7)(Z_9) + (Z_2)(Z_8)(Z_9) + (Z_4)(Z_9^2)");
+        // coeff of r^1: (qm)(b1)(a2) + (ql)(u1)(a2) + (qm)(a1)(b2) + (qr)(u1)(b2) + (qo)(u1)(c2) + (ql)(a1)(u2) + (qr)(b1)(u2) + (qo)(c1)(u2) + 0x2(qc)(u1)(u2)
+        assert_eq!(format!("{}", r1), "(Z_3)(Z_7)(Z_11) + (Z_0)(Z_9)(Z_11) + (Z_3)(Z_6)(Z_12) + (Z_1)(Z_9)(Z_12) + (Z_2)(Z_9)(Z_13) + (Z_0)(Z_6)(Z_14) + (Z_1)(Z_7)(Z_14) + (Z_2)(Z_8)(Z_14) + 0x2(Z_4)(Z_9)(Z_14)");
+        // coeff of r^2: (qm)(a2)(b2) + (ql)(a2)(u2) + (qr)(b2)(u2) + (qo)(c2)(u2) + (qc)(u2^2)
+        assert_eq!(format!("{}", r2), "(Z_3)(Z_11)(Z_12) + (Z_0)(Z_11)(Z_14) + (Z_1)(Z_12)(Z_14) + (Z_2)(Z_13)(Z_14) + (Z_4)(Z_14^2)");
     }
 }

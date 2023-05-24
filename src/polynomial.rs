@@ -32,6 +32,7 @@ impl<F:PrimeField> Display for Expression<F> {
     }
 }
 impl<F: PrimeField> Expression<F> {
+    // uniquely determined by (rotation, poly_index)
     pub fn poly_set(&self, set: &mut HashSet<(i32, usize)>) {
         match self {
             Expression::Constant(_) => (),
@@ -235,6 +236,9 @@ pub struct Monomial<F: PrimeField> {
 
 impl<F: PrimeField> Display for Monomial<F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.coeff == F::ZERO {
+            return write!(f, "");
+        }
         if self.coeff != F::ONE || self.degree() == 0 {
             let coeff_str = trim_leading_zeros(format!("{:?}", self.coeff));
             write!(f, "{}", coeff_str)?;
@@ -386,13 +390,18 @@ pub struct MultiPolynomial<F: PrimeField> {
 
 impl<F:PrimeField> Display for MultiPolynomial<F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (i, monomial) in self.monomials.iter().enumerate() {
-            write!(f, "{}", monomial)?;
-            if i != self.monomials.len() - 1 {
-                write!(f, " + ")?;
+        let mut non_empty_monomials_count = 0;
+        for monomial in &self.monomials {
+            let formatted_monomial = format!("{}", monomial);
+            if !formatted_monomial.is_empty() {
+                if non_empty_monomials_count > 0 {
+                    write!(f, " + ")?;
+                }
+                write!(f, "{}", formatted_monomial)?;
+                non_empty_monomials_count += 1;
             }
         }
-        write!(f, "")
+        Ok(())
     }
 }
 
@@ -566,9 +575,9 @@ mod tests {
     #[test]
     fn test_expression() {
         let expr1: Expression<Fp> = Expression::Polynomial(Query{index: 0, rotation: Rotation(0)}) - Expression::Constant(pallas::Base::from_str_vartime("1").unwrap()); 
-        let expr2: Expression<Fp> = Expression::Polynomial(Query { index: 1, rotation: Rotation(0) }) * pallas::Base::from(2); 
+        let expr2: Expression<Fp> = Expression::Polynomial(Query { index: 0, rotation: Rotation(0) }) * pallas::Base::from(2); 
         let expr = expr1.clone() * expr1 + expr2;
-        println!("expr={}, expand={}", expr, expr.expand());
+        assert_eq!(format!("{}", expr.expand()), "0x1 + (Z_0^2)");
     }
 
     #[test]
@@ -576,19 +585,7 @@ mod tests {
         let expr1: Expression<Fp> = Expression::Polynomial(Query{index: 0, rotation: Rotation(0)}) + Expression::Constant(pallas::Base::from_str_vartime("1").unwrap()); 
         let expr2: Expression<Fp> =  Expression::<Fp>::Polynomial(Query{index: 0, rotation: Rotation(0)}) * Expression::<Fp>::Polynomial(Query{index: 1, rotation: Rotation(0)});
         let expr3 = expr1.clone() + expr2.clone();
-        println!("expr1={}, homo={}", expr1.expand(), expr1.expand().homogeneous((0,0,2)));
-        println!("expr2={}, homo={}", expr2.expand(), expr2.expand().homogeneous((0,0,2)));
-        println!("expr3={}, homo={}", expr3.expand(), expr3.expand().homogeneous((0,0,2)));
-    }
-
-    #[test]
-    fn test_poly_to_expr() {
-        let expr1: Expression<Fp> = Expression::Polynomial(Query{index: 0, rotation: Rotation(-1)}) + Expression::Polynomial(Query{index:2, rotation: Rotation(0)}) + Expression::Polynomial(Query{index: 1, rotation: Rotation(1)});
-        let expr2: Expression<Fp> =  Expression::<Fp>::Polynomial(Query{index: 0, rotation: Rotation(0)}) + Expression::<Fp>::Polynomial(Query{index: 1, rotation: Rotation(0)});
-        let expr = expr1 * expr2;
-        println!("expr={}, expand={}", expr, expr.expand());
-        println!("back_to_expr={}", expr.expand().to_expression());
-
+        assert_eq!(format!("{}", expr3.expand().homogeneous((0,0,2))), "(Z_2^2) + (Z_0)(Z_2) + (Z_0)(Z_1)");
     }
 }
 

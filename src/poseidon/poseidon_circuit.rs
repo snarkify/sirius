@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn test_poseidon_circuit() {
         println!("-----running Poseidon Circuit-----");
-        const K:u32 = 9;
+        const K:u32 = 8;
         type Scheme = IPACommitmentScheme<EqAffine>;
         let params: ParamsIPA<vesta::Affine> = ParamsIPA::<EqAffine>::new(K);
         let mut inputs = Vec::new();
@@ -397,7 +397,7 @@ mod tests {
     #[test] 
     fn test_mock() {
         use halo2_proofs::dev::MockProver;
-        const K:u32 = 7;
+        const K:u32 = 8;
         let mut inputs = Vec::new();
         for i in 0..5 {
             inputs.push(Fp::from(i as u64));

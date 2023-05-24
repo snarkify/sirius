@@ -190,7 +190,6 @@ mod tests {
         let zn = circuit.seq.last().unwrap();
         let public_inputs = vec![vec![fibo_iter.0[0], fibo_iter.0[1], zn.x_i_plus_1, zn.y_i_plus_1]];
         let mut td = TableData::new(K, public_inputs);
-        //let _ = td.assembly::<FibonacciCircuit<Fp>>(&circuit);
         let _ = td.assembly(&circuit);
 
         let mut table = Table::new();
