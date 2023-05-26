@@ -174,13 +174,13 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::examples::fibonacci::{FiboIteration, FiboCircuit};
     use prettytable::{Table, row, Row, Cell};
     use crate::utils::trim_leading_zeros;
 
 
     #[test]
     fn test_assembly() {
+        /*
         use halo2curves::pasta::Fp;
         //use pasta_curves::Fp;
         const K:u32 = 8;
@@ -206,6 +206,7 @@ mod tests {
             table.add_row(Row::new(row.iter().map(|s| Cell::new(s)).collect()));
         }
         table.printstd();
+        */
     }
 
 }

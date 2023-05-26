@@ -1,48 +1,13 @@
-use poseidon::{self, Spec};
+use poseidon;
 use halo2_proofs::{
     circuit::{Value, AssignedCell},
-    plonk::{Advice, ConstraintSystem, Column, 
-        Fixed, Expression, Error},
-    poly::Rotation};
+    plonk::Error,
+    };
 use halo2curves::group::ff::PrimeField;
-use std::marker::PhantomData;
-//use std::mem;
 use std::convert::TryInto;
-use crate::standard_gate::RegionCtx;
+use crate::aux_gate::{RegionCtx, AuxChip};
 
-#[derive(Clone, Debug)]
-pub struct PoseidonConfig<F: PrimeField, const T: usize, const RATE: usize> {
-    state: [Column<Advice>; T],
-    input: Column<Advice>,
-    out: Column<Advice>,
-    // for linear term
-    q_1: [Column<Fixed>; T],
-    // for quintic term
-    q_5: [Column<Fixed>; T],
-    q_i: Column<Fixed>,
-    q_o: Column<Fixed>,
-    rc: Column<Fixed>,
-    _marker: PhantomData<F>
-}
-
-#[derive(Debug)]
-pub struct PoseidonChip<F: PrimeField, const T: usize, const RATE: usize> {
-    config: PoseidonConfig<F, T, RATE>,
-    spec: Spec<F, T, RATE>,
-    buf: Vec<F>,
-    offset: usize // TODO: support multiple uses of squeeze when needed
-}
-
-impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
-    pub fn new(config: PoseidonConfig<F, T, RATE>, spec: Spec<F,T,RATE>) -> Self {
-        Self {
-            config,
-            spec,
-            buf: Vec::new(),
-            offset: 0,
-        }
-    }
-
+impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
     pub fn next_state_val(state: [Value<F>; T], q_1: [F; T], q_5: [F; T], q_o: F, rc: F) -> Value<F> {
         let pow_5 = |v: Value<F>| {
             let v2 = v * v;
@@ -53,61 +18,6 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
             out = out + pow_5(*s) * Value::known(q5) + *s * Value::known(q1);
         }
         out * Value::known((-q_o).invert().unwrap())
-    }
-
-    pub fn configure(
-        meta: &mut ConstraintSystem<F>,
-        adv_cols: &mut (impl Iterator<Item = Column<Advice>> + Clone),
-        fix_cols: &mut (impl Iterator<Item = Column<Fixed>> + Clone),
-    ) -> PoseidonConfig<F, T, RATE> {
-        
-        let state = [0; T].map(|_| adv_cols.next().unwrap());
-        let input = adv_cols.next().unwrap();
-        let out = adv_cols.next().unwrap();
-        let q_1 = [0; T].map(|_| fix_cols.next().unwrap());
-        let q_5 = [0; T].map(|_| fix_cols.next().unwrap());
-        let q_i = fix_cols.next().unwrap();
-        let q_o = fix_cols.next().unwrap();
-        let rc = fix_cols.next().unwrap();
-
-        state.map(|s| {
-            meta.enable_equality(s);
-        });
-        meta.enable_equality(out);
-
-        let pow_5 = |v: Expression<F>| {
-            let v2 = v.clone() * v.clone();
-            v2.clone() * v2 * v
-        };
-
-        meta.create_gate("sum_i(q_1[i]*s[i]) + sum_i(q_5[i]*s[i]^5) + rc + q_i*input + q_o*out=0", |meta|{
-            let state = state.into_iter().map(|s| meta.query_advice(s, Rotation::cur())).collect::<Vec<_>>();
-            let input = meta.query_advice(input, Rotation::cur());
-            let out = meta.query_advice(out, Rotation::cur());
-            let q_1 = q_1.into_iter().map(|q| meta.query_fixed(q, Rotation::cur())).collect::<Vec<_>>();
-            let q_5 = q_5.into_iter().map(|q| meta.query_fixed(q, Rotation::cur())).collect::<Vec<_>>();
-            let q_i = meta.query_fixed(q_i, Rotation::cur());
-            let q_o = meta.query_fixed(q_o, Rotation::cur());
-            let rc = meta.query_fixed(rc, Rotation::cur());
-            let res = state.into_iter().zip(q_1).zip(q_5).map(|((w, q1), q5)| {
-                q1 * w.clone()  +  q5 * pow_5(w)
-            }).fold(q_i * input + rc +  q_o * out, |acc, item| {
-                acc + item
-            });
-            vec![res]
-        });
-
-        PoseidonConfig {
-            state,
-            input,
-            out,
-            q_1,
-            q_5,
-            q_i,
-            q_o,
-            rc,
-            _marker: PhantomData
-        }
     }
 
     pub fn pre_round(&self, ctx: &mut RegionCtx<'_, F>, inputs: Vec<F>, state_idx: usize, state: &[AssignedCell<F, F>; T]) -> Result<AssignedCell<F, F>, Error> {
@@ -294,16 +204,18 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use poseidon::Spec;
     use halo2_proofs::poly::ipa::commitment::{IPACommitmentScheme, ParamsIPA};
     use halo2_proofs::poly::ipa::multiopen::ProverIPA;
     use halo2_proofs::poly::{VerificationStrategy, ipa::strategy::SingleStrategy};
     use halo2_proofs::poly::commitment::ParamsProver;
     use halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
-    use halo2_proofs::plonk::{Circuit, Instance, create_proof, keygen_pk, keygen_vk, verify_proof};
+    use halo2_proofs::plonk::{ConstraintSystem, Column, Circuit, Instance, create_proof, keygen_pk, keygen_vk, verify_proof};
     use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
     use halo2curves::pasta::{vesta, EqAffine, Fp};
     use halo2curves::group::ff::FromUniformBytes;
     use rand_core::OsRng;
+    use crate::aux_gate::AuxConfig;
 
     const T: usize = 3;
     const RATE: usize = 2;
@@ -312,7 +224,7 @@ mod tests {
 
     #[derive(Clone, Debug)]
     struct TestCircuitConfig<F: PrimeField> {
-       pconfig: PoseidonConfig<F, T, RATE>,
+       pconfig: AuxConfig<F, T, RATE>,
        instance: Column<Instance>
     }
 
@@ -327,7 +239,6 @@ mod tests {
             }
         }
     }
-
 
     impl<F: PrimeField + FromUniformBytes<64>> Circuit<F> for TestCircuit<F> {
         type Config = TestCircuitConfig<F>;
@@ -344,8 +255,8 @@ mod tests {
             let instance = meta.instance_column();
             meta.enable_equality(instance);
             let mut adv_cols = [(); T+2].map(|_| meta.advice_column()).into_iter();
-            let mut fix_cols = [(); 2*T+3].map(|_| meta.fixed_column()).into_iter();
-            let pconfig = PoseidonChip::configure(meta, &mut adv_cols, &mut fix_cols);
+            let mut fix_cols = [(); 2*T+4].map(|_| meta.fixed_column()).into_iter();
+            let pconfig = AuxChip::configure(meta, &mut adv_cols, &mut fix_cols);
             Self::Config {
                 pconfig,
                 instance,
@@ -354,7 +265,7 @@ mod tests {
 
         fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
              let spec = Spec::new(R_F, R_P);
-             let mut pchip = PoseidonChip::new(config.pconfig, spec);
+             let mut pchip = AuxChip::new(config.pconfig, spec);
              pchip.update(self.inputs.clone());
              let output = layouter.assign_region(||"poseidon hash", |region|{
                  let ctx = &mut RegionCtx::new(region, 0);
@@ -364,7 +275,6 @@ mod tests {
              Ok(())
         }
     }
-
 
     #[test]
     fn test_poseidon_circuit() {
