@@ -1,11 +1,12 @@
-use std::marker::PhantomData;
+use halo2_proofs::arithmetic::CurveAffine;
 use poseidon::Spec;
-
+use std::marker::PhantomData;
 use halo2_proofs::{
     circuit::{AssignedCell, Cell, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Expression, Fixed, Error}, 
     poly::Rotation};
 use ff::PrimeField;
+use crate::table::RelaxedPlonkInstance;
 
 #[derive(Debug)]
 pub struct RegionCtx<'a, F: PrimeField> {
@@ -68,6 +69,14 @@ impl<'a, F:PrimeField> RegionCtx<'a, F> {
     pub(crate) fn reset(&mut self, offset: usize) {
         self.offset = offset
     }
+}
+
+pub struct AuxInput<C: CurveAffine> {
+    i: C::Base,
+    z0: Vec<C::Base>,
+    zi: Option<Vec<C::Base>>,
+    U: Option<RelaxedPlonkInstance<C>>,
+    u: Option<RelaxedPlonkInstance<C>>,
 }
 
 #[derive(Clone, Debug)]

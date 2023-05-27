@@ -177,7 +177,6 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
 
     pub fn squeeze(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedCell<F, F>, Error> {
         //let buf = mem::take(&mut self.buf);
-        ctx.reset(self.offset);
         let buf = self.buf.clone();
         let exact = buf.len() % RATE == 0;
         let mut state = Vec::new();
@@ -194,7 +193,6 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
             let next_state = self.permutation(ctx, Vec::new(), state[..].try_into().unwrap())?;
             state = next_state.to_vec();
         }
-        self.offset = ctx.offset();
 
         Ok(state[1].clone())
     }

@@ -3,7 +3,7 @@
 use std::io;
 use halo2_proofs::arithmetic::CurveAffine;
 use crate::commitment::CommitmentKey;
-use crate::plonk::{PlonkStructure, RelaxedPlonkInstance, RelaxedPlonkWitness, PlonkInstance, PlonkWitness};
+use crate::table::{PlonkStructure, RelaxedPlonkInstance, RelaxedPlonkWitness, PlonkInstance, PlonkWitness};
 use crate::transcript::{Transcript, AbsorbInTranscript};
 use std::marker::PhantomData;
 
@@ -30,9 +30,9 @@ impl<C: CurveAffine, T:Transcript<C>> NIFS<C,T> {
         U1.absorb_into(transcript)?;
         U2.absorb_into(transcript)?;
 
-        let (T, T_commitment) = S.commit_T(ck, S, U1, W1, U2, W2);
-        transcript.common_point(T_commitment)?;
-        let r = transcript.squeeze_challenge();
+//        let (T, T_commitment) = S.commit_T(ck, S, U1, W1, U2, W2);
+//        transcript.common_point(T_commitment)?;
+//        let r = transcript.squeeze_challenge();
         Ok(())
     }
 
