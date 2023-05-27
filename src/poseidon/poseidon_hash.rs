@@ -1,6 +1,12 @@
 use halo2curves::group::ff::{FromUniformBytes, PrimeField};
+use halo2_proofs::arithmetic::CurveAffine;
 use poseidon::{self, SparseMDSMatrix, Spec};
-use std::{iter, mem};
+use std::{iter, mem, marker::PhantomData};
+use crate::{
+    poseidon::{ROConstantsTrait, ROTrait},
+    utils::fe_to_fe,
+};
+
 
 // adapted from: https://github.com/privacy-scaling-explorations/snark-verifier
 
@@ -88,31 +94,71 @@ impl<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> Stat
     }
 }
 
-
-#[derive(Clone, Debug)]
-pub struct PoseidonHash<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> {
-    spec: Spec<F, T, RATE>,
-    state: State<F, T, RATE>,
-    buf: Vec<F>,
+impl<F, const T: usize, const RATE: usize> ROConstantsTrait for Spec<F, T, RATE>
+     where F: PrimeField+FromUniformBytes<64>
+{
+    fn new(r_f: usize, r_p: usize) -> Self {
+        Spec::new(r_f, r_p)
+    }
 }
 
-impl<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> PoseidonHash<F, T, RATE> {
-    pub fn new(r_f: usize, r_p: usize) -> Self {
+impl<C, F, const T: usize, const RATE: usize> ROTrait<C> for PoseidonHash<C, F, T, RATE>
+     where C: CurveAffine<ScalarExt = F>, F: PrimeField+FromUniformBytes<64>
+{
+    type Constants = Spec<F, T, RATE>;
+    fn new(constants: Self::Constants) -> Self {
         Self {
-            spec: Spec::new(r_f, r_p),
+            spec: constants,
             state: State::new(
                 poseidon::State::default()
                     .words()
             ),
             buf: Vec::new(),
+            _marker: PhantomData,
         }
     }
 
-    pub fn update(&mut self, elements: &[F]) {
+    fn absorb_scalar(&mut self, scalar: C::Scalar) {
+        self.update(&[scalar]);
+    }
+
+    fn absorb_point(&mut self, point: C) {
+        let encoded = point.coordinates().map(|coordinates| {
+            [coordinates.x(), coordinates.y()]
+                .into_iter()
+                .cloned()
+                .map(fe_to_fe)
+                .collect::<Vec<_>>()
+        });
+        if bool::from(encoded.is_some()) {
+            self.update(&encoded.unwrap())
+        } else {
+            self.update(&[C::Scalar::ZERO]) // C is infinity
+        }
+    }
+
+    fn squeeze(&mut self) -> C::Scalar {
+        self.output()
+    }
+}
+
+
+
+
+#[derive(Clone, Debug)]
+pub struct PoseidonHash<C: CurveAffine<ScalarExt = F>, F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> {
+    spec: Spec<F, T, RATE>,
+    state: State<F, T, RATE>,
+    buf: Vec<F>,
+    _marker: PhantomData<C>,
+}
+
+impl<C: CurveAffine<ScalarExt=F>, F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> PoseidonHash<C, F, T, RATE> {
+    fn update(&mut self, elements: &[F]) {
         self.buf.extend_from_slice(elements);
     }
 
-    pub fn squeeze(&mut self) -> F {
+    fn output(&mut self) -> F {
         let buf = mem::take(&mut self.buf);
         let exact = buf.len() % RATE == 0;
 
@@ -164,7 +210,7 @@ impl<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> Pose
 #[cfg(test)]
 mod tests {
     use super::*;
-    use halo2curves::pasta::Fp;
+    use halo2curves::pasta::{EqAffine, Fp};
 
     #[test]
     fn test_poseidon_hash() {
@@ -172,13 +218,12 @@ mod tests {
         const RATE: usize = 2;
         const R_F: usize = 4;
         const R_P: usize = 3;
-        type PH = PoseidonHash<Fp, T, RATE>;
-        let mut poseidon = PH::new(R_F, R_P);
-        let mut input = Vec::new();
+        type PH = PoseidonHash<EqAffine, Fp, T, RATE>;
+        let spec = Spec::<Fp, T, RATE>::new(R_F, R_P);
+        let mut poseidon = PH::new(spec);
         for i in 0..5 {
-            input.push(Fp::from(i as u64));
+            poseidon.absorb_scalar(Fp::from(i as u64));
         }
-        poseidon.update(&input[..]);
         let output = poseidon.squeeze();
         // hex = 0x1cd3150d8e12454ff385da8a4d864af6d0f021529207b16dd6c3d8f2b52cfc67
         let out_hash = Fp::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();

@@ -191,7 +191,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
                 ctx.constrain_equal(rhs.cell(), out.unwrap().cell())?;
             }
             ctx.assign_advice(||"s[0]", self.config.state[0], r_val)?;
-            out = Some(ctx.assign_advice(||"out=s[0]*s[1]+input", self.config.state[1], lhs_val + r_val * rhs_val)?);
+            out = Some(ctx.assign_advice(||"out=s[0]*s[1]+input", self.config.out, lhs_val + r_val * rhs_val)?);
 
             ctx.assign_fixed(||"q_1[0]", self.config.q_1[0], F::ONE)?;
             ctx.assign_fixed(||"q_1[1]", self.config.q_1[1], F::ONE)?;

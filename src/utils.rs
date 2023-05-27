@@ -1,4 +1,70 @@
+use halo2_proofs::plonk::Assigned;
+use ff::{BatchInvert, Field, PrimeField};
+use num_bigint::BigUint;
+
 pub(crate) use rayon::current_num_threads;
+
+
+pub fn modulus<F: PrimeField>() -> BigUint {
+    fe_to_big(-F::ONE) + 1usize
+}
+
+pub fn fe_from_big<F: PrimeField>(big: BigUint) -> F {
+    let bytes = big.to_bytes_le();
+    let mut repr = F::Repr::default();
+    assert!(bytes.len() <= repr.as_ref().len());
+    repr.as_mut()[..bytes.len()].clone_from_slice(bytes.as_slice());
+    F::from_repr(repr).unwrap()
+}
+
+pub fn fe_to_big<F: PrimeField>(fe: F) -> BigUint {
+    BigUint::from_bytes_le(fe.to_repr().as_ref())
+}
+
+pub fn fe_to_fe<F1: PrimeField, F2: PrimeField>(fe: F1) -> F2 {
+    fe_from_big(fe_to_big(fe) % modulus::<F2>())
+}
+
+fn invert<F: Field>(
+      poly: &Vec<Assigned<F>>, 
+      inv_denoms: impl Iterator<Item = F> + ExactSizeIterator,
+  ) -> Vec<F> {
+      assert_eq!(inv_denoms.len(), poly.len());
+      poly 
+        .iter()
+        .zip(inv_denoms.into_iter())
+        .map(|(a, inv_den)| a.numerator() * inv_den)
+        .collect()
+}
+
+pub(crate) fn batch_invert_assigned<F: Field>(
+    assigned: &Vec<Vec<Assigned<F>>>,
+) -> Vec<Vec<F>> {
+    let mut assigned_denominators: Vec<_> = assigned
+        .iter()
+        .map(|f| {
+            f.iter()
+                .map(|value| value.denominator())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    assigned_denominators
+        .iter_mut()
+        .flat_map(|f| {
+            f.iter_mut()
+                // If the denominator is trivial, we can skip it, reducing the
+                // size of the batch inversion.
+                .filter_map(|d| d.as_mut())
+        })
+        .batch_invert();
+
+    assigned
+        .iter()
+        .zip(assigned_denominators.into_iter())
+        .map(|(poly, inv_denoms)| invert(poly, inv_denoms.into_iter().map(|d| d.unwrap_or(F::ONE))))
+        .collect()
+}
 
 pub fn parallelize_iter<I, T, F>(iter: I, f: F)
   where
