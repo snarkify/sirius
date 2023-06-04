@@ -173,6 +173,46 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
         }
     }
 
+    // helper function for some usecases: no copy constraints, only return out cell
+    pub fn apply(&self, ctx: &mut RegionCtx<'_, F>, state: (Option<Vec<F>>, Option<Vec<F>>, Option<F>, Option<Vec<Value<F>>>), 
+        input: (Option<F>, Option<Value<F>>), rc: Option<F>, out: (F, Value<F>)) -> Result<AssignedCell<F, F>, Error> {
+        if let Some(q_1) = state.0 {
+            for (i, val) in q_1.iter().enumerate() {
+                ctx.assign_fixed(||"q_1", self.config.q_1[i], *val)?;
+            }
+        }
+        if let Some(q_5) = state.1 {
+            for (i, val) in q_5.iter().enumerate() {
+                ctx.assign_fixed(||"q_5", self.config.q_5[i], *val)?;
+            }
+        }
+        if let Some(q_m_val) = state.2 {
+            ctx.assign_fixed(||"q_m", self.config.q_m, q_m_val)?;
+        }
+        if let Some(state) = state.3 {
+            for (i, val) in state.iter().enumerate() {
+                ctx.assign_advice(||"state", self.config.state[i], *val)?;
+            }
+        }
+
+        if let Some(q_i_val) = input.0 {
+            ctx.assign_fixed(||"q_i", self.config.q_i, q_i_val)?;
+        }
+        if let Some(input_val) = input.1 {
+            ctx.assign_advice(||"input", self.config.input, input_val)?;
+        }
+
+        if let Some(rc_val) = rc {
+            ctx.assign_fixed(||"rc", self.config.rc, rc_val)?;
+        }
+
+        ctx.assign_fixed(||"q_o", self.config.q_o, out.0)?;
+        let out = ctx.assign_advice(||"out", self.config.out, out.1)?;
+        ctx.next();
+        Ok(out)
+    }
+                 
+
     // calculate sum_{i=0}^d r^i terms[i]
     pub fn random_linear_combination(&self, ctx: &mut RegionCtx<'_, F>, terms: Vec<F>, r: F) -> Result<AssignedCell<F,F>, Error> {
         let d = terms.len();
