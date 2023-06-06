@@ -1,8 +1,7 @@
 use halo2_proofs::arithmetic::CurveAffine;
-use poseidon::Spec;
 use std::marker::PhantomData;
 use halo2_proofs::{
-    circuit::{AssignedCell, Cell, Region, Value},
+    circuit::{AssignedCell, Chip, Cell, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Expression, Fixed, Error}, 
     poly::Rotation};
 use ff::PrimeField;
@@ -80,7 +79,7 @@ pub struct AuxInput<C: CurveAffine> {
 }
 
 #[derive(Clone, Debug)]
-pub struct AuxConfig<F: PrimeField, const T: usize, const RATE: usize> {
+pub struct MainGateConfig<const T: usize> {
     pub(crate) state: [Column<Advice>; T],
     pub(crate) input: Column<Advice>,
     pub(crate) out: Column<Advice>,
@@ -92,25 +91,33 @@ pub struct AuxConfig<F: PrimeField, const T: usize, const RATE: usize> {
     pub(crate) q_i: Column<Fixed>,
     pub(crate) q_o: Column<Fixed>,
     pub(crate) rc: Column<Fixed>,
-    pub(crate) _marker: PhantomData<F>
 }
 
 #[derive(Debug)]
-pub struct AuxChip<F: PrimeField, const T: usize, const RATE: usize> {
-    pub(crate) config: AuxConfig<F, T, RATE>,
-    pub(crate) spec: Spec<F, T, RATE>,
-    pub(crate) buf: Vec<F>,
-    pub(crate) offset: usize, 
+pub struct MainGate<F: PrimeField, const T: usize> {
+    config: MainGateConfig<T>,
+    _marker: PhantomData<F>
+}
+
+impl<F: PrimeField, const T: usize> Chip<F> for MainGate<F, T> {
+    type Config = MainGateConfig<T>;
+    type Loaded = ();
+
+    fn config(&self) -> &Self::Config {
+        &self.config
+    }
+
+    fn loaded(&self) -> &Self::Loaded {
+        &()
+    }
 }
 
 
-impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
-    pub fn new(config: AuxConfig<F, T, RATE>, spec: Spec<F,T,RATE>) -> Self {
+impl<F: PrimeField, const T: usize> MainGate<F, T> {
+    pub fn new(config: MainGateConfig<T>) -> Self {
         Self {
             config,
-            spec,
-            buf: Vec::new(),
-            offset: 0,
+            _marker: PhantomData,
         }
     }
 
@@ -118,7 +125,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
         meta: &mut ConstraintSystem<F>,
         adv_cols: &mut (impl Iterator<Item = Column<Advice>> + Clone),
         fix_cols: &mut (impl Iterator<Item = Column<Fixed>> + Clone),
-    ) -> AuxConfig<F, T, RATE> {
+    ) -> MainGateConfig<T> {
         assert!(T>=2);
         let state = [0; T].map(|_| adv_cols.next().unwrap());
         let input = adv_cols.next().unwrap();
@@ -159,7 +166,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
             vec![res]
         });
 
-        AuxConfig {
+        MainGateConfig {
             state,
             input,
             out,
@@ -169,7 +176,6 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
             q_i,
             q_o,
             rc,
-            _marker: PhantomData
         }
     }
 
@@ -251,13 +257,13 @@ mod tests {
     // use pasta_curves::Fp;
     use halo2curves::pasta::Fp;
 
-    fn aux_gate_expressions() -> (Vec<Vec<Expression<Fp>>>,(usize,usize,usize)) {
+    fn main_gate_expressions() -> (Vec<Vec<Expression<Fp>>>,(usize,usize,usize)) {
         const T: usize = 2;
         const RATE: usize = 2;
         let mut cs = ConstraintSystem::<Fp>::default();
         let mut adv_cols = [(); T+2].map(|_| cs.advice_column()).into_iter();
         let mut fix_cols = [(); 2*T+4].map(|_| cs.fixed_column()).into_iter();
-        let _: AuxConfig<halo2curves::pasta::Fp, T, RATE> = AuxChip::configure(&mut cs, &mut adv_cols, &mut fix_cols);
+        let _: MainGateConfig<T> = MainGate::configure(&mut cs, &mut adv_cols, &mut fix_cols);
         let num_fixed = cs.num_fixed_columns();
         let num_instance = cs.num_instance_columns();
         let num_advice = cs.num_advice_columns();
@@ -268,8 +274,8 @@ mod tests {
     }
 
     #[test]
-    fn test_aux_gate_expr() {
-        let (gates, _) = aux_gate_expressions();
+    fn test_main_gate_expr() {
+        let (gates, _) = main_gate_expressions();
         for (i, gate) in gates.iter().enumerate() {
             for (j, poly) in gate.iter().enumerate() {
                 if i == 0 && j == 0 {
@@ -282,8 +288,8 @@ mod tests {
     }
 
     #[test]
-    fn test_aux_gate_cross_term() {
-        let (gates, meta) = aux_gate_expressions();
+    fn test_main_gate_cross_term() {
+        let (gates, meta) = main_gate_expressions();
         let expr = gates[0][0].clone();
         let multipoly = expr.expand();
         let res = multipoly.fold_transform(meta);

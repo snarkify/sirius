@@ -3,7 +3,7 @@ use halo2_proofs::{
     circuit::AssignedCell,
     plonk::Error,
 };
-use crate::aux_gate::RegionCtx;
+use crate::main_gate::RegionCtx;
 
 pub mod poseidon_hash;
 pub mod poseidon_circuit;

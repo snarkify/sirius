@@ -1,13 +1,28 @@
-use poseidon;
+use poseidon::{self, Spec};
 use halo2_proofs::{
-    circuit::{Value, AssignedCell},
+    circuit::{Chip, Value, AssignedCell},
     plonk::Error,
     };
 use halo2curves::group::ff::PrimeField;
 use std::convert::TryInto;
-use crate::aux_gate::{RegionCtx, AuxChip};
+use crate::main_gate::{RegionCtx, MainGate, MainGateConfig};
 
-impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
+pub struct PoseidonChip<F: PrimeField, const T: usize, const RATE: usize> {
+    main_gate: MainGate<F, T>,
+    spec: Spec<F, T, RATE>,
+    buf: Vec<F>, 
+}
+
+impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
+    pub fn new(config: MainGateConfig<T>, spec: Spec<F,T,RATE>) -> Self {
+        let main_gate =  MainGate::new(config);
+        Self {
+            main_gate,
+            spec,
+            buf: Vec::new(),
+        }
+    }
+
     pub fn next_state_val(state: [Value<F>; T], q_1: [F; T], q_5: [F; T], q_o: F, rc: F) -> Value<F> {
         let pow_5 = |v: Value<F>| {
             let v2 = v * v;
@@ -36,15 +51,15 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
 
         let out_val = s_val + input_val + Value::known(rc_val);
 
-        let si = ctx.assign_advice(||"first round: state", self.config.state[state_idx], s_val)?;
+        let si = ctx.assign_advice(||"first round: state", self.main_gate.config().state[state_idx], s_val)?;
         ctx.constrain_equal(state[state_idx].cell(), si.cell())?;
 
-        ctx.assign_advice(||"pre_round: input", self.config.input, input_val)?;
-        ctx.assign_fixed(||"pre_round: q_1", self.config.q_1[state_idx], F::ONE)?;
-        ctx.assign_fixed(||"pre_round: q_i", self.config.q_i, F::ONE)?;
-        ctx.assign_fixed(||"pre_round: q_o", self.config.q_o, -F::ONE)?;
-        ctx.assign_fixed(||"pre_round: rc", self.config.rc, rc_val)?;
-        let out = ctx.assign_advice(||"pre_round: out", self.config.out, out_val)?;
+        ctx.assign_advice(||"pre_round: input", self.main_gate.config().input, input_val)?;
+        ctx.assign_fixed(||"pre_round: q_1", self.main_gate.config().q_1[state_idx], F::ONE)?;
+        ctx.assign_fixed(||"pre_round: q_i", self.main_gate.config().q_i, F::ONE)?;
+        ctx.assign_fixed(||"pre_round: q_o", self.main_gate.config().q_o, -F::ONE)?;
+        ctx.assign_fixed(||"pre_round: rc", self.main_gate.config().rc, rc_val)?;
+        let out = ctx.assign_advice(||"pre_round: out", self.main_gate.config().out, out_val)?;
     
         ctx.next();
         Ok(out)
@@ -69,19 +84,19 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
         for (j, (mij, cj)) in mds_row.iter().zip(rcs).enumerate() {
             rc_val = rc_val + *mij * cj;
             q_5_vals[j] = *mij;
-            ctx.assign_fixed(||format!("full_round {}: q_5", round_idx), self.config.q_5[j], q_5_vals[j])?;
+            ctx.assign_fixed(||format!("full_round {}: q_5", round_idx), self.main_gate.config().q_5[j], q_5_vals[j])?;
         }
 
         for (i, s) in state.iter().enumerate() {
             state_vals[i] = s.value().copied();
-            let si = ctx.assign_advice(||format!("full_round {}: state", round_idx), self.config.state[i], s.value().copied())?;
+            let si = ctx.assign_advice(||format!("full_round {}: state", round_idx), self.main_gate.config().state[i], s.value().copied())?;
             ctx.constrain_equal(s.cell(), si.cell())?;
         }
 
-        ctx.assign_fixed(||format!("full_round {}: rc", round_idx), self.config.rc, rc_val)?;
-        ctx.assign_fixed(||format!("full_round {}: q_o", round_idx), self.config.q_o, q_o_val)?;
+        ctx.assign_fixed(||format!("full_round {}: rc", round_idx), self.main_gate.config().rc, rc_val)?;
+        ctx.assign_fixed(||format!("full_round {}: q_o", round_idx), self.main_gate.config().q_o, q_o_val)?;
         let out_val = Self::next_state_val(state_vals, q_1_vals, q_5_vals, q_o_val, rc_val);
-        let out = ctx.assign_advice(||format!("full_round {}: out", round_idx), self.config.out, out_val)?;
+        let out = ctx.assign_advice(||format!("full_round {}: out", round_idx), self.main_gate.config().out, out_val)?;
         ctx.next();
         Ok(out)
     }
@@ -101,32 +116,32 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
 
         for (i, s) in state.iter().enumerate() {
             state_vals[i] = s.value().copied();
-            let si = ctx.assign_advice(||format!("partial_round {}: state", round_idx), self.config.state[i], s.value().copied())?;
+            let si = ctx.assign_advice(||format!("partial_round {}: state", round_idx), self.main_gate.config().state[i], s.value().copied())?;
             ctx.constrain_equal(s.cell(), si.cell())?;
         }
 
         let rc_val;
         if state_idx == 0 {
             q_5_vals[0] = row[0];
-            ctx.assign_fixed(||format!("partial_round {}: q_5", round_idx), self.config.q_5[0], q_5_vals[0])?;
+            ctx.assign_fixed(||format!("partial_round {}: q_5", round_idx), self.main_gate.config().q_5[0], q_5_vals[0])?;
             rc_val = row[0] * rc;
-            ctx.assign_fixed(||format!("partial_round {}: rc", round_idx), self.config.rc, rc_val)?;
+            ctx.assign_fixed(||format!("partial_round {}: rc", round_idx), self.main_gate.config().rc, rc_val)?;
             for j in 1..T {
                 q_1_vals[j] = row[j];
-                ctx.assign_fixed(||format!("partial_round {}: q_1", round_idx), self.config.q_1[j], q_1_vals[j])?;
+                ctx.assign_fixed(||format!("partial_round {}: q_1", round_idx), self.main_gate.config().q_1[j], q_1_vals[j])?;
             }
         } else {
             q_5_vals[0] = col_hat[state_idx - 1];
             q_1_vals[state_idx] = F::ONE;
-            ctx.assign_fixed(||format!("partial_round {}: q_5", round_idx), self.config.q_5[0], q_5_vals[0])?;
-            ctx.assign_fixed(||format!("partial_round {}: q_1", round_idx), self.config.q_1[state_idx], q_1_vals[state_idx])?;
+            ctx.assign_fixed(||format!("partial_round {}: q_5", round_idx), self.main_gate.config().q_5[0], q_5_vals[0])?;
+            ctx.assign_fixed(||format!("partial_round {}: q_1", round_idx), self.main_gate.config().q_1[state_idx], q_1_vals[state_idx])?;
             rc_val = col_hat[state_idx - 1] * rc;
-            ctx.assign_fixed(||format!("partial_round {}, rc", round_idx), self.config.rc, rc_val)?;
+            ctx.assign_fixed(||format!("partial_round {}, rc", round_idx), self.main_gate.config().rc, rc_val)?;
         }
 
         let out_val = Self::next_state_val(state_vals, q_1_vals, q_5_vals, -F::ONE, rc_val);
-        ctx.assign_fixed(||format!("full_round {}: q_o", round_idx), self.config.q_o, q_o_val)?;
-        let out = ctx.assign_advice(||format!("full_round {}: out", round_idx), self.config.out, out_val)?;
+        ctx.assign_fixed(||format!("full_round {}: q_o", round_idx), self.main_gate.config().q_o, q_o_val)?;
+        let out = ctx.assign_advice(||format!("full_round {}: out", round_idx), self.main_gate.config().out, out_val)?;
         ctx.next();
         Ok(out)
     }
@@ -182,7 +197,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
         let mut state = Vec::new();
         let state0: [F; T] = poseidon::State::default().words();
         for i in 0..T {
-            let si = ctx.assign_advice(||"initial state", self.config.state[i], Value::known(state0[i]))?;
+            let si = ctx.assign_advice(||"initial state", self.main_gate.config().state[i], Value::known(state0[i]))?;
             state.push(si);
         }
         for chunk in buf.chunks(RATE) {
@@ -201,6 +216,8 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
 
 #[cfg(test)]
 mod tests {
+    use std::marker::PhantomData;
+
     use super::*;
     use poseidon::Spec;
     use halo2_proofs::poly::ipa::commitment::{IPACommitmentScheme, ParamsIPA};
@@ -213,7 +230,7 @@ mod tests {
     use halo2curves::pasta::{vesta, EqAffine, Fp};
     use halo2curves::group::ff::FromUniformBytes;
     use rand_core::OsRng;
-    use crate::aux_gate::AuxConfig;
+    use crate::main_gate::MainGateConfig;
 
     const T: usize = 3;
     const RATE: usize = 2;
@@ -221,8 +238,8 @@ mod tests {
     const R_P: usize = 3;
 
     #[derive(Clone, Debug)]
-    struct TestCircuitConfig<F: PrimeField> {
-       pconfig: AuxConfig<F, T, RATE>,
+    struct TestCircuitConfig {
+       pconfig: MainGateConfig<T>,
        instance: Column<Instance>
     }
 
@@ -239,7 +256,7 @@ mod tests {
     }
 
     impl<F: PrimeField + FromUniformBytes<64>> Circuit<F> for TestCircuit<F> {
-        type Config = TestCircuitConfig<F>;
+        type Config = TestCircuitConfig;
         type FloorPlanner = SimpleFloorPlanner;
 
 
@@ -254,7 +271,7 @@ mod tests {
             meta.enable_equality(instance);
             let mut adv_cols = [(); T+2].map(|_| meta.advice_column()).into_iter();
             let mut fix_cols = [(); 2*T+4].map(|_| meta.fixed_column()).into_iter();
-            let pconfig = AuxChip::configure(meta, &mut adv_cols, &mut fix_cols);
+            let pconfig = MainGate::configure(meta, &mut adv_cols, &mut fix_cols);
             Self::Config {
                 pconfig,
                 instance,
@@ -262,8 +279,8 @@ mod tests {
         }
 
         fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
-             let spec = Spec::new(R_F, R_P);
-             let mut pchip = AuxChip::new(config.pconfig, spec);
+             let spec = Spec::<F, T, RATE>::new(R_F, R_P);
+             let mut pchip = PoseidonChip::new(config.pconfig, spec);
              pchip.update(self.inputs.clone());
              let output = layouter.assign_region(||"poseidon hash", |region|{
                  let ctx = &mut RegionCtx::new(region, 0);

@@ -6,6 +6,6 @@ pub mod gadgets;
 pub mod nifs;
 pub mod polynomial;
 pub mod poseidon;
-pub mod aux_gate;
+pub mod main_gate;
 pub mod table;
 pub mod utils;

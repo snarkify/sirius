@@ -1,12 +1,12 @@
 use ff::PrimeField;
 use halo2_proofs::{
-    circuit::Value,
+    circuit::{Chip, Value},
     plonk::Error,
 };
-use crate::aux_gate::{RegionCtx, AuxChip};
+use crate::main_gate::{RegionCtx, MainGate};
 use crate::gadgets::AssignedValue;
 
-impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
+impl<F: PrimeField, const T: usize> MainGate<F,T> {
     pub fn assert_equal_const(&self, ctx: &mut RegionCtx<'_, F>, a: Value<F>, c: F) -> Result<(), Error> {
         self.apply(ctx, (None, None, None, None), (None, None), Some(c), (-F::ONE, a))?;
         Ok(())
@@ -14,14 +14,14 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
 
     pub fn assign_bit(&self, ctx: &mut RegionCtx<'_, F>, a: Value<F>) -> Result<AssignedValue<F>, Error> {
         // s0*s1 - out = 0
-        let s0 = ctx.assign_advice(||"is_inf", self.config.state[0], a)?;
-        let s1 = ctx.assign_advice(||"is_inf", self.config.state[0], a)?;
-        let out = ctx.assign_advice(||"is_inf", self.config.out, a)?;
+        let s0 = ctx.assign_advice(||"is_inf", self.config().state[0], a)?;
+        let s1 = ctx.assign_advice(||"is_inf", self.config().state[0], a)?;
+        let out = ctx.assign_advice(||"is_inf", self.config().out, a)?;
         ctx.constrain_equal(s0.cell(), out.cell())?;
         ctx.constrain_equal(s1.cell(), out.cell())?;
 
-        ctx.assign_fixed(||"q_m", self.config.q_m, F::ONE)?;
-        ctx.assign_fixed(||"q_o", self.config.q_m, -F::ONE)?;
+        ctx.assign_fixed(||"q_m", self.config().q_m, F::ONE)?;
+        ctx.assign_fixed(||"q_o", self.config().q_m, -F::ONE)?;
         ctx.next();
         Ok(out)
     }
@@ -44,13 +44,13 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
         self.apply(ctx, state_terms, (None, None), Some(-F::ONE), (F::ONE, r.value().copied()))?;
 
         // r * a' = r
-        let r1 = ctx.assign_advice(||"r", self.config.state[0], r.value().copied())?;
-        ctx.assign_advice(||"a_inv", self.config.state[1], a_inv)?;
-        let r2 = ctx.assign_advice(||"r", self.config.out, r.value().copied())?;
+        let r1 = ctx.assign_advice(||"r", self.config().state[0], r.value().copied())?;
+        ctx.assign_advice(||"a_inv", self.config().state[1], a_inv)?;
+        let r2 = ctx.assign_advice(||"r", self.config().out, r.value().copied())?;
         ctx.constrain_equal(r1.cell(), r2.cell())?;
 
-        ctx.assign_fixed(||"q_m", self.config.q_m, F::ONE)?;
-        ctx.assign_fixed(||"q_o", self.config.q_o, -F::ONE)?;
+        ctx.assign_fixed(||"q_m", self.config().q_m, F::ONE)?;
+        ctx.assign_fixed(||"q_o", self.config().q_o, -F::ONE)?;
         ctx.next();
         
         // r = 0

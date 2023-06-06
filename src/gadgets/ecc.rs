@@ -1,11 +1,11 @@
 use halo2_proofs::{
     arithmetic::CurveAffine,
-    circuit::Value,
+    circuit::{Chip, Value},
     plonk::Error,
 };
-use ff::{Field, PrimeField};
+use ff::Field;
 use crate::{
-    aux_gate::{RegionCtx, AuxChip},
+    main_gate::{RegionCtx, MainGate},
     gadgets::AssignedValue,
 };
 
@@ -16,25 +16,36 @@ pub struct AssignedPoint<C: CurveAffine> {
 }
 
 impl<C: CurveAffine> AssignedPoint<C> {
-    pub fn assign<const T:usize,const RATE: usize>(ctx: &mut RegionCtx<'_, C::Base>, chip: AuxChip<C::Base,T,RATE>, coords: Option<(C::Base, C::Base, bool)>) -> Result<Self, Error> {
-        let x = ctx.assign_advice(||"x", chip.config.state[0], Value::known(coords.map_or(C::Base::ZERO,|c|c.0)))?;
-        let y = ctx.assign_advice(||"y", chip.config.state[1], Value::known(coords.map_or(C::Base::ZERO, |c|c.1)))?;
-        ctx.next();
-
-        Ok(Self {
-            x,
-            y,
-        })
-    }
 
     pub fn coordinates(&self) -> (&AssignedValue<C::Base>, &AssignedValue<C::Base>) {
         (&self.x, &self.y)
     }
 
-    pub fn add<const T:usize, const RATE:usize>(&self, ctx: &mut RegionCtx<'_, C::Base>, chip: AuxChip<C::Base,T,RATE>, other: &AssignedPoint<C>) -> Result<Self, Error> {
-        chip.assert_not_equal(ctx, &self.x, &other.x)?;
-        Ok(self.clone())
-    }
 
 }
 
+pub struct EccChip<C: CurveAffine, const T: usize> {
+    main_gate: MainGate<C::Base, T>,
+}
+
+impl<C: CurveAffine, const T: usize> EccChip<C, T> {
+    pub fn assign_point(&self, ctx: &mut RegionCtx<'_, C::Base>, coords: Option<(C::Base, C::Base)>) -> Result<AssignedPoint<C>, Error> {
+        let x = ctx.assign_advice(||"x", self.main_gate.config().state[0], Value::known(coords.map_or(C::Base::ZERO,|c|c.0)))?;
+        let y = ctx.assign_advice(||"y", self.main_gate.config().state[1], Value::known(coords.map_or(C::Base::ZERO, |c|c.1)))?;
+        ctx.next();
+
+        Ok(AssignedPoint {
+            x,
+            y,
+        })
+    }
+
+    pub fn add(&self, ctx: &mut RegionCtx<'_, C::Base>, a: &AssignedPoint<C>, b: &AssignedPoint<C>) -> Result<AssignedPoint<C>, Error> {
+        self.main_gate.assert_not_equal(ctx, &a.x, &b.x)?;
+        self._add_unsafe(ctx, a, b)
+    }
+
+    fn _add_unsafe(&self, ctx: &mut RegionCtx<'_, C::Base>, a: &AssignedPoint<C>, b: &AssignedPoint<C>) -> Result<AssignedPoint<C>, Error> {
+        unimplemented!()
+    }
+}

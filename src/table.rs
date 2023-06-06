@@ -291,11 +291,10 @@ mod tests {
     use super::*;
     use ff::PrimeField;
     use prettytable::{Table, row, Row, Cell};
-    use poseidon::Spec;
     use halo2_proofs::plonk::{ConstraintSystem, Column, Circuit, Instance};
     use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
     use halo2curves::group::ff::FromUniformBytes;
-    use crate::aux_gate::{AuxChip, AuxConfig, RegionCtx};
+    use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
     use crate::utils::trim_leading_zeros;
 
     const T: usize = 3;
@@ -304,8 +303,8 @@ mod tests {
     const R_P: usize = 3;
 
     #[derive(Clone, Debug)]
-    struct TestCircuitConfig<F: PrimeField> {
-       pconfig: AuxConfig<F, T, RATE>,
+    struct TestCircuitConfig {
+       pconfig: MainGateConfig<T>,
        instance: Column<Instance>
     }
 
@@ -324,7 +323,7 @@ mod tests {
     }
 
     impl<F: PrimeField + FromUniformBytes<64>> Circuit<F> for TestCircuit<F> {
-        type Config = TestCircuitConfig<F>;
+        type Config = TestCircuitConfig;
         type FloorPlanner = SimpleFloorPlanner;
 
 
@@ -340,7 +339,7 @@ mod tests {
             meta.enable_equality(instance);
             let mut adv_cols = [(); T+2].map(|_| meta.advice_column()).into_iter();
             let mut fix_cols = [(); 2*T+4].map(|_| meta.fixed_column()).into_iter();
-            let pconfig = AuxChip::configure(meta, &mut adv_cols, &mut fix_cols);
+            let pconfig = MainGate::configure(meta, &mut adv_cols, &mut fix_cols);
             Self::Config {
                 pconfig,
                 instance,
@@ -348,9 +347,8 @@ mod tests {
         }
 
         fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
-             let spec = Spec::new(R_F, R_P);
-             let pchip = AuxChip::new(config.pconfig, spec);
-             let output = layouter.assign_region(||"poseidon hash", |region|{
+             let pchip = MainGate::new(config.pconfig);
+             let output = layouter.assign_region(||"test", |region|{
                  let ctx = &mut RegionCtx::new(region, 0);
                  pchip.random_linear_combination(ctx, self.inputs.clone(), self.r)
              })?;
