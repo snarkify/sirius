@@ -59,7 +59,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> AuxChip<F,T,RATE> {
         Ok(())
     }
 
-    pub fn assert_not_equal(&self, ctx: &mut RegionCtx<'_, F>, a: AssignedValue<F>, b: AssignedValue<F>) -> Result<(), Error> {
+    pub fn assert_not_equal(&self, ctx: &mut RegionCtx<'_, F>, a: &AssignedValue<F>, b: &AssignedValue<F>) -> Result<(), Error> {
         let q_1 = Some(vec![F::ONE, -F::ONE]);
         let state = Some(vec![a.value().copied(), b.value().copied()]);
         let state_terms = (q_1, None, None, state);
