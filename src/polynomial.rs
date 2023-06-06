@@ -8,7 +8,7 @@ use std::{
     fmt,
     ops::{Add, Mul, Neg, Sub},
 };
-use crate::utils::trim_leading_zeros;
+use crate::util::trim_leading_zeros;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Query {

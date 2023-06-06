@@ -8,4 +8,4 @@ pub mod polynomial;
 pub mod poseidon;
 pub mod main_gate;
 pub mod table;
-pub mod utils;
+pub mod util;

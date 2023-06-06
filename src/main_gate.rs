@@ -70,6 +70,30 @@ impl<'a, F:PrimeField> RegionCtx<'a, F> {
     }
 }
 
+pub enum WrapValue<F: PrimeField> {
+    Assigned(AssignedCell<F, F>),
+    Unassigned(Value<F>),
+    Zero,
+}
+
+impl<F:PrimeField> From<Value<F>> for WrapValue<F> {
+    fn from(val: Value<F>) -> Self {
+        WrapValue::Unassigned(val)
+    }
+}
+
+impl<F:PrimeField> From<AssignedCell<F, F>> for WrapValue<F> {
+    fn from(val: AssignedCell<F, F>) -> Self {
+        WrapValue::Assigned(val)
+    }
+}
+
+impl<F:PrimeField> From<&AssignedCell<F, F>> for WrapValue<F> {
+    fn from(val: &AssignedCell<F, F>) -> Self {
+        WrapValue::Assigned(val.clone())
+    }
+}
+
 pub struct AuxInput<C: CurveAffine> {
     i: C::Base,
     z0: Vec<C::Base>,
@@ -180,32 +204,30 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
     }
 
     // helper function for some usecases: no copy constraints, only return out cell
-    pub fn apply(&self, ctx: &mut RegionCtx<'_, F>, state: (Option<Vec<F>>, Option<Vec<F>>, Option<F>, Option<Vec<Value<F>>>), 
-        input: (Option<F>, Option<Value<F>>), rc: Option<F>, out: (F, Value<F>)) -> Result<AssignedCell<F, F>, Error> {
+    // state: (q_1, q_m, state), out: (q_o, out)
+    pub fn apply(&self, ctx: &mut RegionCtx<'_, F>, state: (Option<Vec<F>>, Option<F>, Option<Vec<WrapValue<F>>>), 
+        rc: Option<F>, out: (F, WrapValue<F>)) -> Result<AssignedCell<F, F>, Error> {
         if let Some(q_1) = state.0 {
             for (i, val) in q_1.iter().enumerate() {
                 ctx.assign_fixed(||"q_1", self.config.q_1[i], *val)?;
             }
         }
-        if let Some(q_5) = state.1 {
-            for (i, val) in q_5.iter().enumerate() {
-                ctx.assign_fixed(||"q_5", self.config.q_5[i], *val)?;
-            }
-        }
-        if let Some(q_m_val) = state.2 {
+        if let Some(q_m_val) = state.1 {
             ctx.assign_fixed(||"q_m", self.config.q_m, q_m_val)?;
         }
-        if let Some(state) = state.3 {
+        if let Some(state) = state.2 {
             for (i, val) in state.iter().enumerate() {
-                ctx.assign_advice(||"state", self.config.state[i], *val)?;
+                match val {
+                    WrapValue::Unassigned(vv) => {
+                        ctx.assign_advice(||"state", self.config.state[i], *vv)?;
+                    },
+                    WrapValue::Assigned(avv) => {
+                        let si = ctx.assign_advice(||"state", self.config.state[i], avv.value().copied())?;
+                        ctx.constrain_equal(si.cell(), avv.cell())?;
+                    },
+                    _ => {},
+                }
             }
-        }
-
-        if let Some(q_i_val) = input.0 {
-            ctx.assign_fixed(||"q_i", self.config.q_i, q_i_val)?;
-        }
-        if let Some(input_val) = input.1 {
-            ctx.assign_advice(||"input", self.config.input, input_val)?;
         }
 
         if let Some(rc_val) = rc {
@@ -213,9 +235,22 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         }
 
         ctx.assign_fixed(||"q_o", self.config.q_o, out.0)?;
-        let out = ctx.assign_advice(||"out", self.config.out, out.1)?;
+
+        let res = match out.1 {
+            WrapValue::Unassigned(vv) => {
+                ctx.assign_advice(||"out", self.config.out, vv)?
+            },
+            WrapValue::Assigned(avv) => {
+                let out = ctx.assign_advice(||"out", self.config.out, avv.value().copied())?;
+                ctx.constrain_equal(out.cell(), avv.cell())?;
+                out
+            },
+            WrapValue::Zero => {
+                unimplemented!() // this is not allowed
+            },
+        };
         ctx.next();
-        Ok(out)
+        Ok(res)
     }
                  
 

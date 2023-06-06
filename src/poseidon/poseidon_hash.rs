@@ -4,7 +4,7 @@ use poseidon::{self, SparseMDSMatrix, Spec};
 use std::{iter, mem, marker::PhantomData};
 use crate::{
     poseidon::{ROConstantsTrait, ROTrait},
-    utils::fe_to_fe,
+    util::fe_to_fe,
 };
 
 

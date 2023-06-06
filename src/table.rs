@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::{
     commitment::CommitmentKey,
     poseidon::{ROTrait, AbsorbInRO},
-    utils::batch_invert_assigned,
+    util::batch_invert_assigned,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -295,7 +295,7 @@ mod tests {
     use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
     use halo2curves::group::ff::FromUniformBytes;
     use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
-    use crate::utils::trim_leading_zeros;
+    use crate::util::trim_leading_zeros;
 
     const T: usize = 3;
     const RATE: usize = 2;

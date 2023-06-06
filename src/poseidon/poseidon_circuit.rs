@@ -216,8 +216,6 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
 
 #[cfg(test)]
 mod tests {
-    use std::marker::PhantomData;
-
     use super::*;
     use poseidon::Spec;
     use halo2_proofs::poly::ipa::commitment::{IPACommitmentScheme, ParamsIPA};

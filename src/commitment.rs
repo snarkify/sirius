@@ -5,7 +5,7 @@ use sha3::Shake256;
 use std::io::Read;
 use rayon::prelude::*;
 
-use crate::utils::parallelize;
+use crate::util::parallelize;
 
 
 #[derive(Clone, Debug)]
