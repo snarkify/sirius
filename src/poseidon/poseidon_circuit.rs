@@ -3,19 +3,19 @@ use halo2_proofs::{
     circuit::{Chip, Value, AssignedCell},
     plonk::Error,
     };
-use halo2curves::group::ff::PrimeField;
+use ff::{PrimeField, PrimeFieldBits};
 use std::convert::TryInto;
-use crate::main_gate::{RegionCtx, MainGate, MainGateConfig};
+use crate::main_gate::{RegionCtx, MainGate, MainGateConfig, AssignedValue};
 
-pub struct PoseidonChip<F: PrimeField, const T: usize, const RATE: usize> {
+pub struct PoseidonChip<F: PrimeField+PrimeFieldBits, const T: usize, const RATE: usize> {
     main_gate: MainGate<F, T>,
     spec: Spec<F, T, RATE>,
     buf: Vec<F>, 
 }
 
-impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
+impl<F: PrimeField+PrimeFieldBits, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
     pub fn new(config: MainGateConfig<T>, spec: Spec<F,T,RATE>) -> Self {
-        let main_gate =  MainGate::new(config);
+        let main_gate: MainGate<F, T> =  MainGate::new(config);
         Self {
             main_gate,
             spec,
@@ -35,7 +35,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
         out * Value::known((-q_o).invert().unwrap())
     }
 
-    pub fn pre_round(&self, ctx: &mut RegionCtx<'_, F>, inputs: Vec<F>, state_idx: usize, state: &[AssignedCell<F, F>; T]) -> Result<AssignedCell<F, F>, Error> {
+    pub fn pre_round(&self, ctx: &mut RegionCtx<'_, F>, inputs: Vec<F>, state_idx: usize, state: &[AssignedValue<F>; T]) -> Result<AssignedValue<F>, Error> {
         assert!(inputs.len() <= RATE); 
         let s_val = state[state_idx].value().copied();
 
@@ -101,7 +101,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
         Ok(out)
     }
 
-    pub fn partial_round(&self, ctx: &mut RegionCtx<'_, F>, round_idx: usize, state_idx: usize, state: &[AssignedCell<F, F>; T]) -> Result<AssignedCell<F, F>, Error> {
+    pub fn partial_round(&self, ctx: &mut RegionCtx<'_, F>, round_idx: usize, state_idx: usize, state: &[AssignedValue<F>; T]) -> Result<AssignedValue<F>, Error> {
         let mut state_vals = [Value::known(F::ZERO); T];
         let mut q_1_vals = [F::ZERO; T];
         let mut q_5_vals = [F::ZERO; T];
@@ -146,7 +146,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
         Ok(out)
     }
 
-    pub fn permutation(&self, ctx: &mut RegionCtx<'_, F>, inputs: Vec<F>, init_state: &[AssignedCell<F, F>; T]) -> Result<[AssignedCell<F, F>; T], Error> {
+    pub fn permutation(&self, ctx: &mut RegionCtx<'_, F>, inputs: Vec<F>, init_state: &[AssignedValue<F>; T]) -> Result<[AssignedValue<F>; T], Error> {
         let mut state = Vec::new();
         for i in 0..T {
             let si = self.pre_round(ctx, inputs.clone(), i, init_state)?;
@@ -182,7 +182,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
             }
             state = next_state;
         }
-        let res: [AssignedCell<F, F>; T] = state.try_into().unwrap();
+        let res: [AssignedValue<F>; T] = state.try_into().unwrap();
         Ok(res)
     }
 
@@ -190,7 +190,7 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
         self.buf.extend(inputs)
     }
 
-    pub fn squeeze(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedCell<F, F>, Error> {
+    pub fn squeeze(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedValue<F>, Error> {
         //let buf = mem::take(&mut self.buf);
         let buf = self.buf.clone();
         let exact = buf.len() % RATE == 0;
@@ -210,6 +210,16 @@ impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
         }
 
         Ok(state[1].clone())
+    }
+
+    pub fn squeeze_n_bits(&mut self, ctx: &mut RegionCtx<'_, F>, n: usize) -> Result<Vec<AssignedValue<F>>, Error> {
+        let val = self.squeeze(ctx)?;
+        let res = self.main_gate.le_num_to_bits(ctx, val)?;
+        if res.len() >= n {
+            Ok(res[..n].to_vec())
+        } else {
+            Ok(res)
+        }
     }
 }
 
@@ -241,11 +251,11 @@ mod tests {
        instance: Column<Instance>
     }
 
-    struct TestCircuit<F: PrimeField> {
+    struct TestCircuit<F: PrimeField+PrimeFieldBits> {
         inputs: Vec<F>,
     }
 
-    impl<F:PrimeField> TestCircuit<F> {
+    impl<F:PrimeField+PrimeFieldBits> TestCircuit<F> {
         fn new(inputs: Vec<F>) -> Self {
             Self {
                 inputs,
@@ -253,7 +263,7 @@ mod tests {
         }
     }
 
-    impl<F: PrimeField + FromUniformBytes<64>> Circuit<F> for TestCircuit<F> {
+    impl<F: PrimeField +PrimeFieldBits+FromUniformBytes<64>> Circuit<F> for TestCircuit<F> {
         type Config = TestCircuitConfig;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -320,7 +330,7 @@ mod tests {
     #[test] 
     fn test_mock() {
         use halo2_proofs::dev::MockProver;
-        const K:u32 = 8;
+        const K:u32 = 10;
         let mut inputs = Vec::new();
         for i in 0..5 {
             inputs.push(Fp::from(i as u64));

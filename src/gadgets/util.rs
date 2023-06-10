@@ -1,12 +1,10 @@
 use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Chip, Value},
-    plonk::{Assigned, Error},
+    plonk::Error,
 };
 use crate::main_gate::{RegionCtx, MainGate};
 use crate::gadgets::AssignedValue;
-
-use super::ecc::AssignedPoint;
 
 impl<F: PrimeField, const T: usize> MainGate<F,T> {
     pub fn assign_value(&self, ctx: &mut RegionCtx<'_, F>, a: Value<F>) -> Result<AssignedValue<F>, Error> {

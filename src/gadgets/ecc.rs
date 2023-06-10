@@ -127,7 +127,7 @@ mod tests {
     use halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
     use halo2_proofs::plonk::{ConstraintSystem, Column, Circuit, Instance, create_proof, keygen_pk, keygen_vk, verify_proof};
     use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
-    use halo2curves::pasta::{pallas, vesta, EqAffine, Fp, EpAffine};
+    use halo2curves::pasta::{pallas, vesta, EqAffine, Fp};
     use ff::PrimeFieldBits;
     use rand_core::OsRng;
 

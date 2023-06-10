@@ -1,4 +1,7 @@
-use halo2_proofs::plonk::Assigned;
+use halo2_proofs::{
+    plonk::Assigned,
+    circuit::Value,
+};
 use ff::{BatchInvert, Field, PrimeField};
 use num_bigint::BigUint;
 
@@ -96,11 +99,22 @@ pub fn parallelize<T, F>(v: &mut [T], f: F)
       }
  }
 
-
-
 pub(crate) fn trim_leading_zeros(hex: String) -> String {
     let without_prefix = hex.as_str().trim_start_matches("0x");
     let trimmed = without_prefix.trim_start_matches('0');
     format!("0x{}", trimmed)
 }
+
+pub(crate) fn remove_trailing_zeros(bits: &mut Vec<Value<bool>>) {
+    let last_one_position = bits.iter()
+        .enumerate()
+        .rev()
+        .find(|(_, &value)| *value.unwrap() == Some(true))
+        .map(|(idx, _)| idx);
+
+    if let Some(position) = last_one_position {
+        bits.truncate(position + 1);
+    }
+}
+
 

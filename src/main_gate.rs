@@ -4,8 +4,13 @@ use halo2_proofs::{
     circuit::{AssignedCell, Chip, Cell, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Expression, Fixed, Error}, 
     poly::Rotation};
-use ff::PrimeField;
-use crate::table::RelaxedPlonkInstance;
+use ff::{PrimeField, PrimeFieldBits};
+use crate::{
+    table::RelaxedPlonkInstance,
+    util::remove_trailing_zeros,
+};
+
+pub type AssignedValue<F> = AssignedCell<F, F>;
 
 #[derive(Debug)]
 pub struct RegionCtx<'a, F: PrimeField> {
@@ -34,7 +39,7 @@ impl<'a, F:PrimeField> RegionCtx<'a, F> {
         annotation: A,
         column: Column<Fixed>,
         value: F,
-    ) -> Result<AssignedCell<F, F>, Error>
+    ) -> Result<AssignedValue<F>, Error>
     where
         A: Fn() -> AR,
         AR: Into<String>,
@@ -48,7 +53,7 @@ impl<'a, F:PrimeField> RegionCtx<'a, F> {
         annotation: A,
         column: Column<Advice>,
         value: Value<F>,
-    ) -> Result<AssignedCell<F, F>, Error>
+    ) -> Result<AssignedValue<F>, Error>
     where
         A: Fn() -> AR,
         AR: Into<String>,
@@ -70,8 +75,9 @@ impl<'a, F:PrimeField> RegionCtx<'a, F> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum WrapValue<F: PrimeField> {
-    Assigned(AssignedCell<F, F>),
+    Assigned(AssignedValue<F>),
     Unassigned(Value<F>),
     Zero,
 }
@@ -82,14 +88,14 @@ impl<F:PrimeField> From<Value<F>> for WrapValue<F> {
     }
 }
 
-impl<F:PrimeField> From<AssignedCell<F, F>> for WrapValue<F> {
-    fn from(val: AssignedCell<F, F>) -> Self {
+impl<F:PrimeField> From<AssignedValue<F>> for WrapValue<F> {
+    fn from(val: AssignedValue<F>) -> Self {
         WrapValue::Assigned(val)
     }
 }
 
-impl<F:PrimeField> From<&AssignedCell<F, F>> for WrapValue<F> {
-    fn from(val: &AssignedCell<F, F>) -> Self {
+impl<F:PrimeField> From<&AssignedValue<F>> for WrapValue<F> {
+    fn from(val: &AssignedValue<F>) -> Self {
         WrapValue::Assigned(val.clone())
     }
 }
@@ -164,6 +170,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         state.map(|s| {
             meta.enable_equality(s);
         });
+        meta.enable_equality(input);
         meta.enable_equality(out);
 
         let pow_5 = |v: Expression<F>| {
@@ -206,7 +213,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
     // helper function for some usecases: no copy constraints, only return out cell
     // state: (q_1, q_m, state), out: (q_o, out)
     pub fn apply(&self, ctx: &mut RegionCtx<'_, F>, state: (Option<Vec<F>>, Option<F>, Option<Vec<WrapValue<F>>>), 
-        rc: Option<F>, out: (F, WrapValue<F>)) -> Result<AssignedCell<F, F>, Error> {
+        rc: Option<F>, out: (F, WrapValue<F>)) -> Result<AssignedValue<F>, Error> {
         if let Some(q_1) = state.0 {
             for (i, val) in q_1.iter().enumerate() {
                 ctx.assign_fixed(||"q_1", self.config.q_1[i], *val)?;
@@ -252,12 +259,71 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         ctx.next();
         Ok(res)
     }
-                 
 
+    pub fn apply_with_input(&self, ctx: &mut RegionCtx<'_, F>, state: (Option<Vec<F>>, Option<F>, Option<Vec<WrapValue<F>>>), 
+        input: (Option<F>, Option<WrapValue<F>>), out: (F, WrapValue<F>)) -> Result<AssignedValue<F>, Error> {
+        if let Some(q_1) = state.0 {
+            for (i, val) in q_1.iter().enumerate() {
+                ctx.assign_fixed(||"q_1", self.config.q_1[i], *val)?;
+            }
+        }
+        if let Some(q_m_val) = state.1 {
+            ctx.assign_fixed(||"q_m", self.config.q_m, q_m_val)?;
+        }
+        if let Some(state) = state.2 {
+            for (i, val) in state.iter().enumerate() {
+                match val {
+                    WrapValue::Unassigned(vv) => {
+                        ctx.assign_advice(||"state", self.config.state[i], *vv)?;
+                    },
+                    WrapValue::Assigned(avv) => {
+                        let si = ctx.assign_advice(||"state", self.config.state[i], avv.value().copied())?;
+                        ctx.constrain_equal(si.cell(), avv.cell())?;
+                    },
+                    _ => {},
+                }
+            }
+        }
+
+        if let Some(q_i) = input.0 {
+            ctx.assign_fixed(||"rc", self.config.q_i, q_i)?;
+        }
+        if let Some(inp) = input.1 {
+            match inp {
+                WrapValue::Unassigned(vv) => {
+                    ctx.assign_advice(||"input", self.config.input, vv)?;
+                },
+                WrapValue::Assigned(avv) => {
+                    let si = ctx.assign_advice(||"input", self.config.input, avv.value().copied())?;
+                    ctx.constrain_equal(si.cell(), avv.cell())?;
+                },
+                _ => {},
+            }
+        }
+
+        ctx.assign_fixed(||"q_o", self.config.q_o, out.0)?;
+
+        let res = match out.1 {
+            WrapValue::Unassigned(vv) => {
+                ctx.assign_advice(||"out", self.config.out, vv)?
+            },
+            WrapValue::Assigned(avv) => {
+                let out = ctx.assign_advice(||"out", self.config.out, avv.value().copied())?;
+                ctx.constrain_equal(out.cell(), avv.cell())?;
+                out
+            },
+            WrapValue::Zero => {
+                unimplemented!() // this is not allowed
+            },
+        };
+        ctx.next();
+        Ok(res)
+    }
+                 
     // calculate sum_{i=0}^d r^i terms[i]
-    pub fn random_linear_combination(&self, ctx: &mut RegionCtx<'_, F>, terms: Vec<F>, r: F) -> Result<AssignedCell<F,F>, Error> {
+    pub fn random_linear_combination(&self, ctx: &mut RegionCtx<'_, F>, terms: Vec<F>, r: F) -> Result<AssignedValue<F>, Error> {
         let d = terms.len();
-        let mut out: Option<AssignedCell<F,F>> = None;
+        let mut out: Option<AssignedValue<F>> = None;
         for i in 1..d {
             let lhs_val = Value::known(terms[d-1-i]);
             let rhs_val = if i == 1 {
@@ -282,6 +348,66 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
             ctx.next();
         }
         Ok(out.unwrap())
+    }
+
+}
+
+
+impl<F: PrimeField+PrimeFieldBits, const T: usize> MainGate<F, T> {
+    pub fn assign_bits(&self, ctx: &mut RegionCtx<'_, F>, bits: Vec<Value<bool>>) -> Result<Vec<AssignedValue<F>>, Error> {
+        let bits = bits.iter().map(|bit| bit.map(|bit| {
+            if bit {
+                F::ONE
+            } else {
+                F::ZERO
+            }
+        })).collect::<Vec<_>>();
+        let mut res = vec![];
+        for bit in bits.iter() {
+            let tmp = self.assign_bit(ctx, bit.clone())?;
+            res.push(tmp);
+        }
+        Ok(res)
+    }
+
+    pub fn le_bits_to_num(&self, ctx: &mut RegionCtx<'_, F>, bits: &Vec<AssignedValue<F>>) -> Result<AssignedValue<F>, Error> {
+        let accumulate = |acc: &mut Value<F>,  bs: Vec<AssignedValue<F>>, ps: &Vec<F>| {
+            for (b, p) in bs.iter().zip(ps) {
+                *acc = *acc + b.value().copied() * Value::known(p.clone());
+            }
+        };
+        let length = bits.len();
+        let mut mult = F::ONE;
+        let powers: Vec<F> = (0..length).map(|_| {
+            let pow = mult.clone();
+            mult = mult + mult;
+            pow
+        }).collect();
+        let mut acc = Value::known(F::ZERO);
+        let mut old_acc = self.assign_value(ctx, acc.clone())?;
+        for (bs, ps) in bits.chunks(T).zip(powers.chunks(T)) {
+            let bvs = bs.to_vec();
+            let pvs = ps.to_vec();
+            accumulate(&mut acc, bvs, &pvs);
+            let state = bs.to_vec().iter().map(|bit| bit.into()).collect::<Vec<_>>();
+            let state_terms = (Some(pvs), None, Some(state));
+            old_acc = self.apply_with_input(ctx, state_terms, (Some(F::ONE), Some(old_acc.into())) , (-F::ONE, acc.into()))?;
+        }
+        Ok(old_acc)
+    }
+    pub fn le_num_to_bits(&self, ctx: &mut RegionCtx<'_, F>, a: AssignedValue<F>) -> Result<Vec<AssignedValue<F>>, Error> {
+        // TODO: ensure a is less than F.size() - 1
+        let mut length = 0;
+        let mut bits: Vec<Value<bool>> = a.value().map(|a| {
+            let bits = a.to_le_bits();
+            length = bits.len();
+            bits
+        }).transpose_vec(length);
+        remove_trailing_zeros(&mut bits);
+        let bits = self.assign_bits(ctx, bits)?;
+        let num = self.le_bits_to_num(ctx, &bits)?;
+        ctx.constrain_equal(a.cell(), num.cell())?;
+        Ok(bits)
     }
 }
 
