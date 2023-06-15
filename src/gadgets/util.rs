@@ -113,7 +113,6 @@ impl<F: PrimeField, const T: usize> MainGate<F,T> {
         Ok(out)
     }
 
-
     pub fn sub(&self, ctx: &mut RegionCtx<'_, F>, a: &AssignedValue<F>, b: &AssignedValue<F>) -> Result<AssignedValue<F>, Error> {
         // a - b = r
         let q_1 = Some(vec![F::ONE, -F::ONE]);

@@ -1,12 +1,11 @@
+pub(crate) use rayon::current_num_threads;
 use halo2_proofs::{
     plonk::Assigned,
     circuit::Value,
 };
 use ff::{BatchInvert, Field, PrimeField};
 use num_bigint::BigUint;
-
-pub(crate) use rayon::current_num_threads;
-
+use crate::constants::MAX_BITS;
 
 pub fn modulus<F: PrimeField>() -> BigUint {
     fe_to_big(-F::ONE) + 1usize
@@ -26,6 +25,13 @@ pub fn fe_to_big<F: PrimeField>(fe: F) -> BigUint {
 
 pub fn fe_to_fe<F1: PrimeField, F2: PrimeField>(fe: F1) -> F2 {
     fe_from_big(fe_to_big(fe) % modulus::<F2>())
+}
+
+pub fn fe_to_fe_safe<F1: PrimeField, F2: PrimeField>(fe: F1) -> F2 {
+    let bn1 = fe_to_big(fe);
+    let bn2 = modulus::<F2>();
+    assert!(bn1 < bn2); 
+    fe_from_big(bn1)
 }
 
 fn invert<F: Field>(
@@ -105,15 +111,23 @@ pub(crate) fn trim_leading_zeros(hex: String) -> String {
     format!("0x{}", trimmed)
 }
 
-pub(crate) fn remove_trailing_zeros(bits: &mut Vec<Value<bool>>) {
+pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>) {
     let last_one_position = bits.iter()
-        .enumerate()
-        .rev()
-        .find(|(_, &value)| *value.unwrap() == Some(true))
-        .map(|(idx, _)| idx);
-
+       .enumerate()
+       .rev()
+       .find(|(_, &value)| value == true)
+       .map(|(idx, _)| idx);
     if let Some(position) = last_one_position {
         bits.truncate(position + 1);
+    } else {
+        bits.truncate(1);
+    }
+
+    let length = bits.len();
+    assert!(MAX_BITS >= length);
+
+    for _ in 0..(MAX_BITS - length) {
+        bits.push(false);
     }
 }
 

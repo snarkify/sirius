@@ -7,7 +7,7 @@ use halo2_proofs::{
 use ff::{PrimeField, PrimeFieldBits};
 use crate::{
     table::RelaxedPlonkInstance,
-    util::remove_trailing_zeros,
+    util::normalize_trailing_zeros,
 };
 
 pub type AssignedValue<F> = AssignedCell<F, F>;
@@ -353,19 +353,17 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
 }
 
 
-impl<F: PrimeField+PrimeFieldBits, const T: usize> MainGate<F, T> {
-    pub fn assign_bits(&self, ctx: &mut RegionCtx<'_, F>, bits: Vec<Value<bool>>) -> Result<Vec<AssignedValue<F>>, Error> {
-        let bits = bits.iter().map(|bit| bit.map(|bit| {
-            if bit {
-                F::ONE
-            } else {
-                F::ZERO
-            }
-        })).collect::<Vec<_>>();
+impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
+    pub fn assign_bits(&self, ctx: &mut RegionCtx<'_, F>, bits: &Vec<bool>) -> Result<Vec<AssignedValue<F>>, Error> {
         let mut res = vec![];
         for bit in bits.iter() {
-            let tmp = self.assign_bit(ctx, bit.clone())?;
-            res.push(tmp);
+             if *bit {
+                let tmp = self.assign_bit(ctx, Value::known(F::ONE))?;
+                res.push(tmp);
+             } else {
+                let tmp = self.assign_bit(ctx, Value::known(F::ZERO))?;
+                res.push(tmp);
+             }
         }
         Ok(res)
     }
@@ -398,14 +396,16 @@ impl<F: PrimeField+PrimeFieldBits, const T: usize> MainGate<F, T> {
     pub fn le_num_to_bits(&self, ctx: &mut RegionCtx<'_, F>, a: AssignedValue<F>) -> Result<Vec<AssignedValue<F>>, Error> {
         // TODO: ensure a is less than F.size() - 1
         let mut length = 0;
-        let mut bits: Vec<Value<bool>> = a.value().map(|a| {
+        let bits: Vec<Value<bool>> = a.value().map(|a| {
             let bits = a.to_le_bits();
             length = bits.len();
             bits
         }).transpose_vec(length);
-        remove_trailing_zeros(&mut bits);
-        let bits = self.assign_bits(ctx, bits)?;
+        let mut bits = bits.iter().map(|bit| bit.unwrap().unwrap()).collect::<Vec<_>>();
+        normalize_trailing_zeros(&mut bits);
+        let bits = self.assign_bits(ctx, &bits)?;
         let num = self.le_bits_to_num(ctx, &bits)?;
+        assert_eq!(num.value().unwrap(), a.value().unwrap());
         ctx.constrain_equal(a.cell(), num.cell())?;
         Ok(bits)
     }

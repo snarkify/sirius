@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 rand = "0.8"
-halo2_proofs = { git = "https://github.com/chaosma/halo2", package="halo2_proofs", branch="pse" }
+halo2_proofs = { git = "https://github.com/chaosma/halo2", package="halo2_proofs", branch="for-halo2-debug" }
 ff = "0.13"
 group = "0.13"
 # pasta_curves = "0.5"
