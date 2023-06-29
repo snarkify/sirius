@@ -5,8 +5,7 @@ use halo2_proofs::{
 };
 use ff::PrimeFieldBits;
 use crate::{
-    main_gate::{RegionCtx, MainGate, MainGateConfig},
-    gadgets::AssignedValue,
+    main_gate::{AssignedValue, RegionCtx, MainGate, MainGateConfig},
     constants::MAX_BITS,
 };
 

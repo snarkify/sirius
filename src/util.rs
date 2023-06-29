@@ -1,11 +1,49 @@
 pub(crate) use rayon::current_num_threads;
-use halo2_proofs::{
-    plonk::Assigned,
-    circuit::Value,
-};
+use halo2_proofs::plonk::Assigned;
 use ff::{BatchInvert, Field, PrimeField};
 use num_bigint::BigUint;
 use crate::constants::MAX_BITS;
+
+pub fn bytes_to_bits_le(bytes: Vec<u8>) -> Vec<bool> {
+    let mut bits = Vec::new();
+
+    for byte in &bytes {
+        // Add bits of each byte to the BitVec
+        for i in 0..8 {
+            let mask = 1 << i;
+            bits.push((byte & mask) != 0);
+        }
+    }
+    bits
+}
+
+pub fn bits_to_bytes_le(bits: Vec<bool>) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for chunk in bits.chunks(8) {
+        let mut byte = 0u8;
+        for (i, &bit) in chunk.iter().enumerate() {
+            if bit {
+                byte |= 1 << i;
+            }
+        }
+        bytes.push(byte);
+    }
+    bytes
+}
+
+pub fn fe_to_bits_le<F: PrimeField>(fe: F) -> Vec<bool> {
+    let big = fe_to_big(fe);
+    let bytes = big.to_bytes_le();
+    bytes_to_bits_le(bytes)
+}
+
+pub fn bits_to_fe_le<F: PrimeField>(bits: Vec<bool>) -> F {
+    let bytes = bits_to_bytes_le(bits);
+    let mut repr = F::Repr::default();
+    assert!(bytes.len() <= repr.as_ref().len());
+    repr.as_mut()[..bytes.len()].clone_from_slice(bytes.as_slice());
+    F::from_repr(repr).unwrap()
+}
 
 pub fn modulus<F: PrimeField>() -> BigUint {
     fe_to_big(-F::ONE) + 1usize

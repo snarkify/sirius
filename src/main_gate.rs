@@ -11,6 +11,7 @@ use crate::{
 };
 
 pub type AssignedValue<F> = AssignedCell<F, F>;
+pub type AssignedBit<F> = AssignedCell<F, F>;
 
 #[derive(Debug)]
 pub struct RegionCtx<'a, F: PrimeField> {

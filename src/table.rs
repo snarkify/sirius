@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::{
     commitment::CommitmentKey,
     poseidon::{ROTrait, AbsorbInRO},
-    util::batch_invert_assigned,
+    util::{batch_invert_assigned, fe_to_fe},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,7 +58,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkInstance<C> {
             ro.absorb_point(*point);
         }
         for inst in self.instance.iter().take(2) {
-            ro.absorb_scalar(*inst);
+            ro.absorb_base(fe_to_fe(*inst));
         }
     }
 }
@@ -69,9 +69,9 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
             ro.absorb_point(*point);
         }
         for inst in self.instance.iter().take(2) {
-            ro.absorb_scalar(*inst);
+            ro.absorb_base(fe_to_fe(*inst));
         }
-        ro.absorb_scalar(self.u); 
+        ro.absorb_base(fe_to_fe(self.u)); 
         ro.absorb_point(self.E_commitment);
     }
 }
