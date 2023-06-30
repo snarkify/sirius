@@ -3,14 +3,37 @@ use halo2_proofs::{
     circuit::{Chip, Value, AssignedCell},
     plonk::Error,
     };
-use ff::{PrimeField, PrimeFieldBits};
+use ff::{PrimeField, PrimeFieldBits, FromUniformBytes};
 use std::convert::TryInto;
-use crate::main_gate::{RegionCtx, MainGate, MainGateConfig, AssignedValue};
+use crate::main_gate::{RegionCtx, MainGate, MainGateConfig, AssignedValue, WrapValue, AssignedBit};
 
-pub struct PoseidonChip<F: PrimeField+PrimeFieldBits, const T: usize, const RATE: usize> {
+use super::ROCircuitTrait;
+
+pub struct PoseidonChip<F: PrimeFieldBits, const T: usize, const RATE: usize> {
     main_gate: MainGate<F, T>,
     spec: Spec<F, T, RATE>,
-    buf: Vec<F>, 
+    buf: Vec<WrapValue<F>>, 
+}
+
+
+impl<F: PrimeFieldBits+FromUniformBytes<64>, const T: usize, const RATE: usize> ROCircuitTrait<F> for PoseidonChip<F, T, RATE> {
+  fn absorb_base(&mut self, base: WrapValue<F>) {
+      self.update(&[base])
+  }
+
+  fn absorb_point(&mut self, x: WrapValue<F>, y: WrapValue<F>) {
+      self.update(&[x, y])
+  }
+
+  fn squeeze_n_bits(&mut self, ctx: &mut RegionCtx<'_, F>, num_bits: usize) -> Result<Vec<AssignedBit<F>>, Error> {
+      let val = self.squeeze(ctx)?;
+      let res = self.main_gate.le_num_to_bits(ctx, val)?;
+      if res.len() >= num_bits {
+          Ok(res[..num_bits].to_vec())
+      } else {
+          Ok(res)
+      }
+  }
 }
 
 impl<F: PrimeField+PrimeFieldBits, const T: usize, const RATE: usize> PoseidonChip<F,T,RATE> {
@@ -35,15 +58,16 @@ impl<F: PrimeField+PrimeFieldBits, const T: usize, const RATE: usize> PoseidonCh
         out * Value::known((-q_o).invert().unwrap())
     }
 
-    pub fn pre_round(&self, ctx: &mut RegionCtx<'_, F>, inputs: Vec<F>, state_idx: usize, state: &[AssignedValue<F>; T]) -> Result<AssignedValue<F>, Error> {
+    pub fn pre_round(&self, ctx: &mut RegionCtx<'_, F>, inputs: Vec<WrapValue<F>>, state_idx: usize, state: &[AssignedValue<F>; T]) -> Result<AssignedValue<F>, Error> {
         assert!(inputs.len() <= RATE); 
         let s_val = state[state_idx].value().copied();
 
-        let inputs = std::iter::once(F::ZERO).chain(inputs.into_iter())
-        .chain(std::iter::once(F::ONE))
-        .chain(std::iter::repeat(F::ZERO))
+        // TODO: add copy constraint
+        let inputs = std::iter::once(Value::known(F::ZERO)).chain(inputs.into_iter().map(|v| v.value()))
+        .chain(std::iter::once(Value::known(F::ONE)))
+        .chain(std::iter::repeat(Value::known(F::ZERO)))
         .take(T).collect::<Vec<_>>();
-        let input_val = Value::known(inputs[state_idx]);
+        let input_val = inputs[state_idx];
 
         let constants = self.spec.constants().start();
         let pre_constants = constants[0];
@@ -146,7 +170,7 @@ impl<F: PrimeField+PrimeFieldBits, const T: usize, const RATE: usize> PoseidonCh
         Ok(out)
     }
 
-    pub fn permutation(&self, ctx: &mut RegionCtx<'_, F>, inputs: Vec<F>, init_state: &[AssignedValue<F>; T]) -> Result<[AssignedValue<F>; T], Error> {
+    pub fn permutation(&self, ctx: &mut RegionCtx<'_, F>, inputs: Vec<WrapValue<F>>, init_state: &[AssignedValue<F>; T]) -> Result<[AssignedValue<F>; T], Error> {
         let mut state = Vec::new();
         for i in 0..T {
             let si = self.pre_round(ctx, inputs.clone(), i, init_state)?;
@@ -186,8 +210,8 @@ impl<F: PrimeField+PrimeFieldBits, const T: usize, const RATE: usize> PoseidonCh
         Ok(res)
     }
 
-    pub fn update(&mut self, inputs: Vec<F>) {
-        self.buf.extend(inputs)
+    pub fn update(&mut self, inputs: &[WrapValue<F>]) {
+        self.buf.extend_from_slice(inputs)
     }
 
     pub fn squeeze(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedValue<F>, Error> {
@@ -212,15 +236,7 @@ impl<F: PrimeField+PrimeFieldBits, const T: usize, const RATE: usize> PoseidonCh
         Ok(state[1].clone())
     }
 
-    pub fn squeeze_n_bits(&mut self, ctx: &mut RegionCtx<'_, F>, n: usize) -> Result<Vec<AssignedValue<F>>, Error> {
-        let val = self.squeeze(ctx)?;
-        let res = self.main_gate.le_num_to_bits(ctx, val)?;
-        if res.len() >= n {
-            Ok(res[..n].to_vec())
-        } else {
-            Ok(res)
-        }
-    }
+    
 }
 
 
@@ -252,13 +268,15 @@ mod tests {
     }
 
     struct TestCircuit<F: PrimeField+PrimeFieldBits> {
-        inputs: Vec<F>,
+        inputs: Vec<WrapValue<F>>,
+        num_bits: usize
     }
 
     impl<F:PrimeField+PrimeFieldBits> TestCircuit<F> {
-        fn new(inputs: Vec<F>) -> Self {
+        fn new(inputs: Vec<F>, num_bits: usize) -> Self {
             Self {
-                inputs,
+                inputs: inputs.into_iter().map(|v|Value::known(v).into()).collect::<Vec<_>>(),
+                num_bits,
             }
         }
     }
@@ -271,6 +289,7 @@ mod tests {
         fn without_witnesses(&self) -> Self {
             Self {
                 inputs: Vec::new(),
+                num_bits: 0,
             }
         }
 
@@ -289,10 +308,11 @@ mod tests {
         fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
              let spec = Spec::<F, T, RATE>::new(R_F, R_P);
              let mut pchip = PoseidonChip::new(config.pconfig, spec);
-             pchip.update(self.inputs.clone());
+             pchip.update(&self.inputs[..]);
              let output = layouter.assign_region(||"poseidon hash", |region|{
                  let ctx = &mut RegionCtx::new(region, 0);
-                 pchip.squeeze(ctx)
+                 let bits = pchip.squeeze_n_bits(ctx, self.num_bits)?;
+                 pchip.main_gate.le_bits_to_num(ctx, &bits)
              })?;
              layouter.constrain_instance(output.cell(), config.instance, 0)?;
              Ok(())
@@ -302,19 +322,20 @@ mod tests {
     #[test]
     fn test_poseidon_circuit() {
         println!("-----running Poseidon Circuit-----");
-        const K:u32 = 8;
+        const K:u32 = 10;
         type Scheme = IPACommitmentScheme<EqAffine>;
         let params: ParamsIPA<vesta::Affine> = ParamsIPA::<EqAffine>::new(K);
         let mut inputs = Vec::new();
+        let num_bits = 128;
         for i in 0..5 {
             inputs.push(Fp::from(i as u64));
         }
-        let circuit = TestCircuit::new(inputs);
+        let circuit = TestCircuit::new(inputs, num_bits);
 
         let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
         let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
-        // hex = 0x1cd3150d8e12454ff385da8a4d864af6d0f021529207b16dd6c3d8f2b52cfc67
-        let out_hash = Fp::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();
+        // let out_hash = Fp::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();
+        let out_hash = Fp::from_str_vartime("277726250230731218669330566268314254439").unwrap();
         let public_inputs: &[&[Fp]] = &[&[out_hash]];
         let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
         create_proof::<IPACommitmentScheme<_>, ProverIPA<_>, _, _, _, _>(&params, &pk, &[circuit], &[public_inputs], OsRng, &mut transcript)
@@ -332,12 +353,13 @@ mod tests {
         use halo2_proofs::dev::MockProver;
         const K:u32 = 10;
         let mut inputs = Vec::new();
+        let num_bits = 128;
         for i in 0..5 {
             inputs.push(Fp::from(i as u64));
         }
-        let circuit = TestCircuit::new(inputs);
-        // hex = 0x1cd3150d8e12454ff385da8a4d864af6d0f021529207b16dd6c3d8f2b52cfc67
-        let out_hash = Fp::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();
+        let circuit = TestCircuit::new(inputs, num_bits);
+        // let out_hash = Fp::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();
+        let out_hash = Fp::from_str_vartime("277726250230731218669330566268314254439").unwrap();
         let public_inputs = vec![vec![out_hash]];
         let prover = match MockProver::run(K, &circuit, public_inputs) {
             Ok(prover) => prover,

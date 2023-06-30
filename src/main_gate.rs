@@ -1,14 +1,10 @@
-use halo2_proofs::arithmetic::CurveAffine;
 use std::marker::PhantomData;
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Cell, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Expression, Fixed, Error}, 
     poly::Rotation};
 use ff::{PrimeField, PrimeFieldBits};
-use crate::{
-    table::RelaxedPlonkInstance,
-    util::normalize_trailing_zeros,
-};
+use crate::util::normalize_trailing_zeros;
 
 pub type AssignedValue<F> = AssignedCell<F, F>;
 pub type AssignedBit<F> = AssignedCell<F, F>;
@@ -83,6 +79,16 @@ pub enum WrapValue<F: PrimeField> {
     Zero,
 }
 
+impl<F: PrimeField> WrapValue<F> {
+    pub fn value(&self) -> Value<F> {
+        match self {
+            WrapValue::Assigned(v) => v.value().copied(),
+            WrapValue::Unassigned(v) => v.clone(),
+            WrapValue::Zero => Value::known(F::ZERO),
+        }
+    }
+}
+
 impl<F:PrimeField> From<Value<F>> for WrapValue<F> {
     fn from(val: Value<F>) -> Self {
         WrapValue::Unassigned(val)
@@ -99,14 +105,6 @@ impl<F:PrimeField> From<&AssignedValue<F>> for WrapValue<F> {
     fn from(val: &AssignedValue<F>) -> Self {
         WrapValue::Assigned(val.clone())
     }
-}
-
-pub struct AuxInput<C: CurveAffine> {
-    i: C::Base,
-    z0: Vec<C::Base>,
-    zi: Option<Vec<C::Base>>,
-    U: Option<RelaxedPlonkInstance<C>>,
-    u: Option<RelaxedPlonkInstance<C>>,
 }
 
 #[derive(Clone, Debug)]

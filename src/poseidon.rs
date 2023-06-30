@@ -2,7 +2,8 @@ use halo2_proofs::{
     arithmetic::CurveAffine,
     plonk::Error,
 };
-use crate::main_gate::{AssignedBit, AssignedValue, RegionCtx};
+use ff::{PrimeFieldBits, FromUniformBytes};
+use crate::main_gate::{AssignedBit, RegionCtx, WrapValue};
 
 pub mod poseidon_hash;
 pub mod poseidon_circuit;
@@ -37,21 +38,15 @@ pub trait ROTrait<C: CurveAffine> {
 }
 
 /// A helper trait that defines the behavior of a hash function that we use as an RO in the circuit model
-pub trait ROCircuitTrait<C: CurveAffine> {
-  /// A type representing constants/parameters associated with the hash function
-  type Constants: ROConstantsTrait;
-
-  /// Initializes the hash function
-  fn new(constants: Self::Constants) -> Self;
-
+pub trait ROCircuitTrait<F:  PrimeFieldBits+FromUniformBytes<64>> {
   /// Adds a scalar to the internal state
-  fn absorb_base(&mut self, base: AssignedValue<C::Base>);
+  fn absorb_base(&mut self, base: WrapValue<F>);
 
   /// Adds a point to the internal state
-  fn absorb_point(&mut self, p: C);
+  fn absorb_point(&mut self, x: WrapValue<F>, y: WrapValue<F>);
 
   /// Returns a challenge of `num_bits` by hashing the internal state
-  fn squeeze(&mut self, ctx: &mut RegionCtx<'_, C::Scalar>, num_bits: usize) -> Result<Vec<AssignedBit<C::Base>>, Error>;
+  fn squeeze_n_bits(&mut self, ctx: &mut RegionCtx<'_, F>, num_bits: usize) -> Result<Vec<AssignedBit<F>>, Error>;
 }
 
 
