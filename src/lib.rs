@@ -4,9 +4,9 @@
 pub mod commitment;
 pub mod constants;
 pub mod gadgets;
+pub mod main_gate;
 pub mod nifs;
 pub mod polynomial;
 pub mod poseidon;
-pub mod main_gate;
 pub mod table;
 pub mod util;

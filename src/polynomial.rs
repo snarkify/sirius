@@ -1,14 +1,14 @@
-use halo2_proofs::poly::Rotation;
-use halo2_proofs::plonk::Expression as PE;
+use crate::util::trim_leading_zeros;
 use ff::PrimeField;
+use halo2_proofs::plonk::Expression as PE;
+use halo2_proofs::poly::Rotation;
 use std::{
+    cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd},
     collections::{HashMap, HashSet},
-    cmp::{Ord, PartialOrd, Ordering, PartialEq, Eq},
-    fmt::{Display,Debug},
     fmt,
+    fmt::{Debug, Display},
     ops::{Add, Mul, Neg, Sub},
 };
-use crate::util::trim_leading_zeros;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Query {
@@ -19,14 +19,14 @@ pub struct Query {
 #[derive(Clone, Debug)]
 pub enum Expression<F> {
     Constant(F),
-    Polynomial(Query), 
+    Polynomial(Query),
     Negated(Box<Expression<F>>),
     Sum(Box<Expression<F>>, Box<Expression<F>>),
     Product(Box<Expression<F>>, Box<Expression<F>>),
     Scaled(Box<Expression<F>>, F),
 }
 
-impl<F:PrimeField> Display for Expression<F> {
+impl<F: PrimeField> Display for Expression<F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.visualize())
     }
@@ -53,17 +53,26 @@ impl<F: PrimeField> Expression<F> {
     }
 
     fn _expand(&self, index_to_poly: &Vec<(i32, usize)>) -> MultiPolynomial<F> {
-        match self { 
+        match self {
             Expression::Constant(c) => {
                 let arity = index_to_poly.len();
-                MultiPolynomial{arity, monomials: vec![Monomial::new(index_to_poly.clone(), *c, vec![0;arity])]}
+                MultiPolynomial {
+                    arity,
+                    monomials: vec![Monomial::new(index_to_poly.clone(), *c, vec![0; arity])],
+                }
             }
             Expression::Polynomial(poly) => {
                 let arity = index_to_poly.len();
                 let mut exponents = vec![0; arity];
-                let index = index_to_poly.iter().position(|&(a, b)| a == poly.rotation.0 && b == poly.index).unwrap();
-                exponents[index] = 1; 
-                MultiPolynomial { arity, monomials: vec![Monomial::new(index_to_poly.clone(), F::ONE, exponents)] }
+                let index = index_to_poly
+                    .iter()
+                    .position(|&(a, b)| a == poly.rotation.0 && b == poly.index)
+                    .unwrap();
+                exponents[index] = 1;
+                MultiPolynomial {
+                    arity,
+                    monomials: vec![Monomial::new(index_to_poly.clone(), F::ONE, exponents)],
+                }
             }
             Expression::Negated(a) => {
                 let a = a._expand(index_to_poly);
@@ -94,18 +103,23 @@ impl<F: PrimeField> Expression<F> {
         self._expand(&index_to_poly)
     }
 
-
     pub fn fold_transform(&self, meta: (usize, usize, usize)) -> Self {
         match self {
             Expression::Constant(c) => Expression::Constant(*c),
             Expression::Polynomial(poly) => {
                 if poly.index < meta.0 {
                     return Expression::Polynomial(*poly);
-                } 
+                }
                 // u1, u2 is added
-                let r = Expression::Polynomial(Query{index: meta.0+2*(meta.1+meta.2+1), rotation:Rotation(0)});
+                let r = Expression::Polynomial(Query {
+                    index: meta.0 + 2 * (meta.1 + meta.2 + 1),
+                    rotation: Rotation(0),
+                });
                 let index_shift = meta.1 + meta.2 + 1;
-                let y = Expression::Polynomial(Query{index: poly.index + index_shift, rotation:poly.rotation});
+                let y = Expression::Polynomial(Query {
+                    index: poly.index + index_shift,
+                    rotation: poly.rotation,
+                });
                 Expression::Polynomial(*poly) + r * y
             }
             Expression::Negated(a) => {
@@ -139,13 +153,13 @@ impl<F: PrimeField> Expression<F> {
                 } else if poly.rotation.0 > 0 {
                     rotation = format!("[+{}]", poly.rotation.0);
                 }
-                format!("Z_{}{}",poly.index, rotation)
+                format!("Z_{}{}", poly.index, rotation)
             }
             Expression::Negated(a) => {
                 let a = a.visualize();
                 format!("(-{})", a)
             }
-            Expression::Sum(a,b) => {
+            Expression::Sum(a, b) => {
                 let a = a.visualize();
                 let b = b.visualize();
                 format!("({} + {})", a, b)
@@ -165,33 +179,41 @@ impl<F: PrimeField> Expression<F> {
 
     // we need (num_fixed_columns, num_instance_columns) to recover
     pub fn from_halo2_expr(expr: &PE<F>, meta: (usize, usize)) -> Self {
-       match expr {
-           PE::Constant(c) => Expression::Constant(*c),
-           PE::Fixed(query) => Expression::Polynomial(Query{index: query.column_index(), rotation: query.rotation()}),
-           PE::Instance(query) => Expression::Polynomial(Query{index: meta.0 + query.column_index(), rotation: query.rotation()}),
-           PE::Advice(query) => Expression::Polynomial(Query{index: meta.0 + meta.1 + query.column_index(), rotation: query.rotation()}),
-           PE::Negated(a) => {
-               let a = Self::from_halo2_expr(a, meta);
-               -a
-           }
-           PE::Sum(a, b) => {
-               let a = Self::from_halo2_expr(a, meta);
-               let b = Self::from_halo2_expr(b, meta);
-               a + b
-           }
-           PE::Product(a, b) => {
-               let a = Self::from_halo2_expr(a, meta);
-               let b = Self::from_halo2_expr(b, meta);
-               a * b
-           }
-           PE::Scaled(a, k) => {
-               let a = Self::from_halo2_expr(a, meta);
-               a * *k
-           }
-           _ => unimplemented!("not supported"),
-       }
+        match expr {
+            PE::Constant(c) => Expression::Constant(*c),
+            PE::Fixed(query) => Expression::Polynomial(Query {
+                index: query.column_index(),
+                rotation: query.rotation(),
+            }),
+            PE::Instance(query) => Expression::Polynomial(Query {
+                index: meta.0 + query.column_index(),
+                rotation: query.rotation(),
+            }),
+            PE::Advice(query) => Expression::Polynomial(Query {
+                index: meta.0 + meta.1 + query.column_index(),
+                rotation: query.rotation(),
+            }),
+            PE::Negated(a) => {
+                let a = Self::from_halo2_expr(a, meta);
+                -a
+            }
+            PE::Sum(a, b) => {
+                let a = Self::from_halo2_expr(a, meta);
+                let b = Self::from_halo2_expr(b, meta);
+                a + b
+            }
+            PE::Product(a, b) => {
+                let a = Self::from_halo2_expr(a, meta);
+                let b = Self::from_halo2_expr(b, meta);
+                a * b
+            }
+            PE::Scaled(a, k) => {
+                let a = Self::from_halo2_expr(a, meta);
+                a * *k
+            }
+            _ => unimplemented!("not supported"),
+        }
     }
-
 }
 
 impl<F: PrimeField> Neg for Expression<F> {
@@ -222,14 +244,13 @@ macro_rules! impl_expression_ops {
 
 impl_expression_ops!(Add, add, Sum, Expression<F>, std::convert::identity);
 impl_expression_ops!(Sub, sub, Sum, Expression<F>, Neg::neg);
-impl_expression_ops!(Mul, mul, Product, Expression<F>,  std::convert::identity);
-
+impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
 
 #[derive(Clone)]
 pub struct Monomial<F: PrimeField> {
     pub arity: usize,
-    pub index_to_poly: Vec<(i32,usize)>,  
-    pub poly_to_index: HashMap<(i32,usize), usize>, // column index set
+    pub index_to_poly: Vec<(i32, usize)>,
+    pub poly_to_index: HashMap<(i32, usize), usize>, // column index set
     pub coeff: F,
     pub exponents: Vec<usize>,
 }
@@ -248,7 +269,13 @@ impl<F: PrimeField> Display for Monomial<F> {
                 continue;
             }
             let (rid, cid) = self.index_to_poly[i];
-            let shift = if rid == 0 { format!("") } else if rid > 0 { format!("[+{}]", rid) } else { format!("[{}]", rid) };
+            let shift = if rid == 0 {
+                format!("")
+            } else if rid > 0 {
+                format!("[+{}]", rid)
+            } else {
+                format!("[{}]", rid)
+            };
             if *exp == 1 {
                 write!(f, "(Z_{}{})", cid, shift)?;
             } else {
@@ -260,7 +287,7 @@ impl<F: PrimeField> Display for Monomial<F> {
 }
 
 impl<F: PrimeField> Monomial<F> {
-    pub fn new(index_to_poly: Vec<(i32,usize)>, coeff: F, exponents: Vec<usize>) -> Self {
+    pub fn new(index_to_poly: Vec<(i32, usize)>, coeff: F, exponents: Vec<usize>) -> Self {
         let arity = index_to_poly.len();
         assert!(arity == exponents.len());
         let mut poly_to_index: HashMap<(i32, usize), usize> = HashMap::new();
@@ -272,7 +299,7 @@ impl<F: PrimeField> Monomial<F> {
             arity,
             index_to_poly,
             poly_to_index,
-            coeff, 
+            coeff,
             exponents,
         }
     }
@@ -280,9 +307,9 @@ impl<F: PrimeField> Monomial<F> {
     pub fn homogeneous(&self, degree: usize, u_index: usize) -> Self {
         let mut mono = self.clone();
         mono.arity += 1;
-        mono.exponents.push(degree-self.degree());
+        mono.exponents.push(degree - self.degree());
         mono.index_to_poly.push((0, u_index));
-        mono.poly_to_index.insert((0, u_index), mono.arity); 
+        mono.poly_to_index.insert((0, u_index), mono.arity);
         mono
     }
 
@@ -291,7 +318,10 @@ impl<F: PrimeField> Monomial<F> {
         for (i, exp) in self.exponents.iter().enumerate() {
             let (rot, idx) = self.index_to_poly[i];
             for _ in 0..(*exp) {
-                let x0 = Expression::<F>::Polynomial(Query{index: idx, rotation: Rotation(rot)});
+                let x0 = Expression::<F>::Polynomial(Query {
+                    index: idx,
+                    rotation: Rotation(rot),
+                });
                 expr = Expression::Product(Box::new(expr), Box::new(x0));
             }
         }
@@ -302,7 +332,12 @@ impl<F: PrimeField> Monomial<F> {
         if self.arity != other.arity {
             return false;
         }
-        let matching = self.index_to_poly.iter().zip(&other.index_to_poly).filter(|&(a,b)| a == b).count();
+        let matching = self
+            .index_to_poly
+            .iter()
+            .zip(&other.index_to_poly)
+            .filter(|&(a, b)| a == b)
+            .count();
         matching == self.arity
     }
 
@@ -318,7 +353,7 @@ impl<F: PrimeField> Monomial<F> {
         assert!(self.is_same_class(other));
         let mut exponents = vec![];
         for (a, b) in self.exponents.iter().zip(other.exponents.iter()) {
-            exponents.push(*a+*b);
+            exponents.push(*a + *b);
         }
         Self {
             arity: self.arity,
@@ -344,7 +379,6 @@ impl<F: PrimeField> Monomial<F> {
         assert!(self == other);
         self.coeff += other.coeff;
     }
-
 }
 
 impl<F: PrimeField> PartialEq for Monomial<F> {
@@ -359,15 +393,15 @@ impl<F: PrimeField> PartialEq for Monomial<F> {
     }
 }
 
-impl<F: PrimeField> Eq for Monomial<F>{}
+impl<F: PrimeField> Eq for Monomial<F> {}
 
-impl<F:PrimeField> PartialOrd for Monomial<F> {
+impl<F: PrimeField> PartialOrd for Monomial<F> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<F:PrimeField> Ord for Monomial<F>{
+impl<F: PrimeField> Ord for Monomial<F> {
     fn cmp(&self, other: &Self) -> Ordering {
         assert!(self.is_same_class(other));
         for (a, b) in self.exponents.iter().zip(other.exponents.iter()).rev() {
@@ -381,14 +415,13 @@ impl<F:PrimeField> Ord for Monomial<F>{
     }
 }
 
-
 #[derive(Clone)]
 pub struct MultiPolynomial<F: PrimeField> {
     pub arity: usize,
     pub monomials: Vec<Monomial<F>>,
 }
 
-impl<F:PrimeField> Display for MultiPolynomial<F> {
+impl<F: PrimeField> Display for MultiPolynomial<F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut non_empty_monomials_count = 0;
         for monomial in &self.monomials {
@@ -405,7 +438,6 @@ impl<F:PrimeField> Display for MultiPolynomial<F> {
     }
 }
 
-
 impl<F: PrimeField> MultiPolynomial<F> {
     pub fn new(arity: usize) -> Self {
         Self {
@@ -419,7 +451,7 @@ impl<F: PrimeField> MultiPolynomial<F> {
     }
     pub fn degree(&self) -> usize {
         let mut deg = 0;
-        for monomial in self. monomials.iter() {
+        for monomial in self.monomials.iter() {
             if deg < monomial.degree() {
                 deg = monomial.degree()
             }
@@ -427,10 +459,14 @@ impl<F: PrimeField> MultiPolynomial<F> {
         deg
     }
 
-    pub fn homogeneous(&self, meta:(usize,usize,usize)) -> Self {
+    pub fn homogeneous(&self, meta: (usize, usize, usize)) -> Self {
         let degree = self.degree();
         let u_index = meta.0 + meta.1 + meta.2;
-        let monos = self.monomials.iter().map(|f| f.homogeneous(degree, u_index)).collect();
+        let monos = self
+            .monomials
+            .iter()
+            .map(|f| f.homogeneous(degree, u_index))
+            .collect();
         Self {
             arity: self.arity + 1,
             monomials: monos,
@@ -445,51 +481,53 @@ impl<F: PrimeField> MultiPolynomial<F> {
         expr
     }
 
-
     // p(X1,X2,...) -> p(X1+r*Y1,X2+r*Y2,...)
     // meta: size of |fixed_columns|instance_columns|advice_columns|
     pub fn fold_transform(&self, meta: (usize, usize, usize)) -> Self {
-        self.homogeneous(meta).to_expression().fold_transform(meta).expand()
+        self.homogeneous(meta)
+            .to_expression()
+            .fold_transform(meta)
+            .expand()
     }
 
     // get coefficient of X^k, where X identified by (ratation, index) in 0..arity, k=degree
     pub fn coeff_of(&self, var: (i32, usize), degree: usize) -> Self {
-        assert!(self.monomials.len()>0);
+        assert!(self.monomials.len() > 0);
         assert!(self.monomials[0].poly_to_index.contains_key(&var));
 
         let index = self.monomials[0].poly_to_index.get(&var).unwrap();
         let mut index_to_poly = self.monomials[0].index_to_poly.clone();
         index_to_poly.remove(*index);
 
-        let mut poly = Self::new(self.arity-1);
+        let mut poly = Self::new(self.arity - 1);
 
         for mono in self.monomials.iter() {
             if mono.exponents[*index] == degree {
                 let mut exponents = mono.exponents.clone();
-                exponents.remove(*index); 
-                let tmp = Monomial::new(index_to_poly.clone(), mono.coeff, exponents); 
+                exponents.remove(*index);
+                let tmp = Monomial::new(index_to_poly.clone(), mono.coeff, exponents);
                 poly.monomials.push(tmp);
             }
         }
         poly
     }
 
-    pub fn reduce(&mut self)  {
+    pub fn reduce(&mut self) {
         if self.monomials.len() <= 1 {
-            return
+            return;
         }
         self.monomials.sort();
         let mut reduced: Vec<Monomial<F>> = Vec::new();
-        let mut idx:usize = 0;
+        let mut idx: usize = 0;
         reduced.push(self.monomials[idx].clone());
         loop {
             idx += 1;
             if idx >= self.monomials.len() {
                 break;
             }
-            if self.monomials[idx] == self.monomials[idx-1] {
+            if self.monomials[idx] == self.monomials[idx - 1] {
                 let size = reduced.len();
-                reduced[size-1].add(&self.monomials[idx]);
+                reduced[size - 1].add(&self.monomials[idx]);
             } else {
                 reduced.push(self.monomials[idx].clone());
             }
@@ -569,23 +607,42 @@ impl<F: PrimeField> Mul<F> for MultiPolynomial<F> {
 mod tests {
     use super::*;
     use ff::PrimeField;
-     // use pasta_curves::{Fp, pallas};
+    // use pasta_curves::{Fp, pallas};
     use halo2curves::pasta::{pallas, Fp};
 
     #[test]
     fn test_expression() {
-        let expr1: Expression<Fp> = Expression::Polynomial(Query{index: 0, rotation: Rotation(0)}) - Expression::Constant(pallas::Base::from_str_vartime("1").unwrap()); 
-        let expr2: Expression<Fp> = Expression::Polynomial(Query { index: 0, rotation: Rotation(0) }) * pallas::Base::from(2); 
+        let expr1: Expression<Fp> =
+            Expression::Polynomial(Query {
+                index: 0,
+                rotation: Rotation(0),
+            }) - Expression::Constant(pallas::Base::from_str_vartime("1").unwrap());
+        let expr2: Expression<Fp> = Expression::Polynomial(Query {
+            index: 0,
+            rotation: Rotation(0),
+        }) * pallas::Base::from(2);
         let expr = expr1.clone() * expr1 + expr2;
         assert_eq!(format!("{}", expr.expand()), "0x1 + (Z_0^2)");
     }
 
     #[test]
     fn test_homogeneous() {
-        let expr1: Expression<Fp> = Expression::Polynomial(Query{index: 0, rotation: Rotation(0)}) + Expression::Constant(pallas::Base::from_str_vartime("1").unwrap()); 
-        let expr2: Expression<Fp> =  Expression::<Fp>::Polynomial(Query{index: 0, rotation: Rotation(0)}) * Expression::<Fp>::Polynomial(Query{index: 1, rotation: Rotation(0)});
+        let expr1: Expression<Fp> =
+            Expression::Polynomial(Query {
+                index: 0,
+                rotation: Rotation(0),
+            }) + Expression::Constant(pallas::Base::from_str_vartime("1").unwrap());
+        let expr2: Expression<Fp> = Expression::<Fp>::Polynomial(Query {
+            index: 0,
+            rotation: Rotation(0),
+        }) * Expression::<Fp>::Polynomial(Query {
+            index: 1,
+            rotation: Rotation(0),
+        });
         let expr3 = expr1.clone() + expr2.clone();
-        assert_eq!(format!("{}", expr3.expand().homogeneous((0,0,2))), "(Z_2^2) + (Z_0)(Z_2) + (Z_0)(Z_1)");
+        assert_eq!(
+            format!("{}", expr3.expand().homogeneous((0, 0, 2))),
+            "(Z_2^2) + (Z_0)(Z_2) + (Z_0)(Z_1)"
+        );
     }
 }
-

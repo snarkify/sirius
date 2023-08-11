@@ -1,36 +1,31 @@
-use halo2curves::group::ff::{FromUniformBytes, PrimeField};
-use halo2_proofs::arithmetic::CurveAffine;
-use poseidon::{self, SparseMDSMatrix, Spec};
-use std::{iter, mem, marker::PhantomData};
 use crate::poseidon::{ROConstantsTrait, ROTrait};
-use crate::util::{bits_to_fe_le,fe_to_bits_le};
-
+use crate::util::{bits_to_fe_le, fe_to_bits_le};
+use halo2_proofs::arithmetic::CurveAffine;
+use halo2curves::group::ff::{FromUniformBytes, PrimeField};
+use poseidon::{self, SparseMDSMatrix, Spec};
+use std::{iter, marker::PhantomData, mem};
 
 // adapted from: https://github.com/privacy-scaling-explorations/snark-verifier
 
 #[derive(Clone, Debug)]
-struct State<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> {
+struct State<F: PrimeField + FromUniformBytes<64>, const T: usize, const RATE: usize> {
     inner: [F; T],
 }
 
-impl<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> State<F, T, RATE> {
+impl<F: PrimeField + FromUniformBytes<64>, const T: usize, const RATE: usize> State<F, T, RATE> {
     fn new(inner: [F; T]) -> Self {
-        Self {
-            inner,
-        }
+        Self { inner }
     }
 
     fn sbox_full(&mut self, constants: &[F; T]) {
-        let pow5 = |v: &F| { 
-           v.square() * v.square() * v
-        };
+        let pow5 = |v: &F| v.square() * v.square() * v;
         for (state, constant) in self.inner.iter_mut().zip(constants.iter()) {
-            *state = pow5(state) + *constant; 
+            *state = pow5(state) + *constant;
         }
     }
 
     fn sbox_part(&mut self, constant: &F) {
-        let pow5 = |v: &F| { v.square() * v.square() * v};
+        let pow5 = |v: &F| v.square() * v.square() * v;
         self.inner[0] = pow5(&self.inner[0]) + *constant;
     }
 
@@ -53,7 +48,11 @@ impl<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> Stat
             .skip(1 + inputs.len())
             .enumerate()
             .for_each(|(idx, (state, constant))| {
-                *state = if idx == 0 { *state + F::ONE + *constant } else { *state + *constant };
+                *state = if idx == 0 {
+                    *state + F::ONE + *constant
+                } else {
+                    *state + *constant
+                };
             });
     }
 
@@ -61,39 +60,39 @@ impl<F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> Stat
         self.inner = mds
             .iter()
             .map(|row| {
-                row.iter().clone().zip(self.inner.iter()).fold(F::ZERO, |acc, (mij, sj)| {
-                    acc + *sj * *mij
-                })
+                row.iter()
+                    .clone()
+                    .zip(self.inner.iter())
+                    .fold(F::ZERO, |acc, (mij, sj)| acc + *sj * *mij)
             })
-            .collect::<Vec<F>>().try_into().unwrap();
+            .collect::<Vec<F>>()
+            .try_into()
+            .unwrap();
     }
 
     fn apply_sparse_mds(&mut self, mds: &SparseMDSMatrix<F, T, RATE>) {
         self.inner = iter::once(
-              mds.row()
-              .iter()
-              .cloned()
-              .zip(self.inner.iter())
-              .fold(F::ZERO, |acc, (vi, si)|{
-                  acc + vi * si
-              })
-            )
+            mds.row()
+                .iter()
+                .cloned()
+                .zip(self.inner.iter())
+                .fold(F::ZERO, |acc, (vi, si)| acc + vi * si),
+        )
         .chain(
             mds.col_hat()
-            .iter()
-            .zip(self.inner.iter().skip(1))
-            .map(|(coeff, state)| {
-                *coeff * self.inner[0] + *state
-            }),
+                .iter()
+                .zip(self.inner.iter().skip(1))
+                .map(|(coeff, state)| *coeff * self.inner[0] + *state),
         )
-       .collect::<Vec<F>>()
-       .try_into()
-       .unwrap();
+        .collect::<Vec<F>>()
+        .try_into()
+        .unwrap();
     }
 }
 
 impl<F, const T: usize, const RATE: usize> ROConstantsTrait for Spec<F, T, RATE>
-     where F: PrimeField+FromUniformBytes<64>
+where
+    F: PrimeField + FromUniformBytes<64>,
 {
     fn new(r_f: usize, r_p: usize) -> Self {
         Spec::new(r_f, r_p)
@@ -101,16 +100,15 @@ impl<F, const T: usize, const RATE: usize> ROConstantsTrait for Spec<F, T, RATE>
 }
 
 impl<C, F, const T: usize, const RATE: usize> ROTrait<C> for PoseidonHash<C, F, T, RATE>
-     where C: CurveAffine<Base = F>, F: PrimeField+FromUniformBytes<64>
+where
+    C: CurveAffine<Base = F>,
+    F: PrimeField + FromUniformBytes<64>,
 {
     type Constants = Spec<F, T, RATE>;
     fn new(constants: Self::Constants) -> Self {
         Self {
             spec: constants,
-            state: State::new(
-                poseidon::State::default()
-                    .words()
-            ),
+            state: State::new(poseidon::State::default().words()),
             buf: Vec::new(),
             _marker: PhantomData,
         }
@@ -121,7 +119,7 @@ impl<C, F, const T: usize, const RATE: usize> ROTrait<C> for PoseidonHash<C, F, 
     }
 
     fn absorb_point(&mut self, point: C) {
-         let encoded = point.coordinates().map(|coordinates| {
+        let encoded = point.coordinates().map(|coordinates| {
             [coordinates.x(), coordinates.y()]
                 .into_iter()
                 .cloned()
@@ -139,18 +137,26 @@ impl<C, F, const T: usize, const RATE: usize> ROTrait<C> for PoseidonHash<C, F, 
     }
 }
 
-
-
-
 #[derive(Clone, Debug)]
-pub struct PoseidonHash<C: CurveAffine<Base = F>, F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> {
+pub struct PoseidonHash<
+    C: CurveAffine<Base = F>,
+    F: PrimeField + FromUniformBytes<64>,
+    const T: usize,
+    const RATE: usize,
+> {
     spec: Spec<F, T, RATE>,
     state: State<F, T, RATE>,
     buf: Vec<F>,
     _marker: PhantomData<C>,
 }
 
-impl<C: CurveAffine<Base = F>, F: PrimeField+FromUniformBytes<64>, const T: usize, const RATE: usize> PoseidonHash<C, F, T, RATE> {
+impl<
+        C: CurveAffine<Base = F>,
+        F: PrimeField + FromUniformBytes<64>,
+        const T: usize,
+        const RATE: usize,
+    > PoseidonHash<C, F, T, RATE>
+{
     fn update(&mut self, elements: &[F]) {
         self.buf.extend_from_slice(elements);
     }
@@ -204,7 +210,6 @@ impl<C: CurveAffine<Base = F>, F: PrimeField+FromUniformBytes<64>, const T: usiz
         self.state.apply_mds(&mds);
     }
 }
-
 
 #[cfg(test)]
 mod tests {

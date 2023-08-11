@@ -1,8 +1,8 @@
-pub(crate) use rayon::current_num_threads;
-use halo2_proofs::plonk::Assigned;
-use ff::{BatchInvert, Field, PrimeField};
-use num_bigint::BigUint;
 use crate::constants::MAX_BITS;
+use ff::{BatchInvert, Field, PrimeField};
+use halo2_proofs::plonk::Assigned;
+use num_bigint::BigUint;
+pub(crate) use rayon::current_num_threads;
 
 pub fn bytes_to_bits_le(bytes: Vec<u8>) -> Vec<bool> {
     let mut bits = Vec::new();
@@ -68,25 +68,22 @@ pub fn fe_to_fe<F1: PrimeField, F2: PrimeField>(fe: F1) -> F2 {
 pub fn fe_to_fe_safe<F1: PrimeField, F2: PrimeField>(fe: F1) -> F2 {
     let bn1 = fe_to_big(fe);
     let bn2 = modulus::<F2>();
-    assert!(bn1 < bn2); 
+    assert!(bn1 < bn2);
     fe_from_big(bn1)
 }
 
 fn invert<F: Field>(
-      poly: &Vec<Assigned<F>>, 
-      inv_denoms: impl Iterator<Item = F> + ExactSizeIterator,
-  ) -> Vec<F> {
-      assert_eq!(inv_denoms.len(), poly.len());
-      poly 
-        .iter()
+    poly: &Vec<Assigned<F>>,
+    inv_denoms: impl Iterator<Item = F> + ExactSizeIterator,
+) -> Vec<F> {
+    assert_eq!(inv_denoms.len(), poly.len());
+    poly.iter()
         .zip(inv_denoms.into_iter())
         .map(|(a, inv_den)| a.numerator() * inv_den)
         .collect()
 }
 
-pub(crate) fn batch_invert_assigned<F: Field>(
-    assigned: &Vec<Vec<Assigned<F>>>,
-) -> Vec<Vec<F>> {
+pub(crate) fn batch_invert_assigned<F: Field>(assigned: &Vec<Vec<Assigned<F>>>) -> Vec<Vec<F>> {
     let mut assigned_denominators: Vec<_> = assigned
         .iter()
         .map(|f| {
@@ -114,34 +111,34 @@ pub(crate) fn batch_invert_assigned<F: Field>(
 }
 
 pub fn parallelize_iter<I, T, F>(iter: I, f: F)
-  where
-      I: Send + Iterator<Item = T>,
-      T: Send,
-      F: Fn(T) + Send + Sync + Clone,
-  {
-      rayon::scope(|scope| {
-          for item in iter {
-              let f = f.clone();
-              scope.spawn(move |_| f(item));
-          }
-      });
-  }
+where
+    I: Send + Iterator<Item = T>,
+    T: Send,
+    F: Fn(T) + Send + Sync + Clone,
+{
+    rayon::scope(|scope| {
+        for item in iter {
+            let f = f.clone();
+            scope.spawn(move |_| f(item));
+        }
+    });
+}
 
 /// This simple utility function will parallelize an operation that is to be
 /// performed over a mutable slice.
 pub fn parallelize<T, F>(v: &mut [T], f: F)
-  where
-      T: Send,
-      F: Fn((&mut [T], usize)) + Send + Sync + Clone,
-  {
-      let num_threads = current_num_threads();
-      let chunk_size = (v.len() as f64 / num_threads as f64).ceil() as usize;
-      if v.len() < num_threads {
-          f((v, 0));
-      } else {
-          parallelize_iter(v.chunks_mut(chunk_size).zip((0..).step_by(chunk_size)), f);
-      }
- }
+where
+    T: Send,
+    F: Fn((&mut [T], usize)) + Send + Sync + Clone,
+{
+    let num_threads = current_num_threads();
+    let chunk_size = (v.len() as f64 / num_threads as f64).ceil() as usize;
+    if v.len() < num_threads {
+        f((v, 0));
+    } else {
+        parallelize_iter(v.chunks_mut(chunk_size).zip((0..).step_by(chunk_size)), f);
+    }
+}
 
 pub(crate) fn trim_leading_zeros(hex: String) -> String {
     let without_prefix = hex.as_str().trim_start_matches("0x");
@@ -150,11 +147,12 @@ pub(crate) fn trim_leading_zeros(hex: String) -> String {
 }
 
 pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>) {
-    let last_one_position = bits.iter()
-       .enumerate()
-       .rev()
-       .find(|(_, &value)| value == true)
-       .map(|(idx, _)| idx);
+    let last_one_position = bits
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, &value)| value == true)
+        .map(|(idx, _)| idx);
     if let Some(position) = last_one_position {
         bits.truncate(position + 1);
     } else {
@@ -168,5 +166,3 @@ pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>) {
         bits.push(false);
     }
 }
-
-
