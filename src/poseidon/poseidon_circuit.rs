@@ -159,7 +159,7 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
 
         let mut rc_val = F::ZERO;
         for (j, (mij, cj)) in mds_row.iter().zip(rcs).enumerate() {
-            rc_val = rc_val + *mij * cj;
+            rc_val += *mij * cj;
             q_5_vals[j] = *mij;
             ctx.assign_fixed(
                 || format!("full_round {}: q_5", round_idx),
@@ -351,24 +351,27 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
         //let buf = mem::take(&mut self.buf);
         let buf = self.buf.clone();
         let exact = buf.len() % RATE == 0;
-        let mut state = Vec::new();
         let state0: [F; T] = poseidon::State::default().words();
-        for i in 0..T {
-            let si = ctx.assign_advice(
-                || "initial state",
-                self.main_gate.config().state[i],
-                Value::known(state0[i]),
-            )?;
-            state.push(si);
-        }
+
+        let mut state: [AssignedValue<F>; T] = self
+            .main_gate
+            .config()
+            .state
+            .into_iter()
+            .zip(state0.into_iter().map(Value::known))
+            .map(|(state_column, state0_value)| {
+                ctx.assign_advice(|| "initial state", state_column, state0_value)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .expect("Unreachable, because zip two arrays with same size");
+
         for chunk in buf.chunks(RATE) {
-            let next_state =
-                self.permutation(ctx, chunk.to_vec(), state[..].try_into().unwrap())?;
-            state = next_state.to_vec();
+            state = self.permutation(ctx, chunk.to_vec(), &state)?;
         }
+
         if exact {
-            let next_state = self.permutation(ctx, Vec::new(), state[..].try_into().unwrap())?;
-            state = next_state.to_vec();
+            state = self.permutation(ctx, Vec::new(), &state)?;
         }
 
         Ok(state[1].clone())

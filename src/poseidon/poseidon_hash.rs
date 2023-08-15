@@ -33,7 +33,7 @@ impl<F: PrimeField + FromUniformBytes<64>, const T: usize, const RATE: usize> St
         assert!(RATE == T - 1);
         assert!(inputs.len() <= RATE);
 
-        self.inner[0] = self.inner[0] + pre_constants[0];
+        self.inner[0] += pre_constants[0];
         self.inner
             .iter_mut()
             .zip(pre_constants.iter())
@@ -172,7 +172,7 @@ impl<
             self.permutation(&[]);
         }
 
-        let output = self.state.inner[1].clone();
+        let output = self.state.inner[1];
         let bits = fe_to_bits_le(output)[..num_bits].to_vec();
         bits_to_fe_le(bits)
     }

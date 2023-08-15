@@ -81,7 +81,7 @@ impl<F: PrimeField> WrapValue<F> {
     pub fn value(&self) -> Value<F> {
         match self {
             WrapValue::Assigned(v) => v.value().copied(),
-            WrapValue::Unassigned(v) => v.clone(),
+            WrapValue::Unassigned(v) => *v,
             WrapValue::Zero => Value::known(F::ZERO),
         }
     }
@@ -375,7 +375,7 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
     pub fn assign_bits(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        bits: &Vec<bool>,
+        bits: &[bool],
     ) -> Result<Vec<AssignedValue<F>>, Error> {
         let mut res = vec![];
         for bit in bits.iter() {
@@ -397,20 +397,20 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
     ) -> Result<AssignedValue<F>, Error> {
         let accumulate = |acc: &mut Value<F>, bs: Vec<AssignedValue<F>>, ps: &Vec<F>| {
             for (b, p) in bs.iter().zip(ps) {
-                *acc = *acc + b.value().copied() * Value::known(p.clone());
+                *acc = *acc + b.value().copied() * Value::known(p);
             }
         };
         let length = bits.len();
         let mut mult = F::ONE;
         let powers: Vec<F> = (0..length)
             .map(|_| {
-                let pow = mult.clone();
+                let pow = mult;
                 mult = mult + mult;
                 pow
             })
             .collect();
         let mut acc = Value::known(F::ZERO);
-        let mut old_acc = self.assign_value(ctx, acc.clone())?;
+        let mut old_acc = self.assign_value(ctx, acc)?;
         for (bs, ps) in bits.chunks(T).zip(powers.chunks(T)) {
             let bvs = bs.to_vec();
             let pvs = ps.to_vec();
