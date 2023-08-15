@@ -147,12 +147,12 @@ impl<F: PrimeField> Expression<F> {
         match self {
             Expression::Constant(c) => trim_leading_zeros(format!("{:?}", c)),
             Expression::Polynomial(poly) => {
-                let mut rotation = String::from("");
-                if poly.rotation.0 < 0 {
-                    rotation = format!("[{}]", poly.rotation.0);
-                } else if poly.rotation.0 > 0 {
-                    rotation = format!("[+{}]", poly.rotation.0);
-                }
+                let rotation = match poly.rotation.0.cmp(&0) {
+                    Ordering::Equal => "".to_owned(),
+                    Ordering::Less => format!("[{}]", poly.rotation.0),
+                    Ordering::Greater => format!("[+{}]", poly.rotation.0),
+                };
+
                 format!("Z_{}{}", poly.index, rotation)
             }
             Expression::Negated(a) => {
@@ -269,13 +269,12 @@ impl<F: PrimeField> Display for Monomial<F> {
                 continue;
             }
             let (rid, cid) = self.index_to_poly[i];
-            let shift = if rid == 0 {
-                format!("")
-            } else if rid > 0 {
-                format!("[+{}]", rid)
-            } else {
-                format!("[{}]", rid)
+            let shift = match rid.cmp(&0) {
+                Ordering::Equal => "".to_owned(),
+                Ordering::Greater => format!("[+{rid}]"),
+                Ordering::Less => format!("[{rid}]"),
             };
+
             if *exp == 1 {
                 write!(f, "(Z_{}{})", cid, shift)?;
             } else {
@@ -404,11 +403,13 @@ impl<F: PrimeField> PartialOrd for Monomial<F> {
 impl<F: PrimeField> Ord for Monomial<F> {
     fn cmp(&self, other: &Self) -> Ordering {
         assert!(self.is_same_class(other));
+
         for (a, b) in self.exponents.iter().zip(other.exponents.iter()).rev() {
-            if *a < *b {
-                return Ordering::Less;
-            } else if *a > *b {
-                return Ordering::Greater;
+            match a.cmp(b) {
+                Ordering::Equal => continue,
+                order => {
+                    return order;
+                }
             }
         }
         Ordering::Equal
@@ -492,7 +493,7 @@ impl<F: PrimeField> MultiPolynomial<F> {
 
     // get coefficient of X^k, where X identified by (ratation, index) in 0..arity, k=degree
     pub fn coeff_of(&self, var: (i32, usize), degree: usize) -> Self {
-        assert!(self.monomials.len() > 0);
+        assert!(!self.monomials.is_empty());
         assert!(self.monomials[0].poly_to_index.contains_key(&var));
 
         let index = self.monomials[0].poly_to_index.get(&var).unwrap();

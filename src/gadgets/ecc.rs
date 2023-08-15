@@ -87,7 +87,7 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
         // make correction if first bit is 0
         let res: AssignedPoint<C> = {
             let acc_minus_initial = {
-                let neg = self.negate(ctx, &p0)?;
+                let neg = self.negate(ctx, p0)?;
                 self.add(ctx, &acc, &neg)?
             };
             let x = self.main_gate.conditional_select(
@@ -446,7 +446,7 @@ mod tests {
                         Value::known(self.a.y),
                     )?;
                     let a = AssignedPoint { x: ax, y: ay };
-                    let output = if self.test_case == 0 {
+                    if self.test_case == 0 {
                         let bx = ctx.assign_advice(
                             || "b.x",
                             ecc_chip.main_gate.config().state[2],
@@ -470,8 +470,7 @@ mod tests {
                         ctx.next();
                         let bits = ecc_chip.main_gate.le_num_to_bits(ctx, lambda)?;
                         ecc_chip.scalar_mul(ctx, &a, &bits)
-                    };
-                    output
+                    }
                 },
             )?;
             layouter.constrain_instance(output.x.cell(), config.instance, 0)?;

@@ -15,13 +15,13 @@ pub struct NIFS<C: CurveAffine, RO: ROTrait<C>> {
 
 impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
     pub fn prove(
-        ck: &CommitmentKey<C>,
+        _ck: &CommitmentKey<C>,
         ro: &mut RO,
         S: &PlonkStructure<C>,
         U1: &RelaxedPlonkInstance<C>,
-        W1: &RelaxedPlonkWitness<C>,
+        _W1: &RelaxedPlonkWitness<C>,
         U2: &PlonkInstance<C>,
-        W2: &PlonkWitness<C>,
+        _W2: &PlonkWitness<C>,
     ) {
         //-> Result<(NIFS<C,T>, (RelaxedPlonkInstance<C>, RelaxedPlonkWitness<C>))> {
         S.absorb_into(ro);
@@ -33,5 +33,5 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         //        let r = transcript.squeeze_challenge();
     }
 
-    pub fn verify(&self, ro: RO, U1: RelaxedPlonkInstance<C>, U2: PlonkInstance<C>) {}
+    pub fn verify(&self, _ro: RO, _U1: RelaxedPlonkInstance<C>, _U2: PlonkInstance<C>) {}
 }

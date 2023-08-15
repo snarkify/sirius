@@ -83,7 +83,7 @@ fn invert<F: Field>(
         .collect()
 }
 
-pub(crate) fn batch_invert_assigned<F: Field>(assigned: &Vec<Vec<Assigned<F>>>) -> Vec<Vec<F>> {
+pub(crate) fn batch_invert_assigned<F: Field>(assigned: &[Vec<Assigned<F>>]) -> Vec<Vec<F>> {
     let mut assigned_denominators: Vec<_> = assigned
         .iter()
         .map(|f| {
@@ -151,8 +151,8 @@ pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>) {
         .iter()
         .enumerate()
         .rev()
-        .find(|(_, &value)| value == true)
-        .map(|(idx, _)| idx);
+        .find_map(|(idx, &value)| value.then_some(idx));
+
     if let Some(position) = last_one_position {
         bits.truncate(position + 1);
     } else {

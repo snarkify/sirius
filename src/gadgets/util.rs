@@ -232,6 +232,6 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         b: &AssignedValue<F>,
     ) -> Result<AssignedValue<F>, Error> {
         let (_, b_inv) = self.invert_with_flag(ctx, b.clone())?;
-        self.mul(ctx, &a, &b_inv)
+        self.mul(ctx, a, &b_inv)
     }
 }
