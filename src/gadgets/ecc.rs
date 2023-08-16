@@ -419,9 +419,7 @@ mod tests {
         fn configure(meta: &mut ConstraintSystem<C::Base>) -> Self::Config {
             let instance = meta.instance_column();
             meta.enable_equality(instance);
-            let mut adv_cols = [(); T + 2].map(|_| meta.advice_column()).into_iter();
-            let mut fix_cols = [(); 2 * T + 4].map(|_| meta.fixed_column()).into_iter();
-            let config = MainGate::configure(meta, &mut adv_cols, &mut fix_cols);
+            let config = MainGate::configure(meta);
             Self::Config { config, instance }
         }
 

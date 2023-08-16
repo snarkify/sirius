@@ -5,7 +5,7 @@ use halo2_proofs::{
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed},
     poly::Rotation,
 };
-use std::marker::PhantomData;
+use std::{array, marker::PhantomData};
 
 pub type AssignedValue<F> = AssignedCell<F, F>;
 pub type AssignedBit<F> = AssignedCell<F, F>;
@@ -147,21 +147,17 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         }
     }
 
-    pub fn configure(
-        meta: &mut ConstraintSystem<F>,
-        adv_cols: &mut (impl Iterator<Item = Column<Advice>> + Clone),
-        fix_cols: &mut (impl Iterator<Item = Column<Fixed>> + Clone),
-    ) -> MainGateConfig<T> {
+    pub fn configure(meta: &mut ConstraintSystem<F>) -> MainGateConfig<T> {
         assert!(T >= 2);
-        let state = [0; T].map(|_| adv_cols.next().unwrap());
-        let input = adv_cols.next().unwrap();
-        let out = adv_cols.next().unwrap();
-        let q_1 = [0; T].map(|_| fix_cols.next().unwrap());
-        let q_5 = [0; T].map(|_| fix_cols.next().unwrap());
-        let q_m = fix_cols.next().unwrap();
-        let q_i = fix_cols.next().unwrap();
-        let q_o = fix_cols.next().unwrap();
-        let rc = fix_cols.next().unwrap();
+        let state = array::from_fn(|_| meta.advice_column());
+        let input = meta.advice_column();
+        let out = meta.advice_column();
+        let q_1 = array::from_fn(|_| meta.fixed_column());
+        let q_5 = array::from_fn(|_| meta.fixed_column());
+        let q_m = meta.fixed_column();
+        let q_i = meta.fixed_column();
+        let q_o = meta.fixed_column();
+        let rc = meta.fixed_column();
 
         state.map(|s| {
             meta.enable_equality(s);
@@ -184,12 +180,20 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
             let q_i = meta.query_fixed(q_i, Rotation::cur());
             let q_o = meta.query_fixed(q_o, Rotation::cur());
             let rc = meta.query_fixed(rc, Rotation::cur());
+
             let init_term = q_m * state[0].clone() * state[1].clone() + q_i * input + rc + q_o * out;
-            let res = state.into_iter().zip(q_1).zip(q_5).map(|((s, q1), q5)| {
-                q1 * s.clone()  +  q5 * pow_5(s)
-            }).fold(init_term, |acc, item| {
-                acc + item
-            });
+
+            let res = state
+                .into_iter()
+                .zip(q_1)
+                .zip(q_5)
+                .map(|((s, q1), q5)| {
+                    q1 * s.clone()  +  q5 * pow_5(s)
+                })
+                .fold(init_term, |acc, item| {
+                    acc + item
+                });
+
             vec![res]
         });
 
@@ -465,9 +469,7 @@ mod tests {
         const T: usize = 2;
         const RATE: usize = 2;
         let mut cs = ConstraintSystem::<Fp>::default();
-        let mut adv_cols = [(); T + 2].map(|_| cs.advice_column()).into_iter();
-        let mut fix_cols = [(); 2 * T + 4].map(|_| cs.fixed_column()).into_iter();
-        let _: MainGateConfig<T> = MainGate::configure(&mut cs, &mut adv_cols, &mut fix_cols);
+        let _: MainGateConfig<T> = MainGate::configure(&mut cs);
         let num_fixed = cs.num_fixed_columns();
         let num_instance = cs.num_instance_columns();
         let num_advice = cs.num_advice_columns();
