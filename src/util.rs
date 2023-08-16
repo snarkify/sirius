@@ -78,7 +78,7 @@ fn invert<F: Field>(
 ) -> Vec<F> {
     assert_eq!(inv_denoms.len(), poly.len());
     poly.iter()
-        .zip(inv_denoms.into_iter())
+        .zip(inv_denoms)
         .map(|(a, inv_den)| a.numerator() * inv_den)
         .collect()
 }
@@ -105,7 +105,7 @@ pub(crate) fn batch_invert_assigned<F: Field>(assigned: &[Vec<Assigned<F>>]) -> 
 
     assigned
         .iter()
-        .zip(assigned_denominators.into_iter())
+        .zip(assigned_denominators)
         .map(|(poly, inv_denoms)| invert(poly, inv_denoms.into_iter().map(|d| d.unwrap_or(F::ONE))))
         .collect()
 }
