@@ -1,9 +1,12 @@
+use std::{io::Read, iter};
+
 use group::Curve;
 use halo2_proofs::arithmetic::{best_multiexp, CurveAffine, CurveExt};
 use rayon::prelude::*;
-use sha3::digest::{ExtendableOutput, Input};
-use sha3::Shake256;
-use std::io::Read;
+use sha3::{
+    digest::{ExtendableOutput, Input},
+    Shake256,
+};
 
 use crate::util::parallelize;
 
@@ -22,20 +25,16 @@ impl<C: CurveAffine> CommitmentKey<C> {
         let mut shake = Shake256::default();
         shake.input(label);
         let mut reader = shake.xof_result();
-        let mut uniform_bytes_vec = Vec::new();
-        for _ in 0..n {
+
+        let ck_proj: Vec<_> = iter::repeat_with(|| {
             let mut uniform_bytes = [0u8; 32];
             reader.read_exact(&mut uniform_bytes).unwrap();
-            uniform_bytes_vec.push(uniform_bytes);
-        }
-        let ck_proj: Vec<_> = (0..n)
-            .collect::<Vec<usize>>()
-            .into_par_iter()
-            .map(|i| {
-                let hash = C::CurveExt::hash_to_curve("from_uniform_bytes");
-                hash(&uniform_bytes_vec[i])
-            })
-            .collect();
+            uniform_bytes
+        })
+        .take(n)
+        .par_bridge()
+        .map(|uniform_byte| (C::CurveExt::hash_to_curve("from_uniform_bytes"))(&uniform_byte))
+        .collect();
 
         let mut ck: Vec<C> = vec![C::identity(); n];
         parallelize(&mut ck, |(ck, start)| {
