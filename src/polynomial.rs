@@ -1,3 +1,4 @@
+use crate::table::TableData;
 use crate::util::trim_leading_zeros;
 use ff::PrimeField;
 use halo2_proofs::plonk::Expression as PE;
@@ -249,8 +250,10 @@ impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
 #[derive(Clone)]
 pub struct Monomial<F: PrimeField> {
     pub arity: usize,
+    // poly: (rotation, column_index)
     pub index_to_poly: Vec<(i32, usize)>,
-    pub poly_to_index: HashMap<(i32, usize), usize>, // column index set
+    // (rotation, column_index) -> index
+    pub poly_to_index: HashMap<(i32, usize), usize>,
     pub coeff: F,
     pub exponents: Vec<usize>,
 }
@@ -377,6 +380,10 @@ impl<F: PrimeField> Monomial<F> {
     pub fn add(&mut self, other: &Self) {
         assert!(self == other);
         self.coeff += other.coeff;
+    }
+
+    pub fn eval(&self, _row: usize, _td: &TableData<F>) -> F {
+        unimplemented!()
     }
 }
 
@@ -534,6 +541,14 @@ impl<F: PrimeField> MultiPolynomial<F> {
             }
         }
         self.monomials = reduced;
+    }
+
+    // evaluate the multipoly
+    pub fn eval(&self, row: usize, td: &TableData<F>) -> F {
+        self.monomials
+            .iter()
+            .map(|mono| mono.eval(row, td))
+            .fold(F::ZERO, |acc, x| acc + x)
     }
 }
 

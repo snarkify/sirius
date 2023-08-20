@@ -3,7 +3,7 @@ use crate::{
     poseidon::{AbsorbInRO, ROTrait},
     util::{batch_invert_assigned, fe_to_fe},
 };
-use ff::Field;
+use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::CurveAffine,
     circuit::Value,
@@ -30,13 +30,13 @@ pub struct PlonkInstance<C: CurveAffine> {
 #[derive(Clone, Debug)]
 pub struct PlonkWitness<C: CurveAffine> {
     pub(crate) W: Vec<C::Scalar>, // concatenate num_advice_columns together
-    pub(crate) num_advice_columns: usize,  
+    pub(crate) num_advice_columns: usize,
 }
 
 #[derive(Clone, Debug)]
 pub struct RelaxedPlonkInstance<C: CurveAffine> {
     pub(crate) W_commitment: C,
-    pub(crate) num_advice_columns: usize,  
+    pub(crate) num_advice_columns: usize,
     pub(crate) instance: Vec<C::Scalar>,
     pub(crate) E_commitment: C,
     pub(crate) u: C::Scalar,
@@ -74,17 +74,17 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
     }
 }
 
-pub struct TableData<C: CurveAffine> {
+pub struct TableData<F: PrimeField> {
     // TODO: without usable_rows still safe?
     k: u32,
-    fixed: Vec<Vec<Assigned<C::Scalar>>>,
-    instance: Vec<C::Scalar>,
-    advice: Vec<Vec<Assigned<C::Scalar>>>,
-    challenges: HashMap<usize, C::Scalar>,
+    fixed: Vec<Vec<Assigned<F>>>,
+    instance: Vec<F>,
+    advice: Vec<Vec<Assigned<F>>>,
+    challenges: HashMap<usize, F>,
 }
 
-impl<C: CurveAffine> TableData<C> {
-    pub fn new(k: u32, instance: Vec<C::Scalar>) -> Self {
+impl<F: PrimeField> TableData<F> {
+    pub fn new(k: u32, instance: Vec<F>) -> Self {
         TableData {
             k,
             instance,
@@ -94,7 +94,7 @@ impl<C: CurveAffine> TableData<C> {
         }
     }
 
-    pub fn assembly<ConcreteCircuit: Circuit<C::Scalar>>(
+    pub fn assembly<ConcreteCircuit: Circuit<F>>(
         &mut self,
         circuit: &ConcreteCircuit,
     ) -> Result<(), Error> {
@@ -102,11 +102,9 @@ impl<C: CurveAffine> TableData<C> {
         let config = ConcreteCircuit::configure(&mut meta);
         let n = 1u64 << self.k;
         assert!(meta.num_instance_columns() == 1);
-        self.fixed =
-            vec![vec![<C::Scalar as Field>::ZERO.into(); n as usize]; meta.num_fixed_columns()];
-        self.instance = vec![<C::Scalar as Field>::ZERO; 2];
-        self.advice =
-            vec![vec![<C::Scalar as Field>::ZERO.into(); n as usize]; meta.num_advice_columns()];
+        self.fixed = vec![vec![F::ZERO.into(); n as usize]; meta.num_fixed_columns()];
+        self.instance = vec![F::ZERO; 2];
+        self.advice = vec![vec![F::ZERO.into(); n as usize]; meta.num_advice_columns()];
         ConcreteCircuit::FloorPlanner::synthesize(
             self,
             circuit,
@@ -116,13 +114,23 @@ impl<C: CurveAffine> TableData<C> {
         Ok(())
     }
 
-    pub fn plonk_structure(&self, ck: CommitmentKey<C>) -> PlonkStructure<C> {
+    pub fn plonk_structure<C: CurveAffine<ScalarExt = F>>(
+        &self,
+        ck: CommitmentKey<C>,
+    ) -> PlonkStructure<C> {
         let fixed_columns = batch_invert_assigned(&self.fixed);
-        let fixed_commitment  = ck.commit(&fixed_columns.into_iter().flatten().collect::<Vec<_>>()[..]);
-        PlonkStructure { fixed_commitment, num_fixed_columns: self.fixed.len() }
+        let fixed_commitment =
+            ck.commit(&fixed_columns.into_iter().flatten().collect::<Vec<_>>()[..]);
+        PlonkStructure {
+            fixed_commitment,
+            num_fixed_columns: self.fixed.len(),
+        }
     }
 
-    pub fn plonk_instance(&self, ck: CommitmentKey<C>) -> PlonkInstance<C> {
+    pub fn plonk_instance<C: CurveAffine<ScalarExt = F>>(
+        &self,
+        ck: CommitmentKey<C>,
+    ) -> PlonkInstance<C> {
         let advice_columns = batch_invert_assigned(&self.advice);
         let W_commitment = ck.commit(&advice_columns.into_iter().flatten().collect::<Vec<_>>()[..]);
         let mut instance: Vec<C::Scalar> = Vec::new();
@@ -137,13 +145,16 @@ impl<C: CurveAffine> TableData<C> {
         }
     }
 
-    pub fn plonk_witness(&self) -> PlonkWitness<C> {
+    pub fn plonk_witness<C: CurveAffine<ScalarExt = F>>(&self) -> PlonkWitness<C> {
         let advice_columns = batch_invert_assigned(&self.advice);
-        PlonkWitness { W: advice_columns.into_iter().flatten().collect::<Vec<_>>(), num_advice_columns: self.advice.len() }
+        PlonkWitness {
+            W: advice_columns.into_iter().flatten().collect::<Vec<_>>(),
+            num_advice_columns: self.advice.len(),
+        }
     }
 }
 
-impl<C: CurveAffine> Assignment<C::Scalar> for TableData<C> {
+impl<F: PrimeField> Assignment<F> for TableData<F> {
     fn enter_region<NR, N>(&mut self, _: N)
     where
         NR: Into<String>,
@@ -174,11 +185,7 @@ impl<C: CurveAffine> Assignment<C::Scalar> for TableData<C> {
         // Do nothing
     }
 
-    fn query_instance(
-        &self,
-        column: Column<Instance>,
-        row: usize,
-    ) -> Result<Value<C::Scalar>, Error> {
+    fn query_instance(&self, column: Column<Instance>, row: usize) -> Result<Value<F>, Error> {
         assert!(column.index() == 0); // require just single instance
         self.instance
             .get(row)
@@ -195,7 +202,7 @@ impl<C: CurveAffine> Assignment<C::Scalar> for TableData<C> {
     ) -> Result<(), Error>
     where
         V: FnOnce() -> Value<VR>,
-        VR: Into<Assigned<C::Scalar>>,
+        VR: Into<Assigned<F>>,
         A: FnOnce() -> AR,
         AR: Into<String>,
     {
@@ -218,7 +225,7 @@ impl<C: CurveAffine> Assignment<C::Scalar> for TableData<C> {
     ) -> Result<(), Error>
     where
         V: FnOnce() -> Value<VR>,
-        VR: Into<Assigned<C::Scalar>>,
+        VR: Into<Assigned<F>>,
         A: FnOnce() -> AR,
         AR: Into<String>,
     {
@@ -240,12 +247,12 @@ impl<C: CurveAffine> Assignment<C::Scalar> for TableData<C> {
         &mut self,
         _: Column<Fixed>,
         _: usize,
-        _: Value<Assigned<C::Scalar>>,
+        _: Value<Assigned<F>>,
     ) -> Result<(), Error> {
         Ok(())
     }
 
-    fn get_challenge(&self, challenge: Challenge) -> Value<C::Scalar> {
+    fn get_challenge(&self, challenge: Challenge) -> Value<F> {
         self.challenges
             .get(&challenge.index())
             .cloned()
@@ -337,7 +344,8 @@ mod tests {
 
     #[test]
     fn test_assembly() {
-        use halo2curves::pasta::{EqAffine, Fp};
+        use ff::Field;
+        use halo2curves::pasta::Fp;
 
         const K: u32 = 4;
         let mut inputs = Vec::new();
@@ -348,7 +356,7 @@ mod tests {
         let out_hash = Fp::from_str_vartime("45").unwrap();
         let public_inputs = vec![out_hash];
 
-        let mut td = TableData::<EqAffine>::new(K, public_inputs);
+        let mut td = TableData::<Fp>::new(K, public_inputs);
         let _ = td.assembly(&circuit);
 
         let mut table = Table::new();
