@@ -1,3 +1,5 @@
+//! This module defines TableData and Plonk related types
+//! contains methods used by folding scheme
 use crate::{
     commitment::CommitmentKey,
     poseidon::{AbsorbInRO, ROTrait},
@@ -76,11 +78,11 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
 
 pub struct TableData<F: PrimeField> {
     // TODO: without usable_rows still safe?
-    k: u32,
-    fixed: Vec<Vec<Assigned<F>>>,
-    instance: Vec<F>,
-    advice: Vec<Vec<Assigned<F>>>,
-    challenges: HashMap<usize, F>,
+    pub(crate) k: u32,
+    pub(crate) fixed: Vec<Vec<Assigned<F>>>,
+    pub(crate) instance: Vec<F>,
+    pub(crate) advice: Vec<Vec<Assigned<F>>>,
+    pub(crate) challenges: HashMap<usize, F>,
 }
 
 impl<F: PrimeField> TableData<F> {

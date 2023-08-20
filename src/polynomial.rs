@@ -382,8 +382,34 @@ impl<F: PrimeField> Monomial<F> {
         self.coeff += other.coeff;
     }
 
-    pub fn eval(&self, _row: usize, _td: &TableData<F>) -> F {
-        unimplemented!()
+    pub fn eval(&self, row: usize, td: &TableData<F>) -> F {
+        let num_fixed = td.fixed.len();
+        let vars: Vec<F> = (0..self.arity)
+            .map(|i| {
+                let (rot, col) = self.index_to_poly[i];
+                let row1 = if (rot + row as i32) >= 0 {
+                    rot as usize + row
+                } else {
+                    // TODO: check this
+                    td.fixed[0].len() - (-rot as usize) + row 
+                };
+                if col < num_fixed {
+                    td.fixed[col][row1].evaluate() 
+                } else if col < num_fixed + 1 {
+                    // instance column is always 1
+                    td.instance[row1]
+                } else {
+                    td.advice[col - num_fixed - 1][row1].evaluate()
+                }
+            })
+            .collect();
+
+        let res = vars
+            .into_iter()
+            .zip(self.exponents.iter())
+            .map(|(x, exp)| x.pow([*exp as u64, 0, 0, 0]))
+            .fold(F::ONE, |acc, v| acc * v);
+        res * self.coeff
     }
 }
 
