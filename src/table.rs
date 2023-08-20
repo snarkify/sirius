@@ -16,23 +16,27 @@ use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlonkStructure<C: CurveAffine> {
-    pub(crate) fixed_commitments: Vec<C>,
+    pub(crate) fixed_commitment: C, // concatenate num_fixed_columns together, then commit
+    pub(crate) num_fixed_columns: usize,
 }
 
 #[derive(Clone, Debug)]
 pub struct PlonkInstance<C: CurveAffine> {
-    pub(crate) advice_commitments: Vec<C>,
+    pub(crate) W_commitment: C, // concatenate num_advice_columns together, then commit
+    pub(crate) num_advice_columns: usize,
     pub(crate) instance: Vec<C::Scalar>, // inst = [X0, X1]
 }
 
 #[derive(Clone, Debug)]
 pub struct PlonkWitness<C: CurveAffine> {
-    pub(crate) advice_columns: Vec<Vec<C::Scalar>>,
+    pub(crate) W: Vec<C::Scalar>, // concatenate num_advice_columns together
+    pub(crate) num_advice_columns: usize,  
 }
 
 #[derive(Clone, Debug)]
 pub struct RelaxedPlonkInstance<C: CurveAffine> {
-    pub(crate) advice_commitments: Vec<C>,
+    pub(crate) W_commitment: C,
+    pub(crate) num_advice_columns: usize,  
     pub(crate) instance: Vec<C::Scalar>,
     pub(crate) E_commitment: C,
     pub(crate) u: C::Scalar,
@@ -40,24 +44,19 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
 
 #[derive(Clone, Debug)]
 pub struct RelaxedPlonkWitness<C: CurveAffine> {
-    pub(crate) advice_columns: Vec<Vec<C::Scalar>>,
-    pub(crate) instance_columns: Vec<Vec<C::Scalar>>,
+    pub(crate) W: Vec<C::Scalar>,
     pub(crate) E: Vec<C::Scalar>,
 }
 
 impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkStructure<C> {
     fn absorb_into(&self, ro: &mut RO) {
-        for point in &self.fixed_commitments {
-            ro.absorb_point(*point);
-        }
+        ro.absorb_point(self.fixed_commitment);
     }
 }
 
 impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
-        for point in self.advice_commitments.iter() {
-            ro.absorb_point(*point);
-        }
+        ro.absorb_point(self.W_commitment);
         for inst in self.instance.iter().take(2) {
             ro.absorb_base(fe_to_fe(*inst));
         }
@@ -66,9 +65,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkInstance<C> {
 
 impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
-        for point in self.advice_commitments.iter() {
-            ro.absorb_point(*point);
-        }
+        ro.absorb_point(self.W_commitment);
         for inst in self.instance.iter().take(2) {
             ro.absorb_base(fe_to_fe(*inst));
         }
@@ -121,35 +118,28 @@ impl<C: CurveAffine> TableData<C> {
 
     pub fn plonk_structure(&self, ck: CommitmentKey<C>) -> PlonkStructure<C> {
         let fixed_columns = batch_invert_assigned(&self.fixed);
-        let mut fixed_commitments: Vec<C> = Vec::new();
-        for col in fixed_columns.iter() {
-            let tmp = ck.commit(&col[..]);
-            fixed_commitments.push(tmp);
-        }
-        PlonkStructure { fixed_commitments }
+        let fixed_commitment  = ck.commit(&fixed_columns.into_iter().flatten().collect::<Vec<_>>()[..]);
+        PlonkStructure { fixed_commitment, num_fixed_columns: self.fixed.len() }
     }
 
     pub fn plonk_instance(&self, ck: CommitmentKey<C>) -> PlonkInstance<C> {
         let advice_columns = batch_invert_assigned(&self.advice);
-        let mut advice_commitments: Vec<C> = Vec::new();
+        let W_commitment = ck.commit(&advice_columns.into_iter().flatten().collect::<Vec<_>>()[..]);
         let mut instance: Vec<C::Scalar> = Vec::new();
-        for col in advice_columns.iter() {
-            let tmp = ck.commit(&col[..]);
-            advice_commitments.push(tmp);
-        }
         assert!(self.instance.len() >= 2);
         for inst in self.instance.iter().take(2) {
             instance.push(*inst)
         }
         PlonkInstance {
-            advice_commitments,
+            W_commitment,
+            num_advice_columns: self.advice.len(),
             instance,
         }
     }
 
     pub fn plonk_witness(&self) -> PlonkWitness<C> {
         let advice_columns = batch_invert_assigned(&self.advice);
-        PlonkWitness { advice_columns }
+        PlonkWitness { W: advice_columns.into_iter().flatten().collect::<Vec<_>>(), num_advice_columns: self.advice.len() }
     }
 }
 
