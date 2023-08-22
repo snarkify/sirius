@@ -1,6 +1,9 @@
+use std::{num::NonZeroUsize, ops::Div};
+
+use ff::PrimeField;
 use halo2_proofs::{
     circuit::Chip,
-    plonk::{Advice, Column, Fixed},
+    plonk::{Advice, Column},
 };
 use num_bigint::BigInt;
 
@@ -74,24 +77,27 @@ pub mod big_nat {
         pub fn from_bigint(
             input: &BigInt,
             limb_width: NonZeroUsize,
-            n_limbs: NonZeroUsize,
+            limbs_count_limit: NonZeroUsize,
         ) -> Result<Self, Error> {
-            let n_limbs = n_limbs.get();
+            let max_limbs_count = limbs_count_limit.get();
 
-            if input.bits() as usize > n_limbs * limb_width.get() {
+            if input.bits() as usize > max_limbs_count * limb_width.get() {
                 return Err(Error::TooBigBigint);
             }
 
             let mut nat = input.clone();
-            let limb_mask = big_int_with_n_ones(limb_width.get());
+            let limb_mask = get_big_int_with_n_ones(limb_width.get());
 
             Self::from_limbs(
                 iter::repeat_with(|| {
-                    let r = &nat & &limb_mask;
-                    nat >>= limb_width.get() as u32;
-                    nat_to_f(&r).expect("TODO: Check safety")
+                    nat.is_zero().not().then(|| {
+                        let r = &nat & &limb_mask;
+                        nat >>= limb_width.get() as u32;
+                        nat_to_f(&r).expect("TODO: Check safety")
+                    })
                 })
-                .take(n_limbs),
+                .take(max_limbs_count)
+                .map_while(|mut o| o.take()),
                 limb_width,
             )
         }
@@ -104,12 +110,12 @@ pub mod big_nat {
             todo!("Implement and test the conversion of an element from another field")
         }
 
-        pub fn into_bigint(&self, limb_width: usize) -> BigInt {
+        pub fn into_bigint(&self) -> BigInt {
             self.limbs
                 .iter()
                 .rev()
                 .fold(BigInt::zero(), |mut result, limb| {
-                    result <<= limb_width;
+                    result <<= self.limb_width().get();
                     result + f_to_nat(limb)
                 })
         }
@@ -118,51 +124,55 @@ pub mod big_nat {
             self.limbs.get(limb_index)
         }
 
+        pub fn limb_width(&self) -> &NonZeroUsize {
+            &self.width
+        }
+
+        pub fn limbs_count(&self) -> NonZeroUsize {
+            NonZeroUsize::new(self.limbs.len()).unwrap()
+        }
+
+        pub fn get_max_word_mask_bits(&self) -> usize {
+            get_max_word_mask_bits(self.width.get())
+        }
+
+        pub fn bits_count(&self) -> usize {
+            self.width.get() * (self.limbs_count().get() - 1) + self.get_max_word_mask_bits()
+        }
+
+        /// TODO Allow partial assign
         pub fn assign_advice(
             &self,
             ctx: &mut RegionCtx<'_, F>,
             annotation: &str,
-            columns: &[Column<Advice>],
+            column: &Column<Advice>,
         ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-            if self.limbs.len() != columns.len() {
-                return Err(Error::WrongColumnsSize {
-                    limbs_count: self.limbs.len(),
-                    columns_count: columns.len(),
-                });
-            }
-
             self.limbs
                 .iter()
-                .zip(columns.iter())
                 .enumerate()
-                .map(|(index, (val, col))| {
+                .map(|(index, val)| {
                     let annotation = format!("{annotation}_{index}");
-                    ctx.assign_advice(|| &annotation, *col, Value::known(*val))
+                    ctx.region
+                        .assign_advice(|| &annotation, *column, index, || Value::known(*val))
                         .map_err(|err| Error::AssignAdviceError { err, annotation })
                 })
                 .collect()
         }
 
+        /// TODO Allow partial assign
         pub fn assign_fixed(
             &self,
             ctx: &mut RegionCtx<'_, F>,
             annotation: &str,
-            columns: &[Column<Fixed>],
+            column: &Column<Fixed>,
         ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-            if self.limbs.len() != columns.len() {
-                return Err(Error::WrongColumnsSize {
-                    limbs_count: self.limbs.len(),
-                    columns_count: columns.len(),
-                });
-            }
-
             self.limbs
                 .iter()
-                .zip(columns.iter())
                 .enumerate()
-                .map(|(index, (val, col))| {
+                .map(|(index, val)| {
                     let annotation = format!("{annotation}_{index}");
-                    ctx.assign_fixed(|| &annotation, *col, *val)
+                    ctx.region
+                        .assign_fixed(|| &annotation, *column, index, || Value::known(*val))
                         .map_err(|err| Error::AssignFixedError { err, annotation })
                 })
                 .collect()
@@ -188,11 +198,15 @@ pub mod big_nat {
     }
 
     // Calculate `2 ^ n - 1`
-    fn big_int_with_n_ones(n: usize) -> BigInt {
+    fn get_big_int_with_n_ones(n: usize) -> BigInt {
         match n {
             0 => BigInt::zero(),
             n => (BigInt::one() << n) - 1,
         }
+    }
+
+    fn get_max_word_mask_bits(limb_width: usize) -> usize {
+        get_big_int_with_n_ones(limb_width).bits() as usize
     }
 
     #[cfg(test)]
@@ -200,112 +214,85 @@ pub mod big_nat {
         // TODO Add tests here for all cases
     }
 }
+use big_nat::BigNat;
+
+pub enum MultModError {
+    NotConsistentLimbWidth {
+        lhs_limb_width: NonZeroUsize,
+        rhs_limb_width: NonZeroUsize,
+    },
+    BigNatError(big_nat::Error),
+}
+impl From<big_nat::Error> for MultModError {
+    fn from(value: big_nat::Error) -> Self {
+        Self::BigNatError(value)
+    }
+}
 
 /// Multiplication of two large natural numbers
-///
-/// Algorithm of multiplication:
-/// x, y - [`big_nat::BigNat`]
-/// M - modulo
-///
-/// x = Sum_{i=0,...,N_x}[x[i] * w^i]
-/// y = Sum_{i=0,...,N_x}[x[i] * w^i]
-///
-/// ```no_compile
-/// x * y mod M = Sum_{i=0,...,N_x}[
-///     Sum_{j=0,...,N_y}[
-///         (x_i * y_j * w ^ k)
-///     ]
-/// ] mod M
-/// ```
-/// =>
-/// ```no_compile
-/// x * y mod M = Sum_{i=0,...,N_x}[
-///     x_i * (Sum_{j=0,...,N_y}[y_j * w ^ k])
-/// ] mod M
-/// ```
-/// => Thus, we first use `MainGateConfig::q_1` & `MainGateConfig::state[1..]`
-/// to calculate the sum of `y_j` and put the result in `MainGateConfig::input`.
-///
-/// Then, we take the `MainGateConfig::input` and add
-/// it to x_0 in `MainGateConfig::state[0]` and put it into
-/// `MainGateConfig::output`.
-///
-/// Let's call this step [`MultStep`]. It occupies one line and allows
-/// count one operand from the total amount.
-///
-/// Then we will collect all the steps from each line and add them up.
-/// `MainGateConfig::state` & `MainGateConfig::output` will be used for this purpose
-///
-/// Let's call this step [`AggregationStep`]
 pub struct BigNatMulModChip<F: ff::PrimeField, const T: usize> {
     main_gate: MainGate<F, T>,
-}
-
-pub enum Error {}
-
-impl<F: ff::PrimeField, const T: usize> BigNatMulModChip<F, T> {
-    // FIXME T to `T-1`
-    /// Gives the columns to be used for the [`MultStep`] view.
-    /// Depending on the passed index it takes different
-    /// elements of the `lhs` operand
-    fn get_mult_step(&self, _lhs_index: usize) -> MultStep<T> {
-        todo!("Take the required columns from the main gate config")
-    }
-
-    // FIXME T to `T-1`
-    /// Gives the columns to be used for the [`AggregationStep`] view.
-    fn get_aggregation_step(&self) -> AggregationStep<T> {
-        todo!("Take the required columns from the main gate config")
-    }
-
-    pub fn mult_mod(
-        &self,
-        _ctx: &mut RegionCtx<'_, F>,
-        _lhs: BigInt,
-        _rhs: BigInt,
-    ) -> Result<BigInt, Error> {
-        todo!(
-            "
-            1. Convert lhs,rhs from `BigInt` to the `BigNat`
-            2. For each limb of lhs form MultStep and advice all needed params
-            3. Aggregate results of `MultStep` in `AggregationStep`
-            4. Don't forget to add checks for equality between MultStep results and what is in the AggregationStep input
-
-            TODO Consider how to work with the module in intermediate steps
-        "
-        )
-    }
-}
-
-/// Represents columns for multiplication step of [`BigNatMulModChip`]
-///
-/// x[i] * Sum_{j=0,..,N_y}[y[j] * W^j]
-pub struct MultStep<'l, const RHS_LIMBS_COUNT: usize> {
-    // x_i
-    lhs: &'l Column<Advice>,
-    // y_j where j = 0,..,N_y
-    rhs: &'l [Column<Advice>; RHS_LIMBS_COUNT],
-    // w_^j where j = 0,..,N_y
-    power_term: &'l [Column<Fixed>; RHS_LIMBS_COUNT],
-    // Sum_{j=0,..,N_y}[y[j] * W^j]
-    intermediate_result: &'l Column<Advice>,
-    /// x[i] * Sum_{j=0,..,N_y}[y[j] * W^j]
-    output: &'l Column<Fixed>,
-}
-
-/// This step should be used to aggregate all [`MultStep`]
-/// and add them into one [`Advice`] column.
-pub struct AggregationStep<'l, const T: usize> {
-    operands: &'l [Column<Advice>; T],
-    /// x[i] * Sum_{j=0,..,N_y}[y[j] * W^j]
-    output: &'l Column<Fixed>,
+    limb_width: NonZeroUsize,
+    limbs_count_limit: NonZeroUsize,
 }
 
 impl<F: ff::PrimeField, const T: usize> BigNatMulModChip<F, T> {
-    pub fn new(config: <Self as Chip<F>>::Config) -> Self {
+    pub fn new(
+        config: <Self as Chip<F>>::Config,
+        limbs_count_limit: NonZeroUsize,
+        limb_width: NonZeroUsize,
+    ) -> Self {
         Self {
             main_gate: MainGate::new(config),
+            limbs_count_limit,
+            limb_width,
         }
+    }
+
+    pub fn lhs_column(&self) -> &Column<Advice> {
+        todo!()
+    }
+    pub fn rhs_column(&self) -> &Column<Advice> {
+        todo!()
+    }
+}
+
+pub trait MultMod<INPUT, F: PrimeField> {
+    fn mult_mod(
+        &self,
+        _ctx: &mut RegionCtx<'_, F>,
+        lhs: INPUT,
+        rhs: INPUT,
+        modulus: INPUT,
+    ) -> Result<INPUT, MultModError>;
+}
+
+impl<F: ff::PrimeField, const T: usize> MultMod<BigInt, F> for BigNatMulModChip<F, T> {
+    #[allow(unused_variables)] // FIXME
+    fn mult_mod(
+        &self,
+        ctx: &mut RegionCtx<'_, F>,
+        lhs: BigInt,
+        rhs: BigInt,
+        modulus: BigInt,
+    ) -> Result<BigInt, MultModError> {
+        let to_bignat =
+            |val| BigNat::<F>::from_bigint(val, self.limb_width, self.limbs_count_limit);
+
+        let product = &lhs * &rhs;
+        let quotient = &product / &modulus;
+        let remainer = &product % &modulus;
+
+        let lhs_nat = to_bignat(&lhs)?;
+        let rhs_nat = to_bignat(&rhs)?;
+        let mod_nat = to_bignat(&modulus)?;
+        let quotient_nat = to_bignat(&quotient)?;
+        let remainer_nat = to_bignat(&remainer)?;
+
+        let assigned_lhs = lhs_nat.assign_advice(ctx, "lhs", self.lhs_column())?;
+        let assigned_rhs = lhs_nat.assign_advice(ctx, "lhs", self.rhs_column())?;
+
+        todo!()
     }
 }
 
