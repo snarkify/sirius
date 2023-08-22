@@ -391,10 +391,10 @@ impl<F: PrimeField> Monomial<F> {
                     rot as usize + row
                 } else {
                     // TODO: check this
-                    td.fixed[0].len() - (-rot as usize) + row 
+                    td.fixed[0].len() - (-rot as usize) + row
                 };
                 if col < num_fixed {
-                    td.fixed[col][row1].evaluate() 
+                    td.fixed[col][row1].evaluate()
                 } else if col < num_fixed + 1 {
                     // instance column is always 1
                     td.instance[row1]

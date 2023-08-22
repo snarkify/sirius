@@ -2,6 +2,7 @@
 //! contains methods used by folding scheme
 use crate::{
     commitment::CommitmentKey,
+    polynomial::{Expression, MultiPolynomial},
     poseidon::{AbsorbInRO, ROTrait},
     util::{batch_invert_assigned, fe_to_fe},
 };
@@ -14,6 +15,7 @@ use halo2_proofs::{
         Fixed, FloorPlanner, Instance, Selector,
     },
 };
+use rayon::prelude::*;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,6 +155,29 @@ impl<F: PrimeField> TableData<F> {
             W: advice_columns.into_iter().flatten().collect::<Vec<_>>(),
             num_advice_columns: self.advice.len(),
         }
+    }
+
+    pub fn commit_cross_terms<C: CurveAffine<ScalarExt = F>>(
+        &self,
+        gate: Expression<F>,
+        ck: CommitmentKey<C>,
+    ) -> (Vec<Vec<F>>, Vec<C>) {
+        let multipoly = gate.expand();
+        let meta = (self.fixed.len(), 1, self.advice.len());
+        let r_index = meta.0 + 2 * (meta.1 + meta.2 + 1);
+        let degree = multipoly.degree();
+        let res = multipoly.fold_transform(meta);
+        let cross_terms: Vec<Vec<F>> = (1..degree)
+            .map(|i| res.coeff_of((0, r_index), i))
+            .map(|multipoly| {
+                (0..self.fixed[0].len())
+                    .into_par_iter()
+                    .map(|row| multipoly.eval(row, &self))
+                    .collect()
+            })
+            .collect();
+        let cross_term_commits: Vec<C> = cross_terms.iter().map(|v| ck.commit(&v[..])).collect();
+        (cross_terms, cross_term_commits)
     }
 }
 
