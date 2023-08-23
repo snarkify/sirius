@@ -2,13 +2,14 @@
 //! contains methods used by folding scheme
 use crate::{
     commitment::CommitmentKey,
-    polynomial::{Expression, MultiPolynomial},
+    polynomial::Expression,
     poseidon::{AbsorbInRO, ROTrait},
     util::{batch_invert_assigned, fe_to_fe},
 };
-use ff::PrimeField;
+use ff::{Field, PrimeField};
+use group::Curve;
 use halo2_proofs::{
-    arithmetic::CurveAffine,
+    arithmetic::{best_multiexp, CurveAffine},
     circuit::Value,
     plonk::{
         Advice, Any, Assigned, Assignment, Challenge, Circuit, Column, ConstraintSystem, Error,
@@ -75,6 +76,64 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
         }
         ro.absorb_base(fe_to_fe(self.u));
         ro.absorb_point(self.E_commitment);
+    }
+}
+
+impl<C: CurveAffine> RelaxedPlonkInstance<C> {
+    pub fn fold(&self, U2: &PlonkInstance<C>, cross_term_commits: &Vec<C>, r: &C::Scalar) -> Self {
+        let comm_W = self.W_commitment + best_multiexp(&[*r], &[U2.W_commitment]).into();
+        let instance = self
+            .instance
+            .par_iter()
+            .zip(&U2.instance)
+            .map(|(a, b)| *a + *r * b)
+            .collect::<Vec<C::ScalarExt>>();
+        let u = self.u + *r;
+
+        let comm_E = cross_term_commits
+            .into_iter()
+            .enumerate()
+            .map(|(i, ti)| best_multiexp(&[r.pow([i as u64 + 1, 0, 0, 0])], &[*ti]).into())
+            .fold(self.E_commitment, |acc, x| (acc + x).into());
+
+        RelaxedPlonkInstance {
+            W_commitment: comm_W.to_affine(),
+            num_advice_columns: self.num_advice_columns,
+            instance,
+            E_commitment: comm_E,
+            u,
+        }
+    }
+}
+
+impl<C: CurveAffine> RelaxedPlonkWitness<C> {
+    pub fn fold(
+        &self,
+        W2: PlonkWitness<C>,
+        cross_terms: Vec<Vec<C::Scalar>>,
+        r: &C::Scalar,
+    ) -> Self {
+        let W = self
+            .W
+            .par_iter()
+            .zip(W2.W)
+            .map(|(w1, w2)| *w1 + *r * w2)
+            .collect::<Vec<_>>();
+        let E = self
+            .E
+            .par_iter()
+            .enumerate()
+            .map(|(i, ei)| {
+                let mut r_power = *r;
+                let value = cross_terms.iter().fold(*ei, |acc, ti| {
+                    r_power *= *r;
+                    acc + r_power * ti[i]
+                });
+                value
+            })
+            .collect::<Vec<_>>();
+
+        RelaxedPlonkWitness { W, E }
     }
 }
 
