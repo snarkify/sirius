@@ -22,35 +22,31 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlonkStructure<C: CurveAffine> {
     pub(crate) fixed_commitment: C, // concatenate num_fixed_columns together, then commit
-    pub(crate) num_fixed_columns: usize,
 }
 
 #[derive(Clone, Debug)]
 pub struct PlonkInstance<C: CurveAffine> {
     pub(crate) W_commitment: C, // concatenate num_advice_columns together, then commit
-    pub(crate) num_advice_columns: usize,
-    pub(crate) instance: Vec<C::Scalar>, // inst = [X0, X1]
+    pub(crate) instance: Vec<C::ScalarExt>, // inst = [X0, X1]
 }
 
 #[derive(Clone, Debug)]
-pub struct PlonkWitness<C: CurveAffine> {
-    pub(crate) W: Vec<C::Scalar>, // concatenate num_advice_columns together
-    pub(crate) num_advice_columns: usize,
+pub struct PlonkWitness<F: PrimeField> {
+    pub(crate) W: Vec<F>, // concatenate num_advice_columns together
 }
 
 #[derive(Clone, Debug)]
 pub struct RelaxedPlonkInstance<C: CurveAffine> {
     pub(crate) W_commitment: C,
-    pub(crate) num_advice_columns: usize,
-    pub(crate) instance: Vec<C::Scalar>,
+    pub(crate) instance: Vec<C::ScalarExt>,
     pub(crate) E_commitment: C,
-    pub(crate) u: C::Scalar,
+    pub(crate) u: C::ScalarExt,
 }
 
 #[derive(Clone, Debug)]
-pub struct RelaxedPlonkWitness<C: CurveAffine> {
-    pub(crate) W: Vec<C::Scalar>,
-    pub(crate) E: Vec<C::Scalar>,
+pub struct RelaxedPlonkWitness<F: PrimeField> {
+    pub(crate) W: Vec<F>,
+    pub(crate) E: Vec<F>,
 }
 
 impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkStructure<C> {
@@ -80,7 +76,12 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
 }
 
 impl<C: CurveAffine> RelaxedPlonkInstance<C> {
-    pub fn fold(&self, U2: &PlonkInstance<C>, cross_term_commits: &Vec<C>, r: &C::Scalar) -> Self {
+    pub fn fold(
+        &self,
+        U2: &PlonkInstance<C>,
+        cross_term_commits: &Vec<C>,
+        r: &C::ScalarExt,
+    ) -> Self {
         let comm_W = self.W_commitment + best_multiexp(&[*r], &[U2.W_commitment]).into();
         let instance = self
             .instance
@@ -98,7 +99,6 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
 
         RelaxedPlonkInstance {
             W_commitment: comm_W.to_affine(),
-            num_advice_columns: self.num_advice_columns,
             instance,
             E_commitment: comm_E,
             u,
@@ -106,18 +106,13 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
     }
 }
 
-impl<C: CurveAffine> RelaxedPlonkWitness<C> {
-    pub fn fold(
-        &self,
-        W2: PlonkWitness<C>,
-        cross_terms: Vec<Vec<C::Scalar>>,
-        r: &C::Scalar,
-    ) -> Self {
+impl<F: PrimeField> RelaxedPlonkWitness<F> {
+    pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &Vec<Vec<F>>, r: &F) -> Self {
         let W = self
             .W
             .par_iter()
-            .zip(W2.W)
-            .map(|(w1, w2)| *w1 + *r * w2)
+            .zip(W2.W.par_iter())
+            .map(|(w1, w2)| *w1 + *r * *w2)
             .collect::<Vec<_>>();
         let E = self
             .E
@@ -179,47 +174,42 @@ impl<F: PrimeField> TableData<F> {
 
     pub fn plonk_structure<C: CurveAffine<ScalarExt = F>>(
         &self,
-        ck: CommitmentKey<C>,
+        ck: &CommitmentKey<C>,
     ) -> PlonkStructure<C> {
         let fixed_columns = batch_invert_assigned(&self.fixed);
         let fixed_commitment =
             ck.commit(&fixed_columns.into_iter().flatten().collect::<Vec<_>>()[..]);
-        PlonkStructure {
-            fixed_commitment,
-            num_fixed_columns: self.fixed.len(),
-        }
+        PlonkStructure { fixed_commitment }
     }
 
     pub fn plonk_instance<C: CurveAffine<ScalarExt = F>>(
         &self,
-        ck: CommitmentKey<C>,
+        ck: &CommitmentKey<C>,
     ) -> PlonkInstance<C> {
         let advice_columns = batch_invert_assigned(&self.advice);
         let W_commitment = ck.commit(&advice_columns.into_iter().flatten().collect::<Vec<_>>()[..]);
-        let mut instance: Vec<C::Scalar> = Vec::new();
+        let mut instance: Vec<C::ScalarExt> = Vec::new();
         assert!(self.instance.len() >= 2);
         for inst in self.instance.iter().take(2) {
             instance.push(*inst)
         }
         PlonkInstance {
             W_commitment,
-            num_advice_columns: self.advice.len(),
             instance,
         }
     }
 
-    pub fn plonk_witness<C: CurveAffine<ScalarExt = F>>(&self) -> PlonkWitness<C> {
+    pub fn plonk_witness(&self) -> PlonkWitness<F> {
         let advice_columns = batch_invert_assigned(&self.advice);
         PlonkWitness {
             W: advice_columns.into_iter().flatten().collect::<Vec<_>>(),
-            num_advice_columns: self.advice.len(),
         }
     }
 
     pub fn commit_cross_terms<C: CurveAffine<ScalarExt = F>>(
         &self,
-        gate: Expression<F>,
-        ck: CommitmentKey<C>,
+        gate: &Expression<F>,
+        ck: &CommitmentKey<C>,
     ) -> (Vec<Vec<F>>, Vec<C>) {
         let multipoly = gate.expand();
         let meta = (self.fixed.len(), 1, self.advice.len());
