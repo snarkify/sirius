@@ -1,4 +1,4 @@
-use std::{io, iter, num::NonZeroUsize, ops::Not};
+use std::{fmt, io, iter, num::NonZeroUsize, ops::Not};
 
 use ff::PrimeField;
 use halo2_proofs::{
@@ -19,27 +19,53 @@ use crate::main_gate::RegionCtx;
 // IMPORTANT: It is not an independent
 // integer-type, but only a wrapper for
 // storing a natural number with limbs.
+#[derive(PartialEq)]
 pub struct BigNat<F: ff::PrimeField> {
     limbs: Vec<F>,
     width: NonZeroUsize,
 }
 
+impl<F: ff::PrimeField + fmt::Debug> fmt::Debug for BigNat<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BigNat")
+            .field("limbs", &self.limbs)
+            .field("width", &self.width)
+            .finish()
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     // Too big bigint: try to increase the number of limbs or their width
     TooBigBigint,
-    ZeroNotAllowed,
+    ZeroLimbNotAllowed,
     AssignFixedError {
         annotation: String,
-        err: halo2_proofs::plonk::Error,
+        err: Halo2PlonkError,
     },
     AssignAdviceError {
         annotation: String,
-        err: halo2_proofs::plonk::Error,
+        err: Halo2PlonkError,
     },
     WrongColumnsSize {
         limbs_count: usize,
         columns_count: usize,
     },
+    LimbNotFound,
+}
+
+#[derive(Debug)]
+pub struct Halo2PlonkError(halo2_proofs::plonk::Error);
+impl PartialEq for Halo2PlonkError {
+    fn eq(&self, _other: &Self) -> bool {
+        matches!(self, _other)
+    }
+}
+impl Eq for Halo2PlonkError {}
+impl From<halo2_proofs::plonk::Error> for Halo2PlonkError {
+    fn from(value: halo2_proofs::plonk::Error) -> Self {
+        Self(value)
+    }
 }
 
 impl<F: ff::PrimeField> BigNat<F> {
@@ -49,17 +75,35 @@ impl<F: ff::PrimeField> BigNat<F> {
     ) -> Result<Self, Error> {
         let mut is_all_limbs_zero = true;
         let limbs = limbs
-            .inspect(|v| is_all_limbs_zero &= bool::from(v.is_zero().not()))
+            .inspect(|v| is_all_limbs_zero &= bool::from(v.is_zero()))
             .collect::<Vec<_>>();
 
         if is_all_limbs_zero || limbs.is_empty() {
-            Err(Error::ZeroNotAllowed)
+            Err(Error::ZeroLimbNotAllowed)
         } else {
             Ok(Self {
                 limbs,
                 width: limb_width,
             })
         }
+    }
+
+    pub fn from_u64(
+        input: u64,
+        limb_width: NonZeroUsize,
+        limbs_count_limit: NonZeroUsize,
+    ) -> Result<Self, Error> {
+        // FIXME Simplify
+        Self::from_bigint(&BigInt::from(input), limb_width, limbs_count_limit)
+    }
+
+    pub fn from_u128(
+        input: u128,
+        limb_width: NonZeroUsize,
+        limbs_count_limit: NonZeroUsize,
+    ) -> Result<Self, Error> {
+        // FIXME Simplify
+        Self::from_bigint(&BigInt::from(input), limb_width, limbs_count_limit)
     }
 
     pub fn from_bigint(
@@ -75,7 +119,6 @@ impl<F: ff::PrimeField> BigNat<F> {
 
         let mut nat = input.clone();
         let limb_mask = get_big_int_with_n_ones(limb_width.get());
-
         Self::from_limbs(
             iter::repeat_with(|| {
                 nat.is_zero().not().then(|| {
@@ -112,6 +155,10 @@ impl<F: ff::PrimeField> BigNat<F> {
         self.limbs.get(limb_index)
     }
 
+    pub fn limbs(&self) -> &[F] {
+        self.limbs.as_slice()
+    }
+
     pub fn limb_width(&self) -> &NonZeroUsize {
         &self.width
     }
@@ -134,17 +181,16 @@ impl<F: ff::PrimeField> BigNat<F> {
         ctx: &mut RegionCtx<'_, F>,
         annotation: &str,
         column: &Column<Advice>,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        self.limbs
-            .iter()
-            .enumerate()
-            .map(|(index, val)| {
-                let annotation = format!("{annotation}_{index}");
-                ctx.region
-                    .assign_advice(|| &annotation, *column, index, || Value::known(*val))
-                    .map_err(|err| Error::AssignAdviceError { err, annotation })
+        limb_index: usize,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let limb = self.limbs.get(limb_index).ok_or(Error::LimbNotFound)?;
+        let annotation = format!("{annotation}_{limb_index}");
+
+        ctx.assign_advice(|| &annotation, *column, Value::known(*limb))
+            .map_err(|err| Error::AssignAdviceError {
+                err: err.into(),
+                annotation,
             })
-            .collect()
     }
 
     /// TODO Allow partial assign
@@ -161,7 +207,10 @@ impl<F: ff::PrimeField> BigNat<F> {
                 let annotation = format!("{annotation}_{index}");
                 ctx.region
                     .assign_fixed(|| &annotation, *column, index, || Value::known(*val))
-                    .map_err(|err| Error::AssignFixedError { err, annotation })
+                    .map_err(|err| Error::AssignFixedError {
+                        err: err.into(),
+                        annotation,
+                    })
             })
             .collect()
     }
@@ -199,6 +248,72 @@ fn get_max_word_mask_bits(limb_width: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    // TODO Add tests here for all cases
-}
+    use std::mem;
 
+    use super::*;
+    use halo2curves::pasta::Fp;
+    use test_log::test;
+
+    #[test]
+    fn from_u64() {
+        for input in [1, 256, u64::MAX / 2, u64::MAX] {
+            let bn = BigNat::<Fp>::from_u64(
+                input,
+                NonZeroUsize::new(mem::size_of::<u64>() * 8).unwrap(),
+                NonZeroUsize::new(4).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(bn.limbs_count().get(), 1, "Limbs > 1 at {input}");
+            assert_eq!(bn.limbs(), &[Fp::from_u128(input.into())]);
+            assert_eq!(bn.into_bigint(), BigInt::from(input));
+        }
+    }
+
+    #[test]
+    fn from_u128() {
+        for input in [u128::from(u64::MAX) + 1, u128::MAX / 2, u128::MAX] {
+            let bn = BigNat::<Fp>::from_u128(
+                input,
+                NonZeroUsize::new(mem::size_of::<u128>() * 8).unwrap(),
+                NonZeroUsize::new(4).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(bn.limbs_count().get(), 1, "Limbs > 1 at {input}");
+            assert_eq!(bn.limbs(), &[Fp::from_u128(input)]);
+            assert_eq!(bn.into_bigint(), BigInt::from(input));
+        }
+    }
+
+    #[test]
+    fn from_two_limbs() {
+        let input = BigInt::from(u128::MAX) * BigInt::from(u128::MAX);
+        let bn = BigNat::<Fp>::from_bigint(
+            &input,
+            NonZeroUsize::new(mem::size_of::<u128>() * 8).unwrap(),
+            NonZeroUsize::new(4).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(bn.limbs_count().get(), 2, "Limbs > 1 at {input}");
+        assert_eq!(
+            bn.limbs(),
+            &[
+                Fp::from_u128(0x0000000000000000000000000000000000000000000000000000000000000001),
+                Fp::from_u128(0x00000000000000000000000000000000fffffffffffffffffffffffffffffffe)
+            ]
+        );
+
+        assert_eq!(bn.into_bigint(), input);
+    }
+
+    #[test]
+    fn limbs_count_err() {
+        let input = BigInt::from(u128::MAX) * BigInt::from(u128::MAX);
+        let result_with_bn = BigNat::<Fp>::from_bigint(
+            &input,
+            NonZeroUsize::new(mem::size_of::<u64>() * 8).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        );
+
+        assert_eq!(result_with_bn, Err(Error::TooBigBigint));
+    }
+}
