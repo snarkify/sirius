@@ -1,4 +1,4 @@
-use std::{fmt, io, iter, num::NonZeroUsize, ops::Not};
+use std::{io, iter, num::NonZeroUsize, ops::Not};
 
 use ff::PrimeField;
 use halo2_proofs::{
@@ -19,19 +19,10 @@ use crate::{error::Halo2PlonkError, main_gate::RegionCtx};
 // IMPORTANT: It is not an independent
 // integer-type, but only a wrapper for
 // storing a natural number with limbs.
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub struct BigNat<F: ff::PrimeField> {
     limbs: Vec<F>,
     width: NonZeroUsize,
-}
-
-impl<F: ff::PrimeField + fmt::Debug> fmt::Debug for BigNat<F> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BigNat")
-            .field("limbs", &self.limbs)
-            .field("width", &self.width)
-            .finish()
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
