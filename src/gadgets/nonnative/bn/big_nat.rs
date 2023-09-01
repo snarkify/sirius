@@ -3,12 +3,12 @@ use std::{fmt, io, iter, num::NonZeroUsize, ops::Not};
 use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Value},
-    plonk::{Advice, Column, Fixed},
+    plonk::{Advice, Column},
 };
 use num_bigint::{BigInt, Sign};
 use num_traits::{identities::One, Zero};
 
-use crate::main_gate::RegionCtx;
+use crate::{main_gate::RegionCtx, Halo2PlonkError};
 
 // A big natural number with limbs in field `F`
 //
@@ -51,8 +51,9 @@ pub enum Error {
         limbs_count: usize,
         columns_count: usize,
     },
-    LimbNotFound,
-}
+    LimbNotFound {
+        limb_index: usize,
+    },
 }
 
 impl<F: ff::PrimeField> BigNat<F> {
@@ -138,10 +139,6 @@ impl<F: ff::PrimeField> BigNat<F> {
             })
     }
 
-    pub fn get_limb(&self, limb_index: usize) -> Option<&F> {
-        self.limbs.get(limb_index)
-    }
-
     pub fn limbs(&self) -> &[F] {
         self.limbs.as_slice()
     }
@@ -162,7 +159,12 @@ impl<F: ff::PrimeField> BigNat<F> {
         self.width.get() * (self.limbs_count().get() - 1) + self.get_max_word_mask_bits()
     }
 
-    /// TODO Allow partial assign
+    fn get_limb(&self, limb_index: usize) -> Result<&F, Error> {
+        self.limbs
+            .get(limb_index)
+            .ok_or(Error::LimbNotFound { limb_index })
+    }
+
     pub fn assign_advice(
         &self,
         ctx: &mut RegionCtx<'_, F>,
@@ -170,36 +172,17 @@ impl<F: ff::PrimeField> BigNat<F> {
         column: &Column<Advice>,
         limb_index: usize,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let limb = self.limbs.get(limb_index).ok_or(Error::LimbNotFound)?;
         let annotation = format!("{annotation}_{limb_index}");
 
-        ctx.assign_advice(|| &annotation, *column, Value::known(*limb))
-            .map_err(|err| Error::AssignAdviceError {
-                err: err.into(),
-                annotation,
-            })
-    }
-
-    /// TODO Allow partial assign
-    pub fn assign_fixed(
-        &self,
-        ctx: &mut RegionCtx<'_, F>,
-        annotation: &str,
-        column: &Column<Fixed>,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        self.limbs
-            .iter()
-            .enumerate()
-            .map(|(index, val)| {
-                let annotation = format!("{annotation}_{index}");
-                ctx.region
-                    .assign_fixed(|| &annotation, *column, index, || Value::known(*val))
-                    .map_err(|err| Error::AssignFixedError {
-                        err: err.into(),
-                        annotation,
-                    })
-            })
-            .collect()
+        ctx.assign_advice(
+            || &annotation,
+            *column,
+            Value::known(*self.get_limb(limb_index)?),
+        )
+        .map_err(|err| Error::AssignAdviceError {
+            err: err.into(),
+            annotation,
+        })
     }
 }
 
