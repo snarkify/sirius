@@ -8,7 +8,7 @@ use halo2_proofs::{
 use num_bigint::{BigInt, Sign};
 use num_traits::{identities::One, Zero};
 
-use crate::{main_gate::RegionCtx, Halo2PlonkError};
+use crate::{error::Halo2PlonkError, main_gate::RegionCtx};
 
 // A big natural number with limbs in field `F`
 //
