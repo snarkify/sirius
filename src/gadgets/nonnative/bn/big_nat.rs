@@ -150,7 +150,7 @@ impl<F: ff::PrimeField> BigNat<F> {
         self.width.get() * (self.limbs_count().get() - 1) + self.get_max_word_mask_bits()
     }
 
-    fn get_limb(&self, limb_index: usize) -> Result<&F, Error> {
+    pub fn get_limb(&self, limb_index: usize) -> Result<&F, Error> {
         self.limbs
             .get(limb_index)
             .ok_or(Error::LimbNotFound { limb_index })

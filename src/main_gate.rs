@@ -2,7 +2,7 @@ use crate::util::normalize_trailing_zeros;
 use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Cell, Chip, Region, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed},
+    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance},
     poly::Rotation,
 };
 use std::{array, marker::PhantomData};
@@ -55,6 +55,26 @@ impl<'a, F: PrimeField> RegionCtx<'a, F> {
     {
         self.region
             .assign_advice(annotation, column, self.offset, || value)
+    }
+
+    pub fn assign_advice_from_instance<A, AR>(
+        &mut self,
+        annotation: A,
+        column: Column<Advice>,
+        instance: Column<Instance>,
+        instance_offset: usize,
+    ) -> Result<AssignedValue<F>, Error>
+    where
+        A: Fn() -> AR,
+        AR: Into<String>,
+    {
+        self.region.assign_advice_from_instance(
+            annotation,
+            instance,
+            instance_offset,
+            column,
+            self.offset,
+        )
     }
 
     pub fn constrain_equal(&mut self, cell_0: Cell, cell_1: Cell) -> Result<(), Error> {
