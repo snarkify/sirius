@@ -1,7 +1,11 @@
-use std::{num::NonZeroUsize, ops::Mul};
+use std::{
+    num::NonZeroUsize,
+    ops::{Add, Mul},
+};
 
 use ff::PrimeField;
 use halo2_proofs::circuit::{AssignedCell, Chip};
+use itertools::{EitherOrBoth, Itertools};
 use log::*;
 use num_bigint::BigInt;
 
@@ -17,6 +21,7 @@ pub enum Error {
         rhs_limb_width: NonZeroUsize,
     },
     BigNat(big_nat::Error),
+    WhileAssignSumPart(halo2_proofs::plonk::Error),
     WhileAssignProdPart(halo2_proofs::plonk::Error),
     WhileAssignSelector(halo2_proofs::plonk::Error),
     WhileConstraintEqual(halo2_proofs::plonk::Error),
@@ -28,6 +33,7 @@ impl From<big_nat::Error> for Error {
 }
 
 /// Multiplication of two large natural numbers by mod
+#[derive(Debug)]
 pub struct BigNatMulModChip<F: ff::PrimeField> {
     main_gate: MainGate<F, 2>,
     limb_width: NonZeroUsize,
@@ -55,7 +61,91 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         )?)
     }
 
-    /// Assign result of multiplication of `lhs` & `rhs`
+    /// Assign result of sum of `lhs` & `rhs` without handle carry
+    ///
+    /// For every `k` rows looks like:
+    /// ```markdown
+    /// |   ---    |   ---    |  ---  |  ---  |  ---  |  ---   |
+    /// | state[0] | state[1] |  q1_0 |  q1_1 |  q_o  | output |
+    /// |   ---    |   ---    |  ---  |  ---  |  ---  |  ---   |
+    /// |   ...    |   ...    |  ...  |  ...  |  ...  |  ...   |
+    /// |   lhs_0  |   rhs_0  |   1   |   1   |  -1   |  s_0   |
+    /// |   ...    |   ...    |  ...  |  ...  |  ...  |  ...   |
+    /// |   lhs_i  |   rhs_j  |   1   |   1   |  -1   |  s_i   |
+    /// |   ...    |   ...    |  ...  |  ...  |  ...  |  ...   |
+    /// |   lhs_l  |   rhs_l  |   1   |   1   |  -1   |  s_l   |
+    /// |   ...    |   ...    |  ...  |  ...  |  ...  |  ...   |
+    /// ```
+    /// where:
+    /// - `n` - lhs limbs count
+    /// - `m` - rhs limbs count
+    /// - `l` - min(n, m)
+    /// - `s_i = lhs_i + rhs_i` where i in [0..l]
+    ///
+    /// The function also returns unchanged the remaining multipliers
+    /// from the larger summand. 
+    pub fn assign_sum(
+        &self,
+        ctx: &mut RegionCtx<'_, F>,
+        lhs: &[AssignedCell<F, F>],
+        rhs: &[AssignedCell<F, F>],
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        let lhs_column = &self.config().state[0];
+        let rhs_column = &self.config().state[1];
+
+        let lhs_selector = &self.config().q_1[0];
+        let rhs_selector = &self.config().q_1[1];
+
+        let sum_column = &self.config().out;
+        let sum_selector = &self.config().q_o;
+
+        lhs.iter()
+            .zip_longest(rhs.iter())
+            .map(|value| {
+                let sum_cell = match value {
+                    EitherOrBoth::Both(lhs, rhs) => {
+                        let lhs_value = lhs.value();
+                        let rhs_value = rhs.value();
+
+                        let lhs_cell = ctx
+                            .assign_advice(|| "lhs", *lhs_column, lhs_value.map(|f| *f))
+                            .map_err(Error::WhileAssignSumPart)?;
+                        ctx.constrain_equal(lhs.cell(), lhs_cell.cell())
+                            .map_err(Error::WhileConstraintEqual)?;
+
+                        ctx.assign_fixed(|| "lhs_q_1", *lhs_selector, F::ONE)
+                            .map_err(Error::WhileAssignSelector)?;
+
+                        let rhs_cell = ctx
+                            .assign_advice(|| "rhs", *rhs_column, rhs_value.map(|f| *f))
+                            .map_err(Error::WhileAssignSumPart)?;
+                        ctx.constrain_equal(rhs.cell(), rhs_cell.cell())
+                            .map_err(Error::WhileConstraintEqual)?;
+                        ctx.assign_fixed(|| "rhs_q_1", *rhs_selector, F::ONE)
+                            .map_err(Error::WhileAssignSelector)?;
+
+                        ctx.assign_fixed(|| "sum_q_o", *sum_selector, -F::ONE)
+                            .map_err(Error::WhileAssignSelector)?;
+
+                        ctx.assign_advice(
+                            || "sum",
+                            *sum_column,
+                            lhs_value.copied().add(rhs_cell.value()),
+                        )
+                        .map_err(Error::WhileAssignSumPart)?
+                    }
+                    EitherOrBoth::Left(lhs) => lhs.clone(),
+                    EitherOrBoth::Right(rhs) => rhs.clone(),
+                };
+
+                ctx.next();
+
+                Ok(sum_cell)
+            })
+            .collect::<Result<Vec<_>, _>>()
+    }
+
+    /// Assign result of multiplication of `lhs` & `rhs` without handle carry
     ///
     /// This function performs multiplication and assigns the results of multiplication.
     ///
@@ -87,7 +177,6 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     ///
     /// Returns the cells that contain the product coefficients
     /// TODO: carry handling or check `p_k` < `F::MODULUS`
-    /// TODO: ignore the leading zeros
     pub fn assign_mult(
         &self,
         ctx: &mut RegionCtx<'_, F>,
@@ -306,7 +395,7 @@ mod tests {
             )
             .unwrap();
 
-            let prod = layouter
+            let prod: Vec<AssignedCell<F, F>> = layouter
                 .assign_region(
                     || "assign_mult",
                     |region| {
@@ -343,30 +432,6 @@ mod tests {
             Ok(prover) => prover,
             Err(e) => panic!("{:?}", e),
         };
-        assert_eq!(prover.verify(), Ok(()));
-    }
-
-    #[test_log::test]
-    fn test_bn_mult() {
-        let lhs: BigInt = BigInt::from_u64(256 * 2).unwrap() * 2;
-        let rhs: BigInt = BigInt::from_u64(100).unwrap();
-        let prod = &lhs * &rhs;
-
-        info!("Expected {lhs} * {rhs} = {prod}");
-        let prod = BigNat::<Fp>::from_bigint(&prod, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-
-        trace!("Prod limbs: {prod:?}");
-
-        const K: u32 = 10;
-        let prover = match MockProver::run(
-            K,
-            &TestCircuit::<Fp>::new(lhs, rhs),
-            vec![prod.limbs().to_vec()],
-        ) {
-            Ok(prover) => prover,
-            Err(e) => panic!("{:?}", e),
-        };
-
         assert_eq!(prover.verify(), Ok(()));
     }
 }
