@@ -1,6 +1,7 @@
 use std::{
     iter,
     num::NonZeroUsize,
+    ops::Deref,
     ops::{Add, Div, Mul, Sub},
 };
 
@@ -282,7 +283,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         &self,
         ctx: &mut RegionCtx<'_, F>,
         bignat_cells: &[AssignedCell<F, F>],
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+    ) -> Result<GroupedBigNatLimbs<F>, Error> {
         let limbs_per_group = get_limbs_per_group::<F>(self.limb_width.get())?;
 
         let group_count = bignat_cells.len().sub(1).div(limbs_per_group.add(1));
@@ -295,7 +296,6 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 
         let bignat_limb_column = &self.config().state[0];
         let bignat_limb_shift = &self.config().q_1[0];
-
         let current_group_value_column = &self.config().state[1];
         let current_group_selector = &self.config().q_1[1];
 
@@ -329,7 +329,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             if let Some(prev_partial_group_val) = grouped[group_index].take() {
                 let prev_group_val = ctx
                     .assign_advice(
-                        || format!("{index} limb for {group_index} group"),
+                        || format!("{group_index} group value for sum with {index} limb"),
                         *current_group_value_column,
                         prev_partial_group_val.value().map(|f| *f),
                     )
@@ -338,8 +338,12 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                 ctx.constrain_equal(prev_group_val.cell(), prev_partial_group_val.cell())
                     .map_err(Error::WhileAssignForRegroup)?;
 
-                ctx.assign_fixed(|| "previous group value", *current_group_selector, F::ONE)
-                    .map_err(Error::WhileAssignForRegroup)?;
+                ctx.assign_fixed(
+                    || format!("{group_index} group value selector for sum with {index} limb"),
+                    *current_group_selector,
+                    F::ONE,
+                )
+                .map_err(Error::WhileAssignForRegroup)?;
 
                 new_group_value = new_group_value + prev_group_val.value();
             };
@@ -364,7 +368,27 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             ctx.next();
         }
 
+        Ok(GroupedBigNatLimbs {
+            cells: grouped.into_iter().flatten().collect(),
+        })
+    }
+
+    fn equal_when_grouped(
+        &self,
+        lhs: GroupedBigNatLimbs<F>,
+        rhs: GroupedBigNatLimbs<F>,
+    ) -> Result<(), Error> {
         todo!()
+    }
+}
+
+struct GroupedBigNatLimbs<F: ff::PrimeField> {
+    cells: Vec<AssignedCell<F, F>>,
+}
+impl<F: ff::PrimeField> Deref for GroupedBigNatLimbs<F> {
+    type Target = [AssignedCell<F, F>];
+    fn deref(&self) -> &Self::Target {
+        self.cells.as_slice()
     }
 }
 
