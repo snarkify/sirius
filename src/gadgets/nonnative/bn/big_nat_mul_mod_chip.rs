@@ -1,13 +1,15 @@
 use std::{
+    iter,
     num::NonZeroUsize,
-    ops::{Add, Mul},
+    ops::{Add, Div, Mul, Sub},
 };
 
 use ff::PrimeField;
-use halo2_proofs::circuit::{AssignedCell, Chip};
+use halo2_proofs::circuit::{AssignedCell, Chip, Value};
 use itertools::{EitherOrBoth, Itertools};
 use log::*;
 use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 
 use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
 
@@ -25,6 +27,9 @@ pub enum Error {
     WhileAssignProdPart(halo2_proofs::plonk::Error),
     WhileAssignSelector(halo2_proofs::plonk::Error),
     WhileConstraintEqual(halo2_proofs::plonk::Error),
+    WhileAssignForRegroup(halo2_proofs::plonk::Error),
+    // TODO
+    CarryBitsCalculate,
 }
 impl From<big_nat::Error> for Error {
     fn from(value: big_nat::Error) -> Self {
@@ -83,7 +88,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     /// - `s_i = lhs_i + rhs_i` where i in [0..l]
     ///
     /// The function also returns unchanged the remaining multipliers
-    /// from the larger summand. 
+    /// from the larger summand.
     pub fn assign_sum(
         &self,
         ctx: &mut RegionCtx<'_, F>,
@@ -272,6 +277,95 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 
         Ok(production_cells)
     }
+
+    fn group_limbs(
+        &self,
+        ctx: &mut RegionCtx<'_, F>,
+        bignat_cells: &[AssignedCell<F, F>],
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        let limbs_per_group = get_limbs_per_group::<F>(self.limb_width.get())?;
+
+        let group_count = bignat_cells.len().sub(1).div(limbs_per_group.add(1));
+
+        let mut grouped = vec![Option::<AssignedCell<F, F>>::None; group_count];
+
+        let limb_block = iter::successors(Some(F::ONE), |l| Some(l.double()))
+            .nth(self.limb_width.get())
+            .unwrap();
+
+        let bignat_limb_column = &self.config().state[0];
+        let bignat_limb_shift = &self.config().q_1[0];
+
+        let current_group_value_column = &self.config().state[1];
+        let current_group_selector = &self.config().q_1[1];
+
+        let group_output_value_column = &self.config().out;
+        let group_output_selector = &self.config().q_o;
+
+        let mut shift = F::ONE;
+        for (index, original_limb_cell) in bignat_cells.iter().enumerate() {
+            let group_index = index / limbs_per_group;
+
+            if index % limbs_per_group == 0 {
+                shift = F::ONE;
+            }
+
+            let limb_cell = ctx
+                .assign_advice(
+                    || format!("{index} limb for {group_index} group"),
+                    *bignat_limb_column,
+                    original_limb_cell.value().map(|f| *f),
+                )
+                .map_err(Error::WhileAssignForRegroup)?;
+
+            ctx.constrain_equal(limb_cell.cell(), original_limb_cell.cell())
+                .map_err(Error::WhileAssignForRegroup)?;
+
+            ctx.assign_fixed(|| "shift for limb", *bignat_limb_shift, shift)
+                .map_err(Error::WhileAssignForRegroup)?;
+
+            let mut new_group_value = limb_cell.value().map(|f| *f) * Value::known(shift);
+
+            if let Some(prev_partial_group_val) = grouped[group_index].take() {
+                let prev_group_val = ctx
+                    .assign_advice(
+                        || format!("{index} limb for {group_index} group"),
+                        *current_group_value_column,
+                        prev_partial_group_val.value().map(|f| *f),
+                    )
+                    .map_err(Error::WhileAssignForRegroup)?;
+
+                ctx.constrain_equal(prev_group_val.cell(), prev_partial_group_val.cell())
+                    .map_err(Error::WhileAssignForRegroup)?;
+
+                ctx.assign_fixed(|| "previous group value", *current_group_selector, F::ONE)
+                    .map_err(Error::WhileAssignForRegroup)?;
+
+                new_group_value = new_group_value + prev_group_val.value();
+            };
+
+            grouped[group_index] = Some(
+                ctx.assign_advice(
+                    || format!("{index} limb for {group_index} group"),
+                    *group_output_value_column,
+                    new_group_value,
+                )
+                .map_err(Error::WhileAssignForRegroup)?,
+            );
+
+            ctx.assign_fixed(
+                || "selector for regroup output",
+                *group_output_selector,
+                -F::ONE,
+            )
+            .map_err(Error::WhileAssignForRegroup)?;
+
+            shift.mul_assign(&limb_block);
+            ctx.next();
+        }
+
+        todo!()
+    }
 }
 
 pub trait MultMod<INPUT, F: PrimeField> {
@@ -321,6 +415,22 @@ impl<F: ff::PrimeField> Chip<F> for BigNatMulModChip<F> {
     fn loaded(&self) -> &Self::Loaded {
         &()
     }
+}
+
+fn get_limbs_per_group<F: PrimeField>(limb_width: usize) -> Result<usize, Error> {
+    let max_word = big_nat::get_big_int_with_n_ones(limb_width);
+
+    // FIXME: Is `f64` really needed here
+    let carry_bits = max_word
+        .to_f64()
+        .ok_or(Error::CarryBitsCalculate)?
+        .mul(2.0)
+        .log2()
+        .sub(limb_width as f64)
+        .ceil()
+        .add(0.1) as usize;
+
+    Ok((F::CAPACITY as usize - carry_bits) / limb_width)
 }
 
 #[cfg(test)]
