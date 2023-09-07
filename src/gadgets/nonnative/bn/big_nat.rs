@@ -196,7 +196,7 @@ pub fn f_to_nat<Scalar: PrimeField>(f: &Scalar) -> BigInt {
 }
 
 // Calculate `2 ^ n - 1`
-fn get_big_int_with_n_ones(n: usize) -> BigInt {
+pub fn get_big_int_with_n_ones(n: usize) -> BigInt {
     match n {
         0 => BigInt::zero(),
         n => (BigInt::one() << n) - 1,
