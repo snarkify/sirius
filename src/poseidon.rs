@@ -4,6 +4,7 @@ use halo2_proofs::{arithmetic::CurveAffine, plonk::Error};
 
 pub mod poseidon_circuit;
 pub mod poseidon_hash;
+pub use poseidon_hash::PoseidonHash;
 
 /// A helper trait to obsorb different objects into RO
 pub trait AbsorbInRO<C: CurveAffine, RO: ROTrait<C>> {

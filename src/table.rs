@@ -35,7 +35,7 @@ pub struct PlonkWitness<F: PrimeField> {
     pub(crate) W: Vec<F>, // concatenate num_advice_columns together
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RelaxedPlonkInstance<C: CurveAffine> {
     pub(crate) W_commitment: C,
     pub(crate) instance: Vec<C::ScalarExt>,
@@ -76,6 +76,15 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
 }
 
 impl<C: CurveAffine> RelaxedPlonkInstance<C> {
+    pub fn default(num_io: usize) -> Self {
+        Self {
+            W_commitment: CommitmentKey::<C>::default(),
+            E_commitment: CommitmentKey::<C>::default(),
+            u: C::ScalarExt::ONE,
+            instance: vec![C::ScalarExt::ZERO; num_io],
+        }
+    }
+
     pub fn fold(
         &self,
         U2: &PlonkInstance<C>,
@@ -107,6 +116,15 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
 }
 
 impl<F: PrimeField> RelaxedPlonkWitness<F> {
+    // nc: num_advice_columns in plonk gate
+    pub fn default(k: u32, nc: usize) -> Self {
+        let mut W = Vec::new();
+        let mut E = Vec::new();
+        W.resize(2usize.pow(k) * nc, F::ZERO);
+        E.resize(2usize.pow(k), F::ZERO);
+        Self { W, E }
+    }
+
     pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &Vec<Vec<F>>, r: &F) -> Self {
         let W = self
             .W
@@ -155,7 +173,7 @@ impl<F: PrimeField> TableData<F> {
     pub fn assembly<ConcreteCircuit: Circuit<F>>(
         &mut self,
         circuit: &ConcreteCircuit,
-    ) -> Result<(), Error> {
+    ) -> Result<ConstraintSystem<F>, Error> {
         let mut meta = ConstraintSystem::default();
         let config = ConcreteCircuit::configure(&mut meta);
         let n = 1u64 << self.k;
@@ -169,7 +187,7 @@ impl<F: PrimeField> TableData<F> {
             config.clone(),
             vec![], // TODO: make sure constants not needed
         )?;
-        Ok(())
+        Ok(meta)
     }
 
     pub fn plonk_structure<C: CurveAffine<ScalarExt = F>>(
@@ -186,8 +204,8 @@ impl<F: PrimeField> TableData<F> {
         &self,
         ck: &CommitmentKey<C>,
     ) -> PlonkInstance<C> {
-        let advice_columns = batch_invert_assigned(&self.advice);
-        let W_commitment = ck.commit(&advice_columns.into_iter().flatten().collect::<Vec<_>>()[..]);
+        let W = self.plonk_witness().W;
+        let W_commitment = ck.commit(&W[..]);
         let mut instance: Vec<C::ScalarExt> = Vec::new();
         assert!(self.instance.len() >= 2);
         for inst in self.instance.iter().take(2) {
@@ -200,16 +218,23 @@ impl<F: PrimeField> TableData<F> {
     }
 
     pub fn plonk_witness(&self) -> PlonkWitness<F> {
-        let advice_columns = batch_invert_assigned(&self.advice);
-        PlonkWitness {
-            W: advice_columns.into_iter().flatten().collect::<Vec<_>>(),
-        }
+        let mut advice_columns = batch_invert_assigned(&self.advice);
+        let W = advice_columns
+            .iter_mut()
+            .map(|w_i| {
+                w_i.resize(2usize.pow(self.k), F::ZERO);
+                w_i.drain(..)
+            })
+            .flatten()
+            .collect::<Vec<_>>();
+        PlonkWitness { W }
     }
 
     pub fn commit_cross_terms<C: CurveAffine<ScalarExt = F>>(
         &self,
         gate: &Expression<F>,
         ck: &CommitmentKey<C>,
+        u: F, // value of the homogeneous term u
     ) -> (Vec<Vec<F>>, Vec<C>) {
         let multipoly = gate.expand();
         let meta = (self.fixed.len(), 1, self.advice.len());
@@ -221,7 +246,7 @@ impl<F: PrimeField> TableData<F> {
             .map(|multipoly| {
                 (0..self.fixed[0].len())
                     .into_par_iter()
-                    .map(|row| multipoly.eval(row, &self))
+                    .map(|row| multipoly.eval(row, &self, u))
                     .collect()
             })
             .collect();
@@ -429,8 +454,8 @@ mod tests {
             inputs.push(Fp::from(i as u64));
         }
         let circuit = TestCircuit::new(inputs, Fp::ONE);
-        let out_hash = Fp::from_str_vartime("45").unwrap();
-        let public_inputs = vec![out_hash];
+        let output = Fp::from_str_vartime("45").unwrap();
+        let public_inputs = vec![output];
 
         let mut td = TableData::<Fp>::new(K, public_inputs);
         let _ = td.assembly(&circuit);

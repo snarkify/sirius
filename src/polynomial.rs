@@ -247,6 +247,9 @@ impl_expression_ops!(Add, add, Sum, Expression<F>, std::convert::identity);
 impl_expression_ops!(Sub, sub, Sum, Expression<F>, Neg::neg);
 impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
 
+/// Monomial: c_i*x_0*..*x_{n-1} with arity n
+/// index_to_poly is mapping from i to (rotation, column_index)
+/// poly_to_index is mapping from (rotation, column_index) to i \in [0,..,n-1]
 #[derive(Clone)]
 pub struct Monomial<F: PrimeField> {
     pub arity: usize,
@@ -382,15 +385,18 @@ impl<F: PrimeField> Monomial<F> {
         self.coeff += other.coeff;
     }
 
-    pub fn eval(&self, row: usize, td: &TableData<F>) -> F {
+    pub fn eval(&self, row: usize, td: &TableData<F>, u: F) -> F {
         let num_fixed = td.fixed.len();
+        let num_advice = td.advice.len();
         let vars: Vec<F> = (0..self.arity)
             .map(|i| {
                 let (rot, col) = self.index_to_poly[i];
                 let row1 = if (rot + row as i32) >= 0 {
                     rot as usize + row
                 } else {
-                    // TODO: check this
+                    // TODO: check how halo2 handle
+                    // (1): row+rot<0
+                    // (2): row+rot>=2^K
                     td.fixed[0].len() - (-rot as usize) + row
                 };
                 if col < num_fixed {
@@ -398,8 +404,11 @@ impl<F: PrimeField> Monomial<F> {
                 } else if col < num_fixed + 1 {
                     // instance column is always 1
                     td.instance[row1]
-                } else {
+                } else if col < num_fixed + 1 + num_advice {
                     td.advice[col - num_fixed - 1][row1].evaluate()
+                } else {
+                    // homogeneous term
+                    u
                 }
             })
             .collect();
@@ -570,10 +579,10 @@ impl<F: PrimeField> MultiPolynomial<F> {
     }
 
     // evaluate the multipoly
-    pub fn eval(&self, row: usize, td: &TableData<F>) -> F {
+    pub fn eval(&self, row: usize, td: &TableData<F>, u: F) -> F {
         self.monomials
             .iter()
-            .map(|mono| mono.eval(row, td))
+            .map(|mono| mono.eval(row, td, u))
             .fold(F::ZERO, |acc, x| acc + x)
     }
 }
