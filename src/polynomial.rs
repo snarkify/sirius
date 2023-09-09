@@ -1,4 +1,4 @@
-use crate::table::TableData;
+use crate::plonk::TableData;
 use crate::util::trim_leading_zeros;
 use ff::PrimeField;
 use halo2_proofs::plonk::Expression as PE;

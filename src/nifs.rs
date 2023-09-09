@@ -1,11 +1,11 @@
 #![allow(non_snake_case)]
 use crate::commitment::CommitmentKey;
 use crate::constants::NUM_CHALLENGE_BITS;
-use crate::polynomial::Expression;
-use crate::poseidon::{AbsorbInRO, ROTrait};
-use crate::table::{
+use crate::plonk::{
     PlonkInstance, PlonkStructure, RelaxedPlonkInstance, RelaxedPlonkWitness, TableData,
 };
+use crate::polynomial::Expression;
+use crate::poseidon::{AbsorbInRO, ROTrait};
 use halo2_proofs::arithmetic::CurveAffine;
 use std::marker::PhantomData;
 
