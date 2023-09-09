@@ -34,7 +34,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         U1.absorb_into(ro);
         U2.absorb_into(ro);
         // TODO: add support for multiple gates
-        let (cross_terms, cross_term_commits) = td.commit_cross_terms(&gate, ck, U1.u);
+        let (cross_terms, cross_term_commits) = td.commit_cross_terms(gate, ck, U1.u);
         let _ = cross_term_commits
             .iter()
             .map(|cm| ro.absorb_point(*cm))
@@ -67,8 +67,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
             .map(|cm| ro.absorb_point(*cm))
             .collect::<Vec<_>>();
         let r = ro.squeeze(NUM_CHALLENGE_BITS);
-        let U = U1.fold(&U2, &self.cross_term_commits, &r);
-        U
+        U1.fold(&U2, &self.cross_term_commits, &r)
     }
 }
 

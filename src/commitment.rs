@@ -16,7 +16,7 @@ pub struct CommitmentKey<C: CurveAffine> {
 }
 
 impl<C: CurveAffine> CommitmentKey<C> {
-    pub fn default() -> C {
+    pub fn default_value() -> C {
         C::identity()
     }
 

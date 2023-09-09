@@ -78,19 +78,14 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
 impl<C: CurveAffine> RelaxedPlonkInstance<C> {
     pub fn default(num_io: usize) -> Self {
         Self {
-            W_commitment: CommitmentKey::<C>::default(),
-            E_commitment: CommitmentKey::<C>::default(),
+            W_commitment: CommitmentKey::<C>::default_value(),
+            E_commitment: CommitmentKey::<C>::default_value(),
             u: C::ScalarExt::ONE,
             instance: vec![C::ScalarExt::ZERO; num_io],
         }
     }
 
-    pub fn fold(
-        &self,
-        U2: &PlonkInstance<C>,
-        cross_term_commits: &Vec<C>,
-        r: &C::ScalarExt,
-    ) -> Self {
+    pub fn fold(&self, U2: &PlonkInstance<C>, cross_term_commits: &[C], r: &C::ScalarExt) -> Self {
         let comm_W = self.W_commitment + best_multiexp(&[*r], &[U2.W_commitment]).into();
         let instance = self
             .instance
@@ -101,7 +96,7 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
         let u = self.u + *r;
 
         let comm_E = cross_term_commits
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(i, ti)| best_multiexp(&[r.pow([i as u64 + 1, 0, 0, 0])], &[*ti]).into())
             .fold(self.E_commitment, |acc, x| (acc + x).into());
@@ -125,7 +120,7 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
         Self { W, E }
     }
 
-    pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &Vec<Vec<F>>, r: &F) -> Self {
+    pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &[Vec<F>], r: &F) -> Self {
         let W = self
             .W
             .par_iter()
@@ -221,11 +216,10 @@ impl<F: PrimeField> TableData<F> {
         let mut advice_columns = batch_invert_assigned(&self.advice);
         let W = advice_columns
             .iter_mut()
-            .map(|w_i| {
+            .flat_map(|w_i| {
                 w_i.resize(2usize.pow(self.k), F::ZERO);
                 w_i.drain(..)
             })
-            .flatten()
             .collect::<Vec<_>>();
         PlonkWitness { W }
     }
@@ -246,7 +240,7 @@ impl<F: PrimeField> TableData<F> {
             .map(|multipoly| {
                 (0..self.fixed[0].len())
                     .into_par_iter()
-                    .map(|row| multipoly.eval(row, &self, u))
+                    .map(|row| multipoly.eval(row, self, u))
                     .collect()
             })
             .collect();
