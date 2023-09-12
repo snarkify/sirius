@@ -72,7 +72,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     /// For every `k` rows looks like:
     /// ```markdown
     /// |   ---    |   ---    |  ---  |  ---  |  ---  |  ---   |
-    /// | state[0] | state[1] |  q1_0 |  q1_1 |  q_o  | output |
+    /// | state[0] | state[1] | q1[0] | q1[1] |  q_o  | output |
     /// |   ---    |   ---    |  ---  |  ---  |  ---  |  ---   |
     /// |   ...    |   ...    |  ...  |  ...  |  ...  |  ...   |
     /// |   lhs_0  |   rhs_0  |   1   |   1   |  -1   |  s_0   |
@@ -279,6 +279,29 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         Ok(production_cells)
     }
 
+    /// Re-group limbs of `BigNat`
+    ///
+    /// This function performs re-grouping limbs
+    /// With [`get_limbs_per_group`] we calculate how many
+    /// limbs will fit in one group, given that the current
+    /// limbs are merged into new limbs. The result is wrapped
+    /// in [`GroupedBigNatLimbs`]
+    ///
+    /// For every `k` rows looks like:
+    /// ```markdown
+    /// |   ---    |   ---     |  ---   |  ---  |  ---  |      ---       |
+    /// | state[0] | state[1]  | q1[1]  | q1[2] |  q_o  |     output     |
+    /// |   ---    |   ---     |  ---   |  ---  |  ---  |      ---       |
+    /// |   ...    |   ...     |  ...   |  ...  |  ...  |      ...       |
+    /// |   bn_i   | group_j^k |   1    |   1   |   1   |  group_j^{k+1} |
+    /// |   ...    |   ...     |  ...   |  ...  |  ...  |      ...       |
+    /// ```
+    /// where:
+    /// - `bn_i` - i-th limb input big nat
+    /// - `group_j^k` - group he belongs to.
+    ///     - `j` calculated simply `i / limbs_per_group`
+    ///     - `k` - is the intermediate index of the sum of the values of `k` limbs.
+    ///             the largest `k` is the final value of an element of the group
     fn group_limbs(
         &self,
         ctx: &mut RegionCtx<'_, F>,
@@ -317,7 +340,6 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                     original_limb_cell.value().map(|f| *f),
                 )
                 .map_err(Error::WhileAssignForRegroup)?;
-
             ctx.constrain_equal(limb_cell.cell(), original_limb_cell.cell())
                 .map_err(Error::WhileAssignForRegroup)?;
 
@@ -371,14 +393,6 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         Ok(GroupedBigNatLimbs {
             cells: grouped.into_iter().flatten().collect(),
         })
-    }
-
-    fn equal_when_grouped(
-        &self,
-        lhs: GroupedBigNatLimbs<F>,
-        rhs: GroupedBigNatLimbs<F>,
-    ) -> Result<(), Error> {
-        todo!()
     }
 }
 
@@ -441,18 +455,34 @@ impl<F: ff::PrimeField> Chip<F> for BigNatMulModChip<F> {
     }
 }
 
+/// Get how many limbs must be grouped in one
+///
+/// We count how many bits are needed per carry in the worst case, and use the remaining bits for grouping
+///
+/// let `max_word = 2 ^ limb_width - 1` then
+/// let `carry_bits = usize(ceil(log_2(max_word * 2) - limb_width) + 0.1) then
+/// let `limbs_per_group = capacity - carry_bits / limb_width`
 fn get_limbs_per_group<F: PrimeField>(limb_width: usize) -> Result<usize, Error> {
-    let max_word = big_nat::get_big_int_with_n_ones(limb_width);
+    let max_word: BigInt = big_nat::get_big_int_with_n_ones(limb_width);
+
+    use num_traits::One;
 
     // FIXME: Is `f64` really needed here
+    // We can calculate `log2` for BigInt without f64
     let carry_bits = max_word
+        .mul(BigInt::one() + BigInt::one())
         .to_f64()
         .ok_or(Error::CarryBitsCalculate)?
-        .mul(2.0)
         .log2()
         .sub(limb_width as f64)
         .ceil()
-        .add(0.1) as usize;
+        .add(0.1);
+
+    let carry_bits = if carry_bits <= usize::MAX as f64 {
+        carry_bits as usize
+    } else {
+        panic!("`carry_bits` calculation failed - overflow, too big `limb_width` ({limb_width})");
+    };
 
     Ok((F::CAPACITY as usize - carry_bits) / limb_width)
 }
