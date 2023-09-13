@@ -110,23 +110,16 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             .map(|value| {
                 let sum_cell = match value {
                     EitherOrBoth::Both(lhs, rhs) => {
-                        let lhs_value = lhs.value();
-                        let rhs_value = rhs.value();
-
-                        let lhs_cell = ctx
-                            .assign_advice(|| "lhs", *lhs_column, lhs_value.map(|f| *f))
+                        ctx.assign_advice_from(|| "lhs", *lhs_column, lhs)
                             .map_err(Error::WhileAssignSumPart)?;
-                        ctx.constrain_equal(lhs.cell(), lhs_cell.cell())
-                            .map_err(Error::WhileConstraintEqual)?;
 
                         ctx.assign_fixed(|| "lhs_q_1", *lhs_selector, F::ONE)
                             .map_err(Error::WhileAssignSelector)?;
 
                         let rhs_cell = ctx
-                            .assign_advice(|| "rhs", *rhs_column, rhs_value.map(|f| *f))
+                            .assign_advice_from(|| "rhs", *rhs_column, rhs)
                             .map_err(Error::WhileAssignSumPart)?;
-                        ctx.constrain_equal(rhs.cell(), rhs_cell.cell())
-                            .map_err(Error::WhileConstraintEqual)?;
+
                         ctx.assign_fixed(|| "rhs_q_1", *rhs_selector, F::ONE)
                             .map_err(Error::WhileAssignSelector)?;
 
@@ -136,7 +129,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                         ctx.assign_advice(
                             || "sum",
                             *sum_column,
-                            lhs_value.copied().add(rhs_cell.value()),
+                            lhs.value().copied().add(rhs_cell.value()),
                         )
                         .map_err(Error::WhileAssignSumPart)?
                     }
@@ -227,11 +220,12 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                     production_cells.get_mut(k).and_then(|c| c.take())
                 {
                     let prev_partial_value = prev_partial_result.value().copied();
-                    let prev_prod_part = ctx
-                        .assign_advice(|| "prev_prod_part", *prev_part_column, prev_partial_value)
-                        .map_err(Error::WhileAssignProdPart)?;
-                    ctx.constrain_equal(prev_prod_part.cell(), prev_partial_result.cell())
-                        .map_err(Error::WhileConstraintEqual)?;
+                    ctx.assign_advice_from(
+                        || "prev_prod_part",
+                        *prev_part_column,
+                        &prev_partial_result,
+                    )
+                    .map_err(Error::WhileAssignProdPart)?;
 
                     ctx.assign_fixed(|| "selector", *prev_part_selector, F::ONE)
                         .map_err(Error::WhileAssignSelector)?;
@@ -334,13 +328,11 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             }
 
             let limb_cell = ctx
-                .assign_advice(
+                .assign_advice_from(
                     || format!("{index} limb for {group_index} group"),
                     *bignat_limb_column,
-                    original_limb_cell.value().map(|f| *f),
+                    &original_limb_cell,
                 )
-                .map_err(Error::WhileAssignForRegroup)?;
-            ctx.constrain_equal(limb_cell.cell(), original_limb_cell.cell())
                 .map_err(Error::WhileAssignForRegroup)?;
 
             ctx.assign_fixed(|| "shift for limb", *bignat_limb_shift, shift)
@@ -350,15 +342,13 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 
             if let Some(prev_partial_group_val) = grouped[group_index].take() {
                 let prev_group_val = ctx
-                    .assign_advice(
+                    .assign_advice_from(
                         || format!("{group_index} group value for sum with {index} limb"),
                         *current_group_value_column,
-                        prev_partial_group_val.value().map(|f| *f),
+                        &prev_partial_group_val,
                     )
                     .map_err(Error::WhileAssignForRegroup)?;
 
-                ctx.constrain_equal(prev_group_val.cell(), prev_partial_group_val.cell())
-                    .map_err(Error::WhileAssignForRegroup)?;
 
                 ctx.assign_fixed(
                     || format!("{group_index} group value selector for sum with {index} limb"),

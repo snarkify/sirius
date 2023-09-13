@@ -57,6 +57,21 @@ impl<'a, F: PrimeField> RegionCtx<'a, F> {
             .assign_advice(annotation, column, self.offset, || value)
     }
 
+    pub fn assign_advice_from<A, AR>(
+        &mut self,
+        annotation: A,
+        dst: Column<Advice>,
+        src: &AssignedCell<F, F>,
+    ) -> Result<AssignedValue<F>, Error>
+    where
+        A: Fn() -> AR,
+        AR: Into<String>,
+    {
+        let cell = self.assign_advice(annotation, dst, src.value().map(|f| *f))?;
+        self.constrain_equal(cell.cell(), src.cell())?;
+        Ok(cell)
+    }
+
     pub fn assign_advice_from_instance<A, AR>(
         &mut self,
         annotation: A,
