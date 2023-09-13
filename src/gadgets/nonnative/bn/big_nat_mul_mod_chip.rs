@@ -10,7 +10,7 @@ use halo2_proofs::circuit::{AssignedCell, Chip, Value};
 use itertools::{EitherOrBoth, Itertools};
 use log::*;
 use num_bigint::BigInt;
-use num_traits::ToPrimitive;
+use num_traits::{One, ToPrimitive, Zero};
 
 use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
 
@@ -276,7 +276,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     /// Re-group limbs of `BigNat`
     ///
     /// This function performs re-grouping limbs
-    /// With [`get_limbs_per_group`] we calculate how many
+    /// With [`calc_limbs_per_group`] we calculate how many
     /// limbs will fit in one group, given that the current
     /// limbs are merged into new limbs. The result is wrapped
     /// in [`GroupedBigNatLimbs`]
@@ -301,7 +301,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         ctx: &mut RegionCtx<'_, F>,
         bignat_cells: &[AssignedCell<F, F>],
     ) -> Result<GroupedBigNatLimbs<F>, Error> {
-        let limbs_per_group = get_limbs_per_group::<F>(self.limb_width.get())?;
+        let limbs_per_group = calc_limbs_per_group::<F>(self.limb_width.get())?;
 
         let group_count = bignat_cells.len().sub(1).div(limbs_per_group.add(1));
 
@@ -331,7 +331,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                 .assign_advice_from(
                     || format!("{index} limb for {group_index} group"),
                     *bignat_limb_column,
-                    &original_limb_cell,
+                    original_limb_cell,
                 )
                 .map_err(Error::WhileAssignForRegroup)?;
 
@@ -348,7 +348,6 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                         &prev_partial_group_val,
                     )
                     .map_err(Error::WhileAssignForRegroup)?;
-
 
                 ctx.assign_fixed(
                     || format!("{group_index} group value selector for sum with {index} limb"),
@@ -383,6 +382,173 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         Ok(GroupedBigNatLimbs {
             cells: grouped.into_iter().flatten().collect(),
         })
+    }
+
+    fn is_equal(
+        &self,
+        ctx: &mut RegionCtx<'_, F>,
+        lhs: GroupedBigNatLimbs<F>,
+        rhs: GroupedBigNatLimbs<F>,
+    ) -> Result<(), Error> {
+        let limb_width = self.limb_width.get();
+
+        let max_word_bn = big_nat::get_big_int_with_n_ones(limb_width);
+        let max_word: F = big_nat::nat_to_f(&max_word_bn).expect("TODO handle error");
+        let target_base_bn = BigInt::one() << limb_width;
+        let target_base: F = big_nat::nat_to_f(&target_base_bn).expect("TODO");
+        let inverted_target_base: F = Option::<F>::from(target_base.invert()).unwrap_or_default();
+
+        let mut accumulated_extra = BigInt::zero();
+        let carry_bits = calc_carry_bits(limb_width)?;
+
+        let lhs_column = &self.config().state[0];
+        let lhs_selector = &self.config().q_1[0];
+
+        let rhs_column = &self.config().state[1];
+        let rhs_selector = &self.config().q_1[1];
+
+        let carry_column = &self.config().input;
+        let carry_coeff = &self.config().q_i;
+        let mut prev_carry_cell = None;
+
+        let max_word_column = &self.config().rc;
+
+        let output_column = &self.config().out;
+        let _output_coeff = &self.config().q_o;
+
+        // TODO Separate last in lhs\rhs
+        lhs.cells
+            .into_iter()
+            .zip_longest(rhs.cells.into_iter())
+            .enumerate()
+            .map(|(limb_index, cells)| -> Result<(), Error> {
+                match cells {
+                    EitherOrBoth::Both(lhs, rhs) => {
+                        // carry[i-i] + lhs[i] - rhs[i] + max_word - carry[i] * w - m[i] == 0
+                        //
+                        // lhs = state[0]
+                        // q_1[0] = 1
+                        // rhs = state[1]
+                        // q_1[1] = -1
+                        // max_word = rc
+                        // m[i] = output
+
+                        // lhs
+                        let lhs_limb = ctx
+                            .assign_advice_from(
+                                || format!("lhs {limb_index} for calc dividend"),
+                                *lhs_column,
+                                &lhs,
+                            )
+                            .map_err(Error::WhileAssignForRegroup)?;
+                        ctx.assign_fixed(
+                            || format!("selector lhs {limb_index} for calc dividend"),
+                            *lhs_selector,
+                            F::ONE,
+                        )
+                        .map_err(Error::WhileAssignForRegroup)?;
+
+                        // carry[i-1]
+                        let prev_carry = if let Some(prev_carry_cell) = &prev_carry_cell {
+                            ctx.assign_advice_from(
+                                || format!("carry_{limb_index}-1"),
+                                *carry_column,
+                                prev_carry_cell,
+                            )
+                            .map_err(Error::WhileAssignForRegroup)?
+                            .value()
+                            .copied()
+                        } else {
+                            Value::known(F::ZERO)
+                        };
+
+                        // max word
+                        let max_word = ctx
+                            .assign_fixed(
+                                || "max word for equal check".to_string(),
+                                *max_word_column,
+                                max_word,
+                            )
+                            .map_err(Error::WhileAssignForRegroup)?;
+
+                        // -rhs
+                        let rhs_limb = ctx
+                            .assign_advice_from(
+                                || format!("rhs {limb_index} for calc dividend"),
+                                *rhs_column,
+                                &rhs,
+                            )
+                            .map_err(Error::WhileAssignForRegroup)?;
+                        ctx.assign_fixed(
+                            || format!("selector rhs {limb_index} for calc dividend"),
+                            *rhs_selector,
+                            -F::ONE,
+                        )
+                        .map_err(Error::WhileAssignForRegroup)?;
+
+                        // -carry [i] * w
+                        let carry_cell = ctx
+                            .assign_advice(
+                                || format!("carry_{limb_index}"),
+                                *carry_column,
+                                (prev_carry + lhs_limb.value() - rhs_limb.value()
+                                    + max_word.value())
+                                    * Value::known(&inverted_target_base),
+                            )
+                            .map_err(Error::WhileAssignForRegroup)?;
+                        ctx.assign_fixed(
+                            || format!("carry_{limb_index} coeff"),
+                            *carry_coeff,
+                            -target_base,
+                        )
+                        .map_err(Error::WhileAssignForRegroup)?;
+
+                        // -m_i
+                        accumulated_extra += &max_word_bn;
+                        // FIXME Not advice
+                        let m_i = big_nat::nat_to_f(&(&accumulated_extra % &target_base_bn))
+                            .expect("TODO");
+                        ctx.assign_advice(
+                            || format!("m_{limb_index}"),
+                            *output_column,
+                            Value::known(m_i),
+                        )
+                        .map_err(Error::WhileAssignForRegroup)?;
+                        ctx.assign_fixed(|| format!("m_{limb_index} coeff"), *carry_coeff, -F::ONE)
+                            .map_err(Error::WhileAssignForRegroup)?;
+
+                        accumulated_extra /= &target_base_bn;
+
+                        ctx.next();
+                        prev_carry_cell =
+                            Some(self.check_fits_in_bits(ctx, carry_cell, carry_bits)?);
+                    }
+                    EitherOrBoth::Left(_lhs) => todo!(),
+                    EitherOrBoth::Right(_rhs) => todo!(),
+                }
+
+                ctx.next();
+
+                Ok(())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        todo!()
+    }
+
+    fn check_fits_in_bits(
+        &self,
+        _ctx: &mut RegionCtx<'_, F>,
+        cell: AssignedCell<F, F>,
+        bits_count: usize,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        if let Some(value_repr) = cell.value().map(|v| v.to_repr()).unwrap() {
+            for bit in value_repr.as_ref().iter().take(bits_count) {
+                dbg!(bit);
+            }
+            todo!()
+        }
+        todo!()
     }
 }
 
@@ -445,21 +611,10 @@ impl<F: ff::PrimeField> Chip<F> for BigNatMulModChip<F> {
     }
 }
 
-/// Get how many limbs must be grouped in one
-///
-/// We count how many bits are needed per carry in the worst case, and use the remaining bits for grouping
-///
-/// let `max_word = 2 ^ limb_width - 1` then
-/// let `carry_bits = usize(ceil(log_2(max_word * 2) - limb_width) + 0.1) then
-/// let `limbs_per_group = capacity - carry_bits / limb_width`
-fn get_limbs_per_group<F: PrimeField>(limb_width: usize) -> Result<usize, Error> {
-    let max_word: BigInt = big_nat::get_big_int_with_n_ones(limb_width);
-
-    use num_traits::One;
-
+fn calc_carry_bits(limb_width: usize) -> Result<usize, Error> {
     // FIXME: Is `f64` really needed here
     // We can calculate `log2` for BigInt without f64
-    let carry_bits = max_word
+    let carry_bits = big_nat::get_big_int_with_n_ones(limb_width)
         .mul(BigInt::one() + BigInt::one())
         .to_f64()
         .ok_or(Error::CarryBitsCalculate)?
@@ -468,13 +623,22 @@ fn get_limbs_per_group<F: PrimeField>(limb_width: usize) -> Result<usize, Error>
         .ceil()
         .add(0.1);
 
-    let carry_bits = if carry_bits <= usize::MAX as f64 {
-        carry_bits as usize
+    if carry_bits <= usize::MAX as f64 {
+        Ok(carry_bits as usize)
     } else {
-        panic!("`carry_bits` calculation failed - overflow, too big `limb_width` ({limb_width})");
-    };
+        Err(Error::CarryBitsCalculate)
+    }
+}
 
-    Ok((F::CAPACITY as usize - carry_bits) / limb_width)
+/// Get how many limbs must be grouped in one
+///
+/// We count how many bits are needed per carry in the worst case, and use the remaining bits for grouping
+///
+/// let `max_word = 2 ^ limb_width - 1` then
+/// let `carry_bits = usize(ceil(log_2(max_word * 2) - limb_width) + 0.1) then
+/// let `limbs_per_group = capacity - carry_bits / limb_width`
+fn calc_limbs_per_group<F: PrimeField>(limb_width: usize) -> Result<usize, Error> {
+    Ok((F::CAPACITY as usize - calc_carry_bits(limb_width)?) / limb_width)
 }
 
 #[cfg(test)]
