@@ -5,6 +5,7 @@ use std::{
     ops::{Add, Div, Mul, Sub},
 };
 
+use bitter::{BigEndianReader, BitReader};
 use ff::PrimeField;
 use halo2_proofs::circuit::{AssignedCell, Chip, Value};
 use itertools::{EitherOrBoth, Itertools};
@@ -424,7 +425,11 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             .map(|(limb_index, cells)| -> Result<(), Error> {
                 match cells {
                     EitherOrBoth::Both(lhs, rhs) => {
-                        // carry[i-i] + lhs[i] - rhs[i] + max_word - carry[i] * w - m[i] == 0
+                        // (carry[i-i] + lhs[i] - rhs[i] + max_word) / w = carry[i] * w + m[i]
+                        //
+                        // prev_carry + l[i] - o[i] - mw - (target_base * carry.num) - (accumulated_extra % target base) = 0
+                        //
+                        // (carry[i-i] + lhs[i] - rhs[i] + max_word) - carry[i] * w - m[i] =?= 0
                         //
                         // lhs = state[0]
                         // q_1[0] = 1
@@ -464,11 +469,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 
                         // max word
                         let max_word = ctx
-                            .assign_fixed(
-                                || "max word for equal check".to_string(),
-                                *max_word_column,
-                                max_word,
-                            )
+                            .assign_fixed(|| "max word for equal check", *max_word_column, max_word)
                             .map_err(Error::WhileAssignForRegroup)?;
 
                         // -rhs
@@ -536,19 +537,145 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         todo!()
     }
 
+    // Is it `cell` value have less then `expected_bits_count` in bits represtion
+    // Is it `b in [0, 1]`?
+    // b * (1 - b) = 0 =>
+    //     b - b ** 2 = 0 =>
+    //     -1 * (b ** 2) + 1 * b = 0
+    //
+    // q_m = -1
+    // s[0] = b
+    // s[1] = b
+    // input = b
+    // q_i = 1
     fn check_fits_in_bits(
         &self,
-        _ctx: &mut RegionCtx<'_, F>,
+        ctx: &mut RegionCtx<'_, F>,
         cell: AssignedCell<F, F>,
-        bits_count: usize,
+        expected_bits_count: NonZeroUsize,
     ) -> Result<AssignedCell<F, F>, Error> {
-        if let Some(value_repr) = cell.value().map(|v| v.to_repr()).unwrap() {
-            for bit in value_repr.as_ref().iter().take(bits_count) {
-                dbg!(bit);
-            }
-            todo!()
-        }
-        todo!()
+        let value_repr = if let Some(value_repr) = cell.value().map(|v| v.to_repr()).unwrap() {
+            *value_repr
+        } else {
+            F::ZERO.to_repr()
+        };
+
+        // proof here all bits in [0, 1]
+        let bits = {
+            let bit_column = self.config().input;
+            let bit_selector = self.config().q_i;
+
+            let bit_square_multipliers_columns: [_; 2] = self.config().state[0..=1]
+                .try_into()
+                .expect("Safe, because T == 2");
+
+            let square_multipliers_coeff = self.config().q_m;
+
+            let mut bits_repr = BigEndianReader::new(value_repr.as_ref());
+            iter::repeat_with(|| bits_repr.read_bit())
+                .take(expected_bits_count.get())
+                .enumerate()
+                .map(|(index, bit)| {
+                    let bit_cell = ctx
+                        .assign_advice(
+                            || format!("bit_{index}"),
+                            bit_column,
+                            Value::known(match bit {
+                                Some(true) => F::ONE,
+                                Some(false) | None => F::ZERO,
+                            }),
+                        )
+                        .map_err(Error::WhileAssignForRegroup)?;
+                    ctx.assign_fixed(
+                        || format!("bit_square_multipliers_coeff {index}"),
+                        bit_selector,
+                        F::ONE,
+                    )
+                    .map_err(Error::WhileAssignForRegroup)?;
+
+                    for col in bit_square_multipliers_columns.iter() {
+                        ctx.assign_advice_from(|| format!("bit_{index}"), *col, &bit_cell)
+                            .map_err(Error::WhileAssignForRegroup)?;
+                    }
+                    ctx.assign_fixed(
+                        || format!("square_multipliers_coeff {index}"),
+                        square_multipliers_coeff,
+                        -F::ONE,
+                    )
+                    .map_err(Error::WhileAssignForRegroup)?;
+
+                    ctx.next();
+                    Ok(bit_cell)
+                })
+                .collect::<Result<Vec<_>, Error>>()?
+        };
+
+        let bits_with_coeff = itertools::multizip((0.., bits.iter(), get_power_of_two_iter::<F>()));
+
+        let state_q1_columns =
+            itertools::multizip((self.config().state, self.config().q_1)).collect::<Box<[_]>>();
+
+        let prev_chunk_sum_col = self.config().input;
+        let prev_chunk_sum_selector = self.config().q_i;
+
+        let final_sum_cell = bits_with_coeff
+            .chunks(state_q1_columns.len())
+            .into_iter()
+            .try_fold(None, |prev_chunk_sum, bit_cell_chunk| {
+                let mut current_chunk_sum = bit_cell_chunk.zip(state_q1_columns.iter()).try_fold(
+                    Value::known(F::ZERO),
+                    |current_chunk_sum, ((bit_index, bit_cell, bit_coeff), (state_col, state_coeff))| {
+                        let bit_cell = ctx
+                            .assign_advice_from(
+                                || format!("bit {bit_index} in sum"),
+                                *state_col,
+                                bit_cell,
+                            )
+                            .map_err(Error::WhileAssignForRegroup)?;
+
+                        let bit_coeff_cell = ctx
+                            .assign_fixed(
+                                || format!("bit {bit_index} coeff in sum"),
+                                *state_coeff,
+                                bit_coeff,
+                            )
+                            .map_err(Error::WhileAssignForRegroup)?;
+
+                        Result::<_, Error>::Ok(current_chunk_sum + (bit_cell.value().map(|f| *f) * bit_coeff_cell.value()))
+                    },
+                )?;
+
+                if let Some(prev_chunk_sum) = prev_chunk_sum {
+                    ctx.assign_fixed(|| "prev_chunk_sum_coeff", prev_chunk_sum_selector, F::ONE)
+                        .map_err(Error::WhileAssignForRegroup)?;
+
+                    let prev_chunk_sum = ctx
+                        .assign_advice_from(
+                            || "prev_chunk_sum",
+                            prev_chunk_sum_col,
+                            &prev_chunk_sum,
+                        )
+                        .map_err(Error::WhileAssignForRegroup)?;
+
+                    current_chunk_sum = current_chunk_sum + prev_chunk_sum.value();
+                }
+
+                ctx.assign_fixed(|| "chunk_sum_coeff", self.config().q_o, -F::ONE)
+                    .map_err(Error::WhileAssignForRegroup)?;
+
+                let cell = ctx.assign_advice(|| "chunk_sum", self.config().out, current_chunk_sum)
+                    .map_err(Error::WhileAssignForRegroup)?;
+
+                ctx.next();
+
+                Result::<_, Error>::Ok(Some(cell))
+            })?
+            .expect("Safe, because carry_bits != 0");
+
+        ctx.constrain_equal(final_sum_cell.cell(), cell.cell())
+            .map_err(Error::WhileAssignForRegroup)?;
+
+        Ok(cell)
     }
 }
 
@@ -611,7 +738,7 @@ impl<F: ff::PrimeField> Chip<F> for BigNatMulModChip<F> {
     }
 }
 
-fn calc_carry_bits(limb_width: usize) -> Result<usize, Error> {
+fn calc_carry_bits(limb_width: usize) -> Result<NonZeroUsize, Error> {
     // FIXME: Is `f64` really needed here
     // We can calculate `log2` for BigInt without f64
     let carry_bits = big_nat::get_big_int_with_n_ones(limb_width)
@@ -624,7 +751,7 @@ fn calc_carry_bits(limb_width: usize) -> Result<usize, Error> {
         .add(0.1);
 
     if carry_bits <= usize::MAX as f64 {
-        Ok(carry_bits as usize)
+        Ok(NonZeroUsize::new(carry_bits as usize).expect("TODO"))
     } else {
         Err(Error::CarryBitsCalculate)
     }
@@ -638,7 +765,7 @@ fn calc_carry_bits(limb_width: usize) -> Result<usize, Error> {
 /// let `carry_bits = usize(ceil(log_2(max_word * 2) - limb_width) + 0.1) then
 /// let `limbs_per_group = capacity - carry_bits / limb_width`
 fn calc_limbs_per_group<F: PrimeField>(limb_width: usize) -> Result<usize, Error> {
-    Ok((F::CAPACITY as usize - calc_carry_bits(limb_width)?) / limb_width)
+    Ok((F::CAPACITY as usize - calc_carry_bits(limb_width)?.get()) / limb_width)
 }
 
 #[cfg(test)]
@@ -752,4 +879,8 @@ mod tests {
         };
         assert_eq!(prover.verify(), Ok(()));
     }
+}
+
+fn get_power_of_two_iter<F: ff::PrimeField>() -> impl Iterator<Item = F> {
+    iter::successors(Some(F::ONE), |l| Some(l.double()))
 }

@@ -19,6 +19,7 @@ halo2curves = { git = 'https://github.com/privacy-scaling-explorations/halo2curv
 poseidon = { git = "https://github.com/privacy-scaling-explorations/poseidon", rev = "807f8f555313f726ca03bdf941f798098f488ba4" }
 log = "0.4.20"
 itertools = "0.11.0"
+bitter = "0.6.1"
 
 [dev-dependencies]
 env_logger = "0.10.0"
