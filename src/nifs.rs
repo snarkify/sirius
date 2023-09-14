@@ -4,7 +4,6 @@ use crate::constants::NUM_CHALLENGE_BITS;
 use crate::plonk::{
     PlonkInstance, PlonkStructure, RelaxedPlonkInstance, RelaxedPlonkWitness, TableData,
 };
-use crate::polynomial::Expression;
 use crate::poseidon::{AbsorbInRO, ROTrait};
 use halo2_proofs::arithmetic::CurveAffine;
 use std::marker::PhantomData;
@@ -17,7 +16,6 @@ pub struct NIFS<C: CurveAffine, RO: ROTrait<C>> {
 
 impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
     pub fn prove(
-        gate: &Expression<C::ScalarExt>,
         ck: &CommitmentKey<C>,
         ro: &mut RO,
         td: &TableData<C::ScalarExt>,
@@ -28,13 +26,15 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         (RelaxedPlonkInstance<C>, RelaxedPlonkWitness<C::ScalarExt>),
     ) {
         // TODO: hash gate into ro
-        td.plonk_structure(ck).absorb_into(ro);
+        let ps = td.plonk_structure(ck);
+        ps.absorb_into(ro);
         let U2 = td.plonk_instance(ck);
         let W2 = td.plonk_witness();
         U1.absorb_into(ro);
         U2.absorb_into(ro);
-        // TODO: add support for multiple gates
-        let (cross_terms, cross_term_commits) = td.commit_cross_terms(gate, ck, U1.u);
+        let y = ro.squeeze(NUM_CHALLENGE_BITS);
+        // TODO: y is used to combined multiple gates for instance U1 and U2, add evaluation support for variable y
+        let (cross_terms, cross_term_commits) = td.commit_cross_terms(ck, U1, W1, y);
         let _ = cross_term_commits
             .iter()
             .map(|cm| ro.absorb_point(*cm))
@@ -61,6 +61,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         S.absorb_into(ro);
         U1.absorb_into(ro);
         U2.absorb_into(ro);
+        let _ = ro.squeeze(NUM_CHALLENGE_BITS);
         let _ = self
             .cross_term_commits
             .iter()
@@ -75,6 +76,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
 mod tests {
     use super::*;
     use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
+    use crate::polynomial::Expression;
     use ff::PrimeField;
     use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
     use halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Error, Instance};
@@ -156,7 +158,6 @@ mod tests {
 
     fn fold_instances<C: CurveAffine<ScalarExt = F>, F: PrimeField, RO: ROTrait<C>>(
         ck: &CommitmentKey<C>,
-        cs: &ConstraintSystem<F>,
         ro1: &mut RO,
         ro2: &mut RO,
         td1: &TableData<F>,
@@ -165,20 +166,21 @@ mod tests {
         // we assume td.assembly() is already called
         let mut f_U = RelaxedPlonkInstance::default(td1.instance.len());
         let mut f_W = RelaxedPlonkWitness::default(td1.k, td1.advice.len());
-        let gates: Vec<Vec<Expression<F>>> = gate_expressions(cs);
-        let (nifs, (_U, W)) = NIFS::prove(&gates[0][0], ck, ro1, td1, &f_U, &f_W);
+        let (nifs, (_U, W)) = NIFS::prove(ck, ro1, td1, &f_U, &f_W);
         let U = nifs.verify(ro2, td1.plonk_structure(ck), f_U, td1.plonk_instance(ck));
         assert_eq!(U, _U);
 
         f_U = U;
         f_W = W;
-        let (nifs, (_U, _W)) = NIFS::prove(&gates[0][0], ck, ro1, td2, &f_U, &f_W);
+        let (nifs, (_U, _W)) = NIFS::prove(ck, ro1, td2, &f_U, &f_W);
         let U = nifs.verify(ro2, td2.plonk_structure(ck), f_U, td2.plonk_instance(ck));
         assert_eq!(U, _U);
 
-        //f_U = _U;
-        //f_W = _W;
-        // TODO: check (f_U, f_W) satisfy relaxed plonk gate relation
+        let ps = td1.plonk_structure(ck);
+        f_U = _U;
+        f_W = _W;
+        let res = ps.is_sat_relaxed(ck, &f_U, &f_W);
+        assert!(res.is_ok());
     }
 
     fn smallest_power(n: usize, K: u32) -> usize {
@@ -206,7 +208,7 @@ mod tests {
         let output1 = Fp::from_str_vartime("45").unwrap();
         let public_inputs1 = vec![output1];
         let mut td1 = TableData::<Fp>::new(K, public_inputs1);
-        let cs = td1.assembly(&circuit1).unwrap();
+        let _ = td1.assembly(&circuit1);
 
         let circuit2 = TestCircuit::new(inputs2, Fp::ONE);
         let output2 = Fp::from_str_vartime("45").unwrap();
@@ -214,13 +216,14 @@ mod tests {
         let mut td2 = TableData::<Fp>::new(K, public_inputs2);
         let _ = td2.assembly(&circuit2);
 
-        let p1 = smallest_power(cs.num_advice_columns(), K);
+        let p1 = smallest_power(td1.cs.num_advice_columns(), K);
         let p2 = smallest_power(td1.fixed.iter().flatten().collect::<Vec<_>>().len(), 1);
         let ck = CommitmentKey::<EqAffine>::setup(p1.max(p2), b"test");
+
         type PH = PoseidonHash<EqAffine, Fq, T, RATE>;
         let spec = Spec::<Fq, T, RATE>::new(R_F, R_P);
         let mut ro1 = PH::new(spec.clone());
         let mut ro2 = PH::new(spec);
-        fold_instances(&ck, &cs, &mut ro1, &mut ro2, &td1, &td2);
+        fold_instances(&ck, &mut ro1, &mut ro2, &td1, &td2);
     }
 }

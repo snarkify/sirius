@@ -525,7 +525,9 @@ mod tests {
         let (gates, meta) = main_gate_expressions();
         let expr = gates[0][0].clone();
         let multipoly = expr.expand();
-        let res = multipoly.fold_transform(meta);
+        let num_fixed = meta.0;
+        let num_vars = meta.1 + meta.2;
+        let res = multipoly.fold_transform(num_fixed, num_vars);
         let r_index = meta.0 + 2 * (meta.1 + meta.2 + 1);
         let e1 = res.coeff_of((0, r_index), 0);
         let e2 = res.coeff_of((0, r_index), 5);

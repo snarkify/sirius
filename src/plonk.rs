@@ -2,7 +2,7 @@
 //! contains methods used by folding scheme
 use crate::{
     commitment::CommitmentKey,
-    polynomial::Expression,
+    polynomial::{Expression, MultiPolynomial, Query},
     poseidon::{AbsorbInRO, ROTrait},
     util::{batch_invert_assigned, fe_to_fe},
 };
@@ -15,12 +15,18 @@ use halo2_proofs::{
         Advice, Any, Assigned, Assignment, Challenge, Circuit, Column, ConstraintSystem, Error,
         Fixed, FloorPlanner, Instance, Selector,
     },
+    poly::Rotation,
 };
+use rand_core::OsRng;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq)]
 pub struct PlonkStructure<C: CurveAffine> {
+    pub(crate) k: usize,
+    pub(crate) fixed_columns: Vec<Vec<C::ScalarExt>>,
+    pub(crate) num_advice_columns: usize,
+    pub(crate) gate: MultiPolynomial<C::ScalarExt>,
     pub(crate) fixed_commitment: C, // concatenate num_fixed_columns together, then commit
 }
 
@@ -32,6 +38,7 @@ pub struct PlonkInstance<C: CurveAffine> {
 
 #[derive(Clone, Debug)]
 pub struct PlonkWitness<F: PrimeField> {
+    pub(crate) num_advice_columns: usize,
     pub(crate) W: Vec<F>, // concatenate num_advice_columns together
 }
 
@@ -45,11 +52,13 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
 
 #[derive(Clone, Debug)]
 pub struct RelaxedPlonkWitness<F: PrimeField> {
+    pub(crate) num_advice_columns: usize,
     pub(crate) W: Vec<F>,
     pub(crate) E: Vec<F>,
 }
 
 impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkStructure<C> {
+    // TODO: add hash of other fields including gates
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb_point(self.fixed_commitment);
     }
@@ -72,6 +81,84 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
         }
         ro.absorb_base(fe_to_fe(self.u));
         ro.absorb_point(self.E_commitment);
+    }
+}
+
+impl<C: CurveAffine> PlonkStructure<C> {
+    pub fn is_sat<F>(
+        &self,
+        ck: CommitmentKey<C>,
+        U: &PlonkInstance<C>,
+        W: &PlonkWitness<F>,
+    ) -> Result<(), String>
+    where
+        C: CurveAffine<ScalarExt = F>,
+        F: PrimeField,
+    {
+        let y = F::random(&mut OsRng);
+        let nrow = 2usize.pow(self.k as u32);
+        let U2 = RelaxedPlonkInstance::default(U.instance.len());
+        let W2 = RelaxedPlonkWitness::default(self.k as u32, self.num_advice_columns);
+        let res: usize = (0..nrow)
+            .into_par_iter()
+            .map(|row| {
+                self.gate
+                    .eval(row, self, &U.to_relax(), &W.to_relax(), &U2, &W2, y)
+            })
+            .map(|v| usize::from(v != F::ZERO))
+            .sum();
+
+        let res_comm: bool = U.W_commitment == ck.commit(&W.W[..]);
+        if res == 0 && res_comm {
+            Ok(())
+        } else {
+            Err("plonk relation not satisfied".to_string())
+        }
+    }
+
+    pub fn is_sat_relaxed<F>(
+        &self,
+        ck: &CommitmentKey<C>,
+        U: &RelaxedPlonkInstance<C>,
+        W: &RelaxedPlonkWitness<F>,
+    ) -> Result<(), String>
+    where
+        C: CurveAffine<ScalarExt = F>,
+        F: PrimeField,
+    {
+        let y = F::random(&mut OsRng);
+        let nrow = 2usize.pow(self.k as u32);
+        let U2 = RelaxedPlonkInstance::default(U.instance.len());
+        let W2 = RelaxedPlonkWitness::default(self.k as u32, self.num_advice_columns);
+        let res: usize = (0..nrow)
+            .into_par_iter()
+            .map(|row| self.gate.eval(row, self, U, W, &U2, &W2, y))
+            .enumerate()
+            .map(|(i, v)| {
+                let ff = usize::from(v != W.E[i]);
+                println!("hehe, row={}, v={:?}, W.E[i]={:?}", i, v, W.E[i]);
+                ff
+            })
+            .sum();
+
+        let res_W: bool = U.W_commitment == ck.commit(&W.W[..]);
+        let res_E: bool = U.E_commitment == ck.commit(&W.E[..]);
+        if res == 0 && res_W && res_E {
+            Ok(())
+        } else {
+            Err("relaxed plonk relation not satisfied".to_string())
+        }
+    }
+}
+
+impl<C: CurveAffine> PlonkInstance<C> {
+    pub fn to_relax(&self) -> RelaxedPlonkInstance<C> {
+        RelaxedPlonkInstance {
+            W_commitment: self.W_commitment,
+            instance: self.instance.clone(),
+            E_commitment: C::identity(),
+            u: C::ScalarExt::ONE,
+        }
     }
 }
 
@@ -110,6 +197,19 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
     }
 }
 
+impl<F: PrimeField> PlonkWitness<F> {
+    pub fn to_relax(&self) -> RelaxedPlonkWitness<F> {
+        let num_advice_columns = self.num_advice_columns;
+        let len_E = self.W.len() / num_advice_columns;
+        let E = vec![F::ZERO; len_E];
+        RelaxedPlonkWitness {
+            num_advice_columns,
+            W: self.W.clone(), // TODO: avoid clone
+            E,
+        }
+    }
+}
+
 impl<F: PrimeField> RelaxedPlonkWitness<F> {
     // nc: num_advice_columns in plonk gate
     pub fn default(k: u32, nc: usize) -> Self {
@@ -117,7 +217,11 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
         let mut E = Vec::new();
         W.resize(2usize.pow(k) * nc, F::ZERO);
         E.resize(2usize.pow(k), F::ZERO);
-        Self { W, E }
+        Self {
+            num_advice_columns: nc,
+            W,
+            E,
+        }
     }
 
     pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &[Vec<F>], r: &F) -> Self {
@@ -132,7 +236,7 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
             .par_iter()
             .enumerate()
             .map(|(i, ei)| {
-                let mut r_power = *r;
+                let mut r_power = F::ONE;
                 let value = cross_terms.iter().fold(*ei, |acc, ti| {
                     r_power *= *r;
                     acc + r_power * ti[i]
@@ -141,13 +245,18 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
             })
             .collect::<Vec<_>>();
 
-        RelaxedPlonkWitness { W, E }
+        RelaxedPlonkWitness {
+            W,
+            num_advice_columns: self.num_advice_columns,
+            E,
+        }
     }
 }
 
 pub struct TableData<F: PrimeField> {
     // TODO: without usable_rows still safe?
     pub(crate) k: u32,
+    pub(crate) cs: ConstraintSystem<F>,
     pub(crate) fixed: Vec<Vec<Assigned<F>>>,
     pub(crate) instance: Vec<F>,
     pub(crate) advice: Vec<Vec<Assigned<F>>>,
@@ -158,6 +267,7 @@ impl<F: PrimeField> TableData<F> {
     pub fn new(k: u32, instance: Vec<F>) -> Self {
         TableData {
             k,
+            cs: ConstraintSystem::default(),
             instance,
             fixed: vec![],
             advice: vec![],
@@ -168,7 +278,7 @@ impl<F: PrimeField> TableData<F> {
     pub fn assembly<ConcreteCircuit: Circuit<F>>(
         &mut self,
         circuit: &ConcreteCircuit,
-    ) -> Result<ConstraintSystem<F>, Error> {
+    ) -> Result<(), Error> {
         let mut meta = ConstraintSystem::default();
         let config = ConcreteCircuit::configure(&mut meta);
         let n = 1u64 << self.k;
@@ -176,13 +286,14 @@ impl<F: PrimeField> TableData<F> {
         self.fixed = vec![vec![F::ZERO.into(); n as usize]; meta.num_fixed_columns()];
         self.instance = vec![F::ZERO; 2];
         self.advice = vec![vec![F::ZERO.into(); n as usize]; meta.num_advice_columns()];
+        self.cs = meta;
         ConcreteCircuit::FloorPlanner::synthesize(
             self,
             circuit,
             config.clone(),
             vec![], // TODO: make sure constants not needed
         )?;
-        Ok(meta)
+        Ok(())
     }
 
     pub fn plonk_structure<C: CurveAffine<ScalarExt = F>>(
@@ -190,9 +301,43 @@ impl<F: PrimeField> TableData<F> {
         ck: &CommitmentKey<C>,
     ) -> PlonkStructure<C> {
         let fixed_columns = batch_invert_assigned(&self.fixed);
-        let fixed_commitment =
-            ck.commit(&fixed_columns.into_iter().flatten().collect::<Vec<_>>()[..]);
-        PlonkStructure { fixed_commitment }
+        // TODO: avoid clone
+        let fixed_commitment = ck.commit(
+            &fixed_columns
+                .clone()
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()[..],
+        );
+        let num_fixed = self.cs.num_fixed_columns();
+        let num_instance = self.cs.num_instance_columns();
+        let num_advice = self.cs.num_advice_columns();
+        let y = Expression::Polynomial(Query {
+            index: num_fixed + num_instance + num_advice,
+            rotation: Rotation(0),
+        });
+        // suppose we have n polynomial expression: p_1,p_2,...,p_n
+        // we combined them together as one: combined_poly = p_1*y^{n-1}+p_2*y^{n-2}+...+p_n
+        let combined_poly: MultiPolynomial<C::ScalarExt> = self
+            .cs
+            .gates()
+            .iter()
+            .flat_map(|gate| gate.polynomials().iter())
+            .map(|expr| Expression::from_halo2_expr(expr, (num_fixed, num_instance)))
+            .fold(Expression::Constant(F::ZERO), |acc, expr| {
+                Expression::Sum(
+                    Box::new(expr),
+                    Box::new(Expression::Product(Box::new(acc), Box::new(y.clone()))),
+                )
+            })
+            .expand();
+        PlonkStructure {
+            k: self.k as usize,
+            fixed_columns,
+            num_advice_columns: self.cs.num_advice_columns(),
+            gate: combined_poly,
+            fixed_commitment,
+        }
     }
 
     pub fn plonk_instance<C: CurveAffine<ScalarExt = F>>(
@@ -213,6 +358,7 @@ impl<F: PrimeField> TableData<F> {
     }
 
     pub fn plonk_witness(&self) -> PlonkWitness<F> {
+        assert!(!self.advice.is_empty()); // should call TableData.assembly() first
         let mut advice_columns = batch_invert_assigned(&self.advice);
         let W = advice_columns
             .iter_mut()
@@ -221,26 +367,35 @@ impl<F: PrimeField> TableData<F> {
                 w_i.drain(..)
             })
             .collect::<Vec<_>>();
-        PlonkWitness { W }
+        PlonkWitness {
+            num_advice_columns: self.advice[0].len(),
+            W,
+        }
     }
 
     pub fn commit_cross_terms<C: CurveAffine<ScalarExt = F>>(
         &self,
-        gate: &Expression<F>,
         ck: &CommitmentKey<C>,
-        u: F, // value of the homogeneous term u
+        U: &RelaxedPlonkInstance<C>,
+        W: &RelaxedPlonkWitness<F>,
+        y: F, // TODO: should we put y inside RelaxedPlonkInstance
     ) -> (Vec<Vec<F>>, Vec<C>) {
-        let multipoly = gate.expand();
-        let meta = (self.fixed.len(), 1, self.advice.len());
-        let r_index = meta.0 + 2 * (meta.1 + meta.2 + 1);
-        let degree = multipoly.degree();
-        let res = multipoly.fold_transform(meta);
+        let ps = self.plonk_structure(ck);
+        let U2 = self.plonk_instance(ck);
+        let W2 = self.plonk_witness();
+        let gate = &ps.gate;
+
+        let degree = gate.degree();
+        let num_fixed = self.fixed.len();
+        let num_vars = gate.arity - num_fixed; // number of variables to be folded
+        let r_index = num_fixed + 2 * num_vars;
+        let normalized = gate.fold_transform(num_fixed, num_vars);
         let cross_terms: Vec<Vec<F>> = (1..degree)
-            .map(|i| res.coeff_of((0, r_index), i))
+            .map(|i| normalized.coeff_of((0, r_index), i))
             .map(|multipoly| {
                 (0..self.fixed[0].len())
                     .into_par_iter()
-                    .map(|row| multipoly.eval(row, self, u))
+                    .map(|row| multipoly.eval(row, &ps, U, W, &U2.to_relax(), &W2.to_relax(), y))
                     .collect()
             })
             .collect();
@@ -380,9 +535,6 @@ mod tests {
     use prettytable::{row, Cell, Row, Table};
 
     const T: usize = 3;
-    const RATE: usize = 2;
-    const R_F: usize = 4;
-    const R_P: usize = 3;
 
     #[derive(Clone, Debug)]
     struct TestCircuitConfig {
@@ -466,6 +618,6 @@ mod tests {
             }
             table.add_row(Row::new(row.iter().map(|s| Cell::new(s)).collect()));
         }
-        // table.printstd();
+        table.printstd();
     }
 }

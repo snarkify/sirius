@@ -1,6 +1,7 @@
-use crate::plonk::TableData;
+use crate::plonk::{PlonkStructure, RelaxedPlonkInstance, RelaxedPlonkWitness};
 use crate::util::trim_leading_zeros;
 use ff::PrimeField;
+use halo2_proofs::arithmetic::CurveAffine;
 use halo2_proofs::plonk::Expression as PE;
 use halo2_proofs::poly::Rotation;
 use std::{
@@ -11,13 +12,13 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Query {
     pub index: usize,
     pub rotation: Rotation,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Expression<F> {
     Constant(F),
     Polynomial(Query),
@@ -104,41 +105,43 @@ impl<F: PrimeField> Expression<F> {
         self._expand(&index_to_poly)
     }
 
-    pub fn fold_transform(&self, meta: (usize, usize, usize)) -> Self {
+    // fold_transform will fold a polynomial expression P(f_1,...f_m, x_1,...,x_n)
+    // and output P(f_1,...,f_m, x_1+r*y_1,...,x_n+r*y_n)
+    // here num_fixed = m, num_vars = n
+    pub fn fold_transform(&self, num_fixed: usize, num_vars: usize) -> Self {
         match self {
             Expression::Constant(c) => Expression::Constant(*c),
             Expression::Polynomial(poly) => {
-                if poly.index < meta.0 {
+                if poly.index < num_fixed {
                     return Expression::Polynomial(*poly);
                 }
-                // u1, u2 is added
                 let r = Expression::Polynomial(Query {
-                    index: meta.0 + 2 * (meta.1 + meta.2 + 1),
+                    index: num_fixed + 2 * num_vars,
                     rotation: Rotation(0),
                 });
-                let index_shift = meta.1 + meta.2 + 1;
                 let y = Expression::Polynomial(Query {
-                    index: poly.index + index_shift,
+                    index: poly.index + num_vars,
                     rotation: poly.rotation,
                 });
+                // fold variable x_i -> x_i + r * y_i
                 Expression::Polynomial(*poly) + r * y
             }
             Expression::Negated(a) => {
-                let a = a.fold_transform(meta);
+                let a = a.fold_transform(num_fixed, num_vars);
                 -a
             }
             Expression::Sum(a, b) => {
-                let a = a.fold_transform(meta);
-                let b = b.fold_transform(meta);
+                let a = a.fold_transform(num_fixed, num_vars);
+                let b = b.fold_transform(num_fixed, num_vars);
                 a + b
             }
             Expression::Product(a, b) => {
-                let a = a.fold_transform(meta);
-                let b = b.fold_transform(meta);
+                let a = a.fold_transform(num_fixed, num_vars);
+                let b = b.fold_transform(num_fixed, num_vars);
                 a * b
             }
             Expression::Scaled(a, k) => {
-                let a = a.fold_transform(meta);
+                let a = a.fold_transform(num_fixed, num_vars);
                 a * *k
             }
         }
@@ -247,7 +250,7 @@ impl_expression_ops!(Add, add, Sum, Expression<F>, std::convert::identity);
 impl_expression_ops!(Sub, sub, Sum, Expression<F>, Neg::neg);
 impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
 
-/// Monomial: c_i*x_0*..*x_{n-1} with arity n
+/// Monomial: c_i*x_0^d_0*..*x_{n-1}^d_{n-1} with arity n
 /// index_to_poly is mapping from i to (rotation, column_index)
 /// poly_to_index is mapping from (rotation, column_index) to i \in [0,..,n-1]
 #[derive(Clone)]
@@ -385,9 +388,28 @@ impl<F: PrimeField> Monomial<F> {
         self.coeff += other.coeff;
     }
 
-    pub fn eval(&self, row: usize, td: &TableData<F>, u: F) -> F {
-        let num_fixed = td.fixed.len();
-        let num_advice = td.advice.len();
+    #[allow(clippy::too_many_arguments)]
+    pub fn eval<C: CurveAffine<ScalarExt = F>>(
+        &self,
+        row: usize,
+        ps: &PlonkStructure<C>,
+        pi1: &RelaxedPlonkInstance<C>,
+        pw1: &RelaxedPlonkWitness<F>,
+        pi2: &RelaxedPlonkInstance<C>,
+        pw2: &RelaxedPlonkWitness<F>,
+        y: F,
+    ) -> F {
+        let num_fixed = ps.fixed_columns.len();
+        let num_instance = 1;
+        let num_advice = ps.num_advice_columns;
+        let inst1_index = num_fixed;
+        let y1_index = num_fixed + num_instance + num_advice;
+        let u1_index = y1_index + 1;
+        let inst2_index = num_fixed + num_instance + num_advice + 2;
+        let y2_index = num_fixed + 2 * (num_instance + num_advice) + 2;
+        let u2_index = y2_index + 1;
+
+        let row_size = pw1.W.len() / num_advice;
         let vars: Vec<F> = (0..self.arity)
             .map(|i| {
                 let (rot, col) = self.index_to_poly[i];
@@ -397,18 +419,40 @@ impl<F: PrimeField> Monomial<F> {
                     // TODO: check how halo2 handle
                     // (1): row+rot<0
                     // (2): row+rot>=2^K
-                    td.fixed[0].len() - (-rot as usize) + row
+                    row_size - (-rot as usize) + row
                 };
-                if col < num_fixed {
-                    td.fixed[col][row1].evaluate()
-                } else if col < num_fixed + 1 {
-                    // instance column is always 1
-                    td.instance[row1]
-                } else if col < num_fixed + 1 + num_advice {
-                    td.advice[col - num_fixed - 1][row1].evaluate()
+                // layout of the index is:
+                // |num_fixed|num_instace1|num_advice|y1|u1|num_instance2|num_advice2|y2|u2|
+                if col < inst1_index {
+                    ps.fixed_columns[col][row1]
+                } else if col == inst1_index {
+                    if row1 < pi1.instance.len() {
+                        pi1.instance[row1]
+                    } else {
+                        F::ZERO
+                    }
+                } else if col < y1_index {
+                    let idx = (col - inst1_index - 1) * row_size + row1;
+                    pw1.W[idx]
+                } else if col == y1_index {
+                    y
+                } else if col == u1_index {
+                    pi1.u
+                } else if col == inst2_index {
+                    if row1 < pi2.instance.len() {
+                        pi2.instance[row1]
+                    } else {
+                        F::ZERO
+                    }
+                } else if col < y2_index {
+                    let idx = (col - inst2_index - 1) * row_size + row1;
+                    pw2.W[idx]
+                } else if col == y2_index {
+                    y
+                } else if col == u2_index {
+                    pi2.u
                 } else {
-                    // homogeneous term
-                    u
+                    panic!("index out of boundary");
                 }
             })
             .collect();
@@ -458,7 +502,7 @@ impl<F: PrimeField> Ord for Monomial<F> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct MultiPolynomial<F: PrimeField> {
     pub arity: usize,
     pub monomials: Vec<Monomial<F>>,
@@ -502,9 +546,9 @@ impl<F: PrimeField> MultiPolynomial<F> {
         deg
     }
 
-    pub fn homogeneous(&self, meta: (usize, usize, usize)) -> Self {
+    // when make polynomial homogeneous, we need specify the index of u
+    pub fn homogeneous(&self, u_index: usize) -> Self {
         let degree = self.degree();
-        let u_index = meta.0 + meta.1 + meta.2;
         let monos = self
             .monomials
             .iter()
@@ -524,12 +568,15 @@ impl<F: PrimeField> MultiPolynomial<F> {
         expr
     }
 
-    // p(X1,X2,...) -> p(X1+r*Y1,X2+r*Y2,...)
-    // meta: size of |fixed_columns|instance_columns|advice_columns|
-    pub fn fold_transform(&self, meta: (usize, usize, usize)) -> Self {
-        self.homogeneous(meta)
+    // fold_transform will (1) first homogeneous the polynomial
+    // p(f_1,...,f_m,x_1,...,x_n) -> p'(f_1,...,f_m,x_1,...,x_n,u)
+    // (2) fold variable x_i while keep variable f_i unchanged
+    // p' -> p'(f_1,...,f_m, x_1+r*y_1,x_2+r*y_2,...,x_n+r*y_n)
+    // num_fixed = m, num_vars = n
+    pub fn fold_transform(&self, num_fixed: usize, num_vars: usize) -> Self {
+        self.homogeneous(num_fixed + num_vars) // u_index = num_fixed + num_vars
             .to_expression()
-            .fold_transform(meta)
+            .fold_transform(num_fixed, num_vars + 1) // after p -> p', num_vars of p' is increased by 1
             .expand()
     }
 
@@ -579,10 +626,20 @@ impl<F: PrimeField> MultiPolynomial<F> {
     }
 
     // evaluate the multipoly
-    pub fn eval(&self, row: usize, td: &TableData<F>, u: F) -> F {
+    #[allow(clippy::too_many_arguments)]
+    pub fn eval<C: CurveAffine<ScalarExt = F>>(
+        &self,
+        row: usize,
+        ps: &PlonkStructure<C>,
+        pi1: &RelaxedPlonkInstance<C>,
+        pw1: &RelaxedPlonkWitness<F>,
+        pi2: &RelaxedPlonkInstance<C>,
+        pw2: &RelaxedPlonkWitness<F>,
+        y: F,
+    ) -> F {
         self.monomials
             .iter()
-            .map(|mono| mono.eval(row, td, u))
+            .map(|mono| mono.eval(row, ps, pi1, pw1, pi2, pw2, y))
             .fold(F::ZERO, |acc, x| acc + x)
     }
 }
@@ -692,7 +749,7 @@ mod tests {
         });
         let expr3 = expr1.clone() + expr2.clone();
         assert_eq!(
-            format!("{}", expr3.expand().homogeneous((0, 0, 2))),
+            format!("{}", expr3.expand().homogeneous(2)),
             "(Z_2^2) + (Z_0)(Z_2) + (Z_0)(Z_1)"
         );
     }
