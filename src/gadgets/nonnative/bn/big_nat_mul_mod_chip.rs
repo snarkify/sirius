@@ -1,5 +1,5 @@
 use std::{
-    iter,
+    cmp, iter,
     num::NonZeroUsize,
     ops::Deref,
     ops::{Add, Div, Mul, Sub},
@@ -91,12 +91,12 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     ///
     /// The function also returns unchanged the remaining multipliers
     /// from the larger summand.
-    pub fn assign_sum(
+    fn assign_sum(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        lhs: &[AssignedCell<F, F>],
-        rhs: &[AssignedCell<F, F>],
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        lhs: &OverflowingBigNat<F>,
+        rhs: &OverflowingBigNat<F>,
+    ) -> Result<OverflowingBigNat<F>, Error> {
         let lhs_column = &self.config().state[0];
         let rhs_column = &self.config().state[1];
 
@@ -106,7 +106,8 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         let sum_column = &self.config().out;
         let sum_selector = &self.config().q_o;
 
-        lhs.iter()
+        let cells = lhs
+            .iter()
             .zip_longest(rhs.iter())
             .map(|value| {
                 let sum_cell = match value {
@@ -142,7 +143,12 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 
                 Ok(sum_cell)
             })
-            .collect::<Result<Vec<_>, _>>()
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        Ok(OverflowingBigNat {
+            cells,
+            max_word: lhs.max_word + rhs.max_word,
+        })
     }
 
     /// Assign result of multiplication of `lhs` & `rhs` without handle carry
@@ -177,12 +183,12 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     ///
     /// Returns the cells that contain the product coefficients
     /// TODO: carry handling or check `p_k` < `F::MODULUS`
-    pub fn assign_mult(
+    fn assign_mult(
         &self,
         ctx: &mut RegionCtx<'_, F>,
         lhs: &BigInt,
         rhs: &BigInt,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+    ) -> Result<OverflowingBigNat<F>, Error> {
         info!("Assign mult of {lhs} to {rhs}");
 
         let lhs = self.to_bignat(lhs)?;
@@ -271,7 +277,12 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                 .collect::<Box<[_]>>()
         );
 
-        Ok(production_cells)
+        let max_word = big_nat::get_big_int_with_n_ones(self.limb_width.get());
+
+        Ok(OverflowingBigNat {
+            cells: production_cells,
+            max_word: big_nat::nat_to_f(&(&max_word * &max_word)).unwrap(),
+        })
     }
 
     /// Re-group limbs of `BigNat`
@@ -280,7 +291,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     /// With [`calc_limbs_per_group`] we calculate how many
     /// limbs will fit in one group, given that the current
     /// limbs are merged into new limbs. The result is wrapped
-    /// in [`GroupedBigNatLimbs`]
+    /// in [`GroupedBigNat`]
     ///
     /// For every `k` rows looks like:
     /// ```markdown
@@ -300,8 +311,8 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     fn group_limbs(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        bignat_cells: &[AssignedCell<F, F>],
-    ) -> Result<GroupedBigNatLimbs<F>, Error> {
+        bignat_cells: OverflowingBigNat<F>,
+    ) -> Result<GroupedBigNat<F>, Error> {
         let limbs_per_group = calc_limbs_per_group::<F>(self.limb_width.get())?;
 
         let group_count = bignat_cells.len().sub(1).div(limbs_per_group.add(1));
@@ -380,21 +391,27 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             ctx.next();
         }
 
-        Ok(GroupedBigNatLimbs {
+        Ok(GroupedBigNat {
             cells: grouped.into_iter().flatten().collect(),
+            max_word: bignat_cells.max_word,
         })
     }
 
     fn is_equal(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        lhs: GroupedBigNatLimbs<F>,
-        rhs: GroupedBigNatLimbs<F>,
+        lhs: GroupedBigNat<F>,
+        rhs: GroupedBigNat<F>,
     ) -> Result<(), Error> {
         let limb_width = self.limb_width.get();
 
-        let max_word_bn = big_nat::get_big_int_with_n_ones(limb_width);
-        let max_word: F = big_nat::nat_to_f(&max_word_bn).expect("TODO handle error");
+        // FIXME
+        let max_word_bn: BigInt = cmp::max(
+            big_nat::f_to_nat(&lhs.max_word),
+            big_nat::f_to_nat(&rhs.max_word),
+        );
+        let max_word: F = big_nat::nat_to_f(&max_word_bn).unwrap();
+
         let target_base_bn = BigInt::one() << limb_width;
         let target_base: F = big_nat::nat_to_f(&target_base_bn).expect("TODO");
         let inverted_target_base: F = Option::<F>::from(target_base.invert()).unwrap_or_default();
@@ -679,10 +696,22 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     }
 }
 
-struct GroupedBigNatLimbs<F: ff::PrimeField> {
+struct OverflowingBigNat<F: ff::PrimeField> {
     cells: Vec<AssignedCell<F, F>>,
+    max_word: F,
 }
-impl<F: ff::PrimeField> Deref for GroupedBigNatLimbs<F> {
+impl<F: ff::PrimeField> Deref for OverflowingBigNat<F> {
+    type Target = Vec<AssignedCell<F, F>>;
+    fn deref(&self) -> &Self::Target {
+        &self.cells
+    }
+}
+
+struct GroupedBigNat<F: ff::PrimeField> {
+    cells: Vec<AssignedCell<F, F>>,
+    max_word: F,
+}
+impl<F: ff::PrimeField> Deref for GroupedBigNat<F> {
     type Target = [AssignedCell<F, F>];
     fn deref(&self) -> &Self::Target {
         self.cells.as_slice()
@@ -846,7 +875,10 @@ mod tests {
                     |region| {
                         let mut region = RegionCtx::new(region, 0);
 
-                        Ok(chip.assign_mult(&mut region, &self.lhs, &self.rhs).unwrap())
+                        Ok(chip
+                            .assign_mult(&mut region, &self.lhs, &self.rhs)
+                            .unwrap()
+                            .cells)
                     },
                 )
                 .unwrap();
