@@ -432,7 +432,9 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         let max_word_column = &self.config().rc;
 
         let output_column = &self.config().out;
-        let _output_coeff = &self.config().q_o;
+        let output_coeff = &self.config().q_o;
+
+        let min_cells_len = cmp::min(lhs.cells.len(), rhs.cells.len());
 
         // TODO Separate last in lhs\rhs
         lhs.cells
@@ -442,6 +444,48 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             .map(|(limb_index, cells)| -> Result<(), Error> {
                 match cells {
                     EitherOrBoth::Both(lhs, rhs) => {
+                        if limb_index == min_cells_len {
+                            // -m_i
+                            accumulated_extra += &max_word_bn;
+                            // FIXME Not advice
+                            let m_i = big_nat::nat_to_f(&(&accumulated_extra % &target_base_bn))
+                                .expect("TODO");
+                            ctx.assign_advice(
+                                || format!("m_{limb_index}"),
+                                *output_column,
+                                Value::known(m_i),
+                            )
+                            .map_err(Error::WhileAssignForRegroup)?;
+                            ctx.assign_fixed(
+                                || format!("m_{limb_index} coeff"),
+                                *output_coeff,
+                                -F::ONE,
+                            )
+                            .map_err(Error::WhileAssignForRegroup)?;
+
+                            accumulated_extra /= &target_base_bn;
+
+                            // carry[i-1]
+                            ctx.assign_fixed(
+                                || format!("carry_{limb_index} coeff"),
+                                *carry_coeff,
+                                F::ONE, // FIXME `target_base`? Or in hackmd error
+                            )
+                            .map_err(Error::WhileAssignForRegroup)?;
+                            if let Some(prev_carry_cell) = &prev_carry_cell {
+                                ctx.assign_advice_from(
+                                    || format!("carry_{limb_index}-1"),
+                                    *carry_column,
+                                    prev_carry_cell,
+                                )
+                                .map_err(Error::WhileAssignForRegroup)?;
+                            }
+
+                            ctx.next();
+
+                            return Ok(());
+                        }
+
                         // (carry[i-i] + lhs[i] - rhs[i] + max_word) / w = carry[i] * w + m[i]
                         //
                         // prev_carry + l[i] - o[i] - mw - (target_base * carry.num) - (accumulated_extra % target base) = 0
@@ -532,8 +576,13 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                             Value::known(m_i),
                         )
                         .map_err(Error::WhileAssignForRegroup)?;
-                        ctx.assign_fixed(|| format!("m_{limb_index} coeff"), *carry_coeff, -F::ONE)
-                            .map_err(Error::WhileAssignForRegroup)?;
+
+                        ctx.assign_fixed(
+                            || format!("m_{limb_index} coeff"),
+                            *output_coeff,
+                            -F::ONE,
+                        )
+                        .map_err(Error::WhileAssignForRegroup)?;
 
                         accumulated_extra /= &target_base_bn;
 
@@ -541,8 +590,34 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                         prev_carry_cell =
                             Some(self.check_fits_in_bits(ctx, carry_cell, carry_bits)?);
                     }
-                    EitherOrBoth::Left(_lhs) => todo!(),
-                    EitherOrBoth::Right(_rhs) => todo!(),
+                    EitherOrBoth::Left(lhs) => {
+                        ctx.assign_advice_from(
+                            || format!("lhs {limb_index} for calc dividend"),
+                            *lhs_column,
+                            &lhs,
+                        )
+                        .map_err(Error::WhileAssignForRegroup)?;
+                        ctx.assign_fixed(
+                            || format!("selector lhs {limb_index} for check zero"),
+                            *lhs_selector,
+                            F::ONE,
+                        )
+                        .map_err(Error::WhileAssignForRegroup)?;
+                    }
+                    EitherOrBoth::Right(rhs) => {
+                        ctx.assign_advice_from(
+                            || format!("rhs {limb_index} for check zero"),
+                            *rhs_column,
+                            &rhs,
+                        )
+                        .map_err(Error::WhileAssignForRegroup)?;
+                        ctx.assign_fixed(
+                            || format!("selector lhs {limb_index} for check zero"),
+                            *rhs_selector,
+                            F::ONE,
+                        )
+                        .map_err(Error::WhileAssignForRegroup)?;
+                    }
                 }
 
                 ctx.next();
@@ -551,7 +626,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        todo!()
+        Ok(())
     }
 
     // Is it `cell` value have less then `expected_bits_count` in bits represtion
@@ -571,20 +646,18 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         cell: AssignedCell<F, F>,
         expected_bits_count: NonZeroUsize,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let value_repr = if let Some(value_repr) = cell.value().map(|v| v.to_repr()).unwrap() {
-            *value_repr
-        } else {
-            F::ZERO.to_repr()
-        };
+        let value_repr = cell
+            .value()
+            .map(|v| v.to_repr())
+            .unwrap()
+            .unwrap_or_else(|| F::ZERO.to_repr());
 
         // proof here all bits in [0, 1]
         let bits = {
             let bit_column = self.config().input;
             let bit_selector = self.config().q_i;
 
-            let bit_square_multipliers_columns: [_; 2] = self.config().state[0..=1]
-                .try_into()
-                .expect("Safe, because T == 2");
+            let bit_square_multipliers_columns = self.config().state;
 
             let square_multipliers_coeff = self.config().q_m;
 
@@ -610,7 +683,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                     )
                     .map_err(Error::WhileAssignForRegroup)?;
 
-                    for col in bit_square_multipliers_columns.iter() {
+                    for col in bit_square_multipliers_columns.iter().take(2) {
                         ctx.assign_advice_from(|| format!("bit_{index}"), *col, &bit_cell)
                             .map_err(Error::WhileAssignForRegroup)?;
                     }
@@ -622,18 +695,19 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                     .map_err(Error::WhileAssignForRegroup)?;
 
                     ctx.next();
+
                     Ok(bit_cell)
                 })
                 .collect::<Result<Vec<_>, Error>>()?
         };
 
+        let prev_chunk_sum_col = self.config().input;
+        let prev_chunk_sum_selector = self.config().q_i;
+
         let bits_with_coeff = itertools::multizip((0.., bits.iter(), get_power_of_two_iter::<F>()));
 
         let state_q1_columns =
             itertools::multizip((self.config().state, self.config().q_1)).collect::<Box<[_]>>();
-
-        let prev_chunk_sum_col = self.config().input;
-        let prev_chunk_sum_selector = self.config().q_i;
 
         let final_sum_cell = bits_with_coeff
             .chunks(state_q1_columns.len())
@@ -701,9 +775,9 @@ struct OverflowingBigNat<F: ff::PrimeField> {
     max_word: F,
 }
 impl<F: ff::PrimeField> Deref for OverflowingBigNat<F> {
-    type Target = Vec<AssignedCell<F, F>>;
+    type Target = [AssignedCell<F, F>];
     fn deref(&self) -> &Self::Target {
-        &self.cells
+        self.cells.as_slice()
     }
 }
 
