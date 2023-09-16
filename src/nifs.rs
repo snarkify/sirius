@@ -2,10 +2,12 @@
 use crate::commitment::CommitmentKey;
 use crate::constants::NUM_CHALLENGE_BITS;
 use crate::plonk::{
-    PlonkInstance, PlonkStructure, RelaxedPlonkInstance, RelaxedPlonkWitness, TableData,
+    PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
+    TableData,
 };
 use crate::poseidon::{AbsorbInRO, ROTrait};
 use halo2_proofs::arithmetic::CurveAffine;
+use rayon::prelude::*;
 use std::marker::PhantomData;
 
 #[derive(Clone, Debug)]
@@ -15,6 +17,34 @@ pub struct NIFS<C: CurveAffine, RO: ROTrait<C>> {
 }
 
 impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
+    pub fn commit_cross_terms(
+        ck: &CommitmentKey<C>,
+        S: &PlonkStructure<C>,
+        U1: &RelaxedPlonkInstance<C>,
+        W1: &RelaxedPlonkWitness<C::ScalarExt>,
+        U2: &PlonkInstance<C>,
+        W2: &PlonkWitness<C::ScalarExt>,
+    ) -> (Vec<Vec<C::ScalarExt>>, Vec<C>) {
+        let gate = &S.gate;
+        let num_fixed = S.fixed_columns.len();
+        let num_row = S.fixed_columns[0].len();
+        let num_vars = gate.arity - num_fixed; // number of variables to be folded
+        let normalized = gate.fold_transform(num_fixed, num_vars);
+        let r_index = num_fixed + 2 * (num_vars + 1); // after adding u
+        let degree = gate.degree_for_folding(num_fixed);
+        let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
+            .map(|k| normalized.coeff_of((0, r_index), k))
+            .map(|multipoly| {
+                (0..num_row)
+                    .into_par_iter()
+                    .map(|row| multipoly.eval(row, S, U1, W1, &U2.to_relax(), &W2.to_relax()))
+                    .collect()
+            })
+            .collect();
+        let cross_term_commits: Vec<C> = cross_terms.iter().map(|v| ck.commit(&v[..])).collect();
+        (cross_terms, cross_term_commits)
+    }
+
     pub fn prove(
         ck: &CommitmentKey<C>,
         ro: &mut RO,
@@ -26,15 +56,18 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         (RelaxedPlonkInstance<C>, RelaxedPlonkWitness<C::ScalarExt>),
     ) {
         // TODO: hash gate into ro
-        let ps = td.plonk_structure(ck);
-        ps.absorb_into(ro);
-        let U2 = td.plonk_instance(ck);
+        let S = td.plonk_structure(ck);
+        S.absorb_into(ro);
+        let mut U2 = td.plonk_instance(ck);
+        U2.absorb_into(ro);
+        // y is used to combined multiple gates for instance U2
+        let y = ro.squeeze(NUM_CHALLENGE_BITS);
+        U2.y = y;
+
         let W2 = td.plonk_witness();
         U1.absorb_into(ro);
-        U2.absorb_into(ro);
-        let y = ro.squeeze(NUM_CHALLENGE_BITS);
-        // TODO: y is used to combined multiple gates for instance U1 and U2, add evaluation support for variable y
-        let (cross_terms, cross_term_commits) = td.commit_cross_terms(ck, U1, W1, y);
+        let (cross_terms, cross_term_commits) =
+            NIFS::<C, RO>::commit_cross_terms(ck, &S, U1, W1, &U2, &W2);
         let _ = cross_term_commits
             .iter()
             .map(|cm| ro.absorb_point(*cm))
@@ -54,14 +87,17 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
     pub fn verify(
         &self,
         ro: &mut RO,
-        S: PlonkStructure<C>,
+        S: &PlonkStructure<C>,
         U1: RelaxedPlonkInstance<C>,
         U2: PlonkInstance<C>,
     ) -> RelaxedPlonkInstance<C> {
         S.absorb_into(ro);
-        U1.absorb_into(ro);
+        let mut U2 = U2;
         U2.absorb_into(ro);
-        let _ = ro.squeeze(NUM_CHALLENGE_BITS);
+        let y = ro.squeeze(NUM_CHALLENGE_BITS);
+        U2.y = y;
+
+        U1.absorb_into(ro);
         let _ = self
             .cross_term_commits
             .iter()
@@ -76,7 +112,6 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
 mod tests {
     use super::*;
     use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
-    use crate::polynomial::Expression;
     use ff::PrimeField;
     use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
     use halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Error, Instance};
@@ -140,22 +175,6 @@ mod tests {
         }
     }
 
-    fn gate_expressions<F: PrimeField>(cs: &ConstraintSystem<F>) -> Vec<Vec<Expression<F>>> {
-        let num_fixed = cs.num_fixed_columns();
-        let num_instance = cs.num_instance_columns();
-        let gates: Vec<Vec<Expression<F>>> = cs
-            .gates()
-            .iter()
-            .map(|gate| {
-                gate.polynomials()
-                    .iter()
-                    .map(|expr| Expression::from_halo2_expr(expr, (num_fixed, num_instance)))
-                    .collect()
-            })
-            .collect();
-        gates
-    }
-
     fn fold_instances<C: CurveAffine<ScalarExt = F>, F: PrimeField, RO: ROTrait<C>>(
         ck: &CommitmentKey<C>,
         ro1: &mut RO,
@@ -166,20 +185,33 @@ mod tests {
         // we assume td.assembly() is already called
         let mut f_U = RelaxedPlonkInstance::default(td1.instance.len());
         let mut f_W = RelaxedPlonkWitness::default(td1.k, td1.advice.len());
+        let S = td1.plonk_structure(ck);
+        let U1 = td1.plonk_instance(ck);
+        let W1 = td1.plonk_witness();
+        let res = S.is_sat(ck, &U1, &W1);
+        assert!(res.is_ok());
+
         let (nifs, (_U, W)) = NIFS::prove(ck, ro1, td1, &f_U, &f_W);
-        let U = nifs.verify(ro2, td1.plonk_structure(ck), f_U, td1.plonk_instance(ck));
+        let U = nifs.verify(ro2, &S, f_U, U1);
         assert_eq!(U, _U);
 
         f_U = U;
         f_W = W;
+        let res = S.is_sat_relaxed(ck, &f_U, &f_W);
+        assert!(res.is_ok());
+
+        let U1 = td2.plonk_instance(ck);
+        let W1 = td2.plonk_witness();
+        let res = S.is_sat(ck, &U1, &W1);
+        assert!(res.is_ok());
+
         let (nifs, (_U, _W)) = NIFS::prove(ck, ro1, td2, &f_U, &f_W);
-        let U = nifs.verify(ro2, td2.plonk_structure(ck), f_U, td2.plonk_instance(ck));
+        let U = nifs.verify(ro2, &S, f_U, U1);
         assert_eq!(U, _U);
 
-        let ps = td1.plonk_structure(ck);
         f_U = _U;
         f_W = _W;
-        let res = ps.is_sat_relaxed(ck, &f_U, &f_W);
+        let res = S.is_sat_relaxed(ck, &f_U, &f_W);
         assert!(res.is_ok());
     }
 
@@ -193,7 +225,6 @@ mod tests {
     #[test]
     fn test_nifs() {
         use crate::poseidon::PoseidonHash;
-        use ff::Field;
         use halo2curves::pasta::{EqAffine, Fp, Fq};
         use poseidon::Spec;
 
@@ -201,17 +232,17 @@ mod tests {
         let mut inputs1 = Vec::new();
         let mut inputs2 = Vec::new();
         for i in 1..10 {
-            inputs1.push(Fp::from(i as u64));
-            inputs2.push(Fp::from(i as u64));
+            inputs1.push(Fp::from(i));
+            inputs2.push(Fp::from(i + 1));
         }
-        let circuit1 = TestCircuit::new(inputs1, Fp::ONE);
-        let output1 = Fp::from_str_vartime("45").unwrap();
+        let circuit1 = TestCircuit::new(inputs1, Fp::from_str_vartime("2").unwrap());
+        let output1 = Fp::from_str_vartime("4097").unwrap();
         let public_inputs1 = vec![output1];
         let mut td1 = TableData::<Fp>::new(K, public_inputs1);
         let _ = td1.assembly(&circuit1);
 
-        let circuit2 = TestCircuit::new(inputs2, Fp::ONE);
-        let output2 = Fp::from_str_vartime("45").unwrap();
+        let circuit2 = TestCircuit::new(inputs2, Fp::from_str_vartime("3").unwrap());
+        let output2 = Fp::from_str_vartime("93494").unwrap();
         let public_inputs2 = vec![output2];
         let mut td2 = TableData::<Fp>::new(K, public_inputs2);
         let _ = td2.assembly(&circuit2);

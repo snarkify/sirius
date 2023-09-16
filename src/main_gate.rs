@@ -384,8 +384,6 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
                 lhs_val + r_val * rhs_val,
             )?);
 
-            ctx.assign_fixed(|| "q_1[0]", self.config.q_1[0], F::ONE)?;
-            ctx.assign_fixed(|| "q_1[1]", self.config.q_1[1], F::ONE)?;
             ctx.assign_fixed(|| "q_i", self.config.q_i, F::ONE)?;
             ctx.assign_fixed(|| "q_m", self.config.q_m, F::ONE)?;
             ctx.assign_fixed(|| "q_o", self.config.q_o, -F::ONE)?;
@@ -499,7 +497,7 @@ mod tests {
             .map(|gate| {
                 gate.polynomials()
                     .iter()
-                    .map(|expr| Expression::from_halo2_expr(expr, (num_fixed, num_instance)))
+                    .map(|expr| Expression::from_halo2_expr(expr, num_fixed))
                     .collect()
             })
             .collect();
