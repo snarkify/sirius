@@ -25,26 +25,30 @@ pub struct BigNat<F: ff::PrimeField> {
     width: NonZeroUsize,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq)]
 pub enum Error {
     // Too big bigint: try to increase the number of limbs or their width
+    #[error("TODO")]
     TooBigBigint,
+    #[error("TODO")]
     ZeroLimbNotAllowed,
+    #[error("TODO")]
     AssignFixedError {
         annotation: String,
         err: Halo2PlonkError,
     },
+    #[error("TODO")]
     AssignAdviceError {
         annotation: String,
         err: Halo2PlonkError,
     },
+    #[error("TODO")]
     WrongColumnsSize {
         limbs_count: usize,
         columns_count: usize,
     },
-    LimbNotFound {
-        limb_index: usize,
-    },
+    #[error("TODO")]
+    LimbNotFound { limb_index: usize },
 }
 
 impl<F: ff::PrimeField> BigNat<F> {
@@ -83,6 +87,27 @@ impl<F: ff::PrimeField> BigNat<F> {
     ) -> Result<Self, Error> {
         // FIXME Simplify
         Self::from_bigint(&BigInt::from(input), limb_width, limbs_count_limit)
+    }
+
+    pub fn from_assigned_cells(
+        input: &[AssignedCell<F, F>],
+        limb_width: NonZeroUsize,
+        limbs_count_limit: NonZeroUsize,
+    ) -> Result<Self, Error> {
+        let limbs = input
+            .iter()
+            .map(|cell| cell.value().map(|v| *v).unwrap().unwrap_or(F::ZERO))
+            .map(|fv| {
+                if fv.to_repr().as_ref().len() <= limb_width.get() {
+                    Ok(fv)
+                } else {
+                    Err(Error::TooBigBigint)
+                }
+            })
+            .take(limbs_count_limit.get())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Self::from_limbs(limbs.into_iter(), limb_width)
     }
 
     pub fn from_bigint(
