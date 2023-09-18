@@ -1065,7 +1065,7 @@ mod tests {
         let lhs = BigNat::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
         let rhs = BigNat::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
         let prod = mult_with_overflow(&lhs, &rhs);
-        log::info!("prod {prod:?}");
+        log::info!("prod big {prod:?}");
 
         const K: u32 = 10;
         let ts = TestCircuit::<Fp>::new();
@@ -1075,6 +1075,28 @@ mod tests {
             vec![
                 lhs.limbs().to_vec(),
                 rhs.limbs().to_vec(),
+                prod.limbs().to_vec(),
+            ],
+        ) {
+            Ok(prover) => prover,
+            Err(e) => panic!("{:?}", e),
+        };
+        assert_eq!(prover.verify(), Ok(()));
+
+        let lhs = BigInt::from_u64(1).unwrap();
+        let rhs = BigInt::from_u64(5).unwrap();
+
+        let lhs = BigNat::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let rhs = BigNat::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let prod = mult_with_overflow(&lhs, &rhs);
+        log::info!("prod little {prod:?}");
+
+        let prover = match MockProver::run(
+            K,
+            &ts,
+            vec![
+                rhs.limbs().to_vec(),
+                lhs.limbs().to_vec(),
                 prod.limbs().to_vec(),
             ],
         ) {
