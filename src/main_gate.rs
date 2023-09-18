@@ -61,15 +61,13 @@ impl<'a, F: PrimeField> RegionCtx<'a, F> {
         &mut self,
         annotation: A,
         dst: Column<Advice>,
-        src: &AssignedCell<F, F>,
-    ) -> Result<AssignedValue<F>, Error>
+        src: impl AssignAdviceFrom<'a, F>,
+    ) -> Result<AssignedCell<F, F>, Error>
     where
         A: Fn() -> AR,
         AR: Into<String>,
     {
-        let cell = self.assign_advice(annotation, dst, src.value().map(|f| *f))?;
-        self.constrain_equal(cell.cell(), src.cell())?;
-        Ok(cell)
+        AssignAdviceFrom::assign_advice_from(self, annotation, dst, src)
     }
 
     pub fn assign_advice_from_instance<A, AR>(
@@ -104,6 +102,86 @@ impl<'a, F: PrimeField> RegionCtx<'a, F> {
         self.offset = offset
     }
 }
+
+mod assign_advice_from {
+    use super::*;
+
+    pub trait AssignAdviceFrom<'a, F: PrimeField> {
+        fn assign_advice_from<A, AR>(
+            ctx: &mut RegionCtx<'a, F>,
+            annotation: A,
+            dst: Column<Advice>,
+            src: Self,
+        ) -> Result<AssignedCell<F, F>, Error>
+        where
+            A: Fn() -> AR,
+            AR: Into<String>;
+    }
+
+    impl<'a, F: PrimeField> AssignAdviceFrom<'a, F> for &AssignedCell<F, F> {
+        fn assign_advice_from<A, AR>(
+            ctx: &mut RegionCtx<'a, F>,
+            annotation: A,
+            dst: Column<Advice>,
+            src: Self,
+        ) -> Result<AssignedCell<F, F>, Error>
+        where
+            A: Fn() -> AR,
+            AR: Into<String>,
+        {
+            let cell = ctx.assign_advice(annotation, dst, src.value().map(|f| *f))?;
+            ctx.constrain_equal(cell.cell(), src.cell())?;
+            Ok(cell)
+        }
+    }
+
+    impl<'a, F: PrimeField> AssignAdviceFrom<'a, F> for AssignedCell<F, F> {
+        fn assign_advice_from<A, AR>(
+            ctx: &mut RegionCtx<'a, F>,
+            annotation: A,
+            dst: Column<Advice>,
+            src: Self,
+        ) -> Result<AssignedCell<F, F>, Error>
+        where
+            A: Fn() -> AR,
+            AR: Into<String>,
+        {
+            AssignAdviceFrom::assign_advice_from(ctx, annotation, dst, &src)
+        }
+    }
+
+    impl<'a, F: PrimeField> AssignAdviceFrom<'a, F> for &F {
+        fn assign_advice_from<A, AR>(
+            ctx: &mut RegionCtx<'a, F>,
+            annotation: A,
+            dst: Column<Advice>,
+            src: Self,
+        ) -> Result<AssignedCell<F, F>, Error>
+        where
+            A: Fn() -> AR,
+            AR: Into<String>,
+        {
+            AssignAdviceFrom::assign_advice_from(ctx, annotation, dst, *src)
+        }
+    }
+
+    impl<'a, F: PrimeField> AssignAdviceFrom<'a, F> for F {
+        fn assign_advice_from<A, AR>(
+            ctx: &mut RegionCtx<'a, F>,
+            annotation: A,
+            dst: Column<Advice>,
+            src: Self,
+        ) -> Result<AssignedCell<F, F>, Error>
+        where
+            A: Fn() -> AR,
+            AR: Into<String>,
+        {
+            let cell = ctx.assign_advice(annotation, dst, Value::known(src))?;
+            Ok(cell)
+        }
+    }
+}
+pub use assign_advice_from::AssignAdviceFrom;
 
 #[derive(Clone, Debug)]
 pub enum WrapValue<F: PrimeField> {

@@ -20,6 +20,7 @@ poseidon = { git = "https://github.com/privacy-scaling-explorations/poseidon", r
 log = "0.4.20"
 itertools = "0.11.0"
 bitter = "0.6.1"
+thiserror = "1.0.48"
 
 [dev-dependencies]
 env_logger = "0.10.0"
