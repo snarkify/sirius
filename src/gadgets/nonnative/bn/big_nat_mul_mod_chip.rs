@@ -1,5 +1,5 @@
 use std::{
-    cmp, iter,
+    cmp, fmt, iter,
     num::NonZeroUsize,
     ops::Deref,
     ops::{Add, Div, Mul, Sub},
@@ -186,13 +186,16 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     /// where `n` - limbs count of `lhs`, `m` limbs cout of `rhs`
     ///
     /// Returns the cells that contain the product coefficients
-    /// TODO: carry handling or check `p_k` < `F::MODULUS`
     fn assign_mult<'a>(
         &self,
         ctx: &mut RegionCtx<'a, F>,
-        lhs: &[impl AssignAdviceFrom<'a, F> + Clone],
-        rhs: &[impl AssignAdviceFrom<'a, F> + Clone],
+        lhs: &[impl AssignAdviceFrom<'a, F> + Clone + fmt::Debug],
+        rhs: &[impl AssignAdviceFrom<'a, F> + Clone + fmt::Debug],
     ) -> Result<MultContext<F>, Error> {
+        trace!("mult ctx: {ctx:?}");
+        trace!("mult lhs: {lhs:?}");
+        trace!("mult rhs: {rhs:?}");
+
         let lhs_column = &self.config().state[0];
         let rhs_column = &self.config().state[1];
         let prev_part_column = &self.config().input;
@@ -236,18 +239,24 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 
                 match lhs_cells[i] {
                     Some(ref cell) => {
+                        trace!(
+                            "Check prev lhs limb ({cell:?} is equal to new one {lhs_limb_cell:?}"
+                        );
                         ctx.constrain_equal(cell.cell(), lhs_limb_cell.cell())?;
                     }
                     None => {
                         lhs_cells[i] = Some(lhs_limb_cell);
                     }
                 }
-                match rhs_cells[i] {
+                match rhs_cells[j] {
                     Some(ref cell) => {
+                        trace!(
+                            "Check prev rhs limb ({cell:?} is equal to new one {rhs_limb_cell:?}"
+                        );
                         ctx.constrain_equal(cell.cell(), rhs_limb_cell.cell())?;
                     }
                     None => {
-                        rhs_cells[i] = Some(rhs_limb_cell);
+                        rhs_cells[j] = Some(rhs_limb_cell);
                     }
                 }
 
@@ -904,6 +913,7 @@ mod tests {
         dev::MockProver,
         plonk::{Advice, Circuit, Column, Instance},
     };
+    use halo2curves::pasta::Fp;
     use num_traits::FromPrimitive;
 
     use super::*;
@@ -917,7 +927,8 @@ mod tests {
         rhs: Column<Instance>,
         output: Column<Instance>,
 
-        formal: Column<Advice>,
+        advice_lhs: Column<Advice>,
+        advice_rhs: Column<Advice>,
     }
 
     struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits> {
@@ -942,7 +953,11 @@ mod tests {
         }
 
         fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
-            let formal = meta.advice_column();
+            let advice_lhs = meta.advice_column();
+            meta.enable_equality(advice_lhs);
+
+            let advice_rhs = meta.advice_column();
+            meta.enable_equality(advice_rhs);
 
             let lhs = meta.instance_column();
             meta.enable_equality(lhs);
@@ -956,7 +971,8 @@ mod tests {
             Config {
                 lhs,
                 rhs,
-                formal,
+                advice_lhs,
+                advice_rhs,
                 output,
                 main_gate_config: MainGate::<F, 2>::configure(meta),
             }
@@ -985,11 +1001,11 @@ mod tests {
                         let limbs_count_limit = LIMBS_COUNT_LIMIT.get();
                         let (lhs, rhs): (Vec<_>, Vec<_>) = (0..limbs_count_limit)
                             .map(|limb_index| {
-                                (
+                                let res = (
                                     region
                                         .assign_advice_from_instance(
                                             || format!("lhs {limb_index}"),
-                                            config.formal,
+                                            config.advice_lhs,
                                             config.lhs,
                                             limb_index,
                                         )
@@ -997,12 +1013,16 @@ mod tests {
                                     region
                                         .assign_advice_from_instance(
                                             || format!("rhs {limb_index}"),
-                                            config.formal,
+                                            config.advice_rhs,
                                             config.rhs,
-                                            limbs_count_limit + limb_index,
+                                            limb_index,
                                         )
                                         .unwrap(),
-                                )
+                                );
+
+                                region.next();
+
+                                res
                             })
                             .unzip();
 
@@ -1019,16 +1039,33 @@ mod tests {
         }
     }
 
-    use halo2curves::pasta::Fp;
+    fn mult_with_overflow<F: PrimeField>(lhs: &BigNat<F>, rhs: &BigNat<F>) -> BigNat<F> {
+        let lhs_limbs_count = lhs.limbs().len();
+        let rhs_limbs_count = rhs.limbs().len();
+
+        let mut production_cells: Vec<Option<F>> =
+            vec![None; lhs_limbs_count + rhs_limbs_count - 1];
+
+        for (i, lhs_limb) in lhs.limbs().iter().enumerate() {
+            for (j, rhs_limb) in rhs.limbs().iter().enumerate() {
+                let k = i + j;
+                production_cells[k] =
+                    Some(production_cells[k].take().unwrap_or(F::ZERO) + (*lhs_limb * rhs_limb));
+            }
+        }
+
+        BigNat::from_limbs(production_cells.into_iter().flatten(), LIMB_WIDTH).unwrap()
+    }
 
     #[test_log::test]
-    fn test_little_bn_mult() {
-        let lhs = BigInt::from_u64(100).unwrap();
-        let rhs = BigInt::from_u64(100).unwrap();
+    fn test_bn_mult_without_overflow() {
+        let lhs = BigInt::from_u64(u64::MAX).unwrap() * BigInt::from_u64(100).unwrap();
+        let rhs = BigInt::from_u64(u64::MAX).unwrap() * BigInt::from_u64(u64::MAX).unwrap();
 
-        let prod = BigNat::from_bigint(&(&lhs * &rhs), LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
         let lhs = BigNat::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
         let rhs = BigNat::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let prod = mult_with_overflow(&lhs, &rhs);
+        log::info!("prod {prod:?}");
 
         const K: u32 = 10;
         let ts = TestCircuit::<Fp>::new();
