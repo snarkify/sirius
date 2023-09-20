@@ -361,16 +361,9 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             limb_width: {limb_width},
             carry_bits: {carry_bits:?},
             limbs_per_group: {limbs_per_group},
-            group_count: {group_count}
-        ",
+            group_count: {group_count}",
             bignat_cells.cells.len()
         );
-
-        let mut grouped = vec![Option::<AssignedCell<F, F>>::None; group_count];
-
-        let limb_block = iter::successors(Some(F::ONE), |l| Some(l.double()))
-            .nth(limb_width)
-            .unwrap();
 
         let bignat_limb_column = &self.config().state[0];
         let bignat_limb_shift = &self.config().q_1[0];
@@ -380,59 +373,77 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         let group_output_value_column = &self.config().out;
         let group_output_selector = &self.config().q_o;
 
-        let mut shift = F::ONE;
+        let limb_block = iter::successors(Some(F::ONE), |l| Some(l.double()))
+            .nth(limb_width)
+            .unwrap();
 
-        for (limb_index, original_limb_cell) in bignat_cells.iter().enumerate() {
-            let group_index = limb_index / limbs_per_group;
-            debug!("limb index {limb_index}, group_index {group_index}");
+        let grouped = bignat_cells
+            .iter()
+            .enumerate() // add `limb_index`
+            .chunks(limbs_per_group) // group limbs 
+            .into_iter()
+            .enumerate() // add `group_index`
+            .map(|(group_index, limbs_for_group)| {
+                // sum limbs from one group into one cell
+                limbs_for_group
+                    .zip(iter::successors(Some(F::ONE), |l| Some(limb_block * l))) // shift for every limbs in group
+                    .try_fold(
+                        None,
+                        |mut prev_group_val, ((limb_index, original_limb_cell), shift)| {
+                            let limb_cell = ctx.assign_advice_from(
+                                || format!("{limb_index} limb for {group_index} group"),
+                                *bignat_limb_column,
+                                original_limb_cell,
+                            )?;
 
-            if limb_index % limbs_per_group == 0 {
-                shift = F::ONE;
-            }
+                            ctx.assign_fixed(|| "shift for limb", *bignat_limb_shift, shift)?;
 
-            let limb_cell = ctx.assign_advice_from(
-                || format!("{limb_index} limb for {group_index} group"),
-                *bignat_limb_column,
-                original_limb_cell,
-            )?;
+                            let mut new_group_value =
+                                limb_cell.value().map(|f| *f) * Value::known(shift);
 
-            ctx.assign_fixed(|| "shift for limb", *bignat_limb_shift, shift)?;
+                            ctx.assign_fixed(
+                                || format!("{group_index} group value selector for sum with {limb_index} limb"),
+                                *current_group_selector,
+                                F::ONE,
+                            )?;
 
-            let mut new_group_value = limb_cell.value().map(|f| *f) * Value::known(shift);
+                            if let Some(prev_partial_group_val) = prev_group_val.take() {
+                                let prev_group_val = ctx.assign_advice_from(
+                                    || {
+                                        format!(
+                                            "{group_index} group value for sum with {limb_index} limb"
+                                        )
+                                    },
+                                    *current_group_value_column,
+                                    &prev_partial_group_val,
+                                )?;
 
-            ctx.assign_fixed(
-                || format!("{group_index} group value selector for sum with {limb_index} limb"),
-                *current_group_selector,
-                F::ONE,
-            )?;
-            if let Some(prev_partial_group_val) = grouped[group_index].take() {
-                let prev_group_val = ctx.assign_advice_from(
-                    || format!("{group_index} group value for sum with {limb_index} limb"),
-                    *current_group_value_column,
-                    &prev_partial_group_val,
-                )?;
+                                new_group_value = new_group_value + prev_group_val.value();
+                            };
 
-                new_group_value = new_group_value + prev_group_val.value();
-            };
+                            let group_val = ctx.assign_advice(
+                                || format!("{limb_index} limb for {group_index} group"),
+                                *group_output_value_column,
+                                new_group_value,
+                            )?;
 
-            grouped[group_index] = Some(ctx.assign_advice(
-                || format!("{limb_index} limb for {group_index} group"),
-                *group_output_value_column,
-                new_group_value,
-            )?);
+                            ctx.assign_fixed(
+                                || "selector for regroup output",
+                                *group_output_selector,
+                                -F::ONE,
+                            )?;
 
-            ctx.assign_fixed(
-                || "selector for regroup output",
-                *group_output_selector,
-                -F::ONE,
-            )?;
+                            ctx.next();
 
-            shift.mul_assign(&limb_block);
-            ctx.next();
-        }
+                            Result::<_, Error>::Ok(Some(group_val))
+                        })
+                        .transpose()
+                        .expect("Unreachable, empty group not allowed")
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(GroupedBigNat {
-            cells: grouped.into_iter().flatten().collect(),
+            cells: grouped,
             max_word: bignat_cells.max_word,
         })
     }
