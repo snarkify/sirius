@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, mem};
 
 use halo2_proofs::{
     circuit::SimpleFloorPlanner,
@@ -91,11 +91,7 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
             BigNatMulModChip::<F>::try_new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT)
                 .unwrap();
 
-        let (assigned_mult, assigned_sum, grouped_mult): (
-            Vec<AssignedCell<F, F>>,
-            Vec<AssignedCell<F, F>>,
-            Vec<AssignedCell<F, F>>,
-        ) = layouter
+        let (assigned_mult, assigned_sum, grouped_mult): (Vec<_>, Vec<_>, Vec<_>) = layouter
             .assign_region(
                 || "assign_mult",
                 |region| {
@@ -128,7 +124,9 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
                             res
                         })
                         .unzip();
+
                     let mult = chip.assign_mult(&mut region, &lhs, &rhs).unwrap();
+
                     let sum = chip
                         .assign_sum(
                             &mut region,
@@ -147,6 +145,36 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
                         .unwrap();
 
                     let grouped_mult = chip.group_limbs(&mut region, mult.res.clone()).unwrap();
+
+                    // TODO Move to separate test
+                    for bytes in [
+                        u128::MAX,
+                        u128::from_le_bytes((0u8..16).collect::<Vec<_>>().try_into().unwrap()),
+                        0u128,
+                    ] {
+                        let number = F::from_u128(bytes);
+                        let bits_cells = chip
+                            .check_bits(
+                                &mut region,
+                                number.to_repr().as_ref(),
+                                NonZeroUsize::new(mem::size_of::<u128>() * 8).unwrap(),
+                            )
+                            .unwrap();
+
+                        if let Some(accumulated) =
+                            itertools::multizip((bits_cells.iter(), get_power_of_two_iter::<F>()))
+                                .try_fold(F::ZERO, |acc, (bit_cell, shift)| {
+                                    Some(
+                                        acc + bit_cell.value().unwrap().map(|bit| {
+                                            assert!(*bit == F::ZERO || *bit == F::ONE);
+                                            shift * bit
+                                        })?,
+                                    )
+                                })
+                        {
+                            assert_eq!(accumulated, number);
+                        }
+                    }
 
                     Ok((mult.res.cells, sum.res.cells, grouped_mult.cells))
                 },
