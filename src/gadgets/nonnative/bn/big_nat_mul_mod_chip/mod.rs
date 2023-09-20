@@ -347,16 +347,29 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         ctx: &mut RegionCtx<'_, F>,
         bignat_cells: OverflowingBigNat<F>,
     ) -> Result<GroupedBigNat<F>, Error> {
+        trace!("Group {} limbs: {:?}", bignat_cells.len(), bignat_cells);
+
         let limb_width = self.limb_width.get();
         let carry_bits = calc_carry_bits(&big_nat::f_to_nat(&bignat_cells.max_word), limb_width)?;
         let limbs_per_group = calc_limbs_per_group::<F>(carry_bits, limb_width)?;
 
-        let group_count = bignat_cells.len().sub(1).div(limbs_per_group.add(1));
+        let group_count = bignat_cells.cells.len().sub(1).div(limbs_per_group).add(1);
+
+        debug!(
+            "group {bignat_cells:?}:
+            limbs_count: {}
+            limb_width: {limb_width},
+            carry_bits: {carry_bits:?},
+            limbs_per_group: {limbs_per_group},
+            group_count: {group_count}
+        ",
+            bignat_cells.cells.len()
+        );
 
         let mut grouped = vec![Option::<AssignedCell<F, F>>::None; group_count];
 
         let limb_block = iter::successors(Some(F::ONE), |l| Some(l.double()))
-            .nth(self.limb_width.get())
+            .nth(limb_width)
             .unwrap();
 
         let bignat_limb_column = &self.config().state[0];
@@ -368,15 +381,17 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         let group_output_selector = &self.config().q_o;
 
         let mut shift = F::ONE;
-        for (index, original_limb_cell) in bignat_cells.iter().enumerate() {
-            let group_index = index / limbs_per_group;
 
-            if index % limbs_per_group == 0 {
+        for (limb_index, original_limb_cell) in bignat_cells.iter().enumerate() {
+            let group_index = limb_index / limbs_per_group;
+            debug!("limb index {limb_index}, group_index {group_index}");
+
+            if limb_index % limbs_per_group == 0 {
                 shift = F::ONE;
             }
 
             let limb_cell = ctx.assign_advice_from(
-                || format!("{index} limb for {group_index} group"),
+                || format!("{limb_index} limb for {group_index} group"),
                 *bignat_limb_column,
                 original_limb_cell,
             )?;
@@ -386,13 +401,13 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             let mut new_group_value = limb_cell.value().map(|f| *f) * Value::known(shift);
 
             ctx.assign_fixed(
-                || format!("{group_index} group value selector for sum with {index} limb"),
+                || format!("{group_index} group value selector for sum with {limb_index} limb"),
                 *current_group_selector,
                 F::ONE,
             )?;
             if let Some(prev_partial_group_val) = grouped[group_index].take() {
                 let prev_group_val = ctx.assign_advice_from(
-                    || format!("{group_index} group value for sum with {index} limb"),
+                    || format!("{group_index} group value for sum with {limb_index} limb"),
                     *current_group_value_column,
                     &prev_partial_group_val,
                 )?;
@@ -401,7 +416,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             };
 
             grouped[group_index] = Some(ctx.assign_advice(
-                || format!("{index} limb for {group_index} group"),
+                || format!("{limb_index} limb for {group_index} group"),
                 *group_output_value_column,
                 new_group_value,
             )?);
@@ -771,7 +786,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct OverflowingBigNat<F: ff::PrimeField> {
     cells: Vec<AssignedCell<F, F>>,
     max_word: F,
@@ -888,7 +903,13 @@ fn calc_carry_bits(max_word: &BigInt, limb_width: usize) -> Result<NonZeroUsize,
         .add(0.1);
 
     if carry_bits <= usize::MAX as f64 {
-        Ok(NonZeroUsize::new(carry_bits as usize).expect("TODO"))
+        Ok(NonZeroUsize::new(carry_bits as usize).unwrap_or_else(|| {
+            panic!(
+                "
+            Zero carry bits with max_word = {max_word} & limb_width = {limb_width}
+            "
+            )
+        }))
     } else {
         Err(Error::CarryBitsCalculate)
     }
