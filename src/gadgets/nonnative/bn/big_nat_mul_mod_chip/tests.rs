@@ -18,6 +18,7 @@ struct Config {
     lhs: Column<Instance>,
     rhs: Column<Instance>,
     assigned_mult: Column<Instance>,
+    grouped_assigned_mult: Column<Instance>,
     assigned_sum: Column<Instance>,
 
     advice_lhs: Column<Advice>,
@@ -64,6 +65,9 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
         let assigned_sum = meta.instance_column();
         meta.enable_equality(assigned_sum);
 
+        let grouped_assigned_mult = meta.instance_column();
+        meta.enable_equality(grouped_assigned_mult);
+
         Config {
             lhs,
             rhs,
@@ -71,6 +75,7 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
             advice_rhs,
             assigned_mult,
             assigned_sum,
+            grouped_assigned_mult,
             main_gate_config: MainGate::<F, 2>::configure(meta),
         }
     }
@@ -86,64 +91,67 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
             BigNatMulModChip::<F>::try_new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT)
                 .unwrap();
 
-        let (assigned_mult, assigned_sum): (Vec<AssignedCell<F, F>>, Vec<AssignedCell<F, F>>) =
-            layouter
-                .assign_region(
-                    || "assign_mult",
-                    |region| {
-                        let mut region = RegionCtx::new(region, 0);
+        let (assigned_mult, assigned_sum, grouped_mult): (
+            Vec<AssignedCell<F, F>>,
+            Vec<AssignedCell<F, F>>,
+            Vec<AssignedCell<F, F>>,
+        ) = layouter
+            .assign_region(
+                || "assign_mult",
+                |region| {
+                    let mut region = RegionCtx::new(region, 0);
 
-                        let limbs_count_limit = LIMBS_COUNT_LIMIT.get();
-                        let (lhs, rhs): (Vec<_>, Vec<_>) = (0..limbs_count_limit)
-                            .map(|limb_index| {
-                                let res = (
-                                    region
-                                        .assign_advice_from_instance(
-                                            || format!("lhs {limb_index}"),
-                                            config.advice_lhs,
-                                            config.lhs,
-                                            limb_index,
-                                        )
-                                        .unwrap(),
-                                    region
-                                        .assign_advice_from_instance(
-                                            || format!("rhs {limb_index}"),
-                                            config.advice_rhs,
-                                            config.rhs,
-                                            limb_index,
-                                        )
-                                        .unwrap(),
-                                );
-
-                                region.next();
-
-                                res
-                            })
-                            .unzip();
-
-                        Ok((
-                            chip.assign_mult(&mut region, &lhs, &rhs).unwrap().res.cells,
-                            chip.assign_sum(
-                                &mut region,
-                                &OverflowingBigNat {
-                                    cells: lhs.clone(),
-                                    max_word: big_nat::nat_to_f::<F>(
-                                        &big_nat::get_big_int_with_n_ones(LIMB_WIDTH.get()),
+                    let limbs_count_limit = LIMBS_COUNT_LIMIT.get();
+                    let (lhs, rhs): (Vec<_>, Vec<_>) = (0..limbs_count_limit)
+                        .map(|limb_index| {
+                            let res = (
+                                region
+                                    .assign_advice_from_instance(
+                                        || format!("lhs {limb_index}"),
+                                        config.advice_lhs,
+                                        config.lhs,
+                                        limb_index,
                                     )
-                                    .unwrap_or_default(),
-                                },
-                                &rhs.iter()
-                                    .take(limbs_count_limit)
-                                    .map(|c| *c.value().unwrap().unwrap_or(&F::ZERO))
-                                    .collect::<Box<[_]>>(),
-                            )
-                            .unwrap()
-                            .res
-                            .cells,
-                        ))
-                    },
-                )
-                .unwrap();
+                                    .unwrap(),
+                                region
+                                    .assign_advice_from_instance(
+                                        || format!("rhs {limb_index}"),
+                                        config.advice_rhs,
+                                        config.rhs,
+                                        limb_index,
+                                    )
+                                    .unwrap(),
+                            );
+
+                            region.next();
+
+                            res
+                        })
+                        .unzip();
+                    let mult = chip.assign_mult(&mut region, &lhs, &rhs).unwrap();
+                    let sum = chip
+                        .assign_sum(
+                            &mut region,
+                            &OverflowingBigNat {
+                                cells: lhs.clone(),
+                                max_word: big_nat::nat_to_f::<F>(
+                                    &big_nat::get_big_int_with_n_ones(LIMB_WIDTH.get()),
+                                )
+                                .unwrap_or_default(),
+                            },
+                            &rhs.iter()
+                                .take(limbs_count_limit)
+                                .map(|c| *c.value().unwrap().unwrap_or(&F::ZERO))
+                                .collect::<Box<[_]>>(),
+                        )
+                        .unwrap();
+
+                    let grouped_mult = chip.group_limbs(&mut region, mult.res.clone()).unwrap();
+
+                    Ok((mult.res.cells, sum.res.cells, grouped_mult.cells))
+                },
+            )
+            .unwrap();
 
         for (offset, limb) in assigned_mult.into_iter().enumerate() {
             layouter.constrain_instance(limb.cell(), config.assigned_mult, offset)?;
@@ -151,6 +159,10 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
 
         for (offset, limb) in assigned_sum.into_iter().enumerate() {
             layouter.constrain_instance(limb.cell(), config.assigned_sum, offset)?;
+        }
+
+        for (offset, limb) in grouped_mult.into_iter().enumerate() {
+            layouter.constrain_instance(limb.cell(), config.grouped_assigned_mult, offset)?;
         }
 
         Ok(())
@@ -206,6 +218,32 @@ fn sum_with_overflow<F: PrimeField>(lhs: &BigNat<F>, rhs: &BigNat<F>) -> BigNat<
     .unwrap()
 }
 
+fn group_limbs<F: PrimeField>(inp: &BigNat<F>, max_word: BigInt) -> BigNat<F> {
+    let limb_width = LIMB_WIDTH.get();
+    let limbs_per_group =
+        calc_limbs_per_group::<F>(calc_carry_bits(&max_word, limb_width).unwrap(), limb_width)
+            .unwrap();
+
+    let limb_block = iter::successors(Some(F::ONE), |l| Some(l.double()))
+        .nth(limb_width)
+        .unwrap();
+
+    BigNat::from_limbs(
+        inp.limbs()
+            .iter()
+            .chunks(limbs_per_group)
+            .into_iter()
+            .map(|limbs_for_group| {
+                limbs_for_group
+                    .zip(iter::successors(Some(F::ONE), |l| Some(limb_block * l)))
+                    .map(|(limb, shift)| shift * limb)
+                    .sum()
+            }),
+        LIMB_WIDTH,
+    )
+    .unwrap()
+}
+
 #[test_log::test]
 fn test_bn() {
     let lhs = BigInt::from_u64(u64::MAX).unwrap() * BigInt::from_u64(100).unwrap();
@@ -218,6 +256,10 @@ fn test_bn() {
     let sum = sum_with_overflow(&lhs, &rhs);
     log::info!("sum {sum:?}");
 
+    let max_word = big_nat::get_big_int_with_n_ones(LIMB_WIDTH.get());
+    let grouped = group_limbs(&prod, &max_word * &max_word);
+    log::info!("grouped {grouped:?}");
+
     const K: u32 = 10;
     let ts = TestCircuit::<Fp>::new();
     let prover = match MockProver::run(
@@ -228,6 +270,7 @@ fn test_bn() {
             rhs.limbs().to_vec(),
             prod.limbs().to_vec(),
             sum.limbs().to_vec(),
+            grouped.limbs().to_vec(),
         ],
     ) {
         Ok(prover) => prover,
