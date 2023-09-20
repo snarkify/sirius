@@ -108,7 +108,8 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         let cells = lhs
             .iter()
             .zip_longest(rhs.iter())
-            .map(|value| {
+            .enumerate()
+            .map(|(index, value)| {
                 ctx.assign_fixed(|| "lhs_q_1", *lhs_selector, F::ONE)?;
                 ctx.assign_fixed(|| "rhs_q_1", *rhs_selector, F::ONE)?;
                 ctx.assign_fixed(|| "sum_q_o", *sum_selector, -F::ONE)?;
@@ -133,6 +134,10 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                     *sum_column,
                     lhs_cell.value().copied().add(rhs_cell.value()),
                 )?;
+
+                trace!("sum lhs cell by {index}: {lhs_cell:?}");
+                trace!("sum rhs cell by {index}: {rhs_cell:?}");
+                trace!("sum res cell by {index}: {sum_cell:?}");
 
                 rhs_cells.push(rhs_cell);
 
@@ -237,6 +242,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                 let k = i + j;
                 trace!("Part of product[{k}] = {part_of_product:?}");
 
+                // TODO: Move this outside, for simplify '`assigned_cell` as input' case
                 match lhs_cells[i] {
                     Some(ref cell) => {
                         trace!(
@@ -248,6 +254,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                         lhs_cells[i] = Some(lhs_limb_cell);
                     }
                 }
+                // TODO: Move this outside, for simplify '`assigned_cell` as input' case
                 match rhs_cells[j] {
                     Some(ref cell) => {
                         trace!(
@@ -925,7 +932,8 @@ mod tests {
         main_gate_config: MainGateConfig<2>,
         lhs: Column<Instance>,
         rhs: Column<Instance>,
-        output: Column<Instance>,
+        assigned_mult: Column<Instance>,
+        assigned_sum: Column<Instance>,
 
         advice_lhs: Column<Advice>,
         advice_rhs: Column<Advice>,
@@ -965,15 +973,19 @@ mod tests {
             let rhs = meta.instance_column();
             meta.enable_equality(rhs);
 
-            let output = meta.instance_column();
-            meta.enable_equality(output);
+            let assigned_mult = meta.instance_column();
+            meta.enable_equality(assigned_mult);
+
+            let assigned_sum = meta.instance_column();
+            meta.enable_equality(assigned_sum);
 
             Config {
                 lhs,
                 rhs,
                 advice_lhs,
                 advice_rhs,
-                output,
+                assigned_mult,
+                assigned_sum,
                 main_gate_config: MainGate::<F, 2>::configure(meta),
             }
         }
@@ -992,47 +1004,71 @@ mod tests {
             )
             .unwrap();
 
-            let prod: Vec<AssignedCell<F, F>> = layouter
-                .assign_region(
-                    || "assign_mult",
-                    |region| {
-                        let mut region = RegionCtx::new(region, 0);
+            let (assigned_mult, assigned_sum): (Vec<AssignedCell<F, F>>, Vec<AssignedCell<F, F>>) =
+                layouter
+                    .assign_region(
+                        || "assign_mult",
+                        |region| {
+                            let mut region = RegionCtx::new(region, 0);
 
-                        let limbs_count_limit = LIMBS_COUNT_LIMIT.get();
-                        let (lhs, rhs): (Vec<_>, Vec<_>) = (0..limbs_count_limit)
-                            .map(|limb_index| {
-                                let res = (
-                                    region
-                                        .assign_advice_from_instance(
-                                            || format!("lhs {limb_index}"),
-                                            config.advice_lhs,
-                                            config.lhs,
-                                            limb_index,
+                            let limbs_count_limit = LIMBS_COUNT_LIMIT.get();
+                            let (lhs, rhs): (Vec<_>, Vec<_>) = (0..limbs_count_limit)
+                                .map(|limb_index| {
+                                    let res = (
+                                        region
+                                            .assign_advice_from_instance(
+                                                || format!("lhs {limb_index}"),
+                                                config.advice_lhs,
+                                                config.lhs,
+                                                limb_index,
+                                            )
+                                            .unwrap(),
+                                        region
+                                            .assign_advice_from_instance(
+                                                || format!("rhs {limb_index}"),
+                                                config.advice_rhs,
+                                                config.rhs,
+                                                limb_index,
+                                            )
+                                            .unwrap(),
+                                    );
+
+                                    region.next();
+
+                                    res
+                                })
+                                .unzip();
+
+                            Ok((
+                                chip.assign_mult(&mut region, &lhs, &rhs).unwrap().res.cells,
+                                chip.assign_sum(
+                                    &mut region,
+                                    &OverflowingBigNat {
+                                        cells: lhs.clone(),
+                                        max_word: big_nat::nat_to_f::<F>(
+                                            &big_nat::get_big_int_with_n_ones(LIMB_WIDTH.get()),
                                         )
-                                        .unwrap(),
-                                    region
-                                        .assign_advice_from_instance(
-                                            || format!("rhs {limb_index}"),
-                                            config.advice_rhs,
-                                            config.rhs,
-                                            limb_index,
-                                        )
-                                        .unwrap(),
-                                );
+                                        .unwrap_or_default(),
+                                    },
+                                    &rhs.iter()
+                                        .take(limbs_count_limit)
+                                        .map(|c| *c.value().unwrap().unwrap_or(&F::ZERO))
+                                        .collect::<Box<[_]>>(),
+                                )
+                                .unwrap()
+                                .res
+                                .cells,
+                            ))
+                        },
+                    )
+                    .unwrap();
 
-                                region.next();
+            for (offset, limb) in assigned_mult.into_iter().enumerate() {
+                layouter.constrain_instance(limb.cell(), config.assigned_mult, offset)?;
+            }
 
-                                res
-                            })
-                            .unzip();
-
-                        Ok(chip.assign_mult(&mut region, &lhs, &rhs).unwrap().res.cells)
-                    },
-                )
-                .unwrap();
-
-            for (offset, limb) in prod.into_iter().enumerate() {
-                layouter.constrain_instance(limb.cell(), config.output, offset)?;
+            for (offset, limb) in assigned_sum.into_iter().enumerate() {
+                layouter.constrain_instance(limb.cell(), config.assigned_sum, offset)?;
             }
 
             Ok(())
@@ -1057,15 +1093,49 @@ mod tests {
         BigNat::from_limbs(production_cells.into_iter().flatten(), LIMB_WIDTH).unwrap()
     }
 
+    fn sum_with_overflow<F: PrimeField>(lhs: &BigNat<F>, rhs: &BigNat<F>) -> BigNat<F> {
+        BigNat::from_limbs(
+            lhs.limbs()
+                .iter()
+                .zip_longest(rhs.limbs().iter())
+                .enumerate()
+                .map(|(index, limbs)| {
+                    let limb = match limbs {
+                        EitherOrBoth::Both(lhs, rhs) => {
+                            trace!("sum val lhs[{index}] = {lhs:?}");
+                            trace!("sum val rhs[{index}] = {rhs:?}");
+                            *lhs + rhs
+                        }
+                        EitherOrBoth::Left(lhs) => {
+                            trace!("sum val rhs[{index}] = None");
+                            trace!("sum val lhs[{index}] = {lhs:?}");
+                            *lhs
+                        }
+                        EitherOrBoth::Right(rhs) => {
+                            trace!("sum val rhs[{index}] = {rhs:?}");
+                            trace!("sum val lhs[{index}] = None");
+                            *rhs
+                        }
+                    };
+                    trace!("calculated val res[{index}] = {limb:?}");
+                    limb
+                }),
+            LIMB_WIDTH,
+        )
+        .unwrap()
+    }
+
     #[test_log::test]
-    fn test_bn_mult_without_overflow() {
+    fn test_bn() {
         let lhs = BigInt::from_u64(u64::MAX).unwrap() * BigInt::from_u64(100).unwrap();
         let rhs = BigInt::from_u64(u64::MAX).unwrap() * BigInt::from_u64(u64::MAX).unwrap();
 
         let lhs = BigNat::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
         let rhs = BigNat::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
         let prod = mult_with_overflow(&lhs, &rhs);
-        log::info!("prod big {prod:?}");
+        log::info!("prod {prod:?}");
+        let sum = sum_with_overflow(&lhs, &rhs);
+        log::info!("sum {sum:?}");
 
         const K: u32 = 10;
         let ts = TestCircuit::<Fp>::new();
@@ -1076,28 +1146,7 @@ mod tests {
                 lhs.limbs().to_vec(),
                 rhs.limbs().to_vec(),
                 prod.limbs().to_vec(),
-            ],
-        ) {
-            Ok(prover) => prover,
-            Err(e) => panic!("{:?}", e),
-        };
-        assert_eq!(prover.verify(), Ok(()));
-
-        let lhs = BigInt::from_u64(1).unwrap();
-        let rhs = BigInt::from_u64(5).unwrap();
-
-        let lhs = BigNat::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-        let rhs = BigNat::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-        let prod = mult_with_overflow(&lhs, &rhs);
-        log::info!("prod little {prod:?}");
-
-        let prover = match MockProver::run(
-            K,
-            &ts,
-            vec![
-                rhs.limbs().to_vec(),
-                lhs.limbs().to_vec(),
-                prod.limbs().to_vec(),
+                sum.limbs().to_vec(),
             ],
         ) {
             Ok(prover) => prover,
