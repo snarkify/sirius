@@ -5,7 +5,7 @@ use std::{
     ops::{Add, Div, Mul, Sub},
 };
 
-use bitter::{BigEndianReader, BitReader};
+use bitter::{BitReader, LittleEndianReader};
 use ff::PrimeField;
 use halo2_proofs::circuit::{AssignedCell, Chip, Value};
 use itertools::{EitherOrBoth, Itertools};
@@ -454,6 +454,9 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         lhs: GroupedBigNat<F>,
         rhs: GroupedBigNat<F>,
     ) -> Result<(), Error> {
+        debug!("equal check lhs {lhs:?}");
+        debug!("equal check rhs {rhs:?}");
+
         let limb_width = self.limb_width.get();
 
         // FIXME
@@ -463,12 +466,15 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         );
         let max_word: F = big_nat::nat_to_f(&max_word_bn).unwrap();
 
+        debug!("max word: {max_word_bn}");
+
         let target_base_bn = BigInt::one() << limb_width;
         let target_base: F = big_nat::nat_to_f(&target_base_bn).expect("TODO");
         let inverted_target_base: F = Option::<F>::from(target_base.invert()).unwrap_or_default();
 
         let mut accumulated_extra = BigInt::zero();
         let carry_bits = calc_carry_bits(&max_word_bn, limb_width)?;
+        debug!("carry_bits {carry_bits}");
 
         let lhs_column = &self.config().state[0];
         let lhs_selector = &self.config().q_1[0];
@@ -487,39 +493,58 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 
         let min_cells_len = cmp::min(lhs.cells.len(), rhs.cells.len());
 
-        // TODO Separate last in lhs\rhs
         lhs.cells
             .into_iter()
             .zip_longest(rhs.cells.into_iter())
             .enumerate()
             .map(|(limb_index, cells)| -> Result<(), Error> {
+                ctx.assign_fixed(|| format!("m_{limb_index} coeff"), *output_coeff, -F::ONE)?;
+
+                // carry[i-1]
+                ctx.assign_fixed(
+                    || format!("carry_{limb_index} coeff"),
+                    *carry_coeff,
+                    F::ONE, // FIXME `target_base`? Or in hackmd error
+                )?;
+
+                ctx.assign_fixed(
+                    || format!("selector lhs {limb_index} for calc dividend"),
+                    *lhs_selector,
+                    F::ONE,
+                )?;
+
+                ctx.assign_fixed(
+                    || format!("selector rhs {limb_index} for calc dividend"),
+                    *rhs_selector,
+                    -F::ONE,
+                )?;
+
+                // max word
+                let max_word =
+                    ctx.assign_fixed(|| "max word for equal check", *max_word_column, max_word)?;
+
+                ctx.assign_fixed(
+                    || format!("carry_{limb_index} coeff"),
+                    *carry_coeff,
+                    -target_base,
+                )?;
+
+                // FIXME Not advice
+                let m_i = big_nat::nat_to_f(&(&accumulated_extra % &target_base_bn)).expect("TODO");
+
                 match cells {
                     EitherOrBoth::Both(lhs, rhs) => {
                         if limb_index == min_cells_len {
                             // -m_i
                             accumulated_extra += &max_word_bn;
-                            // FIXME Not advice
-                            let m_i = big_nat::nat_to_f(&(&accumulated_extra % &target_base_bn))
-                                .expect("TODO");
                             ctx.assign_advice(
                                 || format!("m_{limb_index}"),
                                 *output_column,
                                 Value::known(m_i),
                             )?;
-                            ctx.assign_fixed(
-                                || format!("m_{limb_index} coeff"),
-                                *output_coeff,
-                                -F::ONE,
-                            )?;
 
                             accumulated_extra /= &target_base_bn;
 
-                            // carry[i-1]
-                            ctx.assign_fixed(
-                                || format!("carry_{limb_index} coeff"),
-                                *carry_coeff,
-                                F::ONE, // FIXME `target_base`? Or in hackmd error
-                            )?;
                             if let Some(prev_carry_cell) = &prev_carry_cell {
                                 ctx.assign_advice_from(
                                     || format!("carry_{limb_index}-1"),
@@ -552,12 +577,6 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                             *lhs_column,
                             &lhs,
                         )?;
-                        ctx.assign_fixed(
-                            || format!("selector lhs {limb_index} for calc dividend"),
-                            *lhs_selector,
-                            F::ONE,
-                        )?;
-
                         // carry[i-1]
                         let prev_carry = if let Some(prev_carry_cell) = &prev_carry_cell {
                             ctx.assign_advice_from(
@@ -571,23 +590,11 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                             Value::known(F::ZERO)
                         };
 
-                        // max word
-                        let max_word = ctx.assign_fixed(
-                            || "max word for equal check",
-                            *max_word_column,
-                            max_word,
-                        )?;
-
                         // -rhs
                         let rhs_limb = ctx.assign_advice_from(
                             || format!("rhs {limb_index} for calc dividend"),
                             *rhs_column,
                             &rhs,
-                        )?;
-                        ctx.assign_fixed(
-                            || format!("selector rhs {limb_index} for calc dividend"),
-                            *rhs_selector,
-                            -F::ONE,
                         )?;
 
                         // -carry [i] * w
@@ -596,11 +603,6 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                             *carry_column,
                             (prev_carry + lhs_limb.value() - rhs_limb.value() + max_word.value())
                                 * Value::known(&inverted_target_base),
-                        )?;
-                        ctx.assign_fixed(
-                            || format!("carry_{limb_index} coeff"),
-                            *carry_coeff,
-                            -target_base,
                         )?;
 
                         // -m_i
@@ -632,22 +634,12 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                             *lhs_column,
                             &lhs,
                         )?;
-                        ctx.assign_fixed(
-                            || format!("selector lhs {limb_index} for check zero"),
-                            *lhs_selector,
-                            F::ONE,
-                        )?;
                     }
                     EitherOrBoth::Right(rhs) => {
                         ctx.assign_advice_from(
                             || format!("rhs {limb_index} for check zero"),
                             *rhs_column,
                             &rhs,
-                        )?;
-                        ctx.assign_fixed(
-                            || format!("selector lhs {limb_index} for check zero"),
-                            *rhs_selector,
-                            F::ONE,
                         )?;
                     }
                 }
@@ -659,6 +651,73 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(())
+    }
+
+    /// From slice bytes, creates bit cells and verifies that they are indeed bits.
+    /// Takes the first `expected_bits_count`.
+    ///
+    /// For every `k` rows looks like:
+    /// ```markdown
+    /// |   ---   |   ---   |  ---   |  ---  |  ---  |      ---       |
+    /// |  input  |   q_i   | q1[1]  | q1[2] |  q_m  |     output     |
+    /// |   ---   |   ---   |  ---   |  ---  |  ---  |      ---       |
+    /// |   ...   |   ...   |  ...   |  ...  |  ...  |      ...       |
+    /// |   b_i   |    1    |  b_i   |  b_i  |  -1   |  group_j^{k+1} |
+    /// |   ...   |   ...   |  ...   |  ...  |  ...  |      ...       |
+    /// ```
+    /// Because:
+    /// `input * q_i * q_m * q1[1] * q2[1] == 0` =>
+    /// `b_i - b_i * b_i == 0`
+    /// it's corrected only for `1` or `0`
+    ///
+    /// Bits represented in LE
+    /// Return cells with bits
+    fn check_bits(
+        &self,
+        ctx: &mut RegionCtx<'_, F>,
+        bits: &[u8],
+        expected_bits_count: NonZeroUsize,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        let bit_column = self.config().input;
+        let bit_selector = self.config().q_i;
+
+        let bit_square_multipliers_columns = self.config().state;
+        let square_multipliers_coeff = self.config().q_m;
+
+        // TODO Check BigEngian || LittleEndian
+        let mut bits_repr = LittleEndianReader::new(bits);
+        iter::repeat_with(|| bits_repr.read_bit())
+            .take(expected_bits_count.get())
+            .enumerate()
+            .map(|(index, bit)| {
+                let bit_cell = ctx.assign_advice(
+                    || format!("bit_{index}"),
+                    bit_column,
+                    Value::known(match bit {
+                        Some(true) => F::ONE,
+                        Some(false) | None => F::ZERO,
+                    }),
+                )?;
+                ctx.assign_fixed(
+                    || format!("bit_square_multipliers_coeff {index}"),
+                    bit_selector,
+                    F::ONE,
+                )?;
+
+                for col in bit_square_multipliers_columns.iter().take(2) {
+                    ctx.assign_advice_from(|| format!("bit_{index}"), *col, &bit_cell)?;
+                }
+                ctx.assign_fixed(
+                    || format!("square_multipliers_coeff {index}"),
+                    square_multipliers_coeff,
+                    -F::ONE,
+                )?;
+
+                ctx.next();
+
+                Ok(bit_cell)
+            })
+            .collect::<Result<Vec<_>, Error>>()
     }
 
     // Is it `cell` value have less then `expected_bits_count` in bits represtion
@@ -685,54 +744,13 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             .unwrap_or_else(|| F::ZERO.to_repr());
 
         // proof here all bits in [0, 1]
-        let bits = {
-            let bit_column = self.config().input;
-            let bit_selector = self.config().q_i;
-
-            let bit_square_multipliers_columns = self.config().state;
-
-            let square_multipliers_coeff = self.config().q_m;
-
-            // TODO Check BigEngian || LittleEndian
-            let mut bits_repr = BigEndianReader::new(value_repr.as_ref());
-            iter::repeat_with(|| bits_repr.read_bit())
-                .take(expected_bits_count.get())
-                .enumerate()
-                .map(|(index, bit)| {
-                    let bit_cell = ctx.assign_advice(
-                        || format!("bit_{index}"),
-                        bit_column,
-                        Value::known(match bit {
-                            Some(true) => F::ONE,
-                            Some(false) | None => F::ZERO,
-                        }),
-                    )?;
-                    ctx.assign_fixed(
-                        || format!("bit_square_multipliers_coeff {index}"),
-                        bit_selector,
-                        F::ONE,
-                    )?;
-
-                    for col in bit_square_multipliers_columns.iter().take(2) {
-                        ctx.assign_advice_from(|| format!("bit_{index}"), *col, &bit_cell)?;
-                    }
-                    ctx.assign_fixed(
-                        || format!("square_multipliers_coeff {index}"),
-                        square_multipliers_coeff,
-                        -F::ONE,
-                    )?;
-
-                    ctx.next();
-
-                    Ok(bit_cell)
-                })
-                .collect::<Result<Vec<_>, Error>>()?
-        };
+        let bits_cells = self.check_bits(ctx, value_repr.as_ref(), expected_bits_count)?;
 
         let prev_chunk_sum_col = self.config().input;
         let prev_chunk_sum_selector = self.config().q_i;
 
-        let bits_with_coeff = itertools::multizip((0.., bits.iter(), get_power_of_two_iter::<F>()));
+        let bits_with_coeff =
+            itertools::multizip((0.., bits_cells.iter(), get_power_of_two_iter::<F>()));
 
         let state_q1_columns =
             itertools::multizip((self.config().state, self.config().q_1)).collect::<Box<[_]>>();
@@ -809,6 +827,7 @@ impl<F: ff::PrimeField> Deref for OverflowingBigNat<F> {
     }
 }
 
+#[derive(Debug)]
 struct GroupedBigNat<F: ff::PrimeField> {
     cells: Vec<AssignedCell<F, F>>,
     max_word: F,
