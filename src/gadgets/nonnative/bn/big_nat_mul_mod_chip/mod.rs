@@ -728,18 +728,30 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             .collect::<Result<Vec<_>, Error>>()
     }
 
-    //
-    // Is it `cell` value have less then `expected_bits_count` in bits represtion
-    // Is it `b in [0, 1]`?
-    // b * (1 - b) = 0 =>
-    //     b - b ** 2 = 0 =>
-    //     -1 * (b ** 2) + 1 * b = 0
-    //
-    // q_m = -1
-    // s[0] = b
-    // s[1] = b
-    // input = b
-    // q_i = 1
+    /// Checks that the cell value fits within the given number of bits
+    ///
+    /// First it splits the cell value into bits, takes the first
+    /// `expected_bits_count` and assigns them to advice column,
+    /// proving that each of the bits is 0 or 1 by
+    /// [`BigNatMulModChip::assign_and_check_bits`].
+    ///
+    /// Second, it checks that the sum of all these bits converges
+    /// to the cell value using multiplication by powers of two.
+    /// Proof will fail if the cell value takes up more bits than
+    /// expected.
+    ///
+    /// For every `k` rows looks like:
+    /// ```markdown
+    /// |----------|---------|----------|---------|------------|-------|---------|-------|
+    /// | state[0] |  q1[0]  | state[1] |  q1[0]  |   input    |  q_i  | output  |  q_o  |
+    /// |----------|---------|----------|---------|------------|-------|---------|-------|
+    /// |   ...    |   ...   |   ...    |   ...   |    ...     |  ...  |   ...   |  ...  |
+    /// |   b_k    |   2^k   |  b_{k+1} | 2^{k+1} | chunk_{l-1}|   1   | chunk_l |  -1   |
+    /// |   ...    |   ...   |   ...    |   ...   |    ...     |  ...  |   ...   |  ...  |
+    /// |----------|---------|----------|---------|------------|-------|---------|-------|
+    /// ```
+    ///
+    /// At the end, a constraint is made that the incoming cell is equal to the new counted cell.
     fn check_fits_in_bits(
         &self,
         ctx: &mut RegionCtx<'_, F>,
@@ -758,6 +770,9 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 
         let prev_chunk_sum_col = self.config().input;
         let prev_chunk_sum_selector = self.config().q_i;
+
+        let out_chunk_sum_col = self.config().out;
+        let out_chunk_sum_selector = self.config().q_o;
 
         let bits_with_coeff =
             itertools::multizip((0.., bits_cells.iter(), get_power_of_two_iter::<F>()));
@@ -807,21 +822,21 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                     current_chunk_sum = current_chunk_sum + prev_chunk_sum.value();
                 }
 
-                ctx.assign_fixed(|| "chunk_sum_coeff", self.config().q_o, -F::ONE)
+                ctx.assign_fixed(|| "chunk_sum_coeff", out_chunk_sum_selector, -F::ONE)
                     ?;
 
-                let cell = ctx.assign_advice(|| "chunk_sum", self.config().out, current_chunk_sum)
+                let output = ctx.assign_advice(|| "chunk_sum", out_chunk_sum_col, current_chunk_sum)
                     ?;
 
                 ctx.next();
 
-                Result::<_, Error>::Ok(Some(cell))
+                Result::<_, Error>::Ok(Some(output))
             })?
             .expect("Safe, because carry_bits != 0");
 
         ctx.constrain_equal(final_sum_cell.cell(), cell.cell())?;
 
-        Ok(cell)
+        Ok(final_sum_cell)
     }
 }
 
