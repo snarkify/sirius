@@ -30,6 +30,8 @@ pub enum Error {
     // Too big bigint: try to increase the number of limbs or their width
     #[error("TODO")]
     TooBigBigint,
+    #[error("The limb count check failed, it was expected to be less than {limit} and came up with {actual}")]
+    LimbLimitReached { limit: NonZeroUsize, actual: usize },
     #[error("TODO")]
     ZeroLimbNotAllowed,
     #[error("TODO")]
@@ -89,11 +91,19 @@ impl<F: ff::PrimeField> BigNat<F> {
         Self::from_bigint(&BigInt::from(input), limb_width, limbs_count_limit)
     }
 
+    // If the values in Cell are unknown, they will be filled in
     pub fn from_assigned_cells(
         input: &[AssignedCell<F, F>],
         limb_width: NonZeroUsize,
         limbs_count_limit: NonZeroUsize,
     ) -> Result<Self, Error> {
+        if input.len() > limbs_count_limit.get() {
+            return Err(Error::LimbLimitReached {
+                actual: input.len(),
+                limit: limbs_count_limit,
+            });
+        }
+
         let limbs = input
             .iter()
             .map(|cell| cell.value().map(|v| *v).unwrap().unwrap_or(F::ZERO))
@@ -104,7 +114,6 @@ impl<F: ff::PrimeField> BigNat<F> {
                     Err(Error::TooBigBigint)
                 }
             })
-            .take(limbs_count_limit.get())
             .collect::<Result<Vec<_>, _>>()?;
 
         Self::from_limbs(limbs.into_iter(), limb_width)
