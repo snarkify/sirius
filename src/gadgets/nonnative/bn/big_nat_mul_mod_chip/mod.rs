@@ -331,12 +331,12 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     ///
     /// For every `k` rows looks like:
     /// ```markdown
-    /// |   ---    |   ---     |  ---   |  ---  |  ---  |      ---       |
-    /// | state[0] | state[1]  | q1[1]  | q1[2] |  q_o  |     output     |
-    /// |   ---    |   ---     |  ---   |  ---  |  ---  |      ---       |
-    /// |   ...    |   ...     |  ...   |  ...  |  ...  |      ...       |
-    /// |   bn_i   | group_j^k |   1    |   1   |   1   |  group_j^{k+1} |
-    /// |   ...    |   ...     |  ...   |  ...  |  ...  |      ...       |
+    /// |   ---    |   ---     |    ---     |  ---  |  ---  |      ---       |
+    /// | state[0] | state[1]  |   q1[0]    | q1[1] |  q_o  |     output     |
+    /// |   ---    |   ---     |    ---     |  ---  |  ---  |      ---       |
+    /// |   ...    |   ...     |    ...     |  ...  |  ...  |      ...       |
+    /// |   bn_i   | group_j^k | limb_shift |   1   |   -1  |  group_j^{k+1} |
+    /// |   ...    |   ...     |    ...     |  ...  |  ...  |      ...       |
     /// ```
     /// where:
     /// - `bn_i` - i-th limb input big nat
@@ -344,6 +344,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     ///     - `j` calculated simply `i / limbs_per_group`
     ///     - `k` - is the intermediate index of the sum of the values of `k` limbs.
     ///             the largest `k` is the final value of an element of the group
+    /// - `limb_shift` - (2 ^ limb_width) ^ limb_index_in_group`
     fn group_limbs(
         &self,
         ctx: &mut RegionCtx<'_, F>,
