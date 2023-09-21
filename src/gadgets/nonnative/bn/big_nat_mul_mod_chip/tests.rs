@@ -165,7 +165,7 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
                     ] {
                         let number = F::from_u128(bytes);
                         let bits_cells = chip
-                            .check_bits(
+                            .assign_and_check_bits(
                                 &mut region,
                                 number.to_repr().as_ref(),
                                 NonZeroUsize::new(mem::size_of::<u128>() * 8).unwrap(),
