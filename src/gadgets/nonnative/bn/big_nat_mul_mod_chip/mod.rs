@@ -44,16 +44,16 @@ pub struct BigNatMulModChip<F: ff::PrimeField> {
 }
 
 impl<F: ff::PrimeField> BigNatMulModChip<F> {
-    pub fn try_new(
+    pub fn new(
         config: <Self as Chip<F>>::Config,
         limb_width: NonZeroUsize,
         limbs_count_limit: NonZeroUsize,
-    ) -> Result<Self, Error> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             main_gate: MainGate::new(config),
             limbs_count_limit,
             limb_width,
-        })
+        }
     }
 
     pub fn to_bignat(&self, input: &BigInt) -> Result<BigNat<F>, Error> {
@@ -193,6 +193,8 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         ctx: &mut RegionCtx<'a, F>,
         lhs: &[impl AssignAdviceFrom<'a, F> + Clone + fmt::Debug],
         rhs: &[impl AssignAdviceFrom<'a, F> + Clone + fmt::Debug],
+        lhs_max_word: &F,
+        rhs_max_word: &F,
     ) -> Result<MultContext<F>, Error> {
         trace!("mult ctx: {ctx:?}");
         trace!("mult lhs: {lhs:?}");
@@ -307,14 +309,14 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                 .collect::<Box<[_]>>()
         );
 
-        let max_word = big_nat::get_big_int_with_n_ones(self.limb_width.get());
+        let min_limbs_count = F::from_u128(cmp::min(lhs_limbs_count, rhs_limbs_count) as u128);
 
         Ok(MultContext {
             lhs: lhs_cells.into_iter().flatten().collect(),
             rhs: rhs_cells.into_iter().flatten().collect(),
             res: OverflowingBigNat {
                 cells: production_cells,
-                max_word: big_nat::nat_to_f(&(&max_word * &max_word)).unwrap(),
+                max_word: min_limbs_count * rhs_max_word * lhs_max_word,
             },
         })
     }
@@ -881,14 +883,31 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         let r = self.to_bignat(&((&lhs_bi * &rhs_bi) % &mod_bi))?;
 
         // lhs * rhs
-        let MultContext { res: left, .. } = self.assign_mult(ctx, lhs, rhs)?;
+
+        let max_word_without_overflow: F =
+            big_nat::nat_to_f(&big_nat::get_big_int_with_n_ones(self.limb_width.get()))
+                .unwrap_or_default();
+
+        let MultContext { res: left, .. } = self.assign_mult(
+            ctx,
+            lhs,
+            rhs,
+            &max_word_without_overflow,
+            &max_word_without_overflow,
+        )?;
 
         // q * m + r
         let MultContext {
             lhs: assigned_q,
             res: q_mul_m,
             ..
-        } = self.assign_mult(ctx, q.limbs(), mod_bn.limbs())?;
+        } = self.assign_mult(
+            ctx,
+            q.limbs(),
+            mod_bn.limbs(),
+            &max_word_without_overflow,
+            &max_word_without_overflow,
+        )?;
         let SumContext {
             rhs: assigned_r,
             res: right,

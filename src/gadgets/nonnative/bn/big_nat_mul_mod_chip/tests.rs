@@ -88,8 +88,7 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
         trace!("Start synthesize");
 
         let chip =
-            BigNatMulModChip::<F>::try_new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT)
-                .unwrap();
+            BigNatMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT);
 
         let (assigned_mult, assigned_sum, grouped_mult): (Vec<_>, Vec<_>, Vec<_>) = layouter
             .assign_region(
@@ -125,7 +124,19 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
                         })
                         .unzip();
 
-                    let mult = chip.assign_mult(&mut region, &lhs, &rhs).unwrap();
+                    let max_word_without_overflow: F =
+                        big_nat::nat_to_f(&big_nat::get_big_int_with_n_ones(LIMB_WIDTH.get()))
+                            .unwrap_or_default();
+
+                    let mult = chip
+                        .assign_mult(
+                            &mut region,
+                            &lhs,
+                            &rhs,
+                            &max_word_without_overflow,
+                            &max_word_without_overflow,
+                        )
+                        .unwrap();
 
                     let sum = chip
                         .assign_sum(
