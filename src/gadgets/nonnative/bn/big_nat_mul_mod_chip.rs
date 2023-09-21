@@ -83,7 +83,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     /// - `s_i = lhs_i + rhs_i` where i in [0..l]
     ///
     /// The function also returns unchanged the remaining multipliers
-    /// from the larger summand. 
+    /// from the larger summand.
     pub fn assign_sum(
         &self,
         ctx: &mut RegionCtx<'_, F>,

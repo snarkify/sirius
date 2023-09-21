@@ -403,7 +403,9 @@ impl<F: PrimeField> Monomial<F> {
         self.coeff += other.coeff;
     }
 
-    // evaluate monomial
+    /// evaluate monomial over {x_1,...,x_n}, n = self.arity
+    /// first get the value of x_i according to its (row, col) in the plonk table
+    /// then calculate the evaluation of monomial: c*x_1^{d_1}*...*x_n^{d_n}
     #[allow(clippy::too_many_arguments)]
     pub fn eval<C: CurveAffine<ScalarExt = F>>(
         &self,
@@ -435,24 +437,24 @@ impl<F: PrimeField> Monomial<F> {
                 };
                 // layout of the index is:
                 // |num_fixed|num_advice|y1|u1|num_advice2|y2|u2|
-                if col < num_fixed {
-                    S.fixed_columns[col][row1]
-                } else if col < y1_index {
-                    let idx = (col - num_fixed) * row_size + row1;
-                    W1.W[idx]
-                } else if col == y1_index {
-                    U1.y
-                } else if col == u1_index {
-                    U1.u
-                } else if col < y2_index {
-                    let idx = (col - u1_index - 1) * row_size + row1;
-                    W2.W[idx]
-                } else if col == y2_index {
-                    U2.y
-                } else if col == u2_index {
-                    U2.u
-                } else {
-                    panic!("index out of boundary");
+                // given column index of a variable x_i, we are able to find the correct location of that variable
+                // and hence its value
+                match col {
+                    // fixed column
+                    col if col < num_fixed => S.fixed_columns[col][row1],
+                    // advice column for (U1, W1)
+                    col if col < y1_index => W1.W[(col - num_fixed) * row_size + row1],
+                    // challenge y1
+                    col if col == y1_index => U1.y,
+                    // homogeneous variable u1
+                    col if col == u1_index => U1.u,
+                    // advice column for (U2, W2)
+                    col if col < y2_index => W2.W[(col - u1_index - 1) * row_size + row1],
+                    // challenge y2
+                    col if col == y2_index => U2.y,
+                    // homogenous variable u2
+                    col if col == u2_index => U2.u,
+                    col => panic!("index out of boundary: {col}"),
                 }
             })
             .collect();

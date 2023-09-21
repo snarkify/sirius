@@ -49,7 +49,10 @@ impl<C: CurveAffine> CommitmentKey<C> {
     }
 
     pub fn commit(&self, v: &[C::Scalar]) -> C {
-        assert!(self.ck.len() >= v.len());
+        assert!(
+            self.ck.len() >= v.len(),
+            "CommitmentKey size must be greater than or equal to scalar vector size"
+        );
         best_multiexp(v, &self.ck[..v.len()]).to_affine()
     }
 }

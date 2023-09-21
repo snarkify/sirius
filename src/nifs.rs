@@ -1,4 +1,8 @@
-#![allow(non_snake_case)]
+//! NIFS: non-interactive folding scheme
+//! NIFS protocal allow us to fold two identical polynomial relations into one
+//! e.g. the polynomial relation can be derived from different way, e.g.:
+//! (1) custom plonkish gate
+//! (2) the permutation polynomial derived from plonk copy constraints
 use crate::commitment::CommitmentKey;
 use crate::constants::NUM_CHALLENGE_BITS;
 use crate::plonk::{
@@ -10,6 +14,13 @@ use halo2_proofs::arithmetic::CurveAffine;
 use rayon::prelude::*;
 use std::marker::PhantomData;
 
+/// NIFS: non-interactive folding scheme
+/// Given a polynomial relation P(x_1,...,x_n) with polynomial degree d.
+/// after folding two such (identical) relations, we have
+/// P(x_1+r*y_1,...,x_n+r*y_n) = P(x_1,...,x_n) + \sum_{k=1}^{d-1} T_k + r^d*P(y_1,...,y_n)
+/// cross_term = [T_1,...,T_{d-1}]
+/// cross_term_commits = [Comm(T_1),...,Comm(T_{d-1})]
+/// please refer to: https://hackmd.io/@chaosma/BJvWmnw_h#31-NIFS
 #[derive(Clone, Debug)]
 pub struct NIFS<C: CurveAffine, RO: ROTrait<C>> {
     pub(crate) cross_term_commits: Vec<C>,
@@ -17,6 +28,11 @@ pub struct NIFS<C: CurveAffine, RO: ROTrait<C>> {
 }
 
 impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
+    /// Given two (relaxed) plonk instance-witness pairs:
+    /// (U1, W1)  and (U2, W2) which share the same plonk structure S
+    /// NIFS prover will calculate and return (cross_terms, cross_term_commits)
+    /// cross_term_commits will be used by NIFS verifier later to calculated the folded relaxed
+    /// plonk instance.
     pub fn commit_cross_terms(
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C>,
@@ -41,10 +57,13 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
                     .collect()
             })
             .collect();
-        let cross_term_commits: Vec<C> = cross_terms.iter().map(|v| ck.commit(&v[..])).collect();
+        let cross_term_commits: Vec<C> = cross_terms.iter().map(|v| ck.commit(v)).collect();
         (cross_terms, cross_term_commits)
     }
 
+    /// NIFS prover: given two (relaxed) plonk witness-instance pairs
+    /// calculated the folded witness-instance as well as the cross_terms (see
+    /// NIFS::commit_cross_terms for detail)
     pub fn prove(
         ck: &CommitmentKey<C>,
         ro: &mut RO,
@@ -52,7 +71,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         U1: &RelaxedPlonkInstance<C>,
         W1: &RelaxedPlonkWitness<C::ScalarExt>,
     ) -> (
-        NIFS<C, RO>,
+        Self,
         (RelaxedPlonkInstance<C>, RelaxedPlonkWitness<C::ScalarExt>),
     ) {
         // TODO: hash gate into ro
@@ -61,17 +80,14 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         let mut U2 = td.plonk_instance(ck);
         U2.absorb_into(ro);
         // y is used to combined multiple gates for instance U2
-        let y = ro.squeeze(NUM_CHALLENGE_BITS);
-        U2.y = y;
+        U2.y = ro.squeeze(NUM_CHALLENGE_BITS);
 
         let W2 = td.plonk_witness();
         U1.absorb_into(ro);
-        let (cross_terms, cross_term_commits) =
-            NIFS::<C, RO>::commit_cross_terms(ck, &S, U1, W1, &U2, &W2);
-        let _ = cross_term_commits
+        let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2);
+        cross_term_commits
             .iter()
-            .map(|cm| ro.absorb_point(*cm))
-            .collect::<Vec<_>>();
+            .for_each(|cm| ro.absorb_point(*cm));
         let r = ro.squeeze(NUM_CHALLENGE_BITS);
         let U = U1.fold(&U2, &cross_term_commits, &r);
         let W = W1.fold(&W2, &cross_terms, &r);
@@ -94,15 +110,12 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         S.absorb_into(ro);
         let mut U2 = U2;
         U2.absorb_into(ro);
-        let y = ro.squeeze(NUM_CHALLENGE_BITS);
-        U2.y = y;
+        U2.y = ro.squeeze(NUM_CHALLENGE_BITS);
 
         U1.absorb_into(ro);
-        let _ = self
-            .cross_term_commits
+        self.cross_term_commits
             .iter()
-            .map(|cm| ro.absorb_point(*cm))
-            .collect::<Vec<_>>();
+            .for_each(|cm| ro.absorb_point(*cm));
         let r = ro.squeeze(NUM_CHALLENGE_BITS);
         U1.fold(&U2, &self.cross_term_commits, &r)
     }
@@ -153,8 +166,10 @@ mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let instance = meta.instance_column();
             meta.enable_equality(instance);
-            let pconfig = MainGate::configure(meta);
-            Self::Config { pconfig, instance }
+            Self::Config {
+                pconfig: MainGate::configure(meta),
+                instance,
+            }
         }
 
         fn synthesize(
@@ -175,6 +190,12 @@ mod tests {
         }
     }
 
+    /// this function will fold two plonk witness-instance pairs consecutively
+    /// it folds the first instance into a default relaxed plonk instance to get folded (f_U, f_W)
+    /// next it folds the second instance into the first folded (f_U, f_W)
+    /// there are several things to be checked: whether two such instances satisfy plonk relation
+    /// (i.e. is_sat), whether two such folded instance satisfy relaxed plonk relation (i.e.
+    /// is_sat_relax)
     fn fold_instances<C: CurveAffine<ScalarExt = F>, F: PrimeField, RO: ROTrait<C>>(
         ck: &CommitmentKey<C>,
         ro1: &mut RO,

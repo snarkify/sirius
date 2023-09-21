@@ -22,6 +22,7 @@ use std::collections::HashMap;
 
 #[derive(Clone, PartialEq)]
 pub struct PlonkStructure<C: CurveAffine> {
+    // k is a parameter such that 2^k is the total number of rows
     pub(crate) k: usize,
     pub(crate) fixed_columns: Vec<Vec<C::ScalarExt>>,
     pub(crate) num_advice_columns: usize,
@@ -105,11 +106,10 @@ impl<C: CurveAffine> PlonkStructure<C> {
                 self.gate
                     .eval(row, self, &U.to_relax(), &W.to_relax(), &U2, &W2)
             })
-            .map(|v| usize::from(v != F::ZERO))
-            .sum();
+            .filter(|v| F::ZERO.ne(v))
+            .count();
 
-        let res_comm: bool = U.W_commitment == ck.commit(&W.W[..]);
-        if res == 0 && res_comm {
+        if U.W_commitment == ck.commit(&W.W) && res == 0 {
             Ok(())
         } else {
             Err("plonk relation not satisfied".to_string())
@@ -136,16 +136,32 @@ impl<C: CurveAffine> PlonkStructure<C> {
             .into_par_iter()
             .map(|row| poly.eval(row, self, U, W, &U2, &W2))
             .enumerate()
-            .map(|(i, v)| usize::from(v != W.E[i]))
-            .sum();
+            .filter(|(i, v)| W.E[*i].ne(v))
+            .count();
 
-        let res_W: bool = U.W_commitment == ck.commit(&W.W[..]);
-        let res_E: bool = U.E_commitment == ck.commit(&W.E[..]);
-        if res == 0 && res_W && res_E {
-            Ok(())
-        } else {
-            Err("relaxed plonk relation not satisfied".to_string())
+        let res_W = U.W_commitment == ck.commit(&W.W);
+        let res_E = U.E_commitment == ck.commit(&W.E);
+        if res != 0 {
+            return Err(format!(
+                "relaxed plonk relation not satisfied on {} out of {} rows",
+                res, nrow
+            ));
         }
+        if !res_W {
+            return Err(format!(
+                "commitment of witness W is not match, expect={:?}, got={:?}",
+                U.W_commitment,
+                ck.commit(&W.W)
+            ));
+        }
+        if !res_E {
+            return Err(format!(
+                "commitment of witness E is not match, expect={:?}, got={:?}",
+                U.E_commitment,
+                ck.commit(&W.E)
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -239,11 +255,10 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
             .enumerate()
             .map(|(i, ei)| {
                 let mut r_power = F::ONE;
-                let value = cross_terms.iter().fold(*ei, |acc, tk| {
+                cross_terms.iter().fold(*ei, |acc, tk| {
                     r_power *= *r;
                     acc + r_power * tk[i]
-                });
-                value
+                })
             })
             .collect::<Vec<_>>();
 
