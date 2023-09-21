@@ -666,12 +666,12 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     ///
     /// For every `k` rows looks like:
     /// ```markdown
-    /// |   ---   |   ---   |  ---   |  ---  |  ---  |      ---       |
-    /// |  input  |   q_i   | q1[1]  | q1[2] |  q_m  |     output     |
-    /// |   ---   |   ---   |  ---   |  ---  |  ---  |      ---       |
-    /// |   ...   |   ...   |  ...   |  ...  |  ...  |      ...       |
-    /// |   b_i   |    1    |  b_i   |  b_i  |  -1   |  group_j^{k+1} |
-    /// |   ...   |   ...   |  ...   |  ...  |  ...  |      ...       |
+    /// |   ---   |   ---   |  ---     |   ---    |  ---  |
+    /// |  input  |   q_i   | state[0] | state[1] |  q_m  |
+    /// |   ---   |   ---   |   ---    |   ---    |  ---  |
+    /// |   ...   |   ...   |   ...    |   ...    |  ...  |
+    /// |   b_i   |    1    |   b_i    |   b_i    |  -1   |
+    /// |   ...   |   ...   |   ...    |   ...    |  ...  |
     /// ```
     /// Because:
     /// `input * q_i * q_m * q1[1] * q2[1] == 0` =>
@@ -680,10 +680,10 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     ///
     /// Bits represented in LE
     /// Return cells with bits
-    fn check_bits(
+    fn assign_and_check_bits(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        bits: &[u8],
+        buffer: &[u8],
         expected_bits_count: NonZeroUsize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         let bit_column = self.config().input;
@@ -693,7 +693,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         let square_multipliers_coeff = self.config().q_m;
 
         // TODO Check BigEngian || LittleEndian
-        let mut bits_repr = LittleEndianReader::new(bits);
+        let mut bits_repr = LittleEndianReader::new(buffer);
         iter::repeat_with(|| bits_repr.read_bit())
             .take(expected_bits_count.get())
             .enumerate()
@@ -728,6 +728,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             .collect::<Result<Vec<_>, Error>>()
     }
 
+    //
     // Is it `cell` value have less then `expected_bits_count` in bits represtion
     // Is it `b in [0, 1]`?
     // b * (1 - b) = 0 =>
@@ -752,7 +753,8 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             .unwrap_or_else(|| F::ZERO.to_repr());
 
         // proof here all bits in [0, 1]
-        let bits_cells = self.check_bits(ctx, value_repr.as_ref(), expected_bits_count)?;
+        let bits_cells =
+            self.assign_and_check_bits(ctx, value_repr.as_ref(), expected_bits_count)?;
 
         let prev_chunk_sum_col = self.config().input;
         let prev_chunk_sum_selector = self.config().q_i;
