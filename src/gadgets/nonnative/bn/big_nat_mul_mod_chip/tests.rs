@@ -187,6 +187,21 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
                         }
                     }
 
+                    let number = region
+                        .assign_advice(
+                            || "check fits in bits",
+                            config.advice_lhs,
+                            Value::known(F::from_u128(u32::MAX as u128)),
+                        )
+                        .unwrap();
+
+                    chip.check_fits_in_bits(
+                        &mut region,
+                        number,
+                        NonZeroUsize::new(mem::size_of::<u32>() * 8).unwrap(),
+                    )
+                    .unwrap();
+
                     Ok((mult.res.cells, sum.res.cells, grouped_mult.cells))
                 },
             )
