@@ -445,9 +445,14 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        let grouped_max_word: BigInt = (0..limbs_per_group).fold(BigInt::zero(), |mut acc, i| {
+            acc.set_bit((i * limb_width) as u64, true);
+            acc
+        });
+
         Ok(GroupedBigNat {
             cells: grouped,
-            max_word: bignat_cells.max_word,
+            max_word: big_nat::nat_to_f::<F>(&grouped_max_word).unwrap() * bignat_cells.max_word,
         })
     }
 
