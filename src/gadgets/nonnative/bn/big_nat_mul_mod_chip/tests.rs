@@ -202,6 +202,9 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
                     )
                     .unwrap();
 
+                    chip.is_equal(&mut region, grouped_mult.clone(), grouped_mult.clone())
+                        .unwrap();
+
                     Ok((mult.res.cells, sum.res.cells, grouped_mult.cells))
                 },
             )
@@ -314,7 +317,7 @@ fn test_bn() {
     let grouped = group_limbs(&prod, &max_word * &max_word);
     log::info!("grouped {grouped:?}");
 
-    const K: u32 = 10;
+    const K: u32 = 11;
     let ts = TestCircuit::<Fp>::new();
     let prover = match MockProver::run(
         K,

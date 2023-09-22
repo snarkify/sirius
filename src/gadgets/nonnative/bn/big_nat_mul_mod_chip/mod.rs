@@ -845,7 +845,7 @@ impl<F: ff::PrimeField> Deref for OverflowingBigNat<F> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct GroupedBigNat<F: ff::PrimeField> {
     cells: Vec<AssignedCell<F, F>>,
     max_word: F,
