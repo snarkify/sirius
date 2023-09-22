@@ -456,6 +456,28 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         })
     }
 
+    /// Checks the equality of two [`GroupedBigNat`] numbers
+    ///
+    /// The algorithm checks against carry.
+    /// carry[i-1] + lhs[i] - rhs[i] + shift == carry[i] + max_word
+    ///
+    ///
+    /// ```markdown
+    /// |----------|-------|----------|-------|-----------|-------------|-------|------|
+    /// | state[0] | q_1[0]| state[1] | q_1[1]|   input   |    q_i      |  out  | q_o  |
+    /// |----------|-------|----------|-------|-----------|-------------|-------|------|
+    /// |   ...    |  ...  |   ...    |  ...  |   ...     |    ...      |  ...  | ...  |
+    /// |  lhs[k]  |   1   |  rhs[k]  |  -1   | carry[k-1]| target_base | carry | -1   |
+    /// |   ...    |  ...  |   ...    |  ...  |   ...     |    ...      |  ...  | ...  |
+    /// |----------|-------|----------|-------|-----------|-------------|-------|------|
+    ///
+    /// ```
+    /// (carry[i-i] + lhs[i] - rhs[i] + max_word) / w = carry[i] + m[i] / w
+    ///
+    /// prev_carry + l[i] - r[i] + mw - (target_base * carry.num) - (accumulated_extra % target base) = 0
+    ///
+    /// (carry[i-i] + lhs[i] - rhs[i] + max_word) - carry[i] * w - m[i] =?= 0
+    /// ```
     fn is_equal(
         &self,
         ctx: &mut RegionCtx<'_, F>,
@@ -490,113 +512,75 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         let rhs_column = &self.config().state[1];
         let rhs_selector = &self.config().q_1[1];
 
-        let carry_column = &self.config().input;
-        let carry_coeff = &self.config().q_i;
+        let prev_carry_column = &self.config().input;
+        let prev_carry_coeff = &self.config().q_i;
         let mut prev_carry_cell = None;
 
-        let max_word_column = &self.config().rc;
+        let constant_column = &self.config().rc;
 
-        let output_column = &self.config().out;
-        let output_coeff = &self.config().q_o;
+        let carry_column = &self.config().out;
+        let carry_coeff = &self.config().q_o;
 
-        let min_cells_len = cmp::min(lhs.cells.len(), rhs.cells.len());
+        let max_cells_len = cmp::max(lhs.cells.len(), rhs.cells.len());
 
+        // TODO Add check about last carry cell
         lhs.cells
             .into_iter()
             .zip_longest(rhs.cells.into_iter())
             .enumerate()
             .map(|(limb_index, cells)| -> Result<(), Error> {
-                ctx.assign_fixed(|| format!("m_{limb_index} coeff"), *output_coeff, -F::ONE)?;
-
-                // carry[i-1]
                 ctx.assign_fixed(
-                    || format!("carry_{limb_index} coeff"),
-                    *carry_coeff,
-                    F::ONE, // FIXME `target_base`? Or in hackmd error
-                )?;
-
-                ctx.assign_fixed(
-                    || format!("selector lhs {limb_index} for calc dividend"),
+                    || format!("selector lhs {limb_index}"),
                     *lhs_selector,
                     F::ONE,
                 )?;
 
                 ctx.assign_fixed(
-                    || format!("selector rhs {limb_index} for calc dividend"),
+                    || format!("selector rhs {limb_index}"),
                     *rhs_selector,
                     -F::ONE,
                 )?;
 
-                // max word
-                let max_word =
-                    ctx.assign_fixed(|| "max word for equal check", *max_word_column, max_word)?;
+                // max word - m_i
+                accumulated_extra += &max_word_bn;
 
-                ctx.assign_fixed(
-                    || format!("carry_{limb_index} coeff"),
-                    *carry_coeff,
-                    -target_base,
+                let m_i: F =
+                    big_nat::nat_to_f(&(&accumulated_extra % &target_base_bn)).expect("TODO");
+                let constant = ctx.assign_fixed(
+                    || "max word for equal check",
+                    *constant_column,
+                    max_word - m_i,
                 )?;
 
-                // FIXME Not advice
-                let m_i = big_nat::nat_to_f(&(&accumulated_extra % &target_base_bn)).expect("TODO");
+                accumulated_extra /= &target_base_bn;
 
-                match cells {
+                ctx.assign_fixed(
+                    || format!("carry[{limb_index}-1] coeff"),
+                    *prev_carry_coeff,
+                    F::ONE,
+                )?;
+
+                // carry[i-1]
+                let prev_carry = if let Some(prev_carry_cell) = &prev_carry_cell {
+                    ctx.assign_advice_from(
+                        || format!("carry_{limb_index}-1"),
+                        *prev_carry_column,
+                        prev_carry_cell,
+                    )?
+                    .value()
+                    .copied()
+                } else {
+                    Value::known(F::ZERO)
+                };
+
+                let lhs_sub_rhs = match cells {
                     EitherOrBoth::Both(lhs, rhs) => {
-                        if limb_index == min_cells_len {
-                            // -m_i
-                            accumulated_extra += &max_word_bn;
-                            ctx.assign_advice(
-                                || format!("m_{limb_index}"),
-                                *output_column,
-                                Value::known(m_i),
-                            )?;
-
-                            accumulated_extra /= &target_base_bn;
-
-                            if let Some(prev_carry_cell) = &prev_carry_cell {
-                                ctx.assign_advice_from(
-                                    || format!("carry_{limb_index}-1"),
-                                    *carry_column,
-                                    prev_carry_cell,
-                                )?;
-                            }
-
-                            ctx.next();
-
-                            return Ok(());
-                        }
-
-                        // (carry[i-i] + lhs[i] - rhs[i] + max_word) / w = carry[i] * w + m[i]
-                        //
-                        // prev_carry + l[i] - o[i] - mw - (target_base * carry.num) - (accumulated_extra % target base) = 0
-                        //
-                        // (carry[i-i] + lhs[i] - rhs[i] + max_word) - carry[i] * w - m[i] =?= 0
-                        //
-                        // lhs = state[0]
-                        // q_1[0] = 1
-                        // rhs = state[1]
-                        // q_1[1] = -1
-                        // max_word = rc
-                        // m[i] = output
-
                         // lhs
                         let lhs_limb = ctx.assign_advice_from(
                             || format!("lhs {limb_index} for calc dividend"),
                             *lhs_column,
                             &lhs,
                         )?;
-                        // carry[i-1]
-                        let prev_carry = if let Some(prev_carry_cell) = &prev_carry_cell {
-                            ctx.assign_advice_from(
-                                || format!("carry_{limb_index}-1"),
-                                *carry_column,
-                                prev_carry_cell,
-                            )?
-                            .value()
-                            .copied()
-                        } else {
-                            Value::known(F::ZERO)
-                        };
 
                         // -rhs
                         let rhs_limb = ctx.assign_advice_from(
@@ -605,51 +589,46 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                             &rhs,
                         )?;
 
-                        // -carry [i] * w
-                        let carry_cell = ctx.assign_advice(
-                            || format!("carry_{limb_index}"),
-                            *carry_column,
-                            (prev_carry + lhs_limb.value() - rhs_limb.value() + max_word.value())
-                                * Value::known(&inverted_target_base),
-                        )?;
-
-                        // -m_i
-                        accumulated_extra += &max_word_bn;
-                        // FIXME Not advice
-                        let m_i = big_nat::nat_to_f(&(&accumulated_extra % &target_base_bn))
-                            .expect("TODO");
-                        ctx.assign_advice(
-                            || format!("m_{limb_index}"),
-                            *output_column,
-                            Value::known(m_i),
-                        )?;
-
-                        ctx.assign_fixed(
-                            || format!("m_{limb_index} coeff"),
-                            *output_coeff,
-                            -F::ONE,
-                        )?;
-
-                        accumulated_extra /= &target_base_bn;
-
-                        ctx.next();
-                        prev_carry_cell =
-                            Some(self.check_fits_in_bits(ctx, carry_cell, carry_bits)?);
+                        lhs_limb.value().map(|f| *f) - rhs_limb.value()
                     }
-                    EitherOrBoth::Left(lhs) => {
-                        ctx.assign_advice_from(
+                    EitherOrBoth::Left(lhs) => ctx
+                        .assign_advice_from(
                             || format!("lhs {limb_index} for calc dividend"),
                             *lhs_column,
                             &lhs,
-                        )?;
-                    }
+                        )?
+                        .value()
+                        .map(|f| *f),
                     EitherOrBoth::Right(rhs) => {
-                        ctx.assign_advice_from(
-                            || format!("rhs {limb_index} for check zero"),
-                            *rhs_column,
-                            &rhs,
-                        )?;
+                        Value::known(-F::ONE)
+                            * ctx
+                                .assign_advice_from(
+                                    || format!("rhs {limb_index} for check zero"),
+                                    *rhs_column,
+                                    &rhs,
+                                )?
+                                .value()
                     }
+                };
+
+                ctx.assign_fixed(
+                    || format!("carry_{limb_index} coeff"),
+                    *carry_coeff,
+                    -target_base,
+                )?;
+                // -carry [i] * w
+                let carry_cell = ctx.assign_advice(
+                    || format!("carry_{limb_index}"),
+                    *carry_column,
+                    (prev_carry + lhs_sub_rhs + constant.value())
+                        * Value::known(&inverted_target_base),
+                )?;
+
+                if limb_index != max_cells_len - 1 {
+                    prev_carry_cell = Some({
+                        ctx.next();
+                        self.check_fits_in_bits(ctx, carry_cell, carry_bits)?
+                    });
                 }
 
                 ctx.next();
@@ -657,6 +636,20 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                 Ok(())
             })
             .collect::<Result<Vec<_>, _>>()?;
+
+        accumulated_extra += &max_word_bn;
+        let m_i: F = big_nat::nat_to_f(&(&accumulated_extra % &target_base_bn)).expect("TODO");
+
+        ctx.assign_fixed(|| "last carry coeff", *carry_coeff, F::ONE)?;
+        // -carry [i]
+        let _last_carry = ctx.assign_advice_from(
+            || "last carry",
+            *carry_column,
+            prev_carry_cell.expect("Always assigned, because limbs not empty"),
+        )?;
+        let _m_n = ctx.assign_fixed(|| "m_n for equal check", *constant_column, -m_i)?;
+
+        ctx.next();
 
         Ok(())
     }
