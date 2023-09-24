@@ -48,11 +48,27 @@ pub struct NIFS<C: CurveAffine, RO: ROTrait<C>> {
 }
 
 impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
-    /// Given two (relaxed) plonk instance-witness pairs:
-    /// (U1, W1)  and (U2, W2) which share the same plonk structure S
-    /// NIFS prover will calculate and return (cross_terms, cross_term_commits)
-    /// cross_term_commits will be used by NIFS verifier later to calculated the folded relaxed
-    /// plonk instance.
+    /// Commits to the cross terms between two Plonk instance-witness pairs.
+    ///
+    /// This method calculates the cross terms and their commitments, which
+    /// are essential for the folding process.
+    ///
+    /// # Arguments
+    /// * `ck`: The commitment key.
+    /// * `S`: the Plonk structure shared by both instance-witness pairs.
+    /// * `U1`: The first relaxed Plonk instance.
+    /// * `W1`: The witness for the first relaxed Plonk instance.
+    /// * `U2`: The second Plonk instance.
+    /// * `W2`: The witness for the second Plonk instance.
+    ///
+    /// # Returns
+    /// A tuple containing the cross terms and their commitments.
+    ///
+    /// # Context
+    /// The cross terms are derived from the polynomial relations
+    /// of the two instance-witness pairs. They play a crucial role
+    /// in the folding process, allowing two polynomial relations
+    /// to be combined into one.
     pub fn commit_cross_terms(
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C>,
@@ -81,9 +97,25 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         (cross_terms, cross_term_commits)
     }
 
-    /// NIFS prover: given two (relaxed) plonk witness-instance pairs
-    /// calculated the folded witness-instance as well as the cross_terms (see
-    /// NIFS::commit_cross_terms for detail)
+    /// Generates a proof of correct folding using the NIFS protocol.
+    ///
+    /// This method takes two relaxed Plonk instance-witness pairs and calculates the folded instance and witness.
+    /// It also computes the cross terms and their commitments.
+    ///
+    /// # Arguments
+    /// * `ck`: The commitment key.
+    /// * `ro`: A mutable reference to the random oracle.
+    /// * `td`: Table data associated with the (strict not relaxed) plonk instance to be folded
+    /// * `U1`: The first relaxed Plonk instance.
+    /// * `W1`: The witness for the first relaxed Plonk instance.
+    ///
+    /// # Returns
+    /// A tuple containing the NIFS instance and the folded relaxed Plonk instance-witness pair.
+    ///
+    /// # Context
+    /// The prove function is central to the NIFS protocol. It demonstrates
+    /// that two polynomial relations have been correctly folded into one,
+    /// providing cryptographic evidence of this fact.
     pub fn prove(
         ck: &CommitmentKey<C>,
         ro: &mut RO,
@@ -120,6 +152,18 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         )
     }
 
+    /// Verifies the correctness of the folding using the NIFS protocol.
+    ///
+    /// This method takes a relaxed Plonk instance and a Plonk instance and verifies if they have been correctly folded.
+    ///
+    /// # Arguments
+    /// * `ro`: A mutable reference to the random oracle.
+    /// * `S`: The Plonk structure shared by both instances.
+    /// * `U1`: The relaxed Plonk instance.
+    /// * `U2`: The Plonk instance.
+    ///
+    /// # Returns
+    /// The folded relaxed Plonk instance.
     pub fn verify(
         &self,
         ro: &mut RO,
@@ -224,8 +268,8 @@ mod tests {
         td2: &TableData<F>,
     ) {
         // we assume td.assembly() is already called
-        let mut f_U = RelaxedPlonkInstance::default(td1.instance.len());
-        let mut f_W = RelaxedPlonkWitness::default(td1.k, td1.advice.len());
+        let mut f_U = RelaxedPlonkInstance::new(td1.instance.len());
+        let mut f_W = RelaxedPlonkWitness::new(td1.k, td1.advice.len());
         let S = td1.plonk_structure(ck);
         let U1 = td1.plonk_instance(ck);
         let W1 = td1.plonk_witness();

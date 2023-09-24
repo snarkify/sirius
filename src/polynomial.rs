@@ -349,14 +349,11 @@ impl<F: PrimeField> Monomial<F> {
     // if the index < num_fixed, it will be treated as "const"
     // i.e. not folded
     pub fn degree_for_folding(&self, num_fixed: usize) -> usize {
-        let mut deg = 0;
-        for (i, exp) in self.exponents.iter().enumerate() {
-            let (_, col) = self.index_to_poly[i];
-            if col >= num_fixed {
-                deg += *exp;
-            }
-        }
-        deg
+        self.exponents
+            .iter()
+            .zip(self.index_to_poly.iter())
+            .filter_map(|(exp, (_, col_index))| (col_index >= &num_fixed).then_some(exp))
+            .sum()
     }
 
     pub fn degree(&self) -> usize {

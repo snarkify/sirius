@@ -98,8 +98,8 @@ impl<C: CurveAffine> PlonkStructure<C> {
         F: PrimeField,
     {
         let nrow = 2usize.pow(self.k as u32);
-        let U2 = RelaxedPlonkInstance::default(U.instance.len());
-        let W2 = RelaxedPlonkWitness::default(self.k as u32, self.num_advice_columns);
+        let U2 = RelaxedPlonkInstance::new(U.instance.len());
+        let W2 = RelaxedPlonkWitness::new(self.k as u32, self.num_advice_columns);
         let res: usize = (0..nrow)
             .into_par_iter()
             .map(|row| {
@@ -127,8 +127,8 @@ impl<C: CurveAffine> PlonkStructure<C> {
         F: PrimeField,
     {
         let nrow = 2usize.pow(self.k as u32);
-        let U2 = RelaxedPlonkInstance::default(U.instance.len());
-        let W2 = RelaxedPlonkWitness::default(self.k as u32, self.num_advice_columns);
+        let U2 = RelaxedPlonkInstance::new(U.instance.len());
+        let W2 = RelaxedPlonkWitness::new(self.k as u32, self.num_advice_columns);
         let num_fixed = self.fixed_columns.len();
         let u_index = num_fixed + self.num_advice_columns + 1;
         let poly = self.gate.homogeneous(num_fixed, u_index);
@@ -183,7 +183,7 @@ impl<C: CurveAffine> PlonkInstance<C> {
 }
 
 impl<C: CurveAffine> RelaxedPlonkInstance<C> {
-    pub fn default(num_io: usize) -> Self {
+    pub fn new(num_io: usize) -> Self {
         Self {
             W_commitment: CommitmentKey::<C>::default_value(),
             E_commitment: CommitmentKey::<C>::default_value(),
@@ -194,6 +194,14 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
     }
 
     /// fold relaxed plonk instance with another plonk instance.
+    ///
+    /// # Arguments
+    /// * `U2`: PlonkInstance
+    /// * `cross_term_commits`: the commitments of cross terms
+    /// * `r`: a random value to combine two (relaxed) plonk Instances
+    ///
+    /// # Returns
+    /// The folded (relaxed) plonk instance
     pub fn fold(&self, U2: &PlonkInstance<C>, cross_term_commits: &[C], r: &C::ScalarExt) -> Self {
         let comm_W = self.W_commitment + best_multiexp(&[*r], &[U2.W_commitment]).into();
         let instance = self
@@ -236,7 +244,7 @@ impl<F: PrimeField> PlonkWitness<F> {
 
 impl<F: PrimeField> RelaxedPlonkWitness<F> {
     // nc: num_advice_columns in plonk gate
-    pub fn default(k: u32, nc: usize) -> Self {
+    pub fn new(k: u32, nc: usize) -> Self {
         let mut W = Vec::new();
         let mut E = Vec::new();
         W.resize(2usize.pow(k) * nc, F::ZERO);
