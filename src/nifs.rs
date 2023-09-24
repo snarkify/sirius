@@ -19,6 +19,18 @@ use halo2_proofs::arithmetic::CurveAffine;
 use rayon::prelude::*;
 use std::marker::PhantomData;
 
+/// Represent intermediate polynomial terms that arise when folding
+/// two polynomial relations into one.
+///
+/// In the context of the NIFS protocol, when two identical
+/// polynomial relations are folded, certain terms (referred
+/// to as cross terms) emerge that capture the interaction between
+/// the two original polynomials.
+pub type CrossTerms<C> = Vec<Vec<<C as CurveAffine>::ScalarExt>>;
+
+/// Cryptographic commitments to the [`CrossTerms`].
+pub type CrossTermCommits<C> = Vec<C>;
+
 /// NIFS: Non Interactive Folding Scheme
 ///
 /// Given a polynomial relation `P(x_1,...,x_n)` with polynomial degree `d.
@@ -31,7 +43,7 @@ use std::marker::PhantomData;
 // TODO Replace links to either the documentation right here, or the official Snarkify resource
 #[derive(Clone, Debug)]
 pub struct NIFS<C: CurveAffine, RO: ROTrait<C>> {
-    pub(crate) cross_term_commits: Vec<C>,
+    pub(crate) cross_term_commits: CrossTermCommits<C>,
     _marker: PhantomData<RO>,
 }
 
@@ -48,7 +60,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         W1: &RelaxedPlonkWitness<C::ScalarExt>,
         U2: &PlonkInstance<C>,
         W2: &PlonkWitness<C::ScalarExt>,
-    ) -> (Vec<Vec<C::ScalarExt>>, Vec<C>) {
+    ) -> (CrossTerms<C>, CrossTermCommits<C>) {
         let gate = &S.gate;
         let num_fixed = S.fixed_columns.len();
         let num_row = S.fixed_columns[0].len();
