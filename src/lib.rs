@@ -1,6 +1,6 @@
 #![allow(clippy::type_complexity)]
 #![allow(dead_code)]
-#![allow(non_snake_case)]
+#![allow(non_snake_case)] // UPPER_CASE is used for ease of compatibility with Nova documentation
 
 pub mod commitment;
 pub mod constants;

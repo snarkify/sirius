@@ -1,8 +1,13 @@
-//! NIFS: non-interactive folding scheme
+//! NIFS: Non Interactive Folding Scheme
+//!
 //! NIFS protocal allow us to fold two identical polynomial relations into one
 //! e.g. the polynomial relation can be derived from different way, e.g.:
-//! (1) custom plonkish gate
-//! (2) the permutation polynomial derived from plonk copy constraints
+//! - Custom plonkish gate
+//! - The permutation polynomial derived from plonk copy constraints
+//!
+//! For more details look at:
+//! - Paragraph '3. Folding scheme' at [Nova whitepaper](https://eprint.iacr.org/2021/370)
+//! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
 use crate::commitment::CommitmentKey;
 use crate::constants::NUM_CHALLENGE_BITS;
 use crate::plonk::{
@@ -14,13 +19,16 @@ use halo2_proofs::arithmetic::CurveAffine;
 use rayon::prelude::*;
 use std::marker::PhantomData;
 
-/// NIFS: non-interactive folding scheme
-/// Given a polynomial relation P(x_1,...,x_n) with polynomial degree d.
-/// after folding two such (identical) relations, we have
-/// P(x_1+r*y_1,...,x_n+r*y_n) = P(x_1,...,x_n) + \sum_{k=1}^{d-1} T_k + r^d*P(y_1,...,y_n)
-/// cross_term = [T_1,...,T_{d-1}]
-/// cross_term_commits = [Comm(T_1),...,Comm(T_{d-1})]
-/// please refer to: https://hackmd.io/@chaosma/BJvWmnw_h#31-NIFS
+/// NIFS: Non Interactive Folding Scheme
+///
+/// Given a polynomial relation `P(x_1,...,x_n)` with polynomial degree `d.
+/// After folding two such (identical) relations, we have:
+/// - `P(x_1 + r*y_1, ..., x_n + r * y_n) = P(x_1, ..., x_n) + \sum_{k=1}^{d-1} T_k + r^d * P(y_1,...,y_n)`
+/// - `cross_term = [T_1,...,T_{d-1}]`
+/// - `cross_term_commits = [Comm(T_1),...,Comm(T_{d-1})]`
+///
+/// Please refer to: [notes](https://hackmd.io/@chaosma/BJvWmnw_h#31-NIFS)
+// TODO Replace links to either the documentation right here, or the official Snarkify resource
 #[derive(Clone, Debug)]
 pub struct NIFS<C: CurveAffine, RO: ROTrait<C>> {
     pub(crate) cross_term_commits: Vec<C>,

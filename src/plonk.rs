@@ -139,29 +139,34 @@ impl<C: CurveAffine> PlonkStructure<C> {
             .filter(|(i, v)| W.E[*i].ne(v))
             .count();
 
-        let res_W = U.W_commitment == ck.commit(&W.W);
-        let res_E = U.E_commitment == ck.commit(&W.E);
-        if res != 0 {
-            return Err(format!(
+        let actual_W_commit = ck.commit(&W.W);
+        let actual_E_commit = ck.commit(&W.E);
+
+        match (
+            res == 0,
+            U.W_commitment.eq(&actual_W_commit),
+            U.E_commitment.eq(&actual_E_commit),
+        ) {
+            (true, true, true) => Ok(()),
+            (false, _, _) => Err(format!(
                 "relaxed plonk relation not satisfied on {} out of {} rows",
                 res, nrow
-            ));
+            )),
+            (true, false, false) => Err(format!(
+                "both commitment of witnesses W & E is not match:
+                    W: Expected: {:?}, Actual: {:?},
+                    E: Expected: {:?}, Actual: {:?}",
+                U.W_commitment, actual_W_commit, U.E_commitment, actual_E_commit
+            )),
+            (true, false, true) => Err(format!(
+                "commitment of witness W is not match: Expected: {:?}, Actual: {:?}",
+                U.W_commitment, actual_W_commit
+            )),
+            (true, true, false) => Err(format!(
+                "commitment of witness E is not match: Expected: {:?}, Actual: {:?}",
+                U.E_commitment, actual_E_commit
+            )),
         }
-        if !res_W {
-            return Err(format!(
-                "commitment of witness W is not match, expect={:?}, got={:?}",
-                U.W_commitment,
-                ck.commit(&W.W)
-            ));
-        }
-        if !res_E {
-            return Err(format!(
-                "commitment of witness E is not match, expect={:?}, got={:?}",
-                U.E_commitment,
-                ck.commit(&W.E)
-            ));
-        }
-        Ok(())
     }
 }
 
@@ -188,6 +193,7 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
         }
     }
 
+    /// fold relaxed plonk instance with another plonk instance.
     pub fn fold(&self, U2: &PlonkInstance<C>, cross_term_commits: &[C], r: &C::ScalarExt) -> Self {
         let comm_W = self.W_commitment + best_multiexp(&[*r], &[U2.W_commitment]).into();
         let instance = self

@@ -188,11 +188,6 @@ impl<F: PrimeField> Expression<F> {
                 index: query.column_index(),
                 rotation: query.rotation(),
             }),
-            //            PE::Instance(query) =>
-            //                Expression::Polynomial(Query {
-            //                index: meta.0 + query.column_index(),
-            //                rotation: query.rotation(),
-            //            }),
             PE::Advice(query) => Expression::Polynomial(Query {
                 index: num_fixed + query.column_index(),
                 rotation: query.rotation(),
