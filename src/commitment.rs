@@ -16,6 +16,10 @@ pub struct CommitmentKey<C: CurveAffine> {
 }
 
 impl<C: CurveAffine> CommitmentKey<C> {
+    pub fn default_value() -> C {
+        C::identity()
+    }
+
     pub fn setup(k: usize, label: &'static [u8]) -> Self {
         // This is usually a limitation on the curve, but we also want 32-bit
         // architectures to be supported.
@@ -45,6 +49,10 @@ impl<C: CurveAffine> CommitmentKey<C> {
     }
 
     pub fn commit(&self, v: &[C::Scalar]) -> C {
-        best_multiexp(v, &self.ck).to_affine()
+        assert!(
+            self.ck.len() >= v.len(),
+            "CommitmentKey size must be greater than or equal to scalar vector size"
+        );
+        best_multiexp(v, &self.ck[..v.len()]).to_affine()
     }
 }
