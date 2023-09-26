@@ -19,19 +19,13 @@ use super::big_nat::{self, BigNat};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("TODO")]
-    InvalidTableSize,
-    #[error("TODO")]
-    NotConsistentLimbWidth {
-        lhs_limb_width: NonZeroUsize,
-        rhs_limb_width: NonZeroUsize,
-    },
-    #[error("TODO")]
+    #[error(transparent)]
     BigNat(#[from] big_nat::Error),
-    #[error("TODO")]
+    #[error(transparent)]
     Halo2(#[from] halo2_proofs::plonk::Error),
-    // TODO
-    #[error("TODO")]
+    #[error(
+        "During the calculation of carry bits the number is converted to f64 and an error occurred"
+    )]
     CarryBitsCalculate,
 }
 
@@ -955,12 +949,23 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 
         let mod_bn = to_bn(modulus)?;
 
-        let lhs_bi = to_bn(lhs)?.into_bigint();
-        let rhs_bi = to_bn(rhs)?.into_bigint();
-        let mod_bi = mod_bn.into_bigint();
+        let lhs_bi = to_bn(lhs)?.map(|bn| bn.into_bigint());
+        let rhs_bi = to_bn(rhs)?.map(|bn| bn.into_bigint());
+        let mod_bi = mod_bn.as_ref().map(|bn| bn.into_bigint());
 
-        let q = self.to_bignat(&((&lhs_bi * &rhs_bi) / &mod_bi))?;
-        let r = self.to_bignat(&((&lhs_bi * &rhs_bi) % &mod_bi))?;
+        let (q, r) = lhs_bi
+            .as_ref()
+            .zip(rhs_bi.as_ref())
+            .zip(mod_bi.as_ref())
+            .map(|((lhs_bi, rhs_bi), mod_bi)| {
+                let prod = lhs_bi * rhs_bi;
+                Result::<_, Error>::Ok((
+                    self.to_bignat(&(&prod / mod_bi))?,
+                    self.to_bignat(&(&prod % mod_bi))?,
+                ))
+            })
+            .transpose()?
+            .unzip();
 
         // lhs * rhs
 
@@ -976,6 +981,10 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             &max_word_without_overflow,
         )?;
 
+        let empty = iter::repeat(F::ZERO)
+            .take(self.limbs_count_limit.get())
+            .collect::<Box<[_]>>();
+
         // q * m + r
         let MultContext {
             lhs: assigned_q,
@@ -983,15 +992,19 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             ..
         } = self.assign_mult(
             ctx,
-            q.limbs(),
-            mod_bn.limbs(),
+            q.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
+            mod_bn.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
             &max_word_without_overflow,
             &max_word_without_overflow,
         )?;
         let SumContext {
             rhs: assigned_r,
             res: right,
-        } = self.assign_sum(ctx, &q_mul_m, r.limbs())?;
+        } = self.assign_sum(
+            ctx,
+            &q_mul_m,
+            r.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
+        )?;
 
         // q * m + r
         let grouped_left = self.group_limbs(ctx, left)?;

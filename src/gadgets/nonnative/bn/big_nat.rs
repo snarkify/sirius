@@ -96,7 +96,7 @@ impl<F: ff::PrimeField> BigNat<F> {
         input: &[AssignedCell<F, F>],
         limb_width: NonZeroUsize,
         limbs_count_limit: NonZeroUsize,
-    ) -> Result<Self, Error> {
+    ) -> Result<Option<Self>, Error> {
         if input.len() > limbs_count_limit.get() {
             return Err(Error::LimbLimitReached {
                 actual: input.len(),
@@ -106,17 +106,23 @@ impl<F: ff::PrimeField> BigNat<F> {
 
         let limbs = input
             .iter()
-            .map(|cell| cell.value().map(|v| *v).unwrap().unwrap_or(F::ZERO))
+            .map(|cell| *cell.value().map(|v| *v).unwrap())
             .map(|fv| {
-                if fv.to_repr().as_ref().len() <= limb_width.get() {
-                    Ok(fv)
+                if let Some(fv) = fv {
+                    if fv.to_repr().as_ref().len() <= limb_width.get() {
+                        Ok(Some(fv))
+                    } else {
+                        Err(Error::TooBigBigint)
+                    }
                 } else {
-                    Err(Error::TooBigBigint)
+                    Ok(None)
                 }
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Option<Vec<_>>, _>>()?;
 
-        Self::from_limbs(limbs.into_iter(), limb_width)
+        limbs
+            .map(|limbs| Self::from_limbs(limbs.into_iter(), limb_width))
+            .transpose()
     }
 
     pub fn from_bigint(
