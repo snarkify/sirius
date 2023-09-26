@@ -1,5 +1,5 @@
 #![allow(clippy::type_complexity)]
-#![allow(dead_code)]
+#![allow(dead_code)] // TODO: remove it later
 #![allow(non_snake_case)] // UPPER_CASE is used for ease of compatibility with Nova documentation
 
 pub mod commitment;
