@@ -1,5 +1,19 @@
-//! This module defines TableData and Plonk related types
-//! contains methods used by folding scheme
+//! This module defines the TableData and Plonk related types for working with
+//! halo2 circuits. It provides functionality to retrieve PlonkStructure and witness
+//! data, as well as defining various methods used by the folding scheme.
+//!
+//! The main types defined in this module are:
+//! - PlonkStructure: Represents the structure of a Plonk circuit and its associated data.
+//! - PlonkInstance: Represents an instance of a Plonk circuit.
+//! - PlonkWitness: Represents the witness data for a Plonk circuit.
+//! - RelaxedPlonkInstance: Represents an instance of a relaxed Plonk circuit.
+//! - RelaxedPlonkWitness: Represents the witness data for a relaxed Plonk circuit.
+//!
+//! The module also provides implementations of the AbsorbInRO trait for
+//! PlonkStructure, PlonkInstance, and RelaxedPlonkInstance.
+//!
+//! Additionally, it defines a method is_sat on PlonkStructure to determine if
+//! a given Plonk instance and witness satisfy the circuit constraints.
 use crate::{
     commitment::CommitmentKey,
     polynomial::{Expression, MultiPolynomial, Query},
@@ -193,15 +207,21 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
         }
     }
 
-    /// fold relaxed plonk instance with another plonk instance.
+    /// Folds a `RelaxedPlonkInstance` with another `PlonkInstance` while preserving their Plonk relation.
+    ///
+    /// This function combines the current relaxed Plonk instance with a given Plonk instance by
+    /// computing new commitments, instances, and scalar values using provided cross-term
+    /// commitments and random value `r`.
     ///
     /// # Arguments
-    /// * `U2`: PlonkInstance
-    /// * `cross_term_commits`: the commitments of cross terms
-    /// * `r`: a random value to combine two (relaxed) plonk Instances
+    /// * `U2`: A `PlonkInstance` used to combine with the current relaxed Plonk instance.
+    /// * `cross_term_commits`: The commitments of the cross terms used to calculate the folded
+    /// value comm_E
+    /// * `r`: A random scalar value used for combining the instances and commitments.
     ///
     /// # Returns
-    /// The folded (relaxed) plonk instance
+    /// The folded `RelaxedPlonkInstance` after combining the instances and commitments.
+    /// for detail of how fold works, please refer to: [nifs](https://hackmd.io/d7syox5tTeaxkepc9nLvHw?view#31-NIFS)
     pub fn fold(&self, U2: &PlonkInstance<C>, cross_term_commits: &[C], r: &C::ScalarExt) -> Self {
         let comm_W = self.W_commitment + best_multiexp(&[*r], &[U2.W_commitment]).into();
         let instance = self
