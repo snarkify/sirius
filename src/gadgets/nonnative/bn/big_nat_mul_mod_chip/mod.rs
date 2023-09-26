@@ -35,10 +35,12 @@ pub enum Error {
     CarryBitsCalculate,
 }
 
+pub const MAIN_GATE_T: usize = 4;
+
 /// Multiplication of two large natural numbers by mod
 #[derive(Debug)]
 pub struct BigNatMulModChip<F: ff::PrimeField> {
-    main_gate: MainGate<F, 2>,
+    main_gate: MainGate<F, MAIN_GATE_T>,
     limb_width: NonZeroUsize,
     limbs_count_limit: NonZeroUsize,
 }
@@ -500,7 +502,6 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 
         let target_base_bn = BigInt::one() << limb_width;
         let target_base: F = big_nat::nat_to_f(&target_base_bn).expect("TODO");
-        let inverted_target_base: F = Option::<F>::from(target_base.invert()).unwrap_or_default();
 
         let mut accumulated_extra = BigInt::zero();
         let carry_bits = calc_carry_bits(&max_word_bn, limb_width)?;
@@ -512,11 +513,15 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         let rhs_column = &self.config().state[1];
         let rhs_selector = &self.config().q_1[1];
 
+        let m_i_column = &self.config().state[2];
+        let m_i_selector = &self.config().q_1[2];
+
+        let max_word_column = &self.config().state[3];
+        let max_word_selector = &self.config().q_1[3];
+
         let prev_carry_column = &self.config().input;
         let prev_carry_coeff = &self.config().q_i;
         let mut prev_carry_cell = None;
-
-        let constant_column = &self.config().rc;
 
         let carry_column = &self.config().out;
         let carry_coeff = &self.config().q_o;
@@ -529,6 +534,8 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             .zip_longest(rhs.cells.into_iter())
             .enumerate()
             .map(|(limb_index, cells)| -> Result<(), Error> {
+                debug!("for limb_index {limb_index} & row offset: {}", ctx.offset);
+
                 ctx.assign_fixed(
                     || format!("selector lhs {limb_index}"),
                     *lhs_selector,
@@ -541,18 +548,39 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                     -F::ONE,
                 )?;
 
-                // max word - m_i
+                // m_i
                 accumulated_extra += &max_word_bn;
 
-                let m_i: F =
-                    big_nat::nat_to_f(&(&accumulated_extra % &target_base_bn)).expect("TODO");
-                let constant = ctx.assign_fixed(
+                let assigned_m_i = ctx.assign_advice(
                     || "max word for equal check",
-                    *constant_column,
-                    max_word - m_i,
+                    *m_i_column,
+                    Value::known(
+                        big_nat::nat_to_f(&(&accumulated_extra % &target_base_bn)).expect("TODO"),
+                    ),
                 )?;
+                debug!("assigned_m_i: {:?}", assigned_m_i);
 
                 accumulated_extra /= &target_base_bn;
+
+                ctx.assign_fixed(
+                    || format!("selector m_i {limb_index}"),
+                    *m_i_selector,
+                    -F::ONE,
+                )?;
+
+                // max_word ($W_m$)
+                let assigned_max_word = ctx.assign_advice(
+                    || "max word for equal check",
+                    *max_word_column,
+                    Value::known(max_word),
+                )?;
+                ctx.assign_fixed(
+                    || format!("selector rhs {limb_index}"),
+                    *max_word_selector,
+                    F::ONE,
+                )?;
+
+                debug!("max word: {:?}", assigned_max_word);
 
                 ctx.assign_fixed(
                     || format!("carry[{limb_index}-1] coeff"),
@@ -562,6 +590,8 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 
                 // carry[i-1]
                 let prev_carry = if let Some(prev_carry_cell) = &prev_carry_cell {
+                    debug!("Take prev carry: {:?}", prev_carry_cell);
+
                     ctx.assign_advice_from(
                         || format!("carry_{limb_index}-1"),
                         *prev_carry_column,
@@ -599,16 +629,14 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                         )?
                         .value()
                         .map(|f| *f),
-                    EitherOrBoth::Right(rhs) => {
-                        Value::known(-F::ONE)
-                            * ctx
-                                .assign_advice_from(
-                                    || format!("rhs {limb_index} for check zero"),
-                                    *rhs_column,
-                                    &rhs,
-                                )?
-                                .value()
-                    }
+                    EitherOrBoth::Right(rhs) => ctx
+                        .assign_advice_from(
+                            || format!("rhs {limb_index} for check zero"),
+                            *rhs_column,
+                            &rhs,
+                        )?
+                        .value()
+                        .map(|v| -(*v)),
                 };
 
                 ctx.assign_fixed(
@@ -617,28 +645,30 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                     -target_base,
                 )?;
                 // -carry [i] * w
-                let carry_cell = ctx.assign_advice(
-                    || format!("carry_{limb_index}"),
-                    *carry_column,
-                    (prev_carry + lhs_sub_rhs + constant.value())
-                        * Value::known(&inverted_target_base),
-                )?;
+                let carry =
+                    (prev_carry + lhs_sub_rhs + assigned_max_word.value()).map(|dividend_carry| {
+                        let dividend_carry = big_nat::f_to_nat(&dividend_carry);
+
+                        big_nat::nat_to_f(&(dividend_carry / &target_base_bn)).unwrap()
+                    });
+
+                let carry_cell =
+                    ctx.assign_advice(|| format!("carry_{limb_index}"), *carry_column, carry)?;
 
                 if limb_index != max_cells_len - 1 {
                     prev_carry_cell = Some({
                         ctx.next();
                         self.check_fits_in_bits(ctx, carry_cell, carry_bits)?
                     });
-                }
+                } else {
+                    prev_carry_cell = Some(carry_cell);
+                };
 
                 ctx.next();
 
                 Ok(())
             })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        accumulated_extra += &max_word_bn;
-        let m_i: F = big_nat::nat_to_f(&(&accumulated_extra % &target_base_bn)).expect("TODO");
+            .collect::<Result<Vec<()>, _>>()?;
 
         ctx.assign_fixed(|| "last carry coeff", *carry_coeff, F::ONE)?;
         // -carry [i]
@@ -647,7 +677,12 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             *carry_column,
             prev_carry_cell.expect("Always assigned, because limbs not empty"),
         )?;
-        let _m_n = ctx.assign_fixed(|| "m_n for equal check", *constant_column, -m_i)?;
+        let _m_n = ctx.assign_advice(
+            || "`m_n` for equal check",
+            *m_i_column,
+            Value::known(big_nat::nat_to_f(&accumulated_extra).unwrap()),
+        )?;
+        ctx.assign_fixed(|| "selector `m_n`", *m_i_selector, -F::ONE)?;
 
         ctx.next();
 
@@ -943,7 +978,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 }
 
 impl<F: ff::PrimeField> Chip<F> for BigNatMulModChip<F> {
-    type Config = MainGateConfig<2>;
+    type Config = MainGateConfig<MAIN_GATE_T>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {

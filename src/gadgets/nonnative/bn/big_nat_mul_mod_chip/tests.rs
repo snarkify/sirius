@@ -14,7 +14,7 @@ const DOUBLE_LIMBS: usize = 12;
 
 #[derive(Clone)]
 struct Config {
-    main_gate_config: MainGateConfig<2>,
+    main_gate_config: MainGateConfig<MAIN_GATE_T>,
     lhs: Column<Instance>,
     rhs: Column<Instance>,
     assigned_mult: Column<Instance>,
@@ -76,7 +76,7 @@ impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
             assigned_mult,
             assigned_sum,
             grouped_assigned_mult,
-            main_gate_config: MainGate::<F, 2>::configure(meta),
+            main_gate_config: MainGate::<F, MAIN_GATE_T>::configure(meta),
         }
     }
 
