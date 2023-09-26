@@ -458,37 +458,67 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         })
     }
 
-    /// Checks the equality of two [`GroupedBigNat`] numbers
+    /// Compares two [`GroupedBigNat`] numbers for equality.
     ///
-    /// The algorithm checks against carry.
-    /// carry[i-1] + lhs[i] - rhs[i] + shift == carry[i] + max_word
+    /// The algorithm can be described as follows:
+    /// ```latex
+    /// Given:
+    /// lhs = \sum_i lhs_i w^i, where lhs_i < w_M
+    /// rhs = \sum_i rhs_i w^i, where rhs_i < w_M
+    /// m = \sum_i w_M w^i = \sum_i m_i w^i, where m_i < w
     ///
+    /// We form the equation:
+    /// x + m - y = \sum_i (lhs_i + w_M - rhs_i) w^i \stackrel{?}{=} \sum_i m_i w^i
+    /// ```
+    ///
+    /// This method checks the equality of two big numbers by leveraging the concept of carry.
+    /// The comparison is done by considering the maximum word size `w_M`.
+    ///
+    /// Parameters:
+    /// - `lhs` & `rhs`: The two bignat numbers, represented in limbs, that we are comparing.
+    /// - `m`: A special number where each limb is `max_word` (`w_M`).
+    /// - `w_M`: The maximum word size, which depends on the operations previously done on the numbers.
+    ///          It accounts for any overflow relative to `self.limb_width`.
+    ///
+    /// # Arithmetization
     ///
     /// ```markdown
-    /// |----------|-------|----------|-------|-----------|-------------|-------|------|
-    /// | state[0] | q_1[0]| state[1] | q_1[1]|   input   |    q_i      |  out  | q_o  |
-    /// |----------|-------|----------|-------|-----------|-------------|-------|------|
-    /// |   ...    |  ...  |   ...    |  ...  |   ...     |    ...      |  ...  | ...  |
-    /// |  lhs[k]  |   1   |  rhs[k]  |  -1   | carry[k-1]| target_base | carry | -1   |
-    /// |   ...    |  ...  |   ...    |  ...  |   ...     |    ...      |  ...  | ...  |
-    /// |----------|-------|----------|-------|-----------|-------------|-------|------|
-    ///
+    /// |----------|-------|----------|-------|----------|-------|----------|-------|-----------|-------------|-------|-------------|
+    /// | state[0] | q_1[0]| state[1] | q_1[1]| state[2] | q_1[2]| state[3] | q_1[3]|   input   |    q_i      |  out  |     q_o     |
+    /// |----------|-------|----------|-------|----------|-------|----------|-------|-----------|-------------|-------|-------------|
+    /// |   ...    |  ...  |   ...    |  ...  |   ...    |  ...  |   ...    |  ...  |   ...     |    ...      |  ...  |     ...     |
+    /// |  lhs[k]  |   1   |  rhs[k]  |  -1   |   m_k    |   1   | max_word |   1   | carry[k-1]|     1       | carry | -target_base|
+    /// |   ...    |  ...  |   ...    |  ...  |   ...    |  ...  |   ...    |  ...  |   ...     |    ...      |  ...  |     ...     |
+    /// |----------|-------|----------|-------|----------|-------|----------|-------|-----------|-------------|-------|-------------|
     /// ```
-    /// (carry[i-i] + lhs[i] - rhs[i] + max_word) / w = carry[i] + m[i] / w
     ///
-    /// prev_carry + l[i] - r[i] + mw - (target_base * carry.num) - (accumulated_extra % target base) = 0
+    /// We express the expression above through main_gate:
+    /// `lhs[k] - rhs[k] + m_i + max_ord + carry[k-1] - carry[k] * target_base`
+    /// `state[0] - state[1] + state[3] + state[4] + prev_carry - carry * target_base`
     ///
-    /// (carry[i-i] + lhs[i] - rhs[i] + max_word) - carry[i] * w - m[i] =?= 0
+    ///
+    /// - `target_base` - is the maximum word for the original limb length plus one (`1 << limb_width`)
+    /// - `m_i` is calculated according to the following rules:
+    /// ```no_compile
+    /// let mut accumulated_extra = 0;
+    /// let target_base = 1 << limb_width;
+    /// let mut m = vec![];
+    /// for i in 0..n {
+    ///     accumulated_extra += &max_word_bn;
+    ///     m[i] = accumulated_extra % &target_base_bn;
+    ///     accumulated_extra /= &target_base_bn;
+    /// }
     /// ```
+    /// - also at each step except the last one we check that the carry
+    ///   fits ([`BigNatMulModChip::check_fits_in_bits`]) into the carry
+    ///   bits ([`calc_carry_bits`]).
+    /// - in the last step, we check that `carry[n] = m[n]`
     fn is_equal(
         &self,
         ctx: &mut RegionCtx<'_, F>,
         lhs: GroupedBigNat<F>,
         rhs: GroupedBigNat<F>,
     ) -> Result<(), Error> {
-        debug!("equal check lhs {lhs:?}");
-        debug!("equal check rhs {rhs:?}");
-
         let limb_width = self.limb_width.get();
 
         // FIXME
