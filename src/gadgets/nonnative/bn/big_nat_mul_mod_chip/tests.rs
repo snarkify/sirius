@@ -152,41 +152,83 @@ mod mult_mod_tests {
         }
     }
 
+    struct Context {
+        lhs: u128,
+        rhs: u128,
+        modulus: u128,
+    }
+
     #[test_log::test]
-    fn test_little_bn() {
-        let lhs = BigInt::from_u64(u64::MAX).unwrap();
-        let rhs = BigInt::from_u64(u32::MAX as u64).unwrap();
-        let modulus = BigInt::from_u64(256).unwrap();
-
-        let quotient = (&lhs * &rhs) / &modulus;
-        let remainer = (&lhs * &rhs) % &modulus;
-
-        println!("{lhs} * {rhs} = {quotient} * {modulus} + {remainer}");
-
-        let lhs = BigNat::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-        let rhs = BigNat::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-        let modulus = BigNat::from_bigint(&modulus, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-
-        let quotient = BigNat::from_bigint(&quotient, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-        let remainer = BigNat::from_bigint(&remainer, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-
+    fn test_mult_mod_bn() {
         const K: u32 = 11;
         let ts = TestCircuit::<Fp>::default();
-        let prover = match MockProver::run(
-            K,
-            &ts,
-            vec![
-                lhs.limbs().to_vec(),
-                rhs.limbs().to_vec(),
-                modulus.limbs().to_vec(),
-                quotient.limbs().to_vec(),
-                remainer.limbs().to_vec(),
-            ],
-        ) {
-            Ok(prover) => prover,
-            Err(e) => panic!("{:?}", e),
-        };
-        assert_eq!(prover.verify(), Ok(()));
+
+        let cases = [
+            Context {
+                lhs: 1u128,
+                rhs: u128::MAX,
+                modulus: 256,
+            },
+            Context {
+                lhs: u128::MAX,
+                rhs: 1,
+                modulus: 256,
+            },
+            Context {
+                lhs: u64::MAX as u128,
+                rhs: u32::MAX as u128,
+                modulus: 256,
+            },
+            Context {
+                lhs: u128::MAX,
+                rhs: u64::MAX as u128,
+                modulus: 256,
+            },
+            Context {
+                lhs: u128::MAX,
+                rhs: 256u128,
+                modulus: 512,
+            },
+            Context {
+                lhs: u128::MAX,
+                rhs: 256u128,
+                modulus: 11,
+            },
+        ];
+
+        for Context { lhs, rhs, modulus } in cases {
+            let lhs = BigInt::from_u128(lhs).unwrap();
+            let rhs = BigInt::from_u128(rhs).unwrap();
+            let modulus = BigInt::from_u128(modulus).unwrap();
+
+            let quotient = (&lhs * &rhs) / &modulus;
+            let remainer = (&lhs * &rhs) % &modulus;
+
+            println!("{lhs} * {rhs} = {quotient} * {modulus} + {remainer}");
+
+            let lhs = BigNat::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let rhs = BigNat::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let modulus = BigNat::from_bigint(&modulus, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+
+            let quotient = BigNat::from_bigint(&quotient, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let remainer = BigNat::from_bigint(&remainer, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+
+            let prover = match MockProver::run(
+                K,
+                &ts,
+                vec![
+                    lhs.limbs().to_vec(),
+                    rhs.limbs().to_vec(),
+                    modulus.limbs().to_vec(),
+                    quotient.limbs().to_vec(),
+                    remainer.limbs().to_vec(),
+                ],
+            ) {
+                Ok(prover) => prover,
+                Err(e) => panic!("{:?}", e),
+            };
+            assert_eq!(prover.verify(), Ok(()));
+        }
     }
 }
 
