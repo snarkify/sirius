@@ -514,7 +514,6 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     ) -> Result<(), Error> {
         let limb_width = self.limb_width.get();
 
-        // FIXME
         let max_word_bn: BigInt = cmp::max(
             big_nat::f_to_nat(&lhs.max_word),
             big_nat::f_to_nat(&rhs.max_word),
