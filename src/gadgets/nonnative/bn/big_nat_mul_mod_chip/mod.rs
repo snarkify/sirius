@@ -934,6 +934,33 @@ pub struct SumContext<F: PrimeField> {
 }
 
 impl<F: ff::PrimeField> BigNatMulModChip<F> {
+    /// Performs the multiplication of `lhs` and `rhs` taking into account the `modulus`.
+    ///
+    /// This method serves as an implementation of modular multiplication in the context
+    /// of Halo2 protocol. This implementation leverages the use of the `BigNatMulModChip`
+    /// to perform efficient calculation of large primes.
+    ///
+    /// # Arguments
+    /// * `ctx`: mutable reference to the `RegionCtx` which provides the constraint system and metadata.
+    /// * `lhs`: array of `AssignedCell` representing the left hand side of the operation.
+    /// * `rhs`: array of `AssignedCell` representing the right hand side of the operation.
+    /// * `modulus`: array of `AssignedCell` representing the modulus.
+    ///
+    /// # Order of Operations
+    /// 1. Convert `lhs`, `rhs`, and `modulus` to `BigNat` objects using [`big_nat::BigNat::from_assigned_cells`].
+    /// 2. Perform the modular multiplication `lhs * rhs` using the converted `BigNat` numbers.
+    /// 2.1. This includes the calculation of the quotient and remainder.
+    /// 3. Assign the modular multiplication to the left using [`Self::assign_mult`].
+    /// 4. Calculate `q * m` and the sum `q * m + r` using [`Self::assign_mult`] and [`Self::assign_sum`] respectively.
+    /// 5. Group the limbs of left and right operations using [`Self::group_limbs`].
+    /// 6. Check for the equivalence between the left and right operations using [`Self::is_equal`].
+    ///
+    /// # Returns
+    /// * A result wrapping `MultModResult` object containing the calculated quotient and remainder.
+    ///
+    /// # Errors
+    /// This method will return an error if there is an issue in the conversion of `lhs`, `rhs`, or `modulus` into `BigNat`
+    /// or if the assignment of multiplication and addition fails
     pub fn mult_mod(
         &self,
         ctx: &mut RegionCtx<'_, F>,
