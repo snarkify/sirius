@@ -921,6 +921,13 @@ pub struct MultModResult<F: PrimeField> {
     remainder: Vec<AssignedCell<F, F>>,
 }
 
+impl<F: PrimeField> Deref for MultModResult<F> {
+    type Target = [AssignedCell<F, F>];
+    fn deref(&self) -> &Self::Target {
+        self.remainder.as_slice()
+    }
+}
+
 #[derive(Debug)]
 pub struct MultContext<F: PrimeField> {
     lhs: Vec<AssignedCell<F, F>>,
