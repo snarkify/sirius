@@ -487,15 +487,14 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     /// | state[0] | q_1[0]| state[1] | q_1[1]| state[2] | q_1[2]| state[3] | q_1[3]|   input   |    q_i      |  out  |     q_o     |
     /// |----------|-------|----------|-------|----------|-------|----------|-------|-----------|-------------|-------|-------------|
     /// |   ...    |  ...  |   ...    |  ...  |   ...    |  ...  |   ...    |  ...  |   ...     |    ...      |  ...  |     ...     |
-    /// |  lhs[k]  |   1   |  rhs[k]  |  -1   |   m_k    |   1   | max_word |   1   | carry[k-1]|     1       | carry | -target_base|
+    /// |  lhs[k]  |   1   |  rhs[k]  |  -1   |   m_k    |  -1   | max_word |   1   | carry[k-1]|     1       | carry | -target_base|
     /// |   ...    |  ...  |   ...    |  ...  |   ...    |  ...  |   ...    |  ...  |   ...     |    ...      |  ...  |     ...     |
     /// |----------|-------|----------|-------|----------|-------|----------|-------|-----------|-------------|-------|-------------|
     /// ```
     ///
     /// We express the expression above through main_gate:
-    /// `lhs[k] - rhs[k] + m_i + max_ord + carry[k-1] - carry[k] * target_base`
+    /// `lhs[k] - rhs[k] - m_i + max_ord + carry[k-1] - carry[k] * target_base`
     /// `state[0] - state[1] + state[3] + state[4] + prev_carry - carry * target_base`
-    ///
     ///
     /// - `target_base` - is the maximum word for the original limb length plus one (`1 << limb_width`)
     /// - `m_i` is calculated according to the following rules:
