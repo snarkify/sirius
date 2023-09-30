@@ -33,6 +33,7 @@ use halo2_proofs::{
 };
 use rayon::prelude::*;
 use std::collections::HashMap;
+pub mod permutation;
 
 #[derive(Clone, PartialEq)]
 pub struct PlonkStructure<C: CurveAffine> {
@@ -312,17 +313,21 @@ pub struct TableData<F: PrimeField> {
     pub(crate) instance: Vec<F>,
     pub(crate) advice: Vec<Vec<Assigned<F>>>,
     pub(crate) challenges: HashMap<usize, F>,
+    pub(crate) permutation: permutation::Assembly,
 }
 
 impl<F: PrimeField> TableData<F> {
     pub fn new(k: u32, instance: Vec<F>) -> Self {
+        let cs = ConstraintSystem::default();
+        let permutation = permutation::Assembly::new((1<<k) as usize, &cs.permutation);
         TableData {
             k,
-            cs: ConstraintSystem::default(),
+            cs,
             instance,
             fixed: vec![],
             advice: vec![],
             challenges: HashMap::new(),
+            permutation,
         }
     }
 
