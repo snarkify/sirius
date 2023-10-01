@@ -12,6 +12,8 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
 };
 
+pub mod sparse;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Query {
     pub index: usize,
