@@ -313,13 +313,12 @@ pub struct TableData<F: PrimeField> {
     pub(crate) instance: Vec<F>,
     pub(crate) advice: Vec<Vec<Assigned<F>>>,
     pub(crate) challenges: HashMap<usize, F>,
-    pub(crate) permutation: permutation::Assembly,
+    pub(crate) permutation: Option<permutation::Assembly>,
 }
 
 impl<F: PrimeField> TableData<F> {
     pub fn new(k: u32, instance: Vec<F>) -> Self {
         let cs = ConstraintSystem::default();
-        let permutation = permutation::Assembly::new((1<<k) as usize, &cs.permutation);
         TableData {
             k,
             cs,
@@ -327,7 +326,7 @@ impl<F: PrimeField> TableData<F> {
             fixed: vec![],
             advice: vec![],
             challenges: HashMap::new(),
-            permutation,
+            permutation: None,
         }
     }
 
@@ -335,14 +334,16 @@ impl<F: PrimeField> TableData<F> {
         &mut self,
         circuit: &ConcreteCircuit,
     ) -> Result<(), Error> {
-        let mut meta = ConstraintSystem::default();
-        let config = ConcreteCircuit::configure(&mut meta);
+        let config = ConcreteCircuit::configure(&mut self.cs);
+        self.permutation = Some(permutation::Assembly::new(
+            (1 << self.k) as usize,
+            &self.cs.permutation,
+        ));
         let n = 1u64 << self.k;
-        assert!(meta.num_instance_columns() == 1);
-        self.fixed = vec![vec![F::ZERO.into(); n as usize]; meta.num_fixed_columns()];
+        assert!(self.cs.num_instance_columns() == 1);
+        self.fixed = vec![vec![F::ZERO.into(); n as usize]; self.cs.num_fixed_columns()];
         self.instance = vec![F::ZERO; 2];
-        self.advice = vec![vec![F::ZERO.into(); n as usize]; meta.num_advice_columns()];
-        self.cs = meta;
+        self.advice = vec![vec![F::ZERO.into(); n as usize]; self.cs.num_advice_columns()];
         ConcreteCircuit::FloorPlanner::synthesize(
             self,
             circuit,
@@ -514,10 +515,18 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
         Ok(())
     }
 
-    fn copy(&mut self, _: Column<Any>, _: usize, _: Column<Any>, _: usize) -> Result<(), Error> {
-        // TODO: needed to constrain instance column
-
-        Ok(())
+    fn copy(
+        &mut self,
+        left_column: Column<Any>,
+        left_row: usize,
+        right_column: Column<Any>,
+        right_row: usize,
+    ) -> Result<(), Error> {
+        if let Some(permutation) = self.permutation.as_mut() {
+            permutation.copy(left_column, left_row, right_column, right_row)
+        } else {
+            Err(Error::Synthesis)
+        }
     }
 
     fn fill_from_row(
