@@ -7,7 +7,7 @@ pub struct Assembly {
     /// Columns that participate on the copy permutation argument.
     columns: Vec<Column<Any>>,
     /// Mapping of the actual copies done.
-    mapping: Vec<Vec<(usize, usize)>>,
+    pub(crate) mapping: Vec<Vec<(usize, usize)>>,
     /// Some aux data used to swap positions directly when sorting.
     aux: Vec<Vec<(usize, usize)>>,
     /// More aux data
@@ -60,7 +60,7 @@ impl Assembly {
             return Err(Error::BoundsFailure);
         }
 
-        // See book/src/design/permutation.md for a description of this algorithm.
+        // See https://zcash.github.io/halo2/design/proving-system/permutation.html for a description of this algorithm.
 
         let mut left_cycle = self.aux[left_column][left_row];
         let mut right_cycle = self.aux[right_column][right_row];

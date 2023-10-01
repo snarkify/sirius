@@ -16,7 +16,8 @@
 //! a given Plonk instance and witness satisfy the circuit constraints.
 use crate::{
     commitment::CommitmentKey,
-    polynomial::{Expression, MultiPolynomial, Query},
+    plonk::util::{cell_to_z_idx, column_index, fill_sparse_matrix},
+    polynomial::{sparse::SparseMatrix, Expression, MultiPolynomial, Query},
     poseidon::{AbsorbInRO, ROTrait},
     util::{batch_invert_assigned, fe_to_fe},
 };
@@ -34,6 +35,7 @@ use halo2_proofs::{
 use rayon::prelude::*;
 use std::collections::HashMap;
 pub mod permutation;
+pub mod util;
 
 #[derive(Clone, PartialEq)]
 pub struct PlonkStructure<C: CurveAffine> {
@@ -429,6 +431,51 @@ impl<F: PrimeField> TableData<F> {
             num_advice_columns: self.advice[0].len(),
             W,
         }
+    }
+
+    /// construct sparse matrix P (size N*N) from copy constraints
+    /// suppose we have m fixed_columns, 1 instance column, n advice columns
+    /// and there are total of r rows. notice the instance column only contains `num_io = io` items
+    /// N = r*m + num_io + r*n
+    /// let (f_1,...,f_{m*r}) be concatenate of fixed columns, (x_1,...,x_{n*r}) be concatenate of
+    /// advice columns. (i_1,...,i_{io}) is all values of the instance columns
+    /// define vector Z = (f_1,...,f_{m*r}, i_1,...,i_{io}, x_1,...,x_{n*r})
+    /// This function is to find the permutation matrix P such that the copy constraints are
+    /// equivalent to P * Z - Z = 0. This is invariant relation under our folding scheme
+    pub(crate) fn permutation_matrix(&self) -> SparseMatrix<F> {
+        let mut sparse_matrix_p = Vec::new();
+        let num_fixed = self.cs.num_fixed_columns();
+        let num_advice = self.cs.num_advice_columns();
+        let num_rows = self.advice[0].len();
+        let num_io = self.instance.len();
+        let columns = &self.cs.permutation.columns;
+
+        for (left_col, vec) in self
+            .permutation
+            .as_ref()
+            .unwrap()
+            .mapping
+            .iter()
+            .enumerate()
+        {
+            for (left_row, cycle) in vec.iter().enumerate() {
+                let left_col = column_index(left_col, num_fixed, columns);
+                let right_col = column_index(cycle.0, num_fixed, columns);
+                let left_z_idx = cell_to_z_idx(left_col, left_row, num_fixed, num_rows, num_io);
+                let right_z_idx = cell_to_z_idx(right_col, cycle.1, num_fixed, num_rows, num_io);
+                sparse_matrix_p.push((left_z_idx, right_z_idx, F::ONE));
+            }
+        }
+
+        fill_sparse_matrix(
+            &mut sparse_matrix_p,
+            num_fixed,
+            num_advice,
+            num_rows,
+            num_io,
+            columns,
+        );
+        sparse_matrix_p
     }
 }
 
