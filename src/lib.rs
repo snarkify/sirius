@@ -10,6 +10,7 @@ pub mod nifs;
 pub mod plonk;
 pub mod polynomial;
 pub mod poseidon;
+pub mod step_circuit;
 pub mod util;
 
 pub mod error;
