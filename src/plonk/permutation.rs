@@ -61,7 +61,6 @@ impl Assembly {
         }
 
         // See https://zcash.github.io/halo2/design/proving-system/permutation.html for a description of this algorithm.
-
         let mut left_cycle = self.aux[left_column][left_row];
         let mut right_cycle = self.aux[right_column][right_row];
 

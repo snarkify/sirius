@@ -17,7 +17,10 @@
 use crate::{
     commitment::CommitmentKey,
     plonk::util::{cell_to_z_idx, column_index, fill_sparse_matrix},
-    polynomial::{sparse::SparseMatrix, Expression, MultiPolynomial, Query},
+    polynomial::{
+        sparse::{matrix_multiply, SparseMatrix},
+        Expression, MultiPolynomial, Query,
+    },
     poseidon::{AbsorbInRO, ROTrait},
     util::{batch_invert_assigned, fe_to_fe},
 };
@@ -45,6 +48,7 @@ pub struct PlonkStructure<C: CurveAffine> {
     pub(crate) num_advice_columns: usize,
     pub(crate) gate: MultiPolynomial<C::ScalarExt>,
     pub(crate) fixed_commitment: C, // concatenate num_fixed_columns together, then commit
+    pub(crate) permutation_matrix: SparseMatrix<C::ScalarExt>,
 }
 
 #[derive(Clone, Debug)]
@@ -183,6 +187,37 @@ impl<C: CurveAffine> PlonkStructure<C> {
                 "commitment of witness E is not match: Expected: {:?}, Actual: {:?}",
                 U.E_commitment, actual_E_commit
             )),
+        }
+    }
+
+    // permutation check for folding instance-witness pair
+    pub fn is_sat_perm<F>(
+        &self,
+        U: &RelaxedPlonkInstance<C>,
+        W: &RelaxedPlonkWitness<F>,
+    ) -> Result<(), String>
+    where
+        C: CurveAffine<ScalarExt = F>,
+        F: PrimeField,
+    {
+        let Z = U
+            .instance
+            .clone()
+            .into_iter()
+            .chain(W.W.clone())
+            .collect::<Vec<_>>();
+        let y = matrix_multiply(&self.permutation_matrix, &Z[..]);
+        let diff = y
+            .into_iter()
+            .zip(Z)
+            .map(|(y, z)| y - z)
+            .enumerate()
+            .filter(|(_, d)| F::ZERO.ne(d))
+            .count();
+        if diff == 0 {
+            Ok(())
+        } else {
+            Err("permutation check failed".to_string())
         }
     }
 }
@@ -344,7 +379,6 @@ impl<F: PrimeField> TableData<F> {
         let n = 1u64 << self.k;
         assert!(self.cs.num_instance_columns() == 1);
         self.fixed = vec![vec![F::ZERO.into(); n as usize]; self.cs.num_fixed_columns()];
-        self.instance = vec![F::ZERO; 2];
         self.advice = vec![vec![F::ZERO.into(); n as usize]; self.cs.num_advice_columns()];
         ConcreteCircuit::FloorPlanner::synthesize(
             self,
@@ -389,6 +423,7 @@ impl<F: PrimeField> TableData<F> {
                 )
             })
             .expand();
+        let permutation_matrix = self.permutation_matrix();
 
         PlonkStructure {
             k: self.k as usize,
@@ -396,6 +431,7 @@ impl<F: PrimeField> TableData<F> {
             num_advice_columns: self.cs.num_advice_columns(),
             gate: combined_poly,
             fixed_commitment,
+            permutation_matrix,
         }
     }
 
@@ -406,8 +442,7 @@ impl<F: PrimeField> TableData<F> {
         let W = self.plonk_witness().W;
         let W_commitment = ck.commit(&W[..]);
         let mut instance: Vec<C::ScalarExt> = Vec::new();
-        assert!(self.instance.len() >= 2);
-        for inst in self.instance.iter().take(2) {
+        for inst in self.instance.iter() {
             instance.push(*inst)
         }
         PlonkInstance {
@@ -434,17 +469,17 @@ impl<F: PrimeField> TableData<F> {
     }
 
     /// construct sparse matrix P (size N*N) from copy constraints
-    /// suppose we have m fixed_columns, 1 instance column, n advice columns
+    /// since folding will change values of advice/instance column while keep fixed column values
+    /// we don't allow fixed column to be in the copy constraint here
+    /// suppose we have 1 instance column, n advice columns
     /// and there are total of r rows. notice the instance column only contains `num_io = io` items
-    /// N = r*m + num_io + r*n
-    /// let (f_1,...,f_{m*r}) be concatenate of fixed columns, (x_1,...,x_{n*r}) be concatenate of
-    /// advice columns. (i_1,...,i_{io}) is all values of the instance columns
-    /// define vector Z = (f_1,...,f_{m*r}, i_1,...,i_{io}, x_1,...,x_{n*r})
+    /// N = num_io + r*n. Let (i_1,...,i_{io}) be all values of the instance columns
+    /// and (x_1,...,x_{n*r}) be concatenate of advice columns.
+    /// define vector Z = (i_1,...,i_{io}, x_1,...,x_{n*r})
     /// This function is to find the permutation matrix P such that the copy constraints are
     /// equivalent to P * Z - Z = 0. This is invariant relation under our folding scheme
     pub(crate) fn permutation_matrix(&self) -> SparseMatrix<F> {
         let mut sparse_matrix_p = Vec::new();
-        let num_fixed = self.cs.num_fixed_columns();
         let num_advice = self.cs.num_advice_columns();
         let num_rows = self.advice[0].len();
         let num_io = self.instance.len();
@@ -459,22 +494,19 @@ impl<F: PrimeField> TableData<F> {
             .enumerate()
         {
             for (left_row, cycle) in vec.iter().enumerate() {
-                let left_col = column_index(left_col, num_fixed, columns);
-                let right_col = column_index(cycle.0, num_fixed, columns);
-                let left_z_idx = cell_to_z_idx(left_col, left_row, num_fixed, num_rows, num_io);
-                let right_z_idx = cell_to_z_idx(right_col, cycle.1, num_fixed, num_rows, num_io);
+                // skip because we don't account for row that beyond the num_io in instance column
+                if left_col == 0 && left_row >= num_io {
+                    continue;
+                }
+                let left_col = column_index(left_col, columns);
+                let right_col = column_index(cycle.0, columns);
+                let left_z_idx = cell_to_z_idx(left_col, left_row, num_rows, num_io);
+                let right_z_idx = cell_to_z_idx(right_col, cycle.1, num_rows, num_io);
                 sparse_matrix_p.push((left_z_idx, right_z_idx, F::ONE));
             }
         }
 
-        fill_sparse_matrix(
-            &mut sparse_matrix_p,
-            num_fixed,
-            num_advice,
-            num_rows,
-            num_io,
-            columns,
-        );
+        fill_sparse_matrix(&mut sparse_matrix_p, num_advice, num_rows, num_io, columns);
         sparse_matrix_p
     }
 }

@@ -284,6 +284,8 @@ mod tests {
         f_W = W;
         let res = S.is_sat_relaxed(ck, &f_U, &f_W);
         assert!(res.is_ok());
+        let perm_res = S.is_sat_perm(&f_U, &f_W);
+        assert!(perm_res.is_ok());
 
         let U1 = td2.plonk_instance(ck);
         let W1 = td2.plonk_witness();
@@ -298,6 +300,8 @@ mod tests {
         f_W = _W;
         let res = S.is_sat_relaxed(ck, &f_U, &f_W);
         assert!(res.is_ok());
+        let perm_res = S.is_sat_perm(&f_U, &f_W);
+        assert!(perm_res.is_ok());
     }
 
     fn smallest_power(n: usize, K: u32) -> usize {
