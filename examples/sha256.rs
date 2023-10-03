@@ -4,7 +4,7 @@ use std::iter;
 
 use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
+    circuit::{AssignedCell, Layouter, Region, SimpleFloorPlanner, Value},
     plonk::{Circuit, ConstraintSystem, Error},
 };
 
@@ -62,6 +62,8 @@ impl Circuit<pallas::Base> for TestSha256Circuit {
         .flatten()
         .collect::<Box<[_]>>();
 
+        assert_eq!(input.len(), ARITY);
+
         Sha256::digest(table16_chip, layouter.namespace(|| "'abc' * 2"), &input)?;
 
         Ok(())
@@ -81,10 +83,13 @@ impl StepCircuit<ARITY, B> for TestSha256Circuit {
 
     fn synthesize(
         &self,
-        cs: &mut ConstraintSystem<pallas::Base>,
+        config: Self::Config,
+        region: Region<'_, B>,
         z_in: &[AssignedCell<B, B>; ARITY],
     ) -> Result<[AssignedCell<B, B>; ARITY], SynthesisError> {
-        todo!("Call `Sha256::digest` but with {cs:?} & {z_in:?} instead of real values")
+        todo!(
+            "Call `Sha256::digest` in {region:?} & {z_in:?} instead of real values use {config:?}"
+        )
     }
 }
 
