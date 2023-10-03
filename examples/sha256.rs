@@ -2,13 +2,15 @@
 
 use std::iter;
 
+use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2_proofs::{
-    circuit::{Layouter, SimpleFloorPlanner, Value},
+    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     plonk::{Circuit, ConstraintSystem, Error},
 };
 
 pub use halo2_gadgets::sha256::{BlockWord, Sha256, Table16Chip, Table16Config};
 use halo2curves::pasta::pallas;
+use sirius::step_circuit::{StepCircuit, SynthesisError};
 
 #[derive(Default)]
 struct TestSha256Circuit {}
@@ -66,6 +68,26 @@ impl Circuit<pallas::Base> for TestSha256Circuit {
     }
 }
 
+type B = pallas::Base;
+// TODO
+const ARITY: usize = 31 * BLOCK_SIZE;
+
+impl StepCircuit<ARITY, B> for TestSha256Circuit {
+    type StepConfig = Table16Config;
+
+    fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::StepConfig {
+        Table16Chip::configure(meta)
+    }
+
+    fn synthesize(
+        &self,
+        cs: &mut ConstraintSystem<pallas::Base>,
+        z_in: &[AssignedCell<B, B>; ARITY],
+    ) -> Result<[AssignedCell<B, B>; ARITY], SynthesisError> {
+        todo!("Call `Sha256::digest` but with {cs:?} & {z_in:?} instead of real values")
+    }
+}
+
 fn main() {
     use halo2_proofs::dev::MockProver;
 
@@ -73,7 +95,7 @@ fn main() {
 
     let prover = match MockProver::run(K, &TestSha256Circuit {}, vec![]) {
         Ok(prover) => prover,
-        Err(e) => panic!("{:#?}", e),
+        Err(err) => panic!("{err:#?}"),
     };
 
     assert_eq!(prover.verify(), Ok(()));
