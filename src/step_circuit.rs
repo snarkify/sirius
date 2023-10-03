@@ -35,14 +35,14 @@ pub enum SynthesisError {
 ///   `StepCircuit` might be used, refer to the 'Section 5' of
 ///   [Nova Whitepaper](https://eprint.iacr.org/2023/969.pdf).
 pub trait StepCircuit<const ARITY: usize, F: PrimeField>: Circuit<F> {
-    type Config: Clone;
+    type StepConfig: Clone;
 
     /// Configure the step circuit. This method initializes necessary
     /// fixed columns and advice columns, but does not create any instance
     /// columns.
     ///
     /// This setup is crucial for the functioning of the IVC-based system.
-    fn configure(cs: &mut ConstraintSystem<F>) -> <Self as StepCircuit<ARITY, F>>::Config;
+    fn configure(cs: &mut ConstraintSystem<F>) -> <Self as StepCircuit<ARITY, F>>::StepConfig;
 
     /// Sythesize the circuit for a computation step and return variable
     /// that corresponds to the output of the step z_{i+1}
@@ -81,13 +81,13 @@ pub(crate) trait ConfigureWithInstanceCheck<const ARITY: usize, F: PrimeField>:
 {
     fn configure_with_instance_check(
         cs: &mut ConstraintSystem<F>,
-    ) -> Result<<Self as StepCircuit<ARITY, F>>::Config, ConfigureError>;
+    ) -> Result<<Self as StepCircuit<ARITY, F>>::StepConfig, ConfigureError>;
 }
 
 impl<const A: usize, F: PrimeField, C: StepCircuit<A, F>> ConfigureWithInstanceCheck<A, F> for C {
     fn configure_with_instance_check(
         cs: &mut ConstraintSystem<F>,
-    ) -> Result<<Self as StepCircuit<A, F>>::Config, ConfigureError> {
+    ) -> Result<<Self as StepCircuit<A, F>>::StepConfig, ConfigureError> {
         let before = cs.num_instance_columns();
 
         let config = <Self as StepCircuit<A, F>>::configure(cs);
