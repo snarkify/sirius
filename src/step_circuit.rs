@@ -1,6 +1,6 @@
 use ff::PrimeField;
 use halo2_proofs::{
-    circuit::AssignedCell,
+    circuit::{AssignedCell, Region},
     plonk::{Circuit, ConstraintSystem},
 };
 
@@ -42,7 +42,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField>: Circuit<F> {
     /// columns.
     ///
     /// This setup is crucial for the functioning of the IVC-based system.
-    fn configure(cs: &mut ConstraintSystem<F>) -> <Self as StepCircuit<ARITY, F>>::StepConfig;
+    fn configure(cs: &mut ConstraintSystem<F>) -> Self::StepConfig;
 
     /// Sythesize the circuit for a computation step and return variable
     /// that corresponds to the output of the step z_{i+1}
@@ -51,7 +51,8 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField>: Circuit<F> {
     /// Return `z_out` result
     fn synthesize(
         &self,
-        cs: &mut ConstraintSystem<F>,
+        config: Self::Config,
+        region: Region<'_, F>,
         z_in: &[AssignedCell<F, F>; ARITY],
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError>;
 
