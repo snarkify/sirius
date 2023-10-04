@@ -35,6 +35,7 @@ use halo2_proofs::{
     },
     poly::Rotation,
 };
+use log::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
 pub mod permutation;
@@ -211,8 +212,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
             .into_iter()
             .zip(Z)
             .map(|(y, z)| y - z)
-            .enumerate()
-            .filter(|(_, d)| F::ZERO.ne(d))
+            .filter(|d| F::ZERO.ne(d))
             .count();
         if diff == 0 {
             Ok(())
@@ -373,13 +373,13 @@ impl<F: PrimeField> TableData<F> {
     ) -> Result<(), Error> {
         let config = ConcreteCircuit::configure(&mut self.cs);
         self.permutation = Some(permutation::Assembly::new(
-            (1 << self.k) as usize,
+            1 << self.k,
             &self.cs.permutation,
         ));
-        let n = 1u64 << self.k;
+        let n = 1 << self.k;
         assert!(self.cs.num_instance_columns() == 1);
-        self.fixed = vec![vec![F::ZERO.into(); n as usize]; self.cs.num_fixed_columns()];
-        self.advice = vec![vec![F::ZERO.into(); n as usize]; self.cs.num_advice_columns()];
+        self.fixed = vec![vec![F::ZERO.into(); n]; self.cs.num_fixed_columns()];
+        self.advice = vec![vec![F::ZERO.into(); n]; self.cs.num_advice_columns()];
         ConcreteCircuit::FloorPlanner::synthesize(
             self,
             circuit,
@@ -478,7 +478,7 @@ impl<F: PrimeField> TableData<F> {
     /// define vector Z = (i_1,...,i_{io}, x_1,...,x_{n*r})
     /// This function is to find the permutation matrix P such that the copy constraints are
     /// equivalent to P * Z - Z = 0. This is invariant relation under our folding scheme
-    pub(crate) fn permutation_matrix(&self) -> SparseMatrix<F> {
+    fn permutation_matrix(&self) -> SparseMatrix<F> {
         let mut sparse_matrix_p = Vec::new();
         let num_advice = self.cs.num_advice_columns();
         let num_rows = self.advice[0].len();
@@ -604,6 +604,7 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
         if let Some(permutation) = self.permutation.as_mut() {
             permutation.copy(left_column, left_row, right_column, right_row)
         } else {
+            error!("permutation is not initialized properly");
             Err(Error::Synthesis)
         }
     }

@@ -1,6 +1,7 @@
 //! Adapted from halo2/halo2_proofs/src/plonk/permutation/keygen.rs
 use halo2_proofs::plonk::permutation::Argument;
 use halo2_proofs::plonk::{Any, Column, Error};
+use log::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Assembly {
@@ -15,10 +16,11 @@ pub struct Assembly {
 }
 
 impl Assembly {
+    /// n is the number of rows in one column
     pub(crate) fn new(n: usize, p: &Argument) -> Self {
         // Initialize the copy vector to keep track of copy constraints in all
         // the permutation arguments.
-        let mut columns = vec![];
+        let mut columns = Vec::with_capacity(p.columns.len() * n);
         for i in 0..p.columns.len() {
             // Computes [(i, 0), (i, 1), ..., (i, n - 1)]
             columns.push((0..n).map(|j| (i, j)).collect());
@@ -57,6 +59,7 @@ impl Assembly {
         if left_row >= self.mapping[left_column].len()
             || right_row >= self.mapping[right_column].len()
         {
+            error!("(left_column, left_row)=({left_column}, {left_row}), (right_column, right_row)=({right_column}, {right_row}). left_row or right_row in the copy contraint exceed maximum length");
             return Err(Error::BoundsFailure);
         }
 

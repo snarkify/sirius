@@ -13,12 +13,14 @@ pub(crate) fn cell_to_z_idx(column: usize, row: usize, num_rows: usize, num_io: 
     }
 }
 
-pub(crate) fn column_index(idx: usize, columns: &[Column<Any>]) -> usize {
+pub fn column_index(idx: usize, columns: &[Column<Any>]) -> usize {
     let column = columns[idx];
     let offset = match column.column_type() {
         Any::Instance => 0,
         Any::Advice(_) => 1,
-        Any::Fixed => panic!("fixed column is not allowed"),
+        Any::Fixed => panic!(
+            "fixed column is not allowed in the copy constraint, it will break during folding"
+        ),
     };
     column.index() + offset
 }
