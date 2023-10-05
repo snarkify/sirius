@@ -16,7 +16,11 @@
 //! a given Plonk instance and witness satisfy the circuit constraints.
 use crate::{
     commitment::CommitmentKey,
-    polynomial::{Expression, MultiPolynomial, Query},
+    plonk::util::{cell_to_z_idx, column_index, fill_sparse_matrix},
+    polynomial::{
+        sparse::{matrix_multiply, SparseMatrix},
+        Expression, MultiPolynomial, Query,
+    },
     poseidon::{AbsorbInRO, ROTrait},
     util::{batch_invert_assigned, fe_to_fe},
 };
@@ -31,8 +35,11 @@ use halo2_proofs::{
     },
     poly::Rotation,
 };
+use log::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
+pub mod permutation;
+pub mod util;
 
 #[derive(Clone, PartialEq)]
 pub struct PlonkStructure<C: CurveAffine> {
@@ -42,6 +49,7 @@ pub struct PlonkStructure<C: CurveAffine> {
     pub(crate) num_advice_columns: usize,
     pub(crate) gate: MultiPolynomial<C::ScalarExt>,
     pub(crate) fixed_commitment: C, // concatenate num_fixed_columns together, then commit
+    pub(crate) permutation_matrix: SparseMatrix<C::ScalarExt>,
 }
 
 #[derive(Clone, Debug)]
@@ -182,6 +190,36 @@ impl<C: CurveAffine> PlonkStructure<C> {
             )),
         }
     }
+
+    // permutation check for folding instance-witness pair
+    pub fn is_sat_perm<F>(
+        &self,
+        U: &RelaxedPlonkInstance<C>,
+        W: &RelaxedPlonkWitness<F>,
+    ) -> Result<(), String>
+    where
+        C: CurveAffine<ScalarExt = F>,
+        F: PrimeField,
+    {
+        let Z = U
+            .instance
+            .clone()
+            .into_iter()
+            .chain(W.W.clone())
+            .collect::<Vec<_>>();
+        let y = matrix_multiply(&self.permutation_matrix, &Z[..]);
+        let diff = y
+            .into_iter()
+            .zip(Z)
+            .map(|(y, z)| y - z)
+            .filter(|d| F::ZERO.ne(d))
+            .count();
+        if diff == 0 {
+            Ok(())
+        } else {
+            Err("permutation check failed".to_string())
+        }
+    }
 }
 
 impl<C: CurveAffine> PlonkInstance<C> {
@@ -312,17 +350,20 @@ pub struct TableData<F: PrimeField> {
     pub(crate) instance: Vec<F>,
     pub(crate) advice: Vec<Vec<Assigned<F>>>,
     pub(crate) challenges: HashMap<usize, F>,
+    pub(crate) permutation: Option<permutation::Assembly>,
 }
 
 impl<F: PrimeField> TableData<F> {
     pub fn new(k: u32, instance: Vec<F>) -> Self {
+        let cs = ConstraintSystem::default();
         TableData {
             k,
-            cs: ConstraintSystem::default(),
+            cs,
             instance,
             fixed: vec![],
             advice: vec![],
             challenges: HashMap::new(),
+            permutation: None,
         }
     }
 
@@ -330,14 +371,15 @@ impl<F: PrimeField> TableData<F> {
         &mut self,
         circuit: &ConcreteCircuit,
     ) -> Result<(), Error> {
-        let mut meta = ConstraintSystem::default();
-        let config = ConcreteCircuit::configure(&mut meta);
-        let n = 1u64 << self.k;
-        assert!(meta.num_instance_columns() == 1);
-        self.fixed = vec![vec![F::ZERO.into(); n as usize]; meta.num_fixed_columns()];
-        self.instance = vec![F::ZERO; 2];
-        self.advice = vec![vec![F::ZERO.into(); n as usize]; meta.num_advice_columns()];
-        self.cs = meta;
+        let config = ConcreteCircuit::configure(&mut self.cs);
+        self.permutation = Some(permutation::Assembly::new(
+            1 << self.k,
+            &self.cs.permutation,
+        ));
+        let n = 1 << self.k;
+        assert!(self.cs.num_instance_columns() == 1);
+        self.fixed = vec![vec![F::ZERO.into(); n]; self.cs.num_fixed_columns()];
+        self.advice = vec![vec![F::ZERO.into(); n]; self.cs.num_advice_columns()];
         ConcreteCircuit::FloorPlanner::synthesize(
             self,
             circuit,
@@ -381,6 +423,7 @@ impl<F: PrimeField> TableData<F> {
                 )
             })
             .expand();
+        let permutation_matrix = self.permutation_matrix();
 
         PlonkStructure {
             k: self.k as usize,
@@ -388,6 +431,7 @@ impl<F: PrimeField> TableData<F> {
             num_advice_columns: self.cs.num_advice_columns(),
             gate: combined_poly,
             fixed_commitment,
+            permutation_matrix,
         }
     }
 
@@ -398,8 +442,7 @@ impl<F: PrimeField> TableData<F> {
         let W = self.plonk_witness().W;
         let W_commitment = ck.commit(&W[..]);
         let mut instance: Vec<C::ScalarExt> = Vec::new();
-        assert!(self.instance.len() >= 2);
-        for inst in self.instance.iter().take(2) {
+        for inst in self.instance.iter() {
             instance.push(*inst)
         }
         PlonkInstance {
@@ -423,6 +466,48 @@ impl<F: PrimeField> TableData<F> {
             num_advice_columns: self.advice[0].len(),
             W,
         }
+    }
+
+    /// construct sparse matrix P (size N*N) from copy constraints
+    /// since folding will change values of advice/instance column while keep fixed column values
+    /// we don't allow fixed column to be in the copy constraint here
+    /// suppose we have 1 instance column, n advice columns
+    /// and there are total of r rows. notice the instance column only contains `num_io = io` items
+    /// N = num_io + r*n. Let (i_1,...,i_{io}) be all values of the instance columns
+    /// and (x_1,...,x_{n*r}) be concatenate of advice columns.
+    /// define vector Z = (i_1,...,i_{io}, x_1,...,x_{n*r})
+    /// This function is to find the permutation matrix P such that the copy constraints are
+    /// equivalent to P * Z - Z = 0. This is invariant relation under our folding scheme
+    fn permutation_matrix(&self) -> SparseMatrix<F> {
+        let mut sparse_matrix_p = Vec::new();
+        let num_advice = self.cs.num_advice_columns();
+        let num_rows = self.advice[0].len();
+        let num_io = self.instance.len();
+        let columns = &self.cs.permutation.columns;
+
+        for (left_col, vec) in self
+            .permutation
+            .as_ref()
+            .unwrap()
+            .mapping
+            .iter()
+            .enumerate()
+        {
+            for (left_row, cycle) in vec.iter().enumerate() {
+                // skip because we don't account for row that beyond the num_io in instance column
+                if left_col == 0 && left_row >= num_io {
+                    continue;
+                }
+                let left_col = column_index(left_col, columns);
+                let right_col = column_index(cycle.0, columns);
+                let left_z_idx = cell_to_z_idx(left_col, left_row, num_rows, num_io);
+                let right_z_idx = cell_to_z_idx(right_col, cycle.1, num_rows, num_io);
+                sparse_matrix_p.push((left_z_idx, right_z_idx, F::ONE));
+            }
+        }
+
+        fill_sparse_matrix(&mut sparse_matrix_p, num_advice, num_rows, num_io, columns);
+        sparse_matrix_p
     }
 }
 
@@ -509,10 +594,19 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
         Ok(())
     }
 
-    fn copy(&mut self, _: Column<Any>, _: usize, _: Column<Any>, _: usize) -> Result<(), Error> {
-        // TODO: needed to constrain instance column
-
-        Ok(())
+    fn copy(
+        &mut self,
+        left_column: Column<Any>,
+        left_row: usize,
+        right_column: Column<Any>,
+        right_row: usize,
+    ) -> Result<(), Error> {
+        if let Some(permutation) = self.permutation.as_mut() {
+            permutation.copy(left_column, left_row, right_column, right_row)
+        } else {
+            error!("permutation is not initialized properly");
+            Err(Error::Synthesis)
+        }
     }
 
     fn fill_from_row(
