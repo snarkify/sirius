@@ -113,7 +113,7 @@ impl From<u32> for Bits<32> {
 }
 
 #[derive(Clone, Debug)]
-pub struct AssignedBits<const LEN: usize>(AssignedCell<Bits<LEN>, pallas::Base>);
+pub struct AssignedBits<const LEN: usize>(pub AssignedCell<Bits<LEN>, pallas::Base>);
 
 impl<const LEN: usize> std::ops::Deref for AssignedBits<LEN> {
     type Target = AssignedCell<Bits<LEN>, pallas::Base>;
@@ -354,9 +354,24 @@ impl Sha256Instructions<pallas::Base> for Table16Chip {
         layouter: &mut impl Layouter<pallas::Base>,
         initialized_state: &Self::State,
         input: [Self::BlockWord; super::BLOCK_SIZE],
+        input_cells: Option<[AssignedCell<pallas::Base, pallas::Base>; super::BLOCK_SIZE]>,
     ) -> Result<Self::State, Error> {
         let config = self.config();
-        let (_, w_halves) = config.message_schedule.process(layouter, input)?;
+
+        let (word_cells, w_halves) = config.message_schedule.process(layouter, input)?;
+
+        if let Some(input_cells) = input_cells {
+            word_cells
+                .into_iter()
+                .zip(input_cells.iter())
+                .try_for_each(|(cell, input)| {
+                    layouter.assign_region(
+                        || "check input word equality",
+                        |mut region| region.constrain_equal(cell.cell(), input.cell()),
+                    )
+                })?;
+        }
+
         config
             .compression
             .compress(layouter, initialized_state.clone(), w_halves)
@@ -379,7 +394,9 @@ impl Sha256Instructions<pallas::Base> for Table16Chip {
     ) -> Result<[AssignedCell<pallas::Base, pallas::Base>; super::DIGEST_SIZE], Error> {
         // Copy the dense forms of the state variable chunks down to this gate.
         // Reconstruct the 32-bit dense words.
-        self.config().compression.digest_cells(layouter, state.clone())
+        self.config()
+            .compression
+            .digest_cells(layouter, state.clone())
     }
 }
 

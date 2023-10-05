@@ -65,6 +65,7 @@ pub mod sha256 {
             layouter: &mut impl Layouter<F>,
             initialized_state: &Self::State,
             input: [Self::BlockWord; BLOCK_SIZE],
+            input_cells: Option<[AssignedCell<F, F>; BLOCK_SIZE]>,
         ) -> Result<Self::State, Error>;
 
         /// Converts the given state into a message digest.
@@ -112,15 +113,16 @@ pub mod sha256 {
         pub fn update(
             &mut self,
             mut layouter: impl Layouter<F>,
-            mut data: &[Sha256Chip::BlockWord],
+            mut input: &[Sha256Chip::BlockWord],
+            _input_cells: Option<[AssignedCell<F, F>; BLOCK_SIZE]>,
         ) -> Result<(), Error> {
-            self.length += data.len() * 32;
+            self.length += input.len() * 32;
 
             // Fill the current block, if possible.
             let remaining = BLOCK_SIZE - self.cur_block.len();
-            let (l, r) = data.split_at(min(remaining, data.len()));
+            let (l, r) = input.split_at(min(remaining, input.len()));
             self.cur_block.extend_from_slice(l);
-            data = r;
+            input = r;
 
             // If we still don't have a full block, we are done.
             if self.cur_block.len() < BLOCK_SIZE {
@@ -134,17 +136,19 @@ pub mod sha256 {
                 self.cur_block[..]
                     .try_into()
                     .expect("cur_block.len() == BLOCK_SIZE"),
+                None, // TODO Pass here first cells
             )?;
             self.cur_block.clear();
 
             // Process any additional full blocks.
-            let mut chunks_iter = data.chunks_exact(BLOCK_SIZE);
+            let mut chunks_iter = input.chunks_exact(BLOCK_SIZE);
             for chunk in &mut chunks_iter {
                 self.state = self.chip.initialization(&mut layouter, &self.state)?;
                 self.state = self.chip.compress(
                     &mut layouter,
                     &self.state,
                     chunk.try_into().expect("chunk.len() == BLOCK_SIZE"),
+                    None, // TODO Pass here rest of cells
                 )?;
             }
 
@@ -172,6 +176,7 @@ pub mod sha256 {
                     self.cur_block[..]
                         .try_into()
                         .expect("cur_block.len() == BLOCK_SIZE"),
+                    None,
                 )?;
             }
             self.chip
@@ -195,6 +200,7 @@ pub mod sha256 {
                     self.cur_block[..]
                         .try_into()
                         .expect("cur_block.len() == BLOCK_SIZE"),
+                    None,
                 )?;
             }
             self.chip.digest_cells(&mut layouter, &self.state)
@@ -208,7 +214,7 @@ pub mod sha256 {
             data: &[Sha256Chip::BlockWord],
         ) -> Result<Sha256Digest<Sha256Chip::BlockWord>, Error> {
             let mut hasher = Self::new(chip, layouter.namespace(|| "init"))?;
-            hasher.update(layouter.namespace(|| "update"), data)?;
+            hasher.update(layouter.namespace(|| "update"), data, None)?;
             hasher.finalize(layouter.namespace(|| "finalize"))
         }
 
@@ -218,9 +224,10 @@ pub mod sha256 {
             chip: Sha256Chip,
             mut layouter: impl Layouter<F>,
             data: &[Sha256Chip::BlockWord],
+            input_cells: Option<[AssignedCell<F, F>; BLOCK_SIZE]>,
         ) -> Result<[AssignedCell<F, F>; DIGEST_SIZE], Error> {
             let mut hasher = Self::new(chip, layouter.namespace(|| "init"))?;
-            hasher.update(layouter.namespace(|| "update"), data)?;
+            hasher.update(layouter.namespace(|| "update"), data, input_cells)?;
             hasher.finalize_cells(layouter.namespace(|| "finalize"))
         }
     }
@@ -288,7 +295,7 @@ impl Circuit<pallas::Base> for TestSha256Circuit {
 
 type B = pallas::Base;
 // TODO
-const ARITY: usize = 31 * BLOCK_SIZE;
+const ARITY: usize = BLOCK_SIZE / 2;
 
 impl StepCircuit<ARITY, B> for TestSha256Circuit {
     type StepConfig = Table16Config;
@@ -306,15 +313,20 @@ impl StepCircuit<ARITY, B> for TestSha256Circuit {
         Table16Chip::load(config.clone(), layouter)?;
         let table16_chip = Table16Chip::construct(config);
 
-        Ok(iter::repeat(
-            Sha256::digest_cells(table16_chip, layouter.namespace(|| "'abc' * 2"), &z_in)?
-                .into_iter(),
-        )
-        .take(ARITY / BLOCK_SIZE)
-        .flatten()
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap())
+        let input: [AssignedCell<B, B>; BLOCK_SIZE] = iter::repeat(z_in.iter())
+            .take(2)
+            .flatten()
+            .cloned()
+            .collect::<Vec<AssignedCell<B, B>>>()
+            .try_into()
+            .unwrap();
+
+        Ok(Sha256::digest_cells(
+            table16_chip,
+            layouter.namespace(|| "'abc' * 2"),
+            &[], // Pass here z_in
+            Some(input),
+        )?)
     }
 }
 
