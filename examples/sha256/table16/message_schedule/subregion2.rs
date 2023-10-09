@@ -7,7 +7,6 @@ use halo2_proofs::{
 use halo2curves::pasta::pallas;
 use std::convert::TryInto;
 
-#[allow(dead_code)]
 /// A word in subregion 2
 /// (3, 4, 3, 7, 1, 1, 13)-bit chunks
 #[derive(Clone, Debug)]
