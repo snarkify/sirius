@@ -2,6 +2,7 @@
 
 use std::iter;
 
+use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
@@ -281,11 +282,9 @@ impl Circuit<pallas::Base> for TestSha256Circuit {
             .into_iter()
             .map(|v| BlockWord(Value::known(v))),
         )
-        .take(31)
+        .take(1)
         .flatten()
         .collect::<Box<[_]>>();
-
-        assert_eq!(input.len(), ARITY);
 
         Sha256::digest(table16_chip, layouter.namespace(|| "'abc' * 2"), &input)?;
 
@@ -321,10 +320,17 @@ impl StepCircuit<ARITY, B> for TestSha256Circuit {
             .try_into()
             .expect("Unreachable, ARITY * 2 == BLOCK_SIZE");
 
+        let values = input
+            .iter()
+            .map(|cell| cell.value().map(|v| *v).unwrap().unwrap_or_default())
+            .map(|field_value| u32::from_be_bytes(field_value.to_repr()[0..4].try_into().unwrap()))
+            .map(|value| BlockWord(Value::known(value)))
+            .collect::<Box<[BlockWord]>>();
+
         Ok(Sha256::digest_cells(
             table16_chip,
             layouter.namespace(|| "'abc' * 2"),
-            &[], // TODO Pass here z_in
+            values.as_ref(),
             Some(input),
         )?)
     }
