@@ -66,6 +66,7 @@ impl<const DENSE: usize, const SPREAD: usize> SpreadWord<DENSE, SPREAD> {
     }
 }
 
+#[allow(dead_code)]
 /// A variable stored in advice columns corresponding to a row of [`SpreadTableConfig`].
 #[derive(Clone, Debug)]
 pub(super) struct SpreadVar<const DENSE: usize, const SPREAD: usize> {

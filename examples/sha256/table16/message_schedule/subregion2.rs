@@ -7,6 +7,7 @@ use halo2_proofs::{
 use halo2curves::pasta::pallas;
 use std::convert::TryInto;
 
+#[allow(dead_code)]
 /// A word in subregion 2
 /// (3, 4, 3, 7, 1, 1, 13)-bit chunks
 #[derive(Clone, Debug)]
@@ -261,7 +262,7 @@ impl MessageScheduleConfig {
                 || format!("carry_{}", new_word_idx),
                 a_9,
                 get_word_row(new_word_idx - 16) + 1,
-                || carry.map(|carry| pallas::Base::from(carry as u64)),
+                || carry.map(pallas::Base::from),
             )?;
             let (word, halves) = self.assign_word_and_halves(region, word, new_word_idx)?;
             w.push(MessageWord(word));
