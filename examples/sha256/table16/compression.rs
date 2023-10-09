@@ -1,16 +1,18 @@
-use super::{
-    super::DIGEST_SIZE,
-    util::{i2lebsp, lebs2ip},
-    AssignedBits, BlockWord, SpreadInputs, SpreadVar, Table16Assignment, ROUNDS, STATE,
-};
+use std::convert::TryInto;
+use std::ops::Range;
+
 use halo2_proofs::{
     circuit::{Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Selector},
     poly::Rotation,
 };
 use halo2curves::pasta::pallas;
-use std::convert::TryInto;
-use std::ops::Range;
+
+use super::{
+    util::{i2lebsp, lebs2ip},
+    AssignedBits, BlockWord, SpreadInputs, SpreadVar, Table16Assignment, ROUNDS, STATE,
+};
+use crate::{AssignedCell, DIGEST_SIZE};
 
 mod compression_gates;
 mod compression_util;
@@ -932,6 +934,18 @@ impl CompressionConfig {
             },
         )?;
         Ok(digest)
+    }
+
+    /// After the final round, convert the state into the final digest.
+    pub(super) fn digest_cells(
+        &self,
+        layouter: &mut impl Layouter<pallas::Base>,
+        state: State,
+    ) -> Result<[AssignedCell<pallas::Base, pallas::Base>; DIGEST_SIZE], Error> {
+        layouter.assign_region(
+            || "digest",
+            |mut region| self.assign_digest_cells(&mut region, state.clone()),
+        )
     }
 }
 

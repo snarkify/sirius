@@ -1,6 +1,8 @@
 use std::convert::TryInto;
 
-use super::{super::BLOCK_SIZE, AssignedBits, BlockWord, SpreadInputs, Table16Assignment, ROUNDS};
+use crate::BlockWord;
+
+use super::{super::BLOCK_SIZE, AssignedBits, SpreadInputs, Table16Assignment, ROUNDS};
 use halo2_proofs::{
     circuit::Layouter,
     plonk::{Advice, Column, ConstraintSystem, Error, Selector},
@@ -21,7 +23,7 @@ use schedule_util::*;
 pub use schedule_util::msg_schedule_test_input;
 
 #[derive(Clone, Debug)]
-pub(super) struct MessageWord(AssignedBits<32>);
+pub(super) struct MessageWord(pub AssignedBits<32>);
 
 impl std::ops::Deref for MessageWord {
     type Target = AssignedBits<32>;

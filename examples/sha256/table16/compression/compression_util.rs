@@ -2,9 +2,7 @@ use super::{
     AbcdVar, CompressionConfig, EfghVar, RoundWord, RoundWordA, RoundWordDense, RoundWordE,
     RoundWordSpread, State, UpperSigmaVar,
 };
-use crate::table16::{
-    util::*, AssignedBits, SpreadVar, SpreadWord, StateWord, Table16Assignment,
-};
+use crate::table16::{util::*, AssignedBits, SpreadVar, SpreadWord, StateWord, Table16Assignment};
 use halo2_proofs::{
     circuit::{Region, Value},
     plonk::{Advice, Column, Error},
