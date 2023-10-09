@@ -354,23 +354,21 @@ impl Sha256Instructions<pallas::Base> for Table16Chip {
         layouter: &mut impl Layouter<pallas::Base>,
         initialized_state: &Self::State,
         input: [Self::BlockWord; super::BLOCK_SIZE],
-        input_cells: Option<[AssignedCell<pallas::Base, pallas::Base>; super::BLOCK_SIZE]>,
+        input_cells: [AssignedCell<pallas::Base, pallas::Base>; super::BLOCK_SIZE],
     ) -> Result<Self::State, Error> {
         let config = self.config();
 
         let (word_cells, w_halves) = config.message_schedule.process(layouter, input)?;
 
-        if let Some(input_cells) = input_cells {
-            word_cells
-                .into_iter()
-                .zip(input_cells.iter())
-                .try_for_each(|(cell, input)| {
-                    layouter.assign_region(
-                        || "check input word equality",
-                        |mut region| region.constrain_equal(cell.cell(), input.cell()),
-                    )
-                })?;
-        }
+        word_cells
+            .into_iter()
+            .zip(input_cells.iter())
+            .try_for_each(|(cell, input)| {
+                layouter.assign_region(
+                    || "check input word equality",
+                    |mut region| region.constrain_equal(cell.cell(), input.cell()),
+                )
+            })?;
 
         config
             .compression

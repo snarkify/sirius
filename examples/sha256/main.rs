@@ -21,9 +21,7 @@ pub mod sha256 {
     //!
     //! [SHA-256]: https://tools.ietf.org/html/rfc6234
 
-    use std::cmp::min;
-    use std::convert::TryInto;
-    use std::fmt;
+    use std::{cmp::min, convert::TryInto, fmt};
 
     use halo2_proofs::{
         arithmetic::Field,
@@ -66,7 +64,7 @@ pub mod sha256 {
             layouter: &mut impl Layouter<F>,
             initialized_state: &Self::State,
             input: [Self::BlockWord; BLOCK_SIZE],
-            input_cells: Option<[AssignedCell<F, F>; BLOCK_SIZE]>,
+            input_cells: [AssignedCell<F, F>; BLOCK_SIZE],
         ) -> Result<Self::State, Error>;
 
         /// Converts the given state into a message digest.
@@ -95,6 +93,7 @@ pub mod sha256 {
         chip: CS,
         state: CS::State,
         cur_block: Vec<CS::BlockWord>,
+        cur_block_src_cell: Vec<AssignedCell<F, F>>,
         length: usize,
     }
 
@@ -106,6 +105,7 @@ pub mod sha256 {
                 chip,
                 state,
                 cur_block: Vec::with_capacity(BLOCK_SIZE),
+                cur_block_src_cell: Vec::with_capacity(BLOCK_SIZE),
                 length: 0,
             })
         }
@@ -115,13 +115,15 @@ pub mod sha256 {
             &mut self,
             mut layouter: impl Layouter<F>,
             mut input: &[Sha256Chip::BlockWord],
-            _input_cells: Option<[AssignedCell<F, F>; BLOCK_SIZE]>,
+            mut input_cells: &[AssignedCell<F, F>],
         ) -> Result<(), Error> {
+            assert_eq!(input.len(), input_cells.len());
+
             self.length += input.len() * 32;
 
             // Fill the current block, if possible.
-            let remaining = BLOCK_SIZE - self.cur_block.len();
-            let (l, r) = input.split_at(min(remaining, input.len()));
+            let cur_block_splitter = min(BLOCK_SIZE - self.cur_block.len(), input.len());
+            let (l, r) = input.split_at(cur_block_splitter);
             self.cur_block.extend_from_slice(l);
             input = r;
 
@@ -130,6 +132,13 @@ pub mod sha256 {
                 return Ok(());
             }
 
+            // Check input cells for copy constraint
+            let (l_cells, r_cells) = input_cells.split_at(cur_block_splitter);
+            input_cells = r_cells;
+
+            // Assign the last `l_cells.len()` of cells to be checked by copy constraint
+            self.cur_block_src_cell.extend_from_slice(l_cells);
+
             // Process the now-full current block.
             self.state = self.chip.compress(
                 &mut layouter,
@@ -137,25 +146,35 @@ pub mod sha256 {
                 self.cur_block[..]
                     .try_into()
                     .expect("cur_block.len() == BLOCK_SIZE"),
-                None, // TODO Pass here first cells
+                self.cur_block_src_cell
+                    .to_vec()
+                    .try_into()
+                    .expect("cur_block.len() == BLOCK_SIZE"),
             )?;
             self.cur_block.clear();
 
             // Process any additional full blocks.
             let mut chunks_iter = input.chunks_exact(BLOCK_SIZE);
-            for chunk in &mut chunks_iter {
+            let mut input_cells_chunks = input_cells.chunks_exact(BLOCK_SIZE);
+
+            for (chunk, cells) in (&mut chunks_iter).zip(&mut input_cells_chunks) {
                 self.state = self.chip.initialization(&mut layouter, &self.state)?;
                 self.state = self.chip.compress(
                     &mut layouter,
                     &self.state,
                     chunk.try_into().expect("chunk.len() == BLOCK_SIZE"),
-                    None, // TODO Pass here rest of cells
+                    cells
+                        .to_vec()
+                        .try_into()
+                        .expect("chunk.len() == BLOCK_SIZE"),
                 )?;
             }
 
             // Cache the remaining partial block, if any.
-            let rem = chunks_iter.remainder();
-            self.cur_block.extend_from_slice(rem);
+            // TODO Process remainder of `input_cells`
+            self.cur_block.extend_from_slice(chunks_iter.remainder());
+            self.cur_block_src_cell
+                .extend_from_slice(input_cells_chunks.remainder());
 
             Ok(())
         }
@@ -177,7 +196,10 @@ pub mod sha256 {
                     self.cur_block[..]
                         .try_into()
                         .expect("cur_block.len() == BLOCK_SIZE"),
-                    None,
+                    self.cur_block_src_cell
+                        .to_vec()
+                        .try_into()
+                        .expect("cur_block.len() == BLOCK_SIZE"),
                 )?;
             }
             self.chip
@@ -201,22 +223,13 @@ pub mod sha256 {
                     self.cur_block[..]
                         .try_into()
                         .expect("cur_block.len() == BLOCK_SIZE"),
-                    None,
+                    self.cur_block_src_cell
+                        .to_vec()
+                        .try_into()
+                        .expect("cur_block.len() == BLOCK_SIZE"),
                 )?;
             }
             self.chip.digest_cells(&mut layouter, &self.state)
-        }
-
-        /// Convenience function to compute hash of the data. It will handle hasher creation,
-        /// data feeding and finalization.
-        pub fn digest(
-            chip: Sha256Chip,
-            mut layouter: impl Layouter<F>,
-            data: &[Sha256Chip::BlockWord],
-        ) -> Result<Sha256Digest<Sha256Chip::BlockWord>, Error> {
-            let mut hasher = Self::new(chip, layouter.namespace(|| "init"))?;
-            hasher.update(layouter.namespace(|| "update"), data, None)?;
-            hasher.finalize(layouter.namespace(|| "finalize"))
         }
 
         /// Convenience function to compute hash of the data. It will handle hasher creation,
@@ -225,7 +238,7 @@ pub mod sha256 {
             chip: Sha256Chip,
             mut layouter: impl Layouter<F>,
             data: &[Sha256Chip::BlockWord],
-            input_cells: Option<[AssignedCell<F, F>; BLOCK_SIZE]>,
+            input_cells: &[AssignedCell<F, F>],
         ) -> Result<[AssignedCell<F, F>; DIGEST_SIZE], Error> {
             let mut hasher = Self::new(chip, layouter.namespace(|| "init"))?;
             hasher.update(layouter.namespace(|| "update"), data, input_cells)?;
@@ -253,42 +266,10 @@ impl Circuit<pallas::Base> for TestSha256Circuit {
 
     fn synthesize(
         &self,
-        config: Self::Config,
-        mut layouter: impl Layouter<pallas::Base>,
+        _config: Self::Config,
+        _layouter: impl Layouter<pallas::Base>,
     ) -> Result<(), Error> {
-        Table16Chip::load(config.clone(), &mut layouter)?;
-        let table16_chip = Table16Chip::construct(config);
-
-        // Test vector: "abc", repeated 31 times
-        let input = iter::repeat(
-            [
-                0b01100001011000100110001110000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000000000,
-                0b00000000000000000000000000011000,
-            ]
-            .into_iter()
-            .map(|v| BlockWord(Value::known(v))),
-        )
-        .take(1)
-        .flatten()
-        .collect::<Box<[_]>>();
-
-        Sha256::digest(table16_chip, layouter.namespace(|| "'abc' * 2"), &input)?;
-
-        Ok(())
+        todo!()
     }
 }
 
@@ -331,7 +312,7 @@ impl StepCircuit<ARITY, B> for TestSha256Circuit {
             table16_chip,
             layouter.namespace(|| "'abc' * 2"),
             values.as_ref(),
-            Some(input),
+            &input,
         )?)
     }
 }
