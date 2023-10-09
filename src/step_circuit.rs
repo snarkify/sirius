@@ -1,6 +1,6 @@
 use ff::PrimeField;
 use halo2_proofs::{
-    circuit::{AssignedCell, Region},
+    circuit::{AssignedCell, Layouter},
     plonk::{Circuit, ConstraintSystem},
 };
 
@@ -52,7 +52,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField>: Circuit<F> {
     fn synthesize(
         &self,
         config: Self::Config,
-        region: Region<'_, F>,
+        layouter: &mut impl Layouter<F>,
         z_in: &[AssignedCell<F, F>; ARITY],
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError>;
 
