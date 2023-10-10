@@ -5,8 +5,8 @@ use std::iter;
 use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
-    plonk::{Circuit, ConstraintSystem, Error},
+    circuit::{AssignedCell, Layouter, Value},
+    plonk::ConstraintSystem,
 };
 
 use halo2curves::pasta::pallas;
@@ -249,29 +249,8 @@ pub mod sha256 {
 
 pub use sha256::{BlockWord, Sha256, Table16Chip, Table16Config};
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct TestSha256Circuit {}
-
-impl Circuit<pallas::Base> for TestSha256Circuit {
-    type Config = Table16Config;
-    type FloorPlanner = SimpleFloorPlanner;
-
-    fn without_witnesses(&self) -> Self {
-        Self::default()
-    }
-
-    fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
-        Table16Chip::configure(meta)
-    }
-
-    fn synthesize(
-        &self,
-        _config: Self::Config,
-        _layouter: impl Layouter<pallas::Base>,
-    ) -> Result<(), Error> {
-        todo!()
-    }
-}
 
 type B = pallas::Base;
 // TODO
@@ -286,7 +265,7 @@ impl StepCircuit<ARITY, B> for TestSha256Circuit {
 
     fn synthesize(
         &self,
-        config: Self::Config,
+        config: Self::StepConfig,
         layouter: &mut impl Layouter<B>,
         z_in: &[AssignedCell<B, B>; ARITY],
     ) -> Result<[AssignedCell<B, B>; ARITY], SynthesisError> {
@@ -318,14 +297,8 @@ impl StepCircuit<ARITY, B> for TestSha256Circuit {
 }
 
 fn main() {
-    use halo2_proofs::dev::MockProver;
-
-    const K: u32 = 17;
-
-    let prover = match MockProver::run(K, &TestSha256Circuit {}, vec![]) {
-        Ok(prover) => prover,
-        Err(err) => panic!("{err:#?}"),
-    };
-
-    assert_eq!(prover.verify(), Ok(()));
+    todo!(
+        "Waiting for IVC Circuit for test {:?}",
+        TestSha256Circuit {}
+    );
 }
