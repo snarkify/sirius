@@ -1,7 +1,4 @@
-use crate::{
-    constants::MAX_BITS,
-    main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx},
-};
+use crate::main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx};
 use ff::PrimeFieldBits;
 use halo2_proofs::{
     arithmetic::CurveAffine,
@@ -59,8 +56,6 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
         p0: &AssignedPoint<C>,
         scalar_bits: &Vec<AssignedValue<C::Base>>,
     ) -> Result<AssignedPoint<C>, Error> {
-        assert!(scalar_bits.len() == MAX_BITS);
-
         let split_len = core::cmp::min(scalar_bits.len(), (C::Base::NUM_BITS - 2) as usize);
         let (incomplete_bits, complete_bits) = scalar_bits.split_at(split_len);
 
@@ -459,14 +454,15 @@ mod tests {
                         ctx.next();
                         ecc_chip.add(ctx, &a, &b)
                     } else {
-                        let lambda = fe_to_fe_safe(self.lambda);
+                        let lambda: C::Base = fe_to_fe_safe(self.lambda);
+                        let bit_len = lambda.to_le_bits().len();
                         let lambda = ctx.assign_advice(
                             || "lambda",
                             ecc_chip.main_gate.config().state[2],
                             Value::known(lambda),
                         )?;
                         ctx.next();
-                        let bits = ecc_chip.main_gate.le_num_to_bits(ctx, lambda)?;
+                        let bits = ecc_chip.main_gate.le_num_to_bits(ctx, lambda, bit_len)?;
                         ecc_chip.scalar_mul(ctx, &a, &bits)
                     }
                 },

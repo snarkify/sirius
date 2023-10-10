@@ -1,4 +1,3 @@
-use crate::constants::MAX_BITS;
 use ff::{BatchInvert, Field, PrimeField};
 use halo2_proofs::plonk::Assigned;
 use num_bigint::BigUint;
@@ -146,7 +145,7 @@ pub(crate) fn trim_leading_zeros(hex: String) -> String {
     format!("0x{}", trimmed)
 }
 
-pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>) {
+pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>, bit_len: usize) {
     let last_one_position = bits
         .iter()
         .enumerate()
@@ -160,9 +159,9 @@ pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>) {
     }
 
     let length = bits.len();
-    assert!(MAX_BITS >= length);
+    assert!(bit_len >= length, "bit length exceed maximum value");
 
-    for _ in 0..(MAX_BITS - length) {
+    for _ in 0..(bit_len - length) {
         bits.push(false);
     }
 }

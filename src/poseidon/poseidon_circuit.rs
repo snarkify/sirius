@@ -1,5 +1,6 @@
-use crate::main_gate::{
-    AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue,
+use crate::{
+    constants::MAX_BITS,
+    main_gate::{AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
 };
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
@@ -34,7 +35,7 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
         num_bits: usize,
     ) -> Result<Vec<AssignedBit<F>>, Error> {
         let val = self.squeeze(ctx)?;
-        let res = self.main_gate.le_num_to_bits(ctx, val)?;
+        let res = self.main_gate.le_num_to_bits(ctx, val, MAX_BITS)?;
         if res.len() >= num_bits {
             Ok(res[..num_bits].to_vec())
         } else {

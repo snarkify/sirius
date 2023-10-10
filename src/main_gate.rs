@@ -545,6 +545,7 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
         &self,
         ctx: &mut RegionCtx<'_, F>,
         a: AssignedValue<F>,
+        bit_len: usize,
     ) -> Result<Vec<AssignedValue<F>>, Error> {
         // TODO: ensure a is less than F.size() - 1
         let mut length = 0;
@@ -560,7 +561,7 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
             .iter()
             .map(|bit| bit.unwrap().unwrap())
             .collect::<Vec<_>>();
-        normalize_trailing_zeros(&mut bits);
+        normalize_trailing_zeros(&mut bits, bit_len);
         let bits = self.assign_bits(ctx, &bits)?;
         let num = self.le_bits_to_num(ctx, &bits)?;
         assert_eq!(num.value().unwrap(), a.value().unwrap());
