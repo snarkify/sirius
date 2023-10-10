@@ -1,7 +1,7 @@
 use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter},
-    plonk::{Circuit, ConstraintSystem},
+    plonk::ConstraintSystem,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -34,7 +34,7 @@ pub enum SynthesisError {
 /// - For a detailed understanding of IVC and the context in which a trait
 ///   `StepCircuit` might be used, refer to the 'Section 5' of
 ///   [Nova Whitepaper](https://eprint.iacr.org/2023/969.pdf).
-pub trait StepCircuit<const ARITY: usize, F: PrimeField>: Circuit<F> {
+pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     type StepConfig: Clone;
 
     /// Configure the step circuit. This method initializes necessary
@@ -51,7 +51,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField>: Circuit<F> {
     /// Return `z_out` result
     fn synthesize(
         &self,
-        config: Self::Config,
+        config: Self::StepConfig,
         layouter: &mut impl Layouter<F>,
         z_in: &[AssignedCell<F, F>; ARITY],
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError>;
