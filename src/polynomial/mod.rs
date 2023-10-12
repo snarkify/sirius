@@ -56,16 +56,52 @@ impl<F: PrimeField> Expression<F> {
         }
     }
 
-    fn _expand(&self, index_to_poly: &Vec<(i32, usize)>) -> MultiPolynomial<F> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate<T>(
+        &self,
+        constant: &impl Fn(F) -> T,
+        poly: &impl Fn(Query) -> T,
+        negated: &impl Fn(T) -> T,
+        sum: &impl Fn(T, T) -> T,
+        product: &impl Fn(T, T) -> T,
+        scaled: &impl Fn(T, F) -> T,
+    ) -> T {
+        let evaluate =
+            |expr: &Expression<F>| expr.evaluate(constant, poly, negated, sum, product, scaled);
         match self {
-            Expression::Constant(c) => {
+            Expression::Constant(scalar) => constant(*scalar),
+            Expression::Polynomial(query) => poly(*query),
+            Expression::Negated(a) => {
+                let a = evaluate(a);
+                negated(a)
+            }
+            Expression::Sum(a, b) => {
+                let a = evaluate(a);
+                let b = evaluate(b);
+                sum(a, b)
+            }
+            Expression::Product(a, b) => {
+                let a = evaluate(a);
+                let b = evaluate(b);
+                product(a, b)
+            }
+            Expression::Scaled(a, scalar) => {
+                let a = evaluate(a);
+                scaled(a, *scalar)
+            }
+        }
+    }
+
+    fn _expand(&self, index_to_poly: &Vec<(i32, usize)>) -> MultiPolynomial<F> {
+        self.evaluate(
+            &|c| {
                 let arity = index_to_poly.len();
                 MultiPolynomial {
                     arity,
-                    monomials: vec![Monomial::new(index_to_poly.clone(), *c, vec![0; arity])],
+                    monomials: vec![Monomial::new(index_to_poly.clone(), c, vec![0; arity])],
                 }
-            }
-            Expression::Polynomial(poly) => {
+            },
+            &|poly| {
                 let arity = index_to_poly.len();
                 let mut exponents = vec![0; arity];
                 let index = index_to_poly
@@ -77,26 +113,12 @@ impl<F: PrimeField> Expression<F> {
                     arity,
                     monomials: vec![Monomial::new(index_to_poly.clone(), F::ONE, exponents)],
                 }
-            }
-            Expression::Negated(a) => {
-                let a = a._expand(index_to_poly);
-                -a
-            }
-            Expression::Sum(a, b) => {
-                let a = a._expand(index_to_poly);
-                let b = b._expand(index_to_poly);
-                a + b
-            }
-            Expression::Product(a, b) => {
-                let a = a._expand(index_to_poly);
-                let b = b._expand(index_to_poly);
-                a * b
-            }
-            Expression::Scaled(a, k) => {
-                let a = a._expand(index_to_poly);
-                a * *k
-            }
-        }
+            },
+            &|a| -a,
+            &|a, b| a + b,
+            &|a, b| a * b,
+            &|a, k| a * k,
+        )
     }
 
     pub fn expand(&self) -> MultiPolynomial<F> {
@@ -111,11 +133,11 @@ impl<F: PrimeField> Expression<F> {
     // and output P(f_1,...,f_m, x_1+r*y_1,...,x_n+r*y_n)
     // here num_fixed = m, num_vars = n
     pub fn fold_transform(&self, num_fixed: usize, num_vars: usize) -> Self {
-        match self {
-            Expression::Constant(c) => Expression::Constant(*c),
-            Expression::Polynomial(poly) => {
+        self.evaluate(
+            &|c| Expression::Constant(c),
+            &|poly| {
                 if poly.index < num_fixed {
-                    return Expression::Polynomial(*poly);
+                    return Expression::Polynomial(poly);
                 }
                 let r = Expression::Polynomial(Query {
                     index: num_fixed + 2 * num_vars,
@@ -126,61 +148,31 @@ impl<F: PrimeField> Expression<F> {
                     rotation: poly.rotation,
                 });
                 // fold variable x_i -> x_i + r * y_i
-                Expression::Polynomial(*poly) + r * y
-            }
-            Expression::Negated(a) => {
-                let a = a.fold_transform(num_fixed, num_vars);
-                -a
-            }
-            Expression::Sum(a, b) => {
-                let a = a.fold_transform(num_fixed, num_vars);
-                let b = b.fold_transform(num_fixed, num_vars);
-                a + b
-            }
-            Expression::Product(a, b) => {
-                let a = a.fold_transform(num_fixed, num_vars);
-                let b = b.fold_transform(num_fixed, num_vars);
-                a * b
-            }
-            Expression::Scaled(a, k) => {
-                let a = a.fold_transform(num_fixed, num_vars);
-                a * *k
-            }
-        }
+                Expression::Polynomial(poly) + r * y
+            },
+            &|a| -a,
+            &|a, b| a + b,
+            &|a, b| a * b,
+            &|a, k| a * k,
+        )
     }
 
     fn visualize(&self) -> String {
-        match self {
-            Expression::Constant(c) => trim_leading_zeros(format!("{:?}", c)),
-            Expression::Polynomial(poly) => {
+        self.evaluate(
+            &|c| trim_leading_zeros(format!("{:?}", c)),
+            &|poly| {
                 let rotation = match poly.rotation.0.cmp(&0) {
                     Ordering::Equal => "".to_owned(),
                     Ordering::Less => format!("[{}]", poly.rotation.0),
                     Ordering::Greater => format!("[+{}]", poly.rotation.0),
                 };
-
                 format!("Z_{}{}", poly.index, rotation)
-            }
-            Expression::Negated(a) => {
-                let a = a.visualize();
-                format!("(-{})", a)
-            }
-            Expression::Sum(a, b) => {
-                let a = a.visualize();
-                let b = b.visualize();
-                format!("({} + {})", a, b)
-            }
-            Expression::Product(a, b) => {
-                let a = a.visualize();
-                let b = b.visualize();
-                format!("({} * {})", a, b)
-            }
-            Expression::Scaled(a, k) => {
-                let a = a.visualize();
-                let k = trim_leading_zeros(format!("{:?}", k));
-                format!("{} * {}", k, a)
-            }
-        }
+            },
+            &|a| format!("(-{})", a),
+            &|a, b| format!("({} + {})", a, b),
+            &|a, b| format!("({} * {})", a, b),
+            &|a, k| format!("{:?} * {}", trim_leading_zeros(format!("{:?}", k)), a),
+        )
     }
 
     pub fn from_halo2_expr(expr: &PE<F>, num_fixed: usize) -> Self {
