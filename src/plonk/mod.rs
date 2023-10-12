@@ -347,6 +347,7 @@ pub struct TableData<F: PrimeField> {
     pub(crate) k: u32,
     pub(crate) cs: ConstraintSystem<F>,
     pub(crate) fixed: Vec<Vec<Assigned<F>>>,
+    pub(crate) selector: Vec<Vec<bool>>,
     pub(crate) instance: Vec<F>,
     pub(crate) advice: Vec<Vec<Assigned<F>>>,
     pub(crate) challenges: HashMap<usize, F>,
@@ -361,6 +362,7 @@ impl<F: PrimeField> TableData<F> {
             cs,
             instance,
             fixed: vec![],
+            selector: vec![],
             advice: vec![],
             challenges: HashMap::new(),
             permutation: None,
@@ -379,6 +381,7 @@ impl<F: PrimeField> TableData<F> {
         let n = 1 << self.k;
         assert!(self.cs.num_instance_columns() == 1);
         self.fixed = vec![vec![F::ZERO.into(); n]; self.cs.num_fixed_columns()];
+        self.selector = vec![vec![false; n]; self.cs.num_selectors()];
         self.advice = vec![vec![F::ZERO.into(); n]; self.cs.num_advice_columns()];
         ConcreteCircuit::FloorPlanner::synthesize(
             self,
@@ -524,13 +527,12 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
         // Do nothing; we don't care about regions in this context.
     }
 
-    fn enable_selector<A, AR>(&mut self, _: A, _: &Selector, _: usize) -> Result<(), Error>
+    fn enable_selector<A, AR>(&mut self, _: A, selector: &Selector, row: usize) -> Result<(), Error>
     where
         A: FnOnce() -> AR,
         AR: Into<String>,
     {
-        // TODO: add selector support by converting to selector to fixed column
-
+        self.selector[selector.index()][row] = true;
         Ok(())
     }
 
@@ -563,7 +565,7 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
         A: FnOnce() -> AR,
         AR: Into<String>,
     {
-        // TODO: do we need to support phases
+        // TODO: support phases
         *self
             .advice
             .get_mut(column.index())
