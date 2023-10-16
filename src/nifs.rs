@@ -78,12 +78,12 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         W2: &PlonkWitness<C::ScalarExt>,
     ) -> (CrossTerms<C>, CrossTermCommits<C>) {
         let gate = &S.gate;
-        let num_fixed = S.fixed_columns.len();
+        let offset = S.selectors.len() + S.fixed_columns.len();
         let num_row = S.fixed_columns[0].len();
-        let num_vars = gate.arity - num_fixed; // number of variables to be folded
-        let normalized = gate.fold_transform(num_fixed, num_vars);
-        let r_index = num_fixed + 2 * (num_vars + 1); // after adding u
-        let degree = gate.degree_for_folding(num_fixed);
+        let num_vars = gate.arity - offset; // number of variables to be folded
+        let normalized = gate.fold_transform(offset, num_vars);
+        let r_index = offset + 2 * (num_vars + 1); // after adding u
+        let degree = gate.degree_for_folding(offset);
         let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
             .map(|k| normalized.coeff_of((0, r_index), k))
             .map(|multipoly| {
@@ -304,6 +304,7 @@ mod tests {
         assert!(perm_res.is_ok());
     }
 
+    /// calculate smallest w such that 2^w >= n*(2^K)
     fn smallest_power(n: usize, K: u32) -> usize {
         let n_f64 = n as f64;
         let mul_res = n_f64 * (2f64.powi(K as i32));
@@ -337,7 +338,7 @@ mod tests {
         let _ = td2.assembly(&circuit2);
 
         let p1 = smallest_power(td1.cs.num_advice_columns(), K);
-        let p2 = smallest_power(td1.fixed.iter().flatten().collect::<Vec<_>>().len(), 1);
+        let p2 = smallest_power(td1.cs.num_selectors() + td1.cs.num_fixed_columns(), K);
         let ck = CommitmentKey::<EqAffine>::setup(p1.max(p2), b"test");
 
         type PH = PoseidonHash<EqAffine, Fq, T, RATE>;

@@ -131,20 +131,21 @@ impl<F: PrimeField> Expression<F> {
 
     // fold_transform will fold a polynomial expression P(f_1,...f_m, x_1,...,x_n)
     // and output P(f_1,...,f_m, x_1+r*y_1,...,x_n+r*y_n)
-    // here num_fixed = m, num_vars = n
-    pub fn fold_transform(&self, num_fixed: usize, num_vars: usize) -> Self {
+    // here m = num_fixed+num_selectors
+    // n = num_advice(+potential extra variables)
+    pub fn fold_transform(&self, mm: usize, nn: usize) -> Self {
         self.evaluate(
             &|c| Expression::Constant(c),
             &|poly| {
-                if poly.index < num_fixed {
+                if poly.index < mm {
                     return Expression::Polynomial(poly);
                 }
                 let r = Expression::Polynomial(Query {
-                    index: num_fixed + 2 * num_vars,
+                    index: mm + 2 * nn,
                     rotation: Rotation(0),
                 });
                 let y = Expression::Polynomial(Query {
-                    index: poly.index + num_vars,
+                    index: poly.index + nn,
                     rotation: poly.rotation,
                 });
                 // fold variable x_i -> x_i + r * y_i
@@ -175,33 +176,37 @@ impl<F: PrimeField> Expression<F> {
         )
     }
 
-    pub fn from_halo2_expr(expr: &PE<F>, num_fixed: usize) -> Self {
+    pub fn from_halo2_expr(expr: &PE<F>, num_selector: usize, num_fixed: usize) -> Self {
         match expr {
             PE::Constant(c) => Expression::Constant(*c),
+            PE::Selector(sel) => Expression::Polynomial(Query {
+                index: sel.index(),
+                rotation: Rotation(0),
+            }),
             PE::Fixed(query) => Expression::Polynomial(Query {
-                index: query.column_index(),
+                index: num_selector + query.column_index(),
                 rotation: query.rotation(),
             }),
             PE::Advice(query) => Expression::Polynomial(Query {
-                index: num_fixed + query.column_index(),
+                index: num_selector + num_fixed + query.column_index(),
                 rotation: query.rotation(),
             }),
             PE::Negated(a) => {
-                let a = Self::from_halo2_expr(a, num_fixed);
+                let a = Self::from_halo2_expr(a, num_selector, num_fixed);
                 -a
             }
             PE::Sum(a, b) => {
-                let a = Self::from_halo2_expr(a, num_fixed);
-                let b = Self::from_halo2_expr(b, num_fixed);
+                let a = Self::from_halo2_expr(a, num_selector, num_fixed);
+                let b = Self::from_halo2_expr(b, num_selector, num_fixed);
                 a + b
             }
             PE::Product(a, b) => {
-                let a = Self::from_halo2_expr(a, num_fixed);
-                let b = Self::from_halo2_expr(b, num_fixed);
+                let a = Self::from_halo2_expr(a, num_selector, num_fixed);
+                let b = Self::from_halo2_expr(b, num_selector, num_fixed);
                 a * b
             }
             PE::Scaled(a, k) => {
-                let a = Self::from_halo2_expr(a, num_fixed);
+                let a = Self::from_halo2_expr(a, num_selector, num_fixed);
                 a * *k
             }
             _ => unimplemented!("not supported"),
@@ -301,11 +306,12 @@ impl<F: PrimeField> Monomial<F> {
         }
     }
 
-    pub fn homogeneous(&self, degree: usize, num_fixed: usize, u_index: usize) -> Self {
+    /// offset = num_selector+num_fixed, equals number of variables that are not folded,
+    pub fn homogeneous(&self, degree: usize, offset: usize, u_index: usize) -> Self {
         let mut mono = self.clone();
         mono.arity += 1;
         mono.exponents
-            .push(degree - self.degree_for_folding(num_fixed));
+            .push(degree - self.degree_for_folding(offset));
         mono.index_to_poly.push((0, u_index));
         mono.poly_to_index.insert((0, u_index), mono.arity);
         mono
@@ -340,13 +346,13 @@ impl<F: PrimeField> Monomial<F> {
     }
 
     // this is used for folding, each variable has index
-    // if the index < num_fixed, it will be treated as "const"
+    // if the index < offset=num_selector+num_fixed, it will be treated as "const"
     // i.e. not folded
-    pub fn degree_for_folding(&self, num_fixed: usize) -> usize {
+    pub fn degree_for_folding(&self, offset: usize) -> usize {
         self.exponents
             .iter()
             .zip(self.index_to_poly.iter())
-            .filter_map(|(exp, (_, col_index))| (col_index >= &num_fixed).then_some(exp))
+            .filter_map(|(exp, (_, col_index))| (col_index >= &offset).then_some(exp))
             .sum()
     }
 
@@ -402,11 +408,12 @@ impl<F: PrimeField> Monomial<F> {
         U2: &RelaxedPlonkInstance<C>,
         W2: &RelaxedPlonkWitness<F>,
     ) -> F {
-        let num_fixed = S.fixed_columns.len();
+        let num_selectors = S.selectors.len();
+        let offset = S.fixed_columns.len() + num_selectors;
         let num_advice = S.num_advice_columns;
-        let y1_index = num_fixed + num_advice;
+        let y1_index = offset + num_advice;
         let u1_index = y1_index + 1;
-        let y2_index = num_fixed + 2 * num_advice + 2;
+        let y2_index = offset + 2 * num_advice + 2;
         let u2_index = y2_index + 1;
 
         let row_size = W1.W.len() / num_advice;
@@ -422,14 +429,22 @@ impl<F: PrimeField> Monomial<F> {
                     row_size - (-rot as usize) + row
                 };
                 // layout of the index is:
-                // |num_fixed|num_advice|y1|u1|num_advice2|y2|u2|
+                // |num_selectors|num_fixed|num_advice|y1|u1|num_advice2|y2|u2|
                 // given column index of a variable x_i, we are able to find the correct location of that variable
                 // and hence its value
                 match col {
+                    // selector column
+                    col if col < num_selectors => {
+                        if S.selectors[col][row1] {
+                            F::ONE
+                        } else {
+                            F::ZERO
+                        }
+                    }
                     // fixed column
-                    col if col < num_fixed => S.fixed_columns[col][row1],
+                    col if col < offset => S.fixed_columns[col - num_selectors][row1],
                     // advice column for (U1, W1)
-                    col if col < y1_index => W1.W[(col - num_fixed) * row_size + row1],
+                    col if col < y1_index => W1.W[(col - offset) * row_size + row1],
                     // challenge y1
                     col if col == y1_index => U1.y,
                     // homogeneous variable u1
@@ -522,23 +537,24 @@ impl<F: PrimeField> MultiPolynomial<F> {
     pub fn arity(&self) -> usize {
         self.arity
     }
-    pub fn degree_for_folding(&self, num_fixed: usize) -> usize {
+    /// offset = num_fixed+num_selector, offset of variables to be folded
+    pub fn degree_for_folding(&self, offset: usize) -> usize {
         let mut deg = 0;
         for monomial in self.monomials.iter() {
-            if deg < monomial.degree_for_folding(num_fixed) {
-                deg = monomial.degree_for_folding(num_fixed)
+            if deg < monomial.degree_for_folding(offset) {
+                deg = monomial.degree_for_folding(offset)
             }
         }
         deg
     }
 
     // when make polynomial homogeneous, we need specify the index of u
-    pub fn homogeneous(&self, num_fixed: usize, u_index: usize) -> Self {
-        let degree = self.degree_for_folding(num_fixed);
+    pub fn homogeneous(&self, offset: usize, u_index: usize) -> Self {
+        let degree = self.degree_for_folding(offset);
         let monos = self
             .monomials
             .iter()
-            .map(|f| f.homogeneous(degree, num_fixed, u_index))
+            .map(|f| f.homogeneous(degree, offset, u_index))
             .collect();
         Self {
             arity: self.arity + 1,
@@ -558,11 +574,11 @@ impl<F: PrimeField> MultiPolynomial<F> {
     // p(f_1,...,f_m,x_1,...,x_n) -> p'(f_1,...,f_m,x_1,...,x_n,u)
     // (2) fold variable x_i while keep variable f_i unchanged
     // p' -> p'(f_1,...,f_m, x_1+r*y_1,x_2+r*y_2,...,x_n+r*y_n)
-    // num_fixed = m, num_vars = n
-    pub fn fold_transform(&self, num_fixed: usize, num_vars: usize) -> Self {
-        self.homogeneous(num_fixed, num_fixed + num_vars) // u_index = num_fixed + num_vars
+    // mm = num_fixed + num_selectors, nn = num_advice(+ potential extra variables)
+    pub fn fold_transform(&self, mm: usize, nn: usize) -> Self {
+        self.homogeneous(mm, mm + nn) // u_index = mm +nn is the homogeneous variable index
             .to_expression()
-            .fold_transform(num_fixed, num_vars + 1) // after p -> p', num_vars of p' is increased by 1
+            .fold_transform(mm, nn + 1) // after p -> p', num_vars of p' is increased by 1
             .expand()
     }
 

@@ -45,10 +45,11 @@ pub mod util;
 pub struct PlonkStructure<C: CurveAffine> {
     // k is a parameter such that 2^k is the total number of rows
     pub(crate) k: usize,
+    pub(crate) selectors: Vec<Vec<bool>>,
     pub(crate) fixed_columns: Vec<Vec<C::ScalarExt>>,
     pub(crate) num_advice_columns: usize,
     pub(crate) gate: MultiPolynomial<C::ScalarExt>,
-    pub(crate) fixed_commitment: C, // concatenate num_fixed_columns together, then commit
+    pub(crate) fixed_commitment: C, // concatenate selectors and num_fixed_columns together, then commit
     pub(crate) permutation_matrix: SparseMatrix<C::ScalarExt>,
 }
 
@@ -151,9 +152,9 @@ impl<C: CurveAffine> PlonkStructure<C> {
         let nrow = 2usize.pow(self.k as u32);
         let U2 = RelaxedPlonkInstance::new(U.instance.len());
         let W2 = RelaxedPlonkWitness::new(self.k as u32, self.num_advice_columns);
-        let num_fixed = self.fixed_columns.len();
-        let u_index = num_fixed + self.num_advice_columns + 1;
-        let poly = self.gate.homogeneous(num_fixed, u_index);
+        let offset = self.selectors.len() + self.fixed_columns.len();
+        let u_index = offset + self.num_advice_columns + 1;
+        let poly = self.gate.homogeneous(offset, u_index);
         let res: usize = (0..nrow)
             .into_par_iter()
             .map(|row| poly.eval(row, self, U, W, &U2, &W2))
@@ -396,19 +397,27 @@ impl<F: PrimeField> TableData<F> {
         &self,
         ck: &CommitmentKey<C>,
     ) -> PlonkStructure<C> {
+        let selectors = self.selector.clone();
         let fixed_columns = batch_invert_assigned(&self.fixed);
+        let selector_columns =
+            self.selector
+                .iter()
+                .flatten()
+                .map(|sel| if *sel { F::ONE } else { F::ZERO });
         // TODO: avoid clone
         let fixed_commitment = ck.commit(
             &fixed_columns
                 .clone()
                 .into_iter()
                 .flatten()
+                .chain(selector_columns)
                 .collect::<Vec<_>>()[..],
         );
+        let num_selector = self.cs.num_selectors();
         let num_fixed = self.cs.num_fixed_columns();
         let num_advice = self.cs.num_advice_columns();
         let y = Expression::Polynomial(Query {
-            index: num_fixed + num_advice,
+            index: num_selector + num_fixed + num_advice,
             rotation: Rotation(0),
         });
         // suppose we have n polynomial expression: p_1,p_2,...,p_n
@@ -418,7 +427,7 @@ impl<F: PrimeField> TableData<F> {
             .gates()
             .iter()
             .flat_map(|gate| gate.polynomials().iter())
-            .map(|expr| Expression::from_halo2_expr(expr, num_fixed))
+            .map(|expr| Expression::from_halo2_expr(expr, num_selector, num_fixed))
             .fold(Expression::Constant(F::ZERO), |acc, expr| {
                 Expression::Sum(
                     Box::new(expr),
@@ -430,6 +439,7 @@ impl<F: PrimeField> TableData<F> {
 
         PlonkStructure {
             k: self.k as usize,
+            selectors,
             fixed_columns,
             num_advice_columns: self.cs.num_advice_columns(),
             gate: combined_poly,
