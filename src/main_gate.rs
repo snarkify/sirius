@@ -582,6 +582,7 @@ mod tests {
         const RATE: usize = 2;
         let mut cs = ConstraintSystem::<Fp>::default();
         let _: MainGateConfig<T> = MainGate::configure(&mut cs);
+        let num_selector = cs.num_selectors(); // is zero for current main_gate design
         let num_fixed = cs.num_fixed_columns();
         let num_instance = cs.num_instance_columns();
         let num_advice = cs.num_advice_columns();
@@ -591,7 +592,7 @@ mod tests {
             .map(|gate| {
                 gate.polynomials()
                     .iter()
-                    .map(|expr| Expression::from_halo2_expr(expr, num_fixed))
+                    .map(|expr| Expression::from_halo2_expr(expr, num_selector, num_fixed))
                     .collect()
             })
             .collect();
