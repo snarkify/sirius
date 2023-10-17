@@ -5,12 +5,12 @@
 pub mod commitment;
 pub mod constants;
 pub mod gadgets;
+pub mod ivc;
 pub mod main_gate;
 pub mod nifs;
 pub mod plonk;
 pub mod polynomial;
 pub mod poseidon;
-pub mod step_circuit;
 pub mod util;
 
 pub mod error;
