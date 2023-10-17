@@ -10,7 +10,7 @@ use halo2_proofs::{
 };
 
 use halo2curves::pasta::pallas;
-use sirius::step_circuit::{StepCircuit, SynthesisError};
+use sirius::ivc::step_circuit::{StepCircuit, SynthesisError};
 
 mod table16;
 
