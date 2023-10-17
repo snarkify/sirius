@@ -3,6 +3,9 @@ use halo2_proofs::{
     circuit::{AssignedCell, Layouter},
     plonk::ConstraintSystem,
 };
+use halo2curves::CurveAffine;
+
+use crate::{plonk::RelaxedPlonkInstance, poseidon::ROTrait};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SynthesisError {
@@ -99,4 +102,71 @@ impl<const A: usize, F: PrimeField, C: StepCircuit<A, F>> ConfigureWithInstanceC
             Err(ConfigureError::InstanceColumnNotAllowed)
         }
     }
+}
+
+// TODO Rename
+pub struct SynthesizeStepParams<G: CurveAffine, RO: ROTrait<G>> {
+    pub limb_width: usize,
+    pub n_limbs: usize,
+    /// A boolean indicating if this is the primary circuit
+    pub is_primary_circuit: bool,
+    pub ro_constant: RO::Constants,
+}
+
+pub struct StepInputs<'link, const ARITY: usize, G: CurveAffine, RO: ROTrait<G>> {
+    params: &'link SynthesizeStepParams<G, RO>,
+    step: G::Base,
+
+    z_0: [AssignedCell<G::Scalar, G::Scalar>; ARITY],
+    z_in: [AssignedCell<G::Scalar, G::Scalar>; ARITY],
+
+    // TODO docs
+    U: Option<RelaxedPlonkInstance<G>>,
+
+    // TODO docs
+    u: Option<RelaxedPlonkInstance<G>>,
+
+    // TODO docs
+    T_commitment: Option<G::Scalar>,
+}
+
+// TODO
+/// Extends a step circuit so that it can be used inside an IVC
+///
+/// This trait functionality is equivalent to structure `NovaAugmentedCircuit` from nova codebase
+pub(crate) trait StepCircuitExt<'link, const ARITY: usize, G: CurveAffine>:
+    StepCircuit<ARITY, G::Scalar>
+{
+    fn synthesize_step<RO: ROTrait<G>>(
+        &self,
+        _config: <Self as StepCircuit<ARITY, G::Scalar>>::StepConfig,
+        _layouter: &mut impl Layouter<G::Scalar>,
+        _input: StepInputs<ARITY, G, RO>,
+    ) -> Result<[AssignedCell<G::Scalar, G::Scalar>; ARITY], SynthesisError> {
+        todo!()
+    }
+
+    fn synthesize_step_base_case<RO: ROTrait<G>>(
+        &self,
+        _config: <Self as StepCircuit<ARITY, G::Scalar>>::StepConfig,
+        _layouter: &mut impl Layouter<G::Scalar>,
+        _input: StepInputs<ARITY, G, RO>,
+    ) -> Result<[AssignedCell<G::Scalar, G::Scalar>; ARITY], SynthesisError> {
+        todo!()
+    }
+
+    fn synthesize_step_not_base_case<RO: ROTrait<G>>(
+        &self,
+        _config: <Self as StepCircuit<ARITY, G::Scalar>>::StepConfig,
+        _layouter: &mut impl Layouter<G::Scalar>,
+        _input: StepInputs<ARITY, G, RO>,
+    ) -> Result<[AssignedCell<G::Scalar, G::Scalar>; ARITY], SynthesisError> {
+        todo!()
+    }
+}
+
+// auto-impl for all `StepCircuit` trait `StepCircuitExt`
+impl<'link, const ARITY: usize, G: CurveAffine, SP: StepCircuit<ARITY, G::Scalar>>
+    StepCircuitExt<'link, ARITY, G> for SP
+{
 }
