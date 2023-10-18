@@ -12,86 +12,86 @@ use crate::{
 use step_circuit::StepCircuit;
 
 // TODO docs
-pub struct CircuitPublicParams<G, RO>
+pub struct CircuitPublicParams<C, RO>
 where
-    G: CurveAffine,
-    RO: ROTrait<G>,
+    C: CurveAffine,
+    RO: ROTrait<C>,
 {
-    ck: CommitmentKey<G>,
-    td: TableData<G::Scalar>,
+    ck: CommitmentKey<C>,
+    td: TableData<C::Scalar>,
     ro_consts: RO::Constants,
     // ro_consts_circuit: ROTrait::Constants, // NOTE: our `ROTraitCircuit` don't have main initializer
     // augmented_circuit_params: NovaAugmentedCircuitParams,
 }
 
 // TODO docs
-pub struct PublicParams<const A1: usize, const A2: usize, G1, G2, R1, R2>
+pub struct PublicParams<const A1: usize, const A2: usize, C1, C2, R1, R2>
 where
-    G1: CurveAffine<Base = <G2 as PrimeCurveAffine>::Scalar>,
-    G2: CurveAffine<Base = <G1 as PrimeCurveAffine>::Scalar>,
-    R1: ROTrait<G1>,
-    R2: ROTrait<G2>,
+    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
+    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
+    R1: ROTrait<C1>,
+    R2: ROTrait<C2>,
 {
-    primary: CircuitPublicParams<G1, R1>,
-    secondary: CircuitPublicParams<G2, R2>,
+    primary: CircuitPublicParams<C1, R1>,
+    secondary: CircuitPublicParams<C2, R2>,
 }
 
 // TODO docs
-pub struct RelaxedTrace<G: CurveAffine> {
-    U: RelaxedPlonkInstance<G>,
-    W: RelaxedPlonkWitness<G::Scalar>,
+pub struct RelaxedTrace<C: CurveAffine> {
+    U: RelaxedPlonkInstance<C>,
+    W: RelaxedPlonkWitness<C::Scalar>,
 }
 
 // TODO docs
-pub struct Trace<G: CurveAffine> {
-    u: PlonkInstance<G>,
-    w: PlonkWitness<G::Scalar>,
+pub struct Trace<C: CurveAffine> {
+    u: PlonkInstance<C>,
+    w: PlonkWitness<C::Scalar>,
 }
 
 // TODO docs
-struct StepCircuitContext<const ARITY: usize, G, C>
+struct StepCircuitContext<const ARITY: usize, C, SC>
 where
-    G: CurveAffine,
-    C: StepCircuit<ARITY, G::Scalar>,
+    C: CurveAffine,
+    SC: StepCircuit<ARITY, C::Scalar>,
 {
-    step_circuit: C,
-    relaxed_trace: RelaxedTrace<G>,
-    z_input: [G::Scalar; ARITY],
+    step_circuit: SC,
+    relaxed_trace: RelaxedTrace<C>,
+    z_input: [C::Scalar; ARITY],
 }
 
 // TODO docs
-struct IVCGadget<const A1: usize, const A2: usize, G1, G2, C1, C2>
+struct IVCGadget<const A1: usize, const A2: usize, C1, C2, SC1, SC2>
 where
-    G1: CurveAffine<Base = <G2 as PrimeCurveAffine>::Scalar>,
-    G2: CurveAffine<Base = <G1 as PrimeCurveAffine>::Scalar>,
-    C1: StepCircuit<A1, G1::Scalar>,
-    C2: StepCircuit<A2, G2::Scalar>,
+    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
+    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
+    SC1: StepCircuit<A1, C1::Scalar>,
+    SC2: StepCircuit<A2, C2::Scalar>,
 {
-    primary: StepCircuitContext<A1, G1, C1>,
-    secondary: StepCircuitContext<A2, G2, C2>,
+    primary: StepCircuitContext<A1, C1, SC1>,
+    secondary: StepCircuitContext<A2, C2, SC2>,
 
-    trace: Trace<G2>,
+    trace: Trace<C2>,
 
     step: usize,
 }
 
-impl<const A1: usize, const A2: usize, G1, G2, C1, C2> IVCGadget<A1, A2, G1, G2, C1, C2>
+impl<const A1: usize, const A2: usize, C1, C2, SC1, SC2> IVCGadget<A1, A2, C1, C2, SC1, SC2>
 where
-    G1: CurveAffine<Base = <G2 as PrimeCurveAffine>::Scalar>,
-    G2: CurveAffine<Base = <G1 as PrimeCurveAffine>::Scalar>,
-    C1: StepCircuit<A1, G1::Scalar>,
-    C2: StepCircuit<A2, G2::Scalar>,
+    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
+    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
+    SC1: StepCircuit<A1, C1::Scalar>,
+    SC2: StepCircuit<A2, C2::Scalar>,
 {
     fn new<RO1, RO2>(
-        _pp: &PublicParams<A1, A2, G1, G2, RO1, RO2>,
+        _pp: &PublicParams<A1, A2, C1, C2, RO1, RO2>,
         _primary: C1,
-        _z0_primary: [G1::Scalar; A1],
+        _z0_primary: [C1::Scalar; A1],
         _secondary: C2,
-        _z0_secondary: [G2::Scalar; A2],
+        _z0_secondary: [C2::Scalar; A2],
     ) -> Self
     where
-        RO1: ROTrait<G1>,
-        RO2: ROTrait<G2>,
+        RO1: ROTrait<C1>,
+        RO2: ROTrait<C2>,
     {
         todo!()
     }

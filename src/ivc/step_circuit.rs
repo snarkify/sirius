@@ -105,7 +105,7 @@ impl<const A: usize, F: PrimeField, C: StepCircuit<A, F>> ConfigureWithInstanceC
 }
 
 // TODO Rename
-pub struct SynthesizeStepParams<G: CurveAffine, RO: ROTrait<G>> {
+pub(crate) struct SynthesizeStepParams<G: CurveAffine, RO: ROTrait<G>> {
     pub limb_width: usize,
     pub n_limbs: usize,
     /// A boolean indicating if this is the primary circuit
@@ -113,60 +113,60 @@ pub struct SynthesizeStepParams<G: CurveAffine, RO: ROTrait<G>> {
     pub ro_constant: RO::Constants,
 }
 
-pub struct StepInputs<'link, const ARITY: usize, G: CurveAffine, RO: ROTrait<G>> {
-    params: &'link SynthesizeStepParams<G, RO>,
-    step: G::Base,
+pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROTrait<C>> {
+    params: &'link SynthesizeStepParams<C, RO>,
+    step: C::Base,
 
-    z_0: [AssignedCell<G::Scalar, G::Scalar>; ARITY],
-    z_in: [AssignedCell<G::Scalar, G::Scalar>; ARITY],
-
-    // TODO docs
-    U: Option<RelaxedPlonkInstance<G>>,
+    z_0: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
+    z_in: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
 
     // TODO docs
-    u: Option<RelaxedPlonkInstance<G>>,
+    U: Option<RelaxedPlonkInstance<C>>,
 
     // TODO docs
-    T_commitment: Option<G::Scalar>,
+    u: Option<RelaxedPlonkInstance<C>>,
+
+    // TODO docs
+    T_commitment: Option<Vec<C::Scalar>>,
 }
 
 // TODO
 /// Extends a step circuit so that it can be used inside an IVC
 ///
 /// This trait functionality is equivalent to structure `NovaAugmentedCircuit` from nova codebase
-pub(crate) trait StepCircuitExt<'link, const ARITY: usize, G: CurveAffine>:
-    StepCircuit<ARITY, G::Scalar>
+pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
+    StepCircuit<ARITY, C::Scalar>
 {
-    fn synthesize_step<RO: ROTrait<G>>(
+    fn synthesize_step<RO: ROTrait<C>>(
         &self,
-        _config: <Self as StepCircuit<ARITY, G::Scalar>>::StepConfig,
-        _layouter: &mut impl Layouter<G::Scalar>,
-        _input: StepInputs<ARITY, G, RO>,
-    ) -> Result<[AssignedCell<G::Scalar, G::Scalar>; ARITY], SynthesisError> {
+        _config: <Self as StepCircuit<ARITY, C::Scalar>>::StepConfig,
+        _layouter: &mut impl Layouter<C::Scalar>,
+        _input: StepInputs<ARITY, C, RO>,
+    ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
         todo!()
     }
 
-    fn synthesize_step_base_case<RO: ROTrait<G>>(
+    fn synthesize_step_base_case<RO: ROTrait<C>>(
         &self,
-        _config: <Self as StepCircuit<ARITY, G::Scalar>>::StepConfig,
-        _layouter: &mut impl Layouter<G::Scalar>,
-        _input: StepInputs<ARITY, G, RO>,
-    ) -> Result<[AssignedCell<G::Scalar, G::Scalar>; ARITY], SynthesisError> {
+        _config: <Self as StepCircuit<ARITY, C::Scalar>>::StepConfig,
+        _layouter: &mut impl Layouter<C::Scalar>,
+        _input: StepInputs<ARITY, C, RO>,
+    ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
         todo!()
     }
 
-    fn synthesize_step_not_base_case<RO: ROTrait<G>>(
+    fn synthesize_step_not_base_case<RO: ROTrait<C>>(
         &self,
-        _config: <Self as StepCircuit<ARITY, G::Scalar>>::StepConfig,
-        _layouter: &mut impl Layouter<G::Scalar>,
-        _input: StepInputs<ARITY, G, RO>,
-    ) -> Result<[AssignedCell<G::Scalar, G::Scalar>; ARITY], SynthesisError> {
+        _config: <Self as StepCircuit<ARITY, C::Scalar>>::StepConfig,
+        _layouter: &mut impl Layouter<C::Scalar>,
+        _input: StepInputs<ARITY, C, RO>,
+    ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
         todo!()
     }
 }
 
 // auto-impl for all `StepCircuit` trait `StepCircuitExt`
-impl<'link, const ARITY: usize, G: CurveAffine, SP: StepCircuit<ARITY, G::Scalar>>
-    StepCircuitExt<'link, ARITY, G> for SP
+impl<'link, const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Scalar>>
+    StepCircuitExt<'link, ARITY, C> for SP
 {
 }
