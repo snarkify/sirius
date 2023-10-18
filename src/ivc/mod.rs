@@ -1,5 +1,7 @@
 pub mod step_circuit;
 
+use std::num::NonZeroUsize;
+
 use group::prime::PrimeCurveAffine;
 use halo2curves::CurveAffine;
 
@@ -9,7 +11,7 @@ use crate::{
     poseidon::ROTrait,
 };
 
-use step_circuit::StepCircuit;
+use step_circuit::{StepCircuit, SynthesizeStepParams};
 
 // TODO docs
 pub struct CircuitPublicParams<C, RO>
@@ -21,19 +23,38 @@ where
     td: TableData<C::Scalar>,
     ro_consts: RO::Constants,
     // ro_consts_circuit: ROTrait::Constants, // NOTE: our `ROTraitCircuit` don't have main initializer
-    // augmented_circuit_params: NovaAugmentedCircuitParams,
+    params: SynthesizeStepParams<C, RO>,
 }
 
 // TODO docs
-pub struct PublicParams<const A1: usize, const A2: usize, C1, C2, R1, R2>
+pub struct PublicParams<const A1: usize, const A2: usize, SC1, SC2, R1, R2>
 where
-    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
-    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
-    R1: ROTrait<C1>,
-    R2: ROTrait<C2>,
+    SC1: CurveAffine<Base = <SC2 as PrimeCurveAffine>::Scalar>,
+    SC2: CurveAffine<Base = <SC1 as PrimeCurveAffine>::Scalar>,
+    R1: ROTrait<SC1>,
+    R2: ROTrait<SC2>,
 {
-    primary: CircuitPublicParams<C1, R1>,
-    secondary: CircuitPublicParams<C2, R2>,
+    primary: CircuitPublicParams<SC1, R1>,
+    secondary: CircuitPublicParams<SC2, R2>,
+}
+
+impl<const A1: usize, const A2: usize, SC1, SC2, R1, R2> PublicParams<A1, A2, SC1, SC2, R1, R2>
+where
+    SC1: CurveAffine<Base = <SC2 as PrimeCurveAffine>::Scalar>,
+    SC2: CurveAffine<Base = <SC1 as PrimeCurveAffine>::Scalar>,
+    R1: ROTrait<SC1>,
+    R2: ROTrait<SC2>,
+{
+    fn new(
+        _limb_width: NonZeroUsize,
+        _limbs_count_limit: NonZeroUsize,
+        _primary: &SC1,
+        _primary_ro_constant: R1::Constants,
+        _secondary: &SC2,
+        _secondary_ro_constant: R2::Constants,
+    ) -> Self {
+        todo!()
+    }
 }
 
 // TODO docs
@@ -60,7 +81,8 @@ where
 }
 
 // TODO docs
-struct IVCGadget<const A1: usize, const A2: usize, C1, C2, SC1, SC2>
+#[allow(clippy::upper_case_acronyms)]
+struct IVC<const A1: usize, const A2: usize, C1, C2, SC1, SC2>
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
@@ -75,7 +97,7 @@ where
     step: usize,
 }
 
-impl<const A1: usize, const A2: usize, C1, C2, SC1, SC2> IVCGadget<A1, A2, C1, C2, SC1, SC2>
+impl<const A1: usize, const A2: usize, C1, C2, SC1, SC2> IVC<A1, A2, C1, C2, SC1, SC2>
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
