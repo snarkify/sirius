@@ -130,6 +130,15 @@ pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROTr
     T_commitment: Option<Vec<C::Scalar>>,
 }
 
+// TODO Add other
+pub(crate) struct AssignedStepInputs<const ARITY: usize, C: CurveAffine> {
+    params: AssignedCell<C::Scalar, C::Scalar>,
+    step: AssignedCell<C::Scalar, C::Scalar>,
+    u: AssignedCell<C::Scalar, C::Scalar>,
+    z0: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
+    zi: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
+}
+
 // TODO
 /// Extends a step circuit so that it can be used inside an IVC
 ///
@@ -139,27 +148,44 @@ pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
 {
     fn synthesize_step<RO: ROTrait<C>>(
         &self,
-        _config: <Self as StepCircuit<ARITY, C::Scalar>>::StepConfig,
+        config: <Self as StepCircuit<ARITY, C::Scalar>>::StepConfig,
+        layouter: &mut impl Layouter<C::Scalar>,
+        input: StepInputs<ARITY, C, RO>,
+    ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
+        let assigned_input = self.alloc_witness(&config, layouter, input)?;
+
+        // Synthesize the circuit for the base case and get the new running instance
+        let _U_new_base = self.synthesize_step_base_case(layouter, &assigned_input.u)?;
+
+        // Synthesize the circuit for the non-base case and get the new running
+        // instance along with a boolean indicating if all checks have passed
+        let _U_non_base = self.synthesize_step_not_base_case(&config, layouter, assigned_input)?;
+
+        todo!()
+    }
+
+    fn alloc_witness<RO: ROTrait<C>>(
+        &self,
+        _config: &<Self as StepCircuit<ARITY, C::Scalar>>::StepConfig,
         _layouter: &mut impl Layouter<C::Scalar>,
         _input: StepInputs<ARITY, C, RO>,
+    ) -> Result<AssignedStepInputs<ARITY, C>, SynthesisError> {
+        todo!()
+    }
+
+    fn synthesize_step_base_case(
+        &self,
+        _layouter: &mut impl Layouter<C::Scalar>,
+        _u: &AssignedCell<C::Scalar, C::Scalar>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
         todo!()
     }
 
-    fn synthesize_step_base_case<RO: ROTrait<C>>(
+    fn synthesize_step_not_base_case(
         &self,
-        _config: <Self as StepCircuit<ARITY, C::Scalar>>::StepConfig,
+        _config: &<Self as StepCircuit<ARITY, C::Scalar>>::StepConfig,
         _layouter: &mut impl Layouter<C::Scalar>,
-        _input: StepInputs<ARITY, C, RO>,
-    ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
-        todo!()
-    }
-
-    fn synthesize_step_not_base_case<RO: ROTrait<C>>(
-        &self,
-        _config: <Self as StepCircuit<ARITY, C::Scalar>>::StepConfig,
-        _layouter: &mut impl Layouter<C::Scalar>,
-        _input: StepInputs<ARITY, C, RO>,
+        _assigned_input: AssignedStepInputs<ARITY, C>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
         todo!()
     }
