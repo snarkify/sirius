@@ -257,15 +257,15 @@ type B = pallas::Base;
 const ARITY: usize = BLOCK_SIZE / 2;
 
 impl StepCircuit<ARITY, B> for TestSha256Circuit {
-    type StepConfig = Table16Config;
+    type Config = Table16Config;
 
-    fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::StepConfig {
+    fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
         Table16Chip::configure(meta)
     }
 
     fn synthesize(
         &self,
-        config: Self::StepConfig,
+        config: Self::Config,
         layouter: &mut impl Layouter<B>,
         z_in: &[AssignedCell<B, B>; ARITY],
     ) -> Result<[AssignedCell<B, B>; ARITY], SynthesisError> {

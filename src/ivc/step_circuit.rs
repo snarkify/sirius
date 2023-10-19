@@ -38,14 +38,16 @@ pub enum SynthesisError {
 ///   `StepCircuit` might be used, refer to the 'Section 5' of
 ///   [Nova Whitepaper](https://eprint.iacr.org/2023/969.pdf).
 pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
-    type StepConfig: Clone;
+    type Config: Clone;
+    /// If you don't understand what it is, just use [`SimpleStepFloorPlanner`]
+    type FloopPlanner: FloorPlanner; // SimpleStepFloorPlanner
 
     /// Configure the step circuit. This method initializes necessary
     /// fixed columns and advice columns, but does not create any instance
     /// columns.
     ///
     /// This setup is crucial for the functioning of the IVC-based system.
-    fn configure(cs: &mut ConstraintSystem<F>) -> Self::StepConfig;
+    fn configure(cs: &mut ConstraintSystem<F>) -> Self::Config;
 
     /// Sythesize the circuit for a computation step and return variable
     /// that corresponds to the output of the step z_{i+1}
@@ -54,7 +56,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     /// Return `z_out` result
     fn synthesize(
         &self,
-        config: Self::StepConfig,
+        config: Self::Config,
         layouter: &mut impl Layouter<F>,
         z_in: &[AssignedCell<F, F>; ARITY],
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError>;
@@ -85,13 +87,13 @@ pub(crate) trait ConfigureWithInstanceCheck<const ARITY: usize, F: PrimeField>:
 {
     fn configure_with_instance_check(
         cs: &mut ConstraintSystem<F>,
-    ) -> Result<<Self as StepCircuit<ARITY, F>>::StepConfig, ConfigureError>;
+    ) -> Result<<Self as StepCircuit<ARITY, F>>::Config, ConfigureError>;
 }
 
 impl<const A: usize, F: PrimeField, C: StepCircuit<A, F>> ConfigureWithInstanceCheck<A, F> for C {
     fn configure_with_instance_check(
         cs: &mut ConstraintSystem<F>,
-    ) -> Result<<Self as StepCircuit<A, F>>::StepConfig, ConfigureError> {
+    ) -> Result<<Self as StepCircuit<A, F>>::Config, ConfigureError> {
         let before = cs.num_instance_columns();
 
         let config = <Self as StepCircuit<A, F>>::configure(cs);
@@ -146,9 +148,9 @@ pub(crate) struct AssignedStepInputs<const ARITY: usize, C: CurveAffine> {
 pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
     StepCircuit<ARITY, C::Scalar>
 {
-    fn synthesize_step<RO: ROTrait<C>>(
+    fn pub_final_synthesize_step<RO: ROTrait<C>>(
         &self,
-        config: <Self as StepCircuit<ARITY, C::Scalar>>::StepConfig,
+        config: <Self as StepCircuit<ARITY, C::Scalar>>::Config,
         layouter: &mut impl Layouter<C::Scalar>,
         input: StepInputs<ARITY, C, RO>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
@@ -166,7 +168,7 @@ pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
 
     fn alloc_witness<RO: ROTrait<C>>(
         &self,
-        _config: &<Self as StepCircuit<ARITY, C::Scalar>>::StepConfig,
+        _config: &<Self as StepCircuit<ARITY, C::Scalar>>::Config,
         _layouter: &mut impl Layouter<C::Scalar>,
         _input: StepInputs<ARITY, C, RO>,
     ) -> Result<AssignedStepInputs<ARITY, C>, SynthesisError> {
@@ -183,7 +185,7 @@ pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
 
     fn synthesize_step_not_base_case(
         &self,
-        _config: &<Self as StepCircuit<ARITY, C::Scalar>>::StepConfig,
+        _config: &<Self as StepCircuit<ARITY, C::Scalar>>::Config,
         _layouter: &mut impl Layouter<C::Scalar>,
         _assigned_input: AssignedStepInputs<ARITY, C>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
