@@ -1,5 +1,7 @@
 pub mod step_circuit;
 
+mod floor_planner;
+
 use std::num::NonZeroUsize;
 
 use group::prime::PrimeCurveAffine;
@@ -11,7 +13,9 @@ use crate::{
     poseidon::ROTrait,
 };
 
-use step_circuit::{StepCircuit, SynthesizeStepParams};
+pub use floor_planner::{FloorPlanner, SimpleFloorPlanner};
+use step_circuit::SynthesizeStepParams;
+pub use step_circuit::{StepCircuit, SynthesisError};
 
 // TODO docs
 pub struct CircuitPublicParams<C, RO>
@@ -82,6 +86,7 @@ where
 
 // TODO docs
 #[allow(clippy::upper_case_acronyms)]
+/// RecursiveSNARK from Nova codebase
 struct IVC<const A1: usize, const A2: usize, C1, C2, SC1, SC2>
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,

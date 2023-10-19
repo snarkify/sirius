@@ -7,6 +7,8 @@ use halo2curves::CurveAffine;
 
 use crate::{plonk::RelaxedPlonkInstance, poseidon::ROTrait};
 
+use super::floor_planner::FloorPlanner;
+
 #[derive(Debug, thiserror::Error)]
 pub enum SynthesisError {
     #[error(transparent)]
@@ -38,9 +40,19 @@ pub enum SynthesisError {
 ///   `StepCircuit` might be used, refer to the 'Section 5' of
 ///   [Nova Whitepaper](https://eprint.iacr.org/2023/969.pdf).
 pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
+    /// This is a configuration object that stores things like columns.
+    ///
+    /// TODO improve
     type Config: Clone;
-    /// If you don't understand what it is, just use [`SimpleStepFloorPlanner`]
-    type FloopPlanner: FloorPlanner; // SimpleStepFloorPlanner
+
+    /// The floor planner used for this circuit.
+    /// This is an associated type of the `Circuit` trait because its
+    /// behaviour is circuit-critical.
+    ///
+    /// TODO improve
+    ///
+    /// If you don't understand what it is, just use [`super::floor_planner::SimpleStepFloorPlanner`]
+    type FloopPlanner: FloorPlanner;
 
     /// Configure the step circuit. This method initializes necessary
     /// fixed columns and advice columns, but does not create any instance
