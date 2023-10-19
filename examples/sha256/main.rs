@@ -10,7 +10,7 @@ use halo2_proofs::{
 };
 
 use halo2curves::pasta::pallas;
-use sirius::ivc::step_circuit::{StepCircuit, SynthesisError};
+use sirius::ivc::{SimpleFloorPlanner, StepCircuit, SynthesisError};
 
 mod table16;
 
@@ -258,6 +258,7 @@ const ARITY: usize = BLOCK_SIZE / 2;
 
 impl StepCircuit<ARITY, B> for TestSha256Circuit {
     type Config = Table16Config;
+    type FloopPlanner = SimpleFloorPlanner;
 
     fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
         Table16Chip::configure(meta)
