@@ -57,7 +57,8 @@ where
         _secondary: &SC2,
         _secondary_ro_constant: R2::Constants,
     ) -> Self {
-        todo!()
+        // https://github.com/microsoft/Nova/blob/fb83e30e16e56b3b21c519b15b83c4ce1f077a13/src/lib.rs#L98
+        todo!("Impl creation of pub params")
     }
 }
 
@@ -84,6 +85,9 @@ where
     z_input: [C::Scalar; ARITY],
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum Error {}
+
 // TODO docs
 #[allow(clippy::upper_case_acronyms)]
 /// RecursiveSNARK from Nova codebase
@@ -109,17 +113,44 @@ where
     SC1: StepCircuit<A1, C1::Scalar>,
     SC2: StepCircuit<A2, C2::Scalar>,
 {
-    fn new<RO1, RO2>(
+    pub fn new<RO1, RO2>(
         _pp: &PublicParams<A1, A2, C1, C2, RO1, RO2>,
         _primary: C1,
         _z0_primary: [C1::Scalar; A1],
         _secondary: C2,
         _z0_secondary: [C2::Scalar; A2],
-    ) -> Self
+    ) -> Result<Self, Error>
     where
         RO1: ROTrait<C1>,
         RO2: ROTrait<C2>,
     {
-        todo!()
+        todo!("Logic at `RecursiveSNARK::new`")
+    }
+
+    pub fn prove_step<RO1, RO2>(
+        &mut self,
+        _pp: &PublicParams<A1, A2, C1, C2, RO1, RO2>,
+        _z0_primary: Vec<C1::Scalar>,
+        _z0_secondary: Vec<C2::Scalar>,
+    ) -> Result<(), Error>
+    where
+        RO1: ROTrait<C1>,
+        RO2: ROTrait<C2>,
+    {
+        todo!("Logic at `RecursiveSNARK::prove_step`")
+    }
+
+    pub fn verify<RO1, RO2>(
+        &mut self,
+        _pp: &PublicParams<A1, A2, C1, C2, RO1, RO2>,
+        _steps_count: usize,
+        _z0_primary: Vec<C1::Scalar>,
+        _z0_secondary: Vec<C2::Scalar>,
+    ) -> Result<(), Error>
+    where
+        RO1: ROTrait<C1>,
+        RO2: ROTrait<C2>,
+    {
+        todo!("Logic at `RecursiveSNARK::verify`")
     }
 }
