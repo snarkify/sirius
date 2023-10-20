@@ -28,3 +28,7 @@ prettytable-rs = "0.10.0"
 test-log = "0.2.12"
 halo2_gadgets = { git = "https://github.com/snarkify/halo2", branch = "snarkify/dev", features = ["unstable"] }
 
+[dev-dependencies.cargo-husky]
+version = "1"
+default-features = false # Disable features which are enabled by default
+features = ["prepush-hook", "run-cargo-fmt", "run-cargo-test", "run-cargo-clippy"]
