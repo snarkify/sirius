@@ -2,7 +2,7 @@ pub mod step_circuit;
 
 mod floor_planner;
 
-use std::num::NonZeroUsize;
+use std::{marker::PhantomData, num::NonZeroUsize};
 
 use group::prime::PrimeCurveAffine;
 use halo2curves::CurveAffine;
@@ -31,32 +31,38 @@ where
 }
 
 // TODO #31 docs
-pub struct PublicParams<const A1: usize, const A2: usize, SC1, SC2, R1, R2>
+pub struct PublicParams<const A1: usize, const A2: usize, C1, C2, R1, R2>
 where
-    SC1: CurveAffine<Base = <SC2 as PrimeCurveAffine>::Scalar>,
-    SC2: CurveAffine<Base = <SC1 as PrimeCurveAffine>::Scalar>,
-    R1: ROTrait<SC1>,
-    R2: ROTrait<SC2>,
+    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
+    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
+    R1: ROTrait<C1>,
+    R2: ROTrait<C2>,
 {
-    primary: CircuitPublicParams<SC1, R1>,
-    secondary: CircuitPublicParams<SC2, R2>,
+    primary: CircuitPublicParams<C1, R1>,
+    secondary: CircuitPublicParams<C2, R2>,
+
+    _p: PhantomData<(C1, C2)>,
 }
 
-impl<const A1: usize, const A2: usize, SC1, SC2, R1, R2> PublicParams<A1, A2, SC1, SC2, R1, R2>
+impl<const A1: usize, const A2: usize, C1, C2, R1, R2> PublicParams<A1, A2, C1, C2, R1, R2>
 where
-    SC1: CurveAffine<Base = <SC2 as PrimeCurveAffine>::Scalar>,
-    SC2: CurveAffine<Base = <SC1 as PrimeCurveAffine>::Scalar>,
-    R1: ROTrait<SC1>,
-    R2: ROTrait<SC2>,
+    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
+    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
+    R1: ROTrait<C1>,
+    R2: ROTrait<C2>,
 {
-    fn new(
+    pub fn new<SC1, SC2>(
         _limb_width: NonZeroUsize,
         _limbs_count_limit: NonZeroUsize,
         _primary: &SC1,
         _primary_ro_constant: R1::Constants,
         _secondary: &SC2,
         _secondary_ro_constant: R2::Constants,
-    ) -> Self {
+    ) -> Self
+    where
+        SC1: StepCircuit<A1, C1::Scalar>,
+        SC2: StepCircuit<A2, C2::Scalar>,
+    {
         // TODO #31 docs
         // https://github.com/microsoft/Nova/blob/fb83e30e16e56b3b21c519b15b83c4ce1f077a13/src/lib.rs#L98
         todo!("Impl creation of pub params")
