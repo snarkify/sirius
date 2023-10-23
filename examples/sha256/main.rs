@@ -308,7 +308,7 @@ impl StepCircuit<ARITY, pallas::Base> for TestSha256Circuit {
 struct RandomOracleConstant;
 impl ROConstantsTrait for RandomOracleConstant {
     fn new(_r_f: usize, _r_p: usize) -> Self {
-        todo!()
+        todo!("#33")
     }
 }
 
@@ -319,22 +319,21 @@ impl<C: CurveAffine> ROTrait<C> for RandomOracle<C> {
     type Constants = RandomOracleConstant;
 
     fn new(_constants: Self::Constants) -> Self {
-        todo!()
+        todo!("#33")
     }
 
     fn absorb_base(&mut self, _base: C::Base) {
-        todo!()
+        todo!("#33")
     }
 
     fn absorb_point(&mut self, _p: C) {
-        todo!()
+        todo!("#33")
     }
 
     fn squeeze(&mut self, _num_bits: usize) -> C::Scalar {
-        todo!()
+        todo!("#33")
     }
 }
-
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(pallas::Base::S as usize) };
 const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
@@ -390,7 +389,7 @@ fn main() {
     .unwrap();
 
     todo!(
-        "Waiting for IVC Circuit for test {:?}",
+        "#33 Waiting for IVC Circuit for test {:?}",
         TestSha256Circuit {}
     );
 }
