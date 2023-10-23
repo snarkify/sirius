@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::iter;
+use std::{array, iter, marker::PhantomData, num::NonZeroUsize};
 
 use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
@@ -9,8 +9,15 @@ use halo2_proofs::{
     plonk::ConstraintSystem,
 };
 
-use halo2curves::pasta::pallas;
-use sirius::ivc::{SimpleFloorPlanner, StepCircuit, SynthesisError};
+use halo2curves::{
+    pasta::{pallas, vesta},
+    CurveAffine,
+};
+use sirius::{
+    ivc::{step_circuit, PublicParams, SimpleFloorPlanner, StepCircuit, SynthesisError, IVC},
+    plonk::TableData,
+    poseidon::{ROConstantsTrait, ROTrait},
+};
 
 mod table16;
 
@@ -252,11 +259,10 @@ pub use sha256::{BlockWord, Sha256, Table16Chip, Table16Config};
 #[derive(Default, Debug)]
 struct TestSha256Circuit {}
 
-type B = pallas::Base;
 // TODO
 const ARITY: usize = BLOCK_SIZE / 2;
 
-impl StepCircuit<ARITY, B> for TestSha256Circuit {
+impl StepCircuit<ARITY, pallas::Base> for TestSha256Circuit {
     type Config = Table16Config;
     type FloopPlanner = SimpleFloorPlanner;
 
@@ -267,19 +273,20 @@ impl StepCircuit<ARITY, B> for TestSha256Circuit {
     fn synthesize_step(
         &self,
         config: Self::Config,
-        layouter: &mut impl Layouter<B>,
-        z_in: &[AssignedCell<B, B>; ARITY],
-    ) -> Result<[AssignedCell<B, B>; ARITY], SynthesisError> {
+        layouter: &mut impl Layouter<pallas::Base>,
+        z_in: &[AssignedCell<pallas::Base, pallas::Base>; ARITY],
+    ) -> Result<[AssignedCell<pallas::Base, pallas::Base>; ARITY], SynthesisError> {
         Table16Chip::load(config.clone(), layouter)?;
         let table16_chip = Table16Chip::construct(config);
 
-        let input: [AssignedCell<B, B>; BLOCK_SIZE] = iter::repeat(z_in.iter())
-            .take(2)
-            .flatten()
-            .cloned()
-            .collect::<Vec<AssignedCell<B, B>>>()
-            .try_into()
-            .expect("Unreachable, ARITY * 2 == BLOCK_SIZE");
+        let input: [AssignedCell<pallas::Base, pallas::Base>; BLOCK_SIZE] =
+            iter::repeat(z_in.iter())
+                .take(2)
+                .flatten()
+                .cloned()
+                .collect::<Vec<AssignedCell<pallas::Base, pallas::Base>>>()
+                .try_into()
+                .expect("Unreachable, ARITY * 2 == BLOCK_SIZE");
 
         let values = input
             .iter()
@@ -297,7 +304,92 @@ impl StepCircuit<ARITY, B> for TestSha256Circuit {
     }
 }
 
+#[derive(Default)]
+struct RandomOracleConstant;
+impl ROConstantsTrait for RandomOracleConstant {
+    fn new(_r_f: usize, _r_p: usize) -> Self {
+        todo!()
+    }
+}
+
+#[derive(Default)]
+struct RandomOracle<C: CurveAffine>(PhantomData<C>);
+
+impl<C: CurveAffine> ROTrait<C> for RandomOracle<C> {
+    type Constants = RandomOracleConstant;
+
+    fn new(_constants: Self::Constants) -> Self {
+        todo!()
+    }
+
+    fn absorb_base(&mut self, _base: C::Base) {
+        todo!()
+    }
+
+    fn absorb_point(&mut self, _p: C) {
+        todo!()
+    }
+
+    fn squeeze(&mut self, _num_bits: usize) -> C::Scalar {
+        todo!()
+    }
+}
+
+const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(pallas::Base::S as usize) };
+const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
+
 fn main() {
+    // pallas
+    let sc1 = TestSha256Circuit::default();
+    // vesta
+    type TrivialCircuit =
+        step_circuit::trivial::Circuit<ARITY, <vesta::Affine as CurveAffine>::Base>;
+    let sc2 = TrivialCircuit::default();
+
+    let _cs1 = TableData::<pallas::Base>::new(11, vec![]);
+    let _cs2 = TableData::<vesta::Base>::new(11, vec![]);
+
+    let pp = PublicParams::<
+        ARITY,
+        ARITY,
+        vesta::Affine,
+        pallas::Affine,
+        RandomOracle<vesta::Affine>,
+        RandomOracle<pallas::Affine>,
+    >::new(
+        LIMB_WIDTH,
+        LIMBS_COUNT_LIMIT,
+        &sc1,
+        RandomOracleConstant,
+        &sc2,
+        RandomOracleConstant,
+    );
+
+    let mut ivc =
+        IVC::<ARITY, ARITY, vesta::Affine, pallas::Affine, TestSha256Circuit, TrivialCircuit>::new(
+            &pp,
+            sc1,
+            array::from_fn(|i| vesta::Scalar::from_u128(i as u128)),
+            sc2,
+            array::from_fn(|i| pallas::Scalar::from_u128(i as u128)),
+        )
+        .unwrap();
+
+    ivc.prove_step(
+        &pp,
+        array::from_fn(|i| vesta::Scalar::from_u128(i as u128)),
+        array::from_fn(|i| pallas::Scalar::from_u128(i as u128)),
+    )
+    .unwrap();
+
+    ivc.verify(
+        &pp,
+        2,
+        array::from_fn(|i| vesta::Scalar::from_u128(i as u128)),
+        array::from_fn(|i| pallas::Scalar::from_u128(i as u128)),
+    )
+    .unwrap();
+
     todo!(
         "Waiting for IVC Circuit for test {:?}",
         TestSha256Circuit {}
