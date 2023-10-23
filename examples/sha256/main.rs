@@ -338,12 +338,12 @@ impl<C: CurveAffine> ROTrait<C> for RandomOracle<C> {
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(pallas::Base::S as usize) };
 const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
+type TrivialCircuit = step_circuit::trivial::Circuit<ARITY, <vesta::Affine as CurveAffine>::Base>;
+
 fn main() {
     // pallas
     let sc1 = TestSha256Circuit::default();
     // vesta
-    type TrivialCircuit =
-        step_circuit::trivial::Circuit<ARITY, <vesta::Affine as CurveAffine>::Base>;
     let sc2 = TrivialCircuit::default();
 
     let _cs1 = TableData::<pallas::Base>::new(11, vec![]);
@@ -365,15 +365,14 @@ fn main() {
         RandomOracleConstant,
     );
 
-    let mut ivc =
-        IVC::<ARITY, ARITY, vesta::Affine, pallas::Affine, TestSha256Circuit, TrivialCircuit>::new(
-            &pp,
-            sc1,
-            array::from_fn(|i| vesta::Scalar::from_u128(i as u128)),
-            sc2,
-            array::from_fn(|i| pallas::Scalar::from_u128(i as u128)),
-        )
-        .unwrap();
+    let mut ivc = IVC::new(
+        &pp,
+        sc1,
+        array::from_fn(|i| vesta::Scalar::from_u128(i as u128)),
+        sc2,
+        array::from_fn(|i| pallas::Scalar::from_u128(i as u128)),
+    )
+    .unwrap();
 
     ivc.prove_step(
         &pp,
