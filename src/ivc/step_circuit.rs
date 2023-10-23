@@ -118,7 +118,7 @@ impl<const A: usize, F: PrimeField, C: StepCircuit<A, F>> ConfigureWithInstanceC
     }
 }
 
-// TODO Rename
+// TODO #32 Rename
 pub(crate) struct SynthesizeStepParams<G: CurveAffine, RO: ROTrait<G>> {
     pub limb_width: usize,
     pub n_limbs: usize,
@@ -127,6 +127,7 @@ pub(crate) struct SynthesizeStepParams<G: CurveAffine, RO: ROTrait<G>> {
     pub ro_constant: RO::Constants,
 }
 
+// TODO #32
 pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROTrait<C>> {
     params: &'link SynthesizeStepParams<C, RO>,
     step: C::Base,
@@ -144,7 +145,7 @@ pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROTr
     T_commitment: Option<Vec<C::Scalar>>,
 }
 
-// TODO Add other
+// TODO #32 Add other
 pub(crate) struct AssignedStepInputs<const ARITY: usize, C: CurveAffine> {
     params: AssignedCell<C::Scalar, C::Scalar>,
     step: AssignedCell<C::Scalar, C::Scalar>,
@@ -153,7 +154,7 @@ pub(crate) struct AssignedStepInputs<const ARITY: usize, C: CurveAffine> {
     zi: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
 }
 
-// TODO
+// TODO #32
 /// Extends a step circuit so that it can be used inside an IVC
 ///
 /// This trait functionality is equivalent to structure `NovaAugmentedCircuit` from nova codebase
@@ -175,7 +176,7 @@ pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
         // instance along with a boolean indicating if all checks have passed
         let _U_non_base = self.synthesize_step_not_base_case(&config, layouter, assigned_input)?;
 
-        todo!()
+        todo!("#32")
     }
 
     fn alloc_witness<RO: ROTrait<C>>(
@@ -184,7 +185,7 @@ pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
         _layouter: &mut impl Layouter<C::Scalar>,
         _input: StepInputs<ARITY, C, RO>,
     ) -> Result<AssignedStepInputs<ARITY, C>, SynthesisError> {
-        todo!()
+        todo!("#32")
     }
 
     fn synthesize_step_base_case(
@@ -192,7 +193,7 @@ pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
         _layouter: &mut impl Layouter<C::Scalar>,
         _u: &AssignedCell<C::Scalar, C::Scalar>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
-        todo!()
+        todo!("#32")
     }
 
     fn synthesize_step_not_base_case(
@@ -201,7 +202,7 @@ pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
         _layouter: &mut impl Layouter<C::Scalar>,
         _assigned_input: AssignedStepInputs<ARITY, C>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
-        todo!()
+        todo!("#32")
     }
 }
 
