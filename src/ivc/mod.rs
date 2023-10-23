@@ -93,7 +93,7 @@ pub enum Error {}
 // TODO #31 docs
 #[allow(clippy::upper_case_acronyms)]
 /// RecursiveSNARK from Nova codebase
-struct IVC<const A1: usize, const A2: usize, C1, C2, SC1, SC2>
+pub struct IVC<const A1: usize, const A2: usize, C1, C2, SC1, SC2>
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
@@ -117,9 +117,9 @@ where
 {
     pub fn new<RO1, RO2>(
         _pp: &PublicParams<A1, A2, C1, C2, RO1, RO2>,
-        _primary: C1,
+        _primary: SC1,
         _z0_primary: [C1::Scalar; A1],
-        _secondary: C2,
+        _secondary: SC2,
         _z0_secondary: [C2::Scalar; A2],
     ) -> Result<Self, Error>
     where
@@ -133,8 +133,8 @@ where
     pub fn prove_step<RO1, RO2>(
         &mut self,
         _pp: &PublicParams<A1, A2, C1, C2, RO1, RO2>,
-        _z0_primary: Vec<C1::Scalar>,
-        _z0_secondary: Vec<C2::Scalar>,
+        _z0_primary: [C1::Scalar; A1],
+        _z0_secondary: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
         RO1: ROTrait<C1>,
@@ -148,8 +148,8 @@ where
         &mut self,
         _pp: &PublicParams<A1, A2, C1, C2, RO1, RO2>,
         _steps_count: usize,
-        _z0_primary: Vec<C1::Scalar>,
-        _z0_secondary: Vec<C2::Scalar>,
+        _z0_primary: [C1::Scalar; A1],
+        _z0_secondary: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
         RO1: ROTrait<C1>,
