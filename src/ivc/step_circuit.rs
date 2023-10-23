@@ -211,3 +211,63 @@ impl<'link, const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Scalar
     StepCircuitExt<'link, ARITY, C> for SP
 {
 }
+
+pub mod trivial {
+    use std::marker::PhantomData;
+
+    use ff::PrimeField;
+    use halo2_proofs::{
+        circuit::{AssignedCell, Layouter},
+        plonk::ConstraintSystem,
+    };
+
+    use crate::ivc::SimpleFloorPlanner;
+
+    use super::{StepCircuit, SynthesisError};
+
+    /// A trivial step circuit that simply returns the input
+    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    pub struct Circuit<const ARITY: usize, F: PrimeField> {
+        _p: PhantomData<F>,
+    }
+
+    impl<const ARITY: usize, F> StepCircuit<ARITY, F> for Circuit<ARITY, F>
+    where
+        F: PrimeField,
+    {
+        /// This is a configuration object that stores things like columns.
+        ///
+        /// TODO improve
+        type Config = ();
+
+        /// The floor planner used for this circuit.
+        /// This is an associated type of the `Circuit` trait because its
+        /// behaviour is circuit-critical.
+        ///
+        /// TODO improve
+        ///
+        /// If you don't understand what it is, just use [`super::floor_planner::SimpleStepFloorPlanner`]
+        type FloopPlanner = SimpleFloorPlanner;
+
+        /// Configure the step circuit. This method initializes necessary
+        /// fixed columns and advice columns, but does not create any instance
+        /// columns.
+        ///
+        /// This setup is crucial for the functioning of the IVC-based system.
+        fn configure(_cs: &mut ConstraintSystem<F>) -> Self::Config {}
+
+        /// Sythesize the circuit for a computation step and return variable
+        /// that corresponds to the output of the step z_{i+1}
+        /// this method will be called when we synthesize the IVC_Circuit
+        ///
+        /// Return `z_out` result
+        fn synthesize_step(
+            &self,
+            _config: Self::Config,
+            _layouter: &mut impl Layouter<F>,
+            z_in: &[AssignedCell<F, F>; ARITY],
+        ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
+            Ok(z_in.clone())
+        }
+    }
+}
