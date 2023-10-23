@@ -17,7 +17,7 @@ pub use floor_planner::{FloorPlanner, SimpleFloorPlanner};
 use step_circuit::SynthesizeStepParams;
 pub use step_circuit::{StepCircuit, SynthesisError};
 
-// TODO docs
+// TODO #31 docs
 pub struct CircuitPublicParams<C, RO>
 where
     C: CurveAffine,
@@ -30,7 +30,7 @@ where
     params: SynthesizeStepParams<C, RO>,
 }
 
-// TODO docs
+// TODO #31 docs
 pub struct PublicParams<const A1: usize, const A2: usize, SC1, SC2, R1, R2>
 where
     SC1: CurveAffine<Base = <SC2 as PrimeCurveAffine>::Scalar>,
@@ -57,24 +57,25 @@ where
         _secondary: &SC2,
         _secondary_ro_constant: R2::Constants,
     ) -> Self {
+        // TODO #31 docs
         // https://github.com/microsoft/Nova/blob/fb83e30e16e56b3b21c519b15b83c4ce1f077a13/src/lib.rs#L98
         todo!("Impl creation of pub params")
     }
 }
 
-// TODO docs
+// TODO #31 docs
 pub struct RelaxedTrace<C: CurveAffine> {
     U: RelaxedPlonkInstance<C>,
     W: RelaxedPlonkWitness<C::Scalar>,
 }
 
-// TODO docs
+// TODO #31 docs
 pub struct Trace<C: CurveAffine> {
     u: PlonkInstance<C>,
     w: PlonkWitness<C::Scalar>,
 }
 
-// TODO docs
+// TODO #31 docs
 struct StepCircuitContext<const ARITY: usize, C, SC>
 where
     C: CurveAffine,
@@ -85,10 +86,11 @@ where
     z_input: [C::Scalar; ARITY],
 }
 
+// TODO #31 docs
 #[derive(Debug, thiserror::Error)]
 pub enum Error {}
 
-// TODO docs
+// TODO #31 docs
 #[allow(clippy::upper_case_acronyms)]
 /// RecursiveSNARK from Nova codebase
 struct IVC<const A1: usize, const A2: usize, C1, C2, SC1, SC2>
@@ -124,6 +126,7 @@ where
         RO1: ROTrait<C1>,
         RO2: ROTrait<C2>,
     {
+        // TODO #31
         todo!("Logic at `RecursiveSNARK::new`")
     }
 
@@ -137,6 +140,7 @@ where
         RO1: ROTrait<C1>,
         RO2: ROTrait<C2>,
     {
+        // TODO #31
         todo!("Logic at `RecursiveSNARK::prove_step`")
     }
 
@@ -151,6 +155,7 @@ where
         RO1: ROTrait<C1>,
         RO2: ROTrait<C2>,
     {
+        // TODO #31
         todo!("Logic at `RecursiveSNARK::verify`")
     }
 }
