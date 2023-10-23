@@ -264,7 +264,7 @@ impl StepCircuit<ARITY, B> for TestSha256Circuit {
         Table16Chip::configure(meta)
     }
 
-    fn synthesize(
+    fn synthesize_step(
         &self,
         config: Self::Config,
         layouter: &mut impl Layouter<B>,

@@ -66,7 +66,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     /// this method will be called when we synthesize the IVC_Circuit
     ///
     /// Return `z_out` result
-    fn synthesize(
+    fn synthesize_step(
         &self,
         config: Self::Config,
         layouter: &mut impl Layouter<F>,
@@ -160,7 +160,7 @@ pub(crate) struct AssignedStepInputs<const ARITY: usize, C: CurveAffine> {
 pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
     StepCircuit<ARITY, C::Scalar>
 {
-    fn pub_final_synthesize_step<RO: ROTrait<C>>(
+    fn synthesize<RO: ROTrait<C>>(
         &self,
         config: <Self as StepCircuit<ARITY, C::Scalar>>::Config,
         layouter: &mut impl Layouter<C::Scalar>,
