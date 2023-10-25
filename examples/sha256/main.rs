@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{array, iter, marker::PhantomData, num::NonZeroUsize};
+use std::{array, iter, num::NonZeroUsize};
 
 use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
@@ -16,7 +16,7 @@ use halo2curves::{
 use sirius::{
     ivc::{step_circuit, PublicParams, SimpleFloorPlanner, StepCircuit, SynthesisError, IVC},
     plonk::TableData,
-    poseidon::{ROConstantsTrait, ROTrait},
+    poseidon::{poseidon_hash, ROTrait},
 };
 
 mod table16;
@@ -304,36 +304,9 @@ impl StepCircuit<ARITY, pallas::Base> for TestSha256Circuit {
     }
 }
 
-#[derive(Default)]
-struct RandomOracleConstant;
-impl ROConstantsTrait for RandomOracleConstant {
-    fn new(_r_f: usize, _r_p: usize) -> Self {
-        todo!("#33")
-    }
-}
+type RandomOracle<C, F> = poseidon_hash::PoseidonHash<C, F, 10, 10>;
+type RandomOracleConstant<C, F> = <RandomOracle<C, F> as ROTrait<C>>::Constants;
 
-#[derive(Default)]
-struct RandomOracle<C: CurveAffine>(PhantomData<C>);
-
-impl<C: CurveAffine> ROTrait<C> for RandomOracle<C> {
-    type Constants = RandomOracleConstant;
-
-    fn new(_constants: Self::Constants) -> Self {
-        todo!("#33")
-    }
-
-    fn absorb_base(&mut self, _base: C::Base) {
-        todo!("#33")
-    }
-
-    fn absorb_point(&mut self, _p: C) {
-        todo!("#33")
-    }
-
-    fn squeeze(&mut self, _num_bits: usize) -> C::Scalar {
-        todo!("#33")
-    }
-}
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(pallas::Base::S as usize) };
 const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
@@ -353,15 +326,15 @@ fn main() {
         ARITY,
         vesta::Affine,
         pallas::Affine,
-        RandomOracle<vesta::Affine>,
-        RandomOracle<pallas::Affine>,
+        RandomOracle<vesta::Affine, <vesta::Affine as CurveAffine>::Base>,
+        RandomOracle<pallas::Affine, <pallas::Affine as CurveAffine>::Base>,
     >::new(
         LIMB_WIDTH,
         LIMBS_COUNT_LIMIT,
         &sc1,
-        RandomOracleConstant,
+        RandomOracleConstant::<vesta::Affine, <vesta::Affine as CurveAffine>::Base>::new(10, 10), // TODO Normal new params
         &sc2,
-        RandomOracleConstant,
+        RandomOracleConstant::<pallas::Affine, <pallas::Affine as CurveAffine>::Base>::new(10, 10), // TODO Normal new params
     );
 
     let mut ivc = IVC::new(
