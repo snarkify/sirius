@@ -39,6 +39,11 @@ pub enum SynthesisError {
 /// - For a detailed understanding of IVC and the context in which a trait
 ///   `StepCircuit` might be used, refer to the 'Section 5' of
 ///   [Nova Whitepaper](https://eprint.iacr.org/2023/969.pdf).
+///   This trait is representation of `F` function at 'Figure 4'
+///     - `F` is a polynomial-time function that takes non-deterministic input. It is the function
+///       that represents the computation being incrementally verified. In the context of IVC, each
+///       step of the incremental computation applies this function FF.
+/// - For `F'` please look at [`StepCircuitExt`]
 pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     /// This is a configuration object that stores things like columns.
     ///
@@ -90,34 +95,6 @@ pub(crate) enum ConfigureError {
     InstanceColumnNotAllowed,
 }
 
-/// The private expanding trait that checks that no instance columns have
-/// been created during [`StepCircuit::configure`].
-///
-/// IVC Circuit should use this method.
-pub(crate) trait ConfigureWithInstanceCheck<const ARITY: usize, F: PrimeField>:
-    StepCircuit<ARITY, F>
-{
-    fn configure_with_instance_check(
-        cs: &mut ConstraintSystem<F>,
-    ) -> Result<<Self as StepCircuit<ARITY, F>>::Config, ConfigureError>;
-}
-
-impl<const A: usize, F: PrimeField, C: StepCircuit<A, F>> ConfigureWithInstanceCheck<A, F> for C {
-    fn configure_with_instance_check(
-        cs: &mut ConstraintSystem<F>,
-    ) -> Result<<Self as StepCircuit<A, F>>::Config, ConfigureError> {
-        let before = cs.num_instance_columns();
-
-        let config = <Self as StepCircuit<A, F>>::configure(cs);
-
-        if before == cs.num_instance_columns() {
-            Ok(config)
-        } else {
-            Err(ConfigureError::InstanceColumnNotAllowed)
-        }
-    }
-}
-
 // TODO #32 Rename
 pub(crate) struct SynthesizeStepParams<G: CurveAffine, RO: ROTrait<G>> {
     pub limb_width: usize,
@@ -128,8 +105,8 @@ pub(crate) struct SynthesizeStepParams<G: CurveAffine, RO: ROTrait<G>> {
 }
 
 // TODO #32
-pub(crate) struct IVCStepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROTrait<C>> {
-    params: &'link SynthesizeStepParams<C, RO>,
+pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROTrait<C>> {
+    public_params: &'link SynthesizeStepParams<C, RO>,
     step: C::Base,
 
     z_0: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
@@ -146,26 +123,55 @@ pub(crate) struct IVCStepInputs<'link, const ARITY: usize, C: CurveAffine, RO: R
 }
 
 // TODO #32 Add other
-pub(crate) struct AssignedIVCStepInputs<const ARITY: usize, C: CurveAffine> {
-    params: AssignedCell<C::Scalar, C::Scalar>,
+pub(crate) struct AssignedStepInputs<const ARITY: usize, C: CurveAffine> {
+    public_params_commit: AssignedCell<C::Scalar, C::Scalar>,
     step: AssignedCell<C::Scalar, C::Scalar>,
     u: AssignedCell<C::Scalar, C::Scalar>,
     z0: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
     zi: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
 }
 
-// TODO #32
-/// Extends a step circuit so that it can be used inside an IVC
+/// Trait extends [`StepCircuit`] to represent the augmented function `F'` in the IVC scheme.
 ///
-/// This trait functionality is equivalent to structure `NovaAugmentedCircuit` from nova codebase
-pub(crate) trait IVCStepCircuit<'link, const ARITY: usize, C: CurveAffine>:
+/// If [`StepCircuit`] is defined by circuit developers, this trait automatically extends
+/// the custom type to add the actions needed by IVC.
+///
+/// TODO #32 I will add details abote actions after implementation of trait to directly link
+/// methods
+///
+/// # References
+/// - For a detailed understanding of IVC and the context in which a trait
+///   [`StepCircuitExt`] might be used, refer to the 'Section 5' of
+///   [Nova Whitepaper](https://eprint.iacr.org/2023/969.pdf).
+///   This trait is representation of `F'` function at 'Figure 4'
+///       - `F'` is an augmented version of `F` designed to produce the IVC proofs `P_i` at each step.
+///         It takes additional parameters such as \( vk, Ui, ui, (i, z0, zi), \omega_i, T \) and outputs \( x \).
+///
+/// - For `F'` please look at [`StepCircuitExt`]
+pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
     StepCircuit<ARITY, C::Scalar>
 {
+    /// The crate-only expanding trait that checks that no instance columns have
+    /// been created during [`StepCircuit::configure`].
+    fn configure_with_instance_check(
+        cs: &mut ConstraintSystem<C::Scalar>,
+    ) -> Result<<Self as StepCircuit<ARITY, C::Scalar>>::Config, ConfigureError> {
+        let before = cs.num_instance_columns();
+
+        let config = <Self as StepCircuit<ARITY, C::Scalar>>::configure(cs);
+
+        if before == cs.num_instance_columns() {
+            Ok(config)
+        } else {
+            Err(ConfigureError::InstanceColumnNotAllowed)
+        }
+    }
+
     fn synthesize<RO: ROTrait<C>>(
         &self,
         config: <Self as StepCircuit<ARITY, C::Scalar>>::Config,
         layouter: &mut impl Layouter<C::Scalar>,
-        input: IVCStepInputs<ARITY, C, RO>,
+        input: StepInputs<ARITY, C, RO>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
         let assigned_input = self.alloc_witness(&config, layouter, input)?;
 
@@ -183,8 +189,8 @@ pub(crate) trait IVCStepCircuit<'link, const ARITY: usize, C: CurveAffine>:
         &self,
         _config: &<Self as StepCircuit<ARITY, C::Scalar>>::Config,
         _layouter: &mut impl Layouter<C::Scalar>,
-        _input: IVCStepInputs<ARITY, C, RO>,
-    ) -> Result<AssignedIVCStepInputs<ARITY, C>, SynthesisError> {
+        _input: StepInputs<ARITY, C, RO>,
+    ) -> Result<AssignedStepInputs<ARITY, C>, SynthesisError> {
         todo!("#32")
     }
 
@@ -200,7 +206,7 @@ pub(crate) trait IVCStepCircuit<'link, const ARITY: usize, C: CurveAffine>:
         &self,
         _config: &<Self as StepCircuit<ARITY, C::Scalar>>::Config,
         _layouter: &mut impl Layouter<C::Scalar>,
-        _assigned_input: AssignedIVCStepInputs<ARITY, C>,
+        _assigned_input: AssignedStepInputs<ARITY, C>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
         todo!("#32")
     }
@@ -208,7 +214,7 @@ pub(crate) trait IVCStepCircuit<'link, const ARITY: usize, C: CurveAffine>:
 
 // auto-impl for all `StepCircuit` trait `StepCircuitExt`
 impl<'link, const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Scalar>>
-    IVCStepCircuit<'link, ARITY, C> for SP
+    StepCircuitExt<'link, ARITY, C> for SP
 {
 }
 
