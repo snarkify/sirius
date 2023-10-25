@@ -9,7 +9,7 @@ use halo2curves::CurveAffine;
 
 use crate::{
     commitment::CommitmentKey,
-    plonk::{PlonkInstance, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness, TableData},
+    plonk::{PlonkTrace, RelaxedPlonkTrace, TableData},
     poseidon::ROTrait,
 };
 
@@ -70,25 +70,13 @@ where
 }
 
 // TODO #31 docs
-pub struct RelaxedTrace<C: CurveAffine> {
-    U: RelaxedPlonkInstance<C>,
-    W: RelaxedPlonkWitness<C::Scalar>,
-}
-
-// TODO #31 docs
-pub struct Trace<C: CurveAffine> {
-    u: PlonkInstance<C>,
-    w: PlonkWitness<C::Scalar>,
-}
-
-// TODO #31 docs
 struct StepCircuitContext<const ARITY: usize, C, SC>
 where
     C: CurveAffine,
     SC: StepCircuit<ARITY, C::Scalar>,
 {
     step_circuit: SC,
-    relaxed_trace: RelaxedTrace<C>,
+    relaxed_trace: RelaxedPlonkTrace<C>,
     z_input: [C::Scalar; ARITY],
 }
 
@@ -109,7 +97,7 @@ where
     primary: StepCircuitContext<A1, C1, SC1>,
     secondary: StepCircuitContext<A2, C2, SC2>,
 
-    trace: Trace<C2>,
+    trace: PlonkTrace<C2>,
 
     step: usize,
 }

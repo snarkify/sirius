@@ -82,6 +82,18 @@ pub struct RelaxedPlonkWitness<F: PrimeField> {
     pub(crate) E: Vec<F>,
 }
 
+// TODO #31 docs
+pub struct RelaxedPlonkTrace<C: CurveAffine> {
+    U: RelaxedPlonkInstance<C>,
+    W: RelaxedPlonkWitness<C::Scalar>,
+}
+
+// TODO #31 docs
+pub struct PlonkTrace<C: CurveAffine> {
+    u: PlonkInstance<C>,
+    w: PlonkWitness<C::Scalar>,
+}
+
 impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkStructure<C> {
     // TODO: add hash of other fields including gates
     fn absorb_into(&self, ro: &mut RO) {
