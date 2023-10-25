@@ -128,7 +128,7 @@ pub(crate) struct SynthesizeStepParams<G: CurveAffine, RO: ROTrait<G>> {
 }
 
 // TODO #32
-pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROTrait<C>> {
+pub(crate) struct IVCStepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROTrait<C>> {
     params: &'link SynthesizeStepParams<C, RO>,
     step: C::Base,
 
@@ -146,7 +146,7 @@ pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROTr
 }
 
 // TODO #32 Add other
-pub(crate) struct AssignedStepInputs<const ARITY: usize, C: CurveAffine> {
+pub(crate) struct AssignedIVCStepInputs<const ARITY: usize, C: CurveAffine> {
     params: AssignedCell<C::Scalar, C::Scalar>,
     step: AssignedCell<C::Scalar, C::Scalar>,
     u: AssignedCell<C::Scalar, C::Scalar>,
@@ -158,14 +158,14 @@ pub(crate) struct AssignedStepInputs<const ARITY: usize, C: CurveAffine> {
 /// Extends a step circuit so that it can be used inside an IVC
 ///
 /// This trait functionality is equivalent to structure `NovaAugmentedCircuit` from nova codebase
-pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
+pub(crate) trait IVCStepCircuit<'link, const ARITY: usize, C: CurveAffine>:
     StepCircuit<ARITY, C::Scalar>
 {
     fn synthesize<RO: ROTrait<C>>(
         &self,
         config: <Self as StepCircuit<ARITY, C::Scalar>>::Config,
         layouter: &mut impl Layouter<C::Scalar>,
-        input: StepInputs<ARITY, C, RO>,
+        input: IVCStepInputs<ARITY, C, RO>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
         let assigned_input = self.alloc_witness(&config, layouter, input)?;
 
@@ -183,8 +183,8 @@ pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
         &self,
         _config: &<Self as StepCircuit<ARITY, C::Scalar>>::Config,
         _layouter: &mut impl Layouter<C::Scalar>,
-        _input: StepInputs<ARITY, C, RO>,
-    ) -> Result<AssignedStepInputs<ARITY, C>, SynthesisError> {
+        _input: IVCStepInputs<ARITY, C, RO>,
+    ) -> Result<AssignedIVCStepInputs<ARITY, C>, SynthesisError> {
         todo!("#32")
     }
 
@@ -200,7 +200,7 @@ pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
         &self,
         _config: &<Self as StepCircuit<ARITY, C::Scalar>>::Config,
         _layouter: &mut impl Layouter<C::Scalar>,
-        _assigned_input: AssignedStepInputs<ARITY, C>,
+        _assigned_input: AssignedIVCStepInputs<ARITY, C>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
         todo!("#32")
     }
@@ -208,7 +208,7 @@ pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
 
 // auto-impl for all `StepCircuit` trait `StepCircuitExt`
 impl<'link, const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Scalar>>
-    StepCircuitExt<'link, ARITY, C> for SP
+    IVCStepCircuit<'link, ARITY, C> for SP
 {
 }
 
