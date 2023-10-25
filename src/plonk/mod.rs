@@ -38,6 +38,7 @@ use halo2_proofs::{
 use log::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
+pub mod lookup;
 pub mod permutation;
 pub mod util;
 
@@ -51,6 +52,7 @@ pub struct PlonkStructure<C: CurveAffine> {
     pub(crate) gate: MultiPolynomial<C::ScalarExt>,
     pub(crate) fixed_commitment: C, // concatenate selectors and num_fixed_columns together, then commit
     pub(crate) permutation_matrix: SparseMatrix<C::ScalarExt>,
+    // pub(crate) lookup_argument: lookup::Argument,
 }
 
 #[derive(Clone, Debug)]
@@ -365,6 +367,7 @@ pub struct TableData<F: PrimeField> {
     pub(crate) advice: Vec<Vec<Assigned<F>>>,
     pub(crate) challenges: HashMap<usize, F>,
     pub(crate) permutation: Option<permutation::Assembly>,
+    pub(crate) lookup: Vec<lookup::Argument<F>>,
 }
 
 impl<F: PrimeField> TableData<F> {
@@ -379,6 +382,7 @@ impl<F: PrimeField> TableData<F> {
             advice: vec![],
             challenges: HashMap::new(),
             permutation: None,
+            lookup: vec![],
         }
     }
 
@@ -391,6 +395,7 @@ impl<F: PrimeField> TableData<F> {
             1 << self.k,
             &self.cs.permutation,
         ));
+        self.lookup = lookup::Argument::new(&self.cs);
         let n = 1 << self.k;
         assert!(self.cs.num_instance_columns() == 1);
         self.fixed = vec![vec![F::ZERO.into(); n]; self.cs.num_fixed_columns()];
@@ -428,6 +433,9 @@ impl<F: PrimeField> TableData<F> {
         let num_selector = self.cs.num_selectors();
         let num_fixed = self.cs.num_fixed_columns();
         let num_advice = self.cs.num_advice_columns();
+
+        // we use the same challenge y for combining custom gates and multiple lookup arguments
+        // need first commit all witness before generating y
         let y = Expression::Polynomial(Query {
             index: num_selector + num_fixed + num_advice,
             rotation: Rotation(0),
