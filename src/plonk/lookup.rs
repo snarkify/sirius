@@ -10,13 +10,23 @@ use halo2_proofs::poly::Rotation;
 /// compress them into one multi-polynomial:
 /// lookup_poly = L(x1,...,xa) = a1+a2*r+a3*r^2+...
 /// table_poly = T(y1,...,yb) = t1+t2*r+t3*r^2+...
-/// with corresponding evaluations of L and T over rows: \vec{l} and \vec{T}
 #[derive(Clone, PartialEq)]
 pub struct Argument<F: PrimeField> {
     lookup_poly: MultiPolynomial<F>,
     table_poly: MultiPolynomial<F>,
-    lookup_vec: Vec<F>,
-    table_vec: Vec<F>,
+}
+
+/// the evaluation of lookup arguments, i.e.:
+/// lookup_vec = \vec{l} = \{l_i\} with l_i = L(x1[i],...,xa[i])
+/// table_vec = \vec{t} = \{t_i\} with t_i = L(y1[i],...,yb[i])
+/// multiplicity_vec = \vec{m_i}
+#[derive(Clone)]
+pub struct Witness<F: PrimeField> {
+    l: Vec<F>,
+    t: Vec<F>,
+    m: Vec<F>,
+    h: Vec<F>,
+    g: Vec<F>,
 }
 
 impl<F: PrimeField> Argument<F> {
@@ -63,9 +73,50 @@ impl<F: PrimeField> Argument<F> {
             .map(|(lookup_poly, table_poly)| Self {
                 lookup_poly,
                 table_poly,
-                lookup_vec: vec![],
-                table_vec: vec![],
             })
             .collect::<Vec<_>>()
+    }
+}
+
+impl<F: PrimeField> Witness<F> {
+    /// calculate the coefficients {m_i} in the log derivative formula
+    /// m_i = sum_j \xi(w_j=t_i) assuming {t_i} have no duplicates
+    pub fn log_derivative_coeffs(&self) -> Vec<F> {
+        let mut m: Vec<F> = Vec::new();
+        let mut processed_t = Vec::new();
+        for t_i in &self.t {
+            if processed_t.contains(&t_i) {
+                // If the current t_i has already been processed, push 0 to m
+                m.push(F::ZERO);
+            } else {
+                let m_i = self.l.iter().filter(|l_j| *l_j == t_i).count() as u128;
+                m.push(F::from_u128(m_i));
+                processed_t.push(t_i);
+            }
+        }
+        m
+    }
+
+    /// calculate the inverse in log derivative formula
+    /// h_i := \frac{1}{l_i+r}
+    /// g_i := \frac{m_i}{t_i+r}
+    pub fn calc_inverse_terms(&self, r: F) -> (Vec<F>, Vec<F>) {
+        let h = self
+            .l
+            .iter()
+            .map(|&l_i| Option::from((l_i + r).invert()).unwrap_or(F::ZERO))
+            .collect::<Vec<F>>();
+        let g = self
+            .t
+            .iter()
+            .zip(self.m.iter())
+            .map(|(t_i, m_i)| *m_i * Option::from((*t_i + r).invert()).unwrap_or(F::ZERO))
+            .collect::<Vec<F>>();
+        (h, g)
+    }
+
+    /// check whether the lookup argument is satisfied
+    pub fn is_sat(&self, _r: F) -> bool {
+        todo!()
     }
 }
