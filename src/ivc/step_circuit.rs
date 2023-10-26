@@ -5,7 +5,7 @@ use halo2_proofs::{
 };
 use halo2curves::CurveAffine;
 
-use crate::{plonk::RelaxedPlonkInstance, poseidon::ROTrait};
+use crate::{constants::NUM_CHALLENGE_BITS, plonk::RelaxedPlonkInstance, poseidon::ROTrait};
 
 use super::floor_planner::FloorPlanner;
 
@@ -104,6 +104,29 @@ pub(crate) struct SynthesizeStepParams<G: CurveAffine, RO: ROTrait<G>> {
     pub ro_constant: RO::Constants,
 }
 
+impl<C: CurveAffine, RO: ROTrait<C>> SynthesizeStepParams<C, RO> {
+    pub fn random_oracle(&self) -> RO {
+        RO::new(self.ro_constant.clone())
+    }
+
+    pub fn digest(&self) -> C::Scalar {
+        let Self {
+            limb_width,
+            n_limbs,
+            is_primary_circuit,
+            ro_constant,
+        } = &self;
+
+        let mut ro = RO::new(ro_constant.clone());
+
+        ro.absorb_base(C::Base::from_u128(*limb_width as u128));
+        ro.absorb_base(C::Base::from_u128(*n_limbs as u128));
+        ro.absorb_base(C::Base::from_u128(*is_primary_circuit as u128));
+
+        ro.squeeze(NUM_CHALLENGE_BITS)
+    }
+}
+
 // TODO #32
 pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROTrait<C>> {
     public_params: &'link SynthesizeStepParams<C, RO>,
@@ -131,6 +154,10 @@ pub(crate) struct AssignedStepInputs<const ARITY: usize, C: CurveAffine> {
     zi: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
 }
 
+pub struct StepConfig<const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Scalar>> {
+    config: SP::Config,
+}
+
 /// Trait extends [`StepCircuit`] to represent the augmented function `F'` in the IVC scheme.
 ///
 /// If [`StepCircuit`] is defined by circuit developers, this trait automatically extends
@@ -149,19 +176,19 @@ pub(crate) struct AssignedStepInputs<const ARITY: usize, C: CurveAffine> {
 ///
 /// - For `F'` please look at [`StepCircuitExt`]
 pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
-    StepCircuit<ARITY, C::Scalar>
+    StepCircuit<ARITY, C::Scalar> + Sized
 {
     /// The crate-only expanding trait that checks that no instance columns have
     /// been created during [`StepCircuit::configure`].
-    fn configure_with_instance_check(
+    fn configure(
         cs: &mut ConstraintSystem<C::Scalar>,
-    ) -> Result<<Self as StepCircuit<ARITY, C::Scalar>>::Config, ConfigureError> {
+    ) -> Result<StepConfig<ARITY, C, Self>, ConfigureError> {
         let before = cs.num_instance_columns();
 
         let config = <Self as StepCircuit<ARITY, C::Scalar>>::configure(cs);
 
         if before == cs.num_instance_columns() {
-            Ok(config)
+            Ok(StepConfig { config })
         } else {
             Err(ConfigureError::InstanceColumnNotAllowed)
         }

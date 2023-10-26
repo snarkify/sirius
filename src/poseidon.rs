@@ -13,7 +13,7 @@ pub trait AbsorbInRO<C: CurveAffine, RO: ROTrait<C>> {
 }
 
 /// A helper trait that defines the constants associated with a hash function
-pub trait ROConstantsTrait {
+pub trait ROConstantsTrait: Clone {
     /// produces constants/parameters associated with the hash function
     fn new(r_f: usize, r_p: usize) -> Self;
 }
