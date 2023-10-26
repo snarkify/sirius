@@ -14,7 +14,7 @@ use halo2curves::{
     CurveAffine,
 };
 use sirius::{
-    ivc::{step_circuit, PublicParams, SimpleFloorPlanner, StepCircuit, SynthesisError, IVC},
+    ivc::{self, PublicParams, SimpleFloorPlanner, StepCircuit, SynthesisError, IVC},
     plonk::TableData,
     poseidon::{poseidon_hash, ROTrait},
 };
@@ -310,7 +310,7 @@ type RandomOracleConstant<C, F> = <RandomOracle<C, F> as ROTrait<C>>::Constants;
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(pallas::Base::S as usize) };
 const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
-type TrivialCircuit = step_circuit::trivial::Circuit<ARITY, <vesta::Affine as CurveAffine>::Base>;
+type TrivialCircuit = ivc::TrivialCircuit<ARITY, <vesta::Affine as CurveAffine>::Base>;
 
 fn main() {
     // pallas
