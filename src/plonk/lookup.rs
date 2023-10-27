@@ -24,9 +24,6 @@ pub struct Argument<F: PrimeField> {
 pub struct Witness<F: PrimeField> {
     l: Vec<F>,
     t: Vec<F>,
-    m: Vec<F>,
-    h: Vec<F>,
-    g: Vec<F>,
 }
 
 impl<F: PrimeField> Argument<F> {
@@ -79,6 +76,10 @@ impl<F: PrimeField> Argument<F> {
 }
 
 impl<F: PrimeField> Witness<F> {
+    pub fn new(&self, l: Vec<F>, t: Vec<F>) -> Self {
+        Self { l, t }
+    }
+
     /// calculate the coefficients {m_i} in the log derivative formula
     /// m_i = sum_j \xi(w_j=t_i) assuming {t_i} have no duplicates
     pub fn log_derivative_coeffs(&self) -> Vec<F> {
@@ -100,7 +101,7 @@ impl<F: PrimeField> Witness<F> {
     /// calculate the inverse in log derivative formula
     /// h_i := \frac{1}{l_i+r}
     /// g_i := \frac{m_i}{t_i+r}
-    pub fn calc_inverse_terms(&self, r: F) -> (Vec<F>, Vec<F>) {
+    pub fn calc_inverse_terms(&self, r: F, m: &[F]) -> (Vec<F>, Vec<F>) {
         let h = self
             .l
             .iter()
@@ -109,14 +110,51 @@ impl<F: PrimeField> Witness<F> {
         let g = self
             .t
             .iter()
-            .zip(self.m.iter())
+            .zip(m)
             .map(|(t_i, m_i)| *m_i * Option::from((*t_i + r).invert()).unwrap_or(F::ZERO))
             .collect::<Vec<F>>();
         (h, g)
     }
 
     /// check whether the lookup argument is satisfied
-    pub fn is_sat(&self, _r: F) -> bool {
-        todo!()
+    /// the remaining check L(x1,...,xa)=l and T(y1,...,ya)=t
+    /// are carried in upper level check
+    pub fn is_sat(&self, r: F) -> Result<(), String> {
+        let m = self.log_derivative_coeffs();
+        let (h, g) = self.calc_inverse_terms(r, &m);
+        // check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
+        let c1 = self
+            .l
+            .iter()
+            .zip(h.iter())
+            .map(|(li, hi)| *hi * (*li + r) - F::ONE)
+            .filter(|d| F::ZERO.ne(d))
+            .count();
+
+        // check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
+        let c2 = self
+            .t
+            .iter()
+            .zip(g.iter())
+            .zip(m)
+            .map(|((ti, gi), mi)| *gi * (*ti + r) - mi)
+            .filter(|d| F::ZERO.ne(d))
+            .count();
+
+        // check sum_i h_i = sum_i g_i
+        let sum = h
+            .into_iter()
+            .zip(g)
+            .map(|(hi, gi)| hi - gi)
+            .fold(F::ZERO, |acc, d| acc + d);
+        let c3 = F::ZERO.ne(&sum);
+        match (c1 == 0, c2 == 0, c3) {
+            (true, true, true) => Ok(()),
+            (false, _, _) => Err(format!("hi(li+r)-1=0 not satisfied on {} rows", c1,).to_string()),
+            (true, false, _) => {
+                Err(format!("gi(ti+r)-mi=0 not satisfied on {} rows", c2,).to_string())
+            }
+            (true, true, false) => Err("sum hi = sum gi not satisfied".to_string()),
+        }
     }
 }

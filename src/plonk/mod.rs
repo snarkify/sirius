@@ -235,6 +235,19 @@ impl<C: CurveAffine> PlonkStructure<C> {
             Err("permutation check failed".to_string())
         }
     }
+
+    pub fn is_sat_lookup<F>(
+        &self,
+        _ck: &CommitmentKey<C>,
+        _U: &RelaxedPlonkInstance<C>,
+        _W: &RelaxedPlonkWitness<F>,
+    ) -> Result<(), String>
+    where
+        C: CurveAffine<ScalarExt = F>,
+        F: PrimeField,
+    {
+        todo!()
+    }
 }
 
 impl<C: CurveAffine> PlonkInstance<C> {
