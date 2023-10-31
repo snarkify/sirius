@@ -1,3 +1,4 @@
+use crate::polynomial::sparse::SparseMatrix;
 use crate::polynomial::{Expression, MultiPolynomial, Query};
 use ff::PrimeField;
 use halo2_proofs::plonk::ConstraintSystem;
@@ -12,8 +13,8 @@ use halo2_proofs::poly::Rotation;
 /// table_poly = T(y1,...,yb) = t1+t2*r+t3*r^2+...
 #[derive(Clone, PartialEq)]
 pub struct Argument<F: PrimeField> {
-    lookup_poly: MultiPolynomial<F>,
-    table_poly: MultiPolynomial<F>,
+    pub(crate) lookup_poly: MultiPolynomial<F>,
+    pub(crate) table_poly: MultiPolynomial<F>,
 }
 
 /// the evaluation of lookup arguments, i.e.:
@@ -22,8 +23,21 @@ pub struct Argument<F: PrimeField> {
 /// multiplicity_vec = \vec{m_i}
 #[derive(Clone)]
 pub struct Witness<F: PrimeField> {
-    l: Vec<F>,
-    t: Vec<F>,
+    pub(crate) l: Vec<F>,
+    pub(crate) t: Vec<F>,
+    // check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
+    pub(crate) l_rel: MultiPolynomial<F>,
+    // check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
+    pub(crate) t_rel: MultiPolynomial<F>,
+    // check sum_i h_i = sum_i g_i
+    pub(crate) h_mat: SparseMatrix<F>,
+    pub(crate) g_mat: SparseMatrix<F>,
+}
+
+/// Used for evaluate lookup relation
+pub struct LookupEvalDomain<'a, F: PrimeField> {
+    pub(crate) W1: &'a Witness<F>,
+    pub(crate) W2: &'a Witness<F>,
 }
 
 impl<F: PrimeField> Argument<F> {
@@ -77,7 +91,53 @@ impl<F: PrimeField> Argument<F> {
 
 impl<F: PrimeField> Witness<F> {
     pub fn new(&self, l: Vec<F>, t: Vec<F>) -> Self {
-        Self { l, t }
+        let le = Expression::Polynomial(Query {
+            index: 0,
+            rotation: Rotation(0),
+        });
+        let te = Expression::Polynomial(Query {
+            index: 1,
+            rotation: Rotation(0),
+        });
+        let m = Expression::Polynomial(Query {
+            index: 2,
+            rotation: Rotation(0),
+        });
+        let r = Expression::Polynomial(Query {
+            index: 3,
+            rotation: Rotation(0),
+        });
+        let h = Expression::Polynomial(Query {
+            index: 4,
+            rotation: Rotation(0),
+        });
+        let g = Expression::Polynomial(Query {
+            index: 5,
+            rotation: Rotation(0),
+        });
+        // check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
+        let l_rel = (h * (le + r.clone()) - Expression::Constant(F::ONE)).expand();
+        // check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
+        let t_rel = (g * (te + r) - m).expand();
+        // check sum_i h_i = sum_i g_i, i.e. h_mat * h = g_mat * g
+        let mut h_mat = Vec::new();
+        let mut g_mat = Vec::new();
+        let _ = l
+            .iter()
+            .enumerate()
+            .map(|(i, _)| h_mat.push((0, i, F::ONE)));
+        let _ = t
+            .iter()
+            .enumerate()
+            .map(|(i, _)| g_mat.push((0, i, F::ONE)));
+        Self {
+            l,
+            t,
+            l_rel,
+            t_rel,
+            h_mat,
+            g_mat,
+        }
     }
 
     /// calculate the coefficients {m_i} in the log derivative formula

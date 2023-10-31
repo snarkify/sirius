@@ -84,6 +84,15 @@ pub struct RelaxedPlonkWitness<F: PrimeField> {
     pub(crate) E: Vec<F>,
 }
 
+/// Used for evaluate plonk custom gates
+pub struct PlonkEvalDomain<'a, C: CurveAffine, F: PrimeField> {
+    pub(crate) S: &'a PlonkStructure<C>,
+    pub(crate) U1: &'a RelaxedPlonkInstance<C>,
+    pub(crate) W1: &'a RelaxedPlonkWitness<F>,
+    pub(crate) U2: &'a RelaxedPlonkInstance<C>,
+    pub(crate) W2: &'a RelaxedPlonkWitness<F>,
+}
+
 // TODO #31 docs
 pub struct RelaxedPlonkTrace<C: CurveAffine> {
     U: RelaxedPlonkInstance<C>,
@@ -137,12 +146,16 @@ impl<C: CurveAffine> PlonkStructure<C> {
         let nrow = 2usize.pow(self.k as u32);
         let U2 = RelaxedPlonkInstance::new(U.instance.len());
         let W2 = RelaxedPlonkWitness::new(self.k as u32, self.num_advice_columns);
+        let data = PlonkEvalDomain {
+            S: self,
+            U1: &U.to_relax(),
+            W1: &W.to_relax(),
+            U2: &U2,
+            W2: &W2,
+        };
         let res: usize = (0..nrow)
             .into_par_iter()
-            .map(|row| {
-                self.gate
-                    .eval(row, self, &U.to_relax(), &W.to_relax(), &U2, &W2)
-            })
+            .map(|row| self.gate.eval(row, &data))
             .filter(|v| F::ZERO.ne(v))
             .count();
 
@@ -169,9 +182,16 @@ impl<C: CurveAffine> PlonkStructure<C> {
         let offset = self.selectors.len() + self.fixed_columns.len();
         let u_index = offset + self.num_advice_columns + 1;
         let poly = self.gate.homogeneous(offset, u_index);
+        let data = PlonkEvalDomain {
+            S: self,
+            U1: U,
+            W1: W,
+            U2: &U2,
+            W2: &W2,
+        };
         let res: usize = (0..nrow)
             .into_par_iter()
-            .map(|row| poly.eval(row, self, U, W, &U2, &W2))
+            .map(|row| poly.eval(row, &data))
             .enumerate()
             .filter(|(i, v)| W.E[*i].ne(v))
             .count();
