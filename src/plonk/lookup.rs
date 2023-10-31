@@ -1,6 +1,8 @@
+use crate::commitment::CommitmentKey;
 use crate::polynomial::sparse::SparseMatrix;
 use crate::polynomial::{Expression, MultiPolynomial, Query};
 use ff::PrimeField;
+use halo2_proofs::arithmetic::CurveAffine;
 use halo2_proofs::plonk::ConstraintSystem;
 use halo2_proofs::plonk::Expression as PE;
 use halo2_proofs::poly::Rotation;
@@ -8,6 +10,7 @@ use halo2_proofs::poly::Rotation;
 /// starting from vector lookup: {(a1,a2,...,ak)} \subset {(t1,t2,...,tk)}
 /// where {ai} are expressions over columns (x1,...xa)
 /// {ti} are expressions over columns (y1,...,yb)
+/// we assume (y1,...,yb) are fixed columns
 /// compress them into one multi-polynomial:
 /// lookup_poly = L(x1,...,xa) = a1+a2*r+a3*r^2+...
 /// table_poly = T(y1,...,yb) = t1+t2*r+t3*r^2+...
@@ -17,21 +20,67 @@ pub struct Argument<F: PrimeField> {
     pub(crate) table_poly: MultiPolynomial<F>,
 }
 
-/// the evaluation of lookup arguments, i.e.:
-/// lookup_vec = \vec{l} = \{l_i\} with l_i = L(x1[i],...,xa[i])
-/// table_vec = \vec{t} = \{t_i\} with t_i = L(y1[i],...,yb[i])
+#[derive(Clone, PartialEq)]
+pub struct Structure<C: CurveAffine> {
+    // 2^k1 is the length of lookup vector l
+    pub(crate) k1: usize,
+    // 2^k2 is the length of table vector t
+    pub(crate) k2: usize,
+    // commitment of [t], we assume table t is constructed by fixed columns
+    pub(crate) t_commitment: C,
+    // check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
+    pub(crate) l_rel: MultiPolynomial<C::ScalarExt>,
+    // check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
+    pub(crate) t_rel: MultiPolynomial<C::ScalarExt>,
+    // check sum_i h_i = sum_i g_i
+    pub(crate) h_mat: SparseMatrix<C::ScalarExt>,
+    pub(crate) g_mat: SparseMatrix<C::ScalarExt>,
+}
+
+pub struct Instance<C: CurveAffine> {
+    // commitment of l\cup m
+    pub(crate) l_m_commitment: C,
+    // commitment of h\cup g
+    pub(crate) h_g_commitment: C,
+    pub(crate) r: C::ScalarExt,
+}
+
 /// multiplicity_vec = \vec{m_i}
 #[derive(Clone)]
 pub struct Witness<F: PrimeField> {
+    //  l_i = L(x1[i],...,xa[i])
     pub(crate) l: Vec<F>,
+    // t: is used to calculate m, h, g; no need to fold
     pub(crate) t: Vec<F>,
-    // check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
-    pub(crate) l_rel: MultiPolynomial<F>,
-    // check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
-    pub(crate) t_rel: MultiPolynomial<F>,
-    // check sum_i h_i = sum_i g_i
-    pub(crate) h_mat: SparseMatrix<F>,
-    pub(crate) g_mat: SparseMatrix<F>,
+    // multiplicity vector
+    pub(crate) m: Vec<F>,
+    pub(crate) h: Vec<F>,
+    pub(crate) g: Vec<F>,
+}
+
+pub struct RelaxedInstance<C: CurveAffine> {
+    // commitment of l\cup m
+    pub(crate) l_m_commitment: C,
+    // commitment of h\cup g
+    pub(crate) h_g_commitment: C,
+    // commitment of e_l\cup e_t
+    pub(crate) E_commitment: C,
+    // random challenge
+    pub(crate) r: C::ScalarExt,
+    // homogenous variable
+    pub(crate) u: C::ScalarExt,
+}
+
+#[derive(Clone)]
+pub struct RelaxedWitness<F: PrimeField> {
+    pub(crate) l: Vec<F>,
+    pub(crate) m: Vec<F>,
+    pub(crate) h: Vec<F>,
+    pub(crate) g: Vec<F>,
+    // error vector of l_rel, length 2^k1
+    pub(crate) e_l: Vec<F>,
+    // error vector of t_rel, length 2^k2
+    pub(crate) e_t: Vec<F>,
 }
 
 /// Used for evaluate lookup relation
@@ -89,13 +138,15 @@ impl<F: PrimeField> Argument<F> {
     }
 }
 
-impl<F: PrimeField> Witness<F> {
-    pub fn new(&self, l: Vec<F>, t: Vec<F>) -> Self {
-        let le = Expression::Polynomial(Query {
+impl<C: CurveAffine<ScalarExt = F>, F: PrimeField> Structure<C> {
+    pub fn new(&self, k1: usize, k2: usize, t_vec: Vec<F>, ck: &CommitmentKey<C>) -> Self {
+        let t_commitment = ck.commit(&t_vec[..]);
+
+        let l = Expression::Polynomial(Query {
             index: 0,
             rotation: Rotation(0),
         });
-        let te = Expression::Polynomial(Query {
+        let t = Expression::Polynomial(Query {
             index: 1,
             rotation: Rotation(0),
         });
@@ -116,30 +167,28 @@ impl<F: PrimeField> Witness<F> {
             rotation: Rotation(0),
         });
         // check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
-        let l_rel = (h * (le + r.clone()) - Expression::Constant(F::ONE)).expand();
+        let l_rel = (h * (l + r.clone()) - Expression::Constant(F::ONE)).expand();
         // check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
-        let t_rel = (g * (te + r) - m).expand();
+        let t_rel = (g * (t + r) - m).expand();
         // check sum_i h_i = sum_i g_i, i.e. h_mat * h = g_mat * g
         let mut h_mat = Vec::new();
         let mut g_mat = Vec::new();
-        let _ = l
-            .iter()
-            .enumerate()
-            .map(|(i, _)| h_mat.push((0, i, F::ONE)));
-        let _ = t
-            .iter()
-            .enumerate()
-            .map(|(i, _)| g_mat.push((0, i, F::ONE)));
+        let _ = (0..2_usize.pow(k1 as u32)).map(|i| h_mat.push((0, i, F::ONE)));
+        let _ = (0..2_usize.pow(k2 as u32)).map(|i| g_mat.push((0, i, F::ONE)));
+
         Self {
-            l,
-            t,
+            k1,
+            k2,
+            t_commitment,
             l_rel,
             t_rel,
             h_mat,
             g_mat,
         }
     }
+}
 
+impl<F: PrimeField> Witness<F> {
     /// calculate the coefficients {m_i} in the log derivative formula
     /// m_i = sum_j \xi(w_j=t_i) assuming {t_i} have no duplicates
     pub fn log_derivative_coeffs(&self) -> Vec<F> {
