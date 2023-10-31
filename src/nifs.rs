@@ -11,8 +11,8 @@
 use crate::commitment::CommitmentKey;
 use crate::constants::NUM_CHALLENGE_BITS;
 use crate::plonk::{
-    PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
-    TableData,
+    PlonkEvalDomain, PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance,
+    RelaxedPlonkWitness, TableData,
 };
 use crate::poseidon::{AbsorbInRO, ROTrait};
 use halo2_proofs::arithmetic::CurveAffine;
@@ -84,12 +84,19 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         let normalized = gate.fold_transform(offset, num_vars);
         let r_index = offset + 2 * (num_vars + 1); // after adding u
         let degree = gate.degree_for_folding(offset);
+        let data = PlonkEvalDomain {
+            S,
+            U1,
+            W1,
+            U2: &U2.to_relax(),
+            W2: &W2.to_relax(),
+        };
         let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
             .map(|k| normalized.coeff_of((0, r_index), k))
             .map(|multipoly| {
                 (0..num_row)
                     .into_par_iter()
-                    .map(|row| multipoly.eval(row, S, U1, W1, &U2.to_relax(), &W2.to_relax()))
+                    .map(|row| multipoly.eval(row, &data))
                     .collect()
             })
             .collect();

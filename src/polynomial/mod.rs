@@ -1,4 +1,5 @@
-use crate::plonk::{PlonkStructure, RelaxedPlonkInstance, RelaxedPlonkWitness};
+use crate::plonk::lookup::LookupEvalDomain;
+use crate::plonk::PlonkEvalDomain;
 use crate::util::trim_leading_zeros;
 use ff::PrimeField;
 use halo2_proofs::arithmetic::CurveAffine;
@@ -394,20 +395,58 @@ impl<F: PrimeField> Monomial<F> {
         assert!(self == other);
         self.coeff += other.coeff;
     }
+}
 
+impl<F: PrimeField> PartialEq for Monomial<F> {
+    fn eq(&self, other: &Self) -> bool {
+        assert!(self.is_same_class(other));
+        for (a, b) in self.exponents.iter().zip(other.exponents.iter()) {
+            if *a != *b {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl<F: PrimeField> Eq for Monomial<F> {}
+
+impl<F: PrimeField> PartialOrd for Monomial<F> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<F: PrimeField> Ord for Monomial<F> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        assert!(self.is_same_class(other));
+
+        for (a, b) in self.exponents.iter().zip(other.exponents.iter()).rev() {
+            match a.cmp(b) {
+                Ordering::Equal => continue,
+                order => {
+                    return order;
+                }
+            }
+        }
+        Ordering::Equal
+    }
+}
+
+pub trait Eval<T, F> {
+    fn eval(&self, row: usize, data: &T) -> F;
+}
+
+impl<'a, C, F> Eval<PlonkEvalDomain<'a, C, F>, F> for Monomial<F>
+where
+    F: PrimeField,
+    C: CurveAffine<ScalarExt = F>,
+{
     /// evaluate monomial over {x_1,...,x_n}, n = self.arity
     /// first get the value of x_i according to its (row, col) in the plonk table
     /// then calculate the evaluation of monomial: c*x_1^{d_1}*...*x_n^{d_n}
-    #[allow(clippy::too_many_arguments)]
-    pub fn eval<C: CurveAffine<ScalarExt = F>>(
-        &self,
-        row: usize,
-        S: &PlonkStructure<C>,
-        U1: &RelaxedPlonkInstance<C>,
-        W1: &RelaxedPlonkWitness<F>,
-        U2: &RelaxedPlonkInstance<C>,
-        W2: &RelaxedPlonkWitness<F>,
-    ) -> F {
+    fn eval(&self, row: usize, data: &PlonkEvalDomain<C, F>) -> F {
+        let PlonkEvalDomain { S, U1, W1, U2, W2 } = data;
         let num_selectors = S.selectors.len();
         let offset = S.fixed_columns.len() + num_selectors;
         let num_advice = S.num_advice_columns;
@@ -467,39 +506,12 @@ impl<F: PrimeField> Monomial<F> {
     }
 }
 
-impl<F: PrimeField> PartialEq for Monomial<F> {
-    fn eq(&self, other: &Self) -> bool {
-        assert!(self.is_same_class(other));
-        for (a, b) in self.exponents.iter().zip(other.exponents.iter()) {
-            if *a != *b {
-                return false;
-            }
-        }
-        true
-    }
-}
-
-impl<F: PrimeField> Eq for Monomial<F> {}
-
-impl<F: PrimeField> PartialOrd for Monomial<F> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<F: PrimeField> Ord for Monomial<F> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        assert!(self.is_same_class(other));
-
-        for (a, b) in self.exponents.iter().zip(other.exponents.iter()).rev() {
-            match a.cmp(b) {
-                Ordering::Equal => continue,
-                order => {
-                    return order;
-                }
-            }
-        }
-        Ordering::Equal
+impl<'a, F: PrimeField> Eval<LookupEvalDomain<'a, F>, F> for Monomial<F> {
+    /// evaluate monomial over {x_1,...,x_n}, n = self.arity
+    /// first get the value of x_i according to its (row, col) in the plonk table
+    /// then calculate the evaluation of monomial: c*x_1^{d_1}*...*x_n^{d_n}
+    fn eval(&self, _row: usize, _data: &LookupEvalDomain<F>) -> F {
+        todo!()
     }
 }
 
@@ -630,19 +642,13 @@ impl<F: PrimeField> MultiPolynomial<F> {
     }
 
     // evaluate the multipoly
-    #[allow(clippy::too_many_arguments)]
-    pub fn eval<C: CurveAffine<ScalarExt = F>>(
-        &self,
-        row: usize,
-        S: &PlonkStructure<C>,
-        U1: &RelaxedPlonkInstance<C>,
-        W1: &RelaxedPlonkWitness<F>,
-        U2: &RelaxedPlonkInstance<C>,
-        W2: &RelaxedPlonkWitness<F>,
-    ) -> F {
+    pub fn eval<T>(&self, row: usize, data: &T) -> F
+    where
+        Monomial<F>: Eval<T, F>,
+    {
         self.monomials
             .iter()
-            .map(|mono| mono.eval(row, S, U1, W1, U2, W2))
+            .map(|mono| mono.eval(row, data))
             .fold(F::ZERO, |acc, x| acc + x)
     }
 }
