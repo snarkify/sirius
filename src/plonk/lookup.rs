@@ -1,3 +1,6 @@
+//! This mod implements the special soundness protocol for lookup arguments
+//! using log derivative approach.
+//! Reference: section 4.3 in [protostar](https://eprint.iacr.org/2023/620)  
 use crate::commitment::CommitmentKey;
 use crate::polynomial::sparse::SparseMatrix;
 use crate::polynomial::{Expression, MultiPolynomial, Query};
@@ -20,11 +23,12 @@ pub struct Argument<F: PrimeField> {
     pub(crate) table_poly: MultiPolynomial<F>,
 }
 
+/// lookup structure includes all the necessary information of folding scheme for lookup
 #[derive(Clone, PartialEq)]
 pub struct Structure<C: CurveAffine> {
-    // 2^k1 is the length of lookup vector l
+    // 2^k1 is the length of lookup vector [`Witness`] l
     pub(crate) k1: usize,
-    // 2^k2 is the length of table vector t
+    // 2^k2 is the length of table vector [`Witness`] t
     pub(crate) k2: usize,
     // commitment of [t], we assume table t is constructed by fixed columns
     pub(crate) t_commitment: C,
@@ -73,9 +77,13 @@ pub struct RelaxedInstance<C: CurveAffine> {
 
 #[derive(Clone)]
 pub struct RelaxedWitness<F: PrimeField> {
+    // l: folded from multiple Witness.l
     pub(crate) l: Vec<F>,
+    // m: folded from multiple Witness.m
     pub(crate) m: Vec<F>,
+    // h: folded from multiple Witness.h
     pub(crate) h: Vec<F>,
+    // g: folded from multiple Witness.g
     pub(crate) g: Vec<F>,
     // error vector of l_rel, length 2^k1
     pub(crate) e_l: Vec<F>,
@@ -91,9 +99,9 @@ pub struct LookupEvalDomain<'a, F: PrimeField> {
 
 impl<F: PrimeField> Argument<F> {
     /// retrieve and compress vector of Lookup Arguments from constraint system
-    /// TODO: halo2 assumes lookup relation to be true over all rows, in reality we may only
+    /// TODO #39:  halo2 assumes lookup relation to be true over all rows, in reality we may only
     /// lookup a few items. need find a way to remove padded rows for lookup_vec
-    pub fn new(cs: &ConstraintSystem<F>) -> Vec<Self> {
+    pub fn compress_from(cs: &ConstraintSystem<F>) -> Vec<Self> {
         // we use the same challenge y for combining custom gates and multiple lookup arguments
         // need first commit all witness before generating y
         let y = Expression::Polynomial(Query {

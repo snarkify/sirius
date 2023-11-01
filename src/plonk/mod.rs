@@ -428,7 +428,7 @@ impl<F: PrimeField> TableData<F> {
             1 << self.k,
             &self.cs.permutation,
         ));
-        self.lookups = lookup::Argument::new(&self.cs);
+        self.lookups = lookup::Argument::compress_from(&self.cs);
         let n = 1 << self.k;
         assert!(self.cs.num_instance_columns() == 1);
         self.fixed = vec![vec![F::ZERO.into(); n]; self.cs.num_fixed_columns()];
