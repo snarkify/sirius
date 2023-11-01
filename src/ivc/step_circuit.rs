@@ -8,18 +8,20 @@ use halo2_proofs::{
 use halo2curves::CurveAffine;
 
 use crate::{
-    ivc::assigned_relaxed_plonk_instance::AssignedRelaxedPlonkInstance,
-    main_gate::{self, RegionCtx},
+    ivc::assigned_relaxed_plonk_instance::FoldRelaxedPlonkInstanceChip,
+    main_gate,
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
 };
 
-use super::floor_planner::FloorPlanner;
+use super::{assigned_relaxed_plonk_instance, floor_planner::FloorPlanner};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SynthesisError {
     #[error(transparent)]
     Halo2(#[from] halo2_proofs::plonk::Error),
+    #[error(transparent)]
+    FoldError(#[from] assigned_relaxed_plonk_instance::Error),
 }
 
 /// The `StepCircuit` trait represents a step in incremental computation in
@@ -146,7 +148,6 @@ where
 
 // TODO #35 Change to real `T` and move it to IVC module level
 const MAIN_GATE_CONFIG_SIZE: usize = 5;
-
 type MainGateConfig = main_gate::MainGateConfig<MAIN_GATE_CONFIG_SIZE>;
 
 pub struct StepConfig<const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Scalar>> {
@@ -219,27 +220,27 @@ where
         layouter: &mut impl Layouter<C::Scalar>,
         public_params: &SynthesizeStepParams<C, RO>,
         u: Option<&PlonkInstance<C>>,
-    ) -> Result<AssignedRelaxedPlonkInstance<C>, SynthesisError> {
+    ) -> Result<FoldRelaxedPlonkInstanceChip<C>, SynthesisError> {
         let u = u.cloned().unwrap_or_default();
 
         let Unew_base = layouter.assign_region(
             || "synthesize_step_base_case",
-            move |region| {
-                let mut ctx = RegionCtx::new(region, 0);
-
-                AssignedRelaxedPlonkInstance::from_instance(
-                    &mut ctx,
-                    // TODO Move this to diff lvl
-                    if public_params.is_primary_circuit {
-                        PlonkInstance::default()
-                    } else {
-                        u.clone()
-                    },
-                    public_params.limb_width,
-                    public_params.n_limbs,
-                )
+            move |_region| {
+                // TODO Move this to diff lvl
+                Ok(if public_params.is_primary_circuit {
+                    Ok(FoldRelaxedPlonkInstanceChip::new_default(
+                        public_params.limb_width,
+                        public_params.n_limbs,
+                    ))
+                } else {
+                    FoldRelaxedPlonkInstanceChip::from_instance(
+                        u.clone(),
+                        public_params.limb_width,
+                        public_params.n_limbs,
+                    )
+                })
             },
-        )?;
+        )??;
 
         Ok(Unew_base)
     }
@@ -249,23 +250,19 @@ where
         config: &StepConfig<ARITY, C, Self>,
         layouter: &mut impl Layouter<C::Scalar>,
         input: StepInputs<ARITY, C, RO>,
-    ) -> Result<AssignedRelaxedPlonkInstance<C>, SynthesisError> {
+    ) -> Result<FoldRelaxedPlonkInstanceChip<C>, SynthesisError> {
         // TODO Check hash of params
 
         let U = input.U.unwrap_or_default();
 
-        let _Unew_base: AssignedRelaxedPlonkInstance<C> = layouter.assign_region(
+        let _Unew_base: FoldRelaxedPlonkInstanceChip<C> = layouter.assign_region(
             || "synthesize_step_non_base_case",
-            move |region| {
-                let mut ctx = RegionCtx::new(region, 0);
-
-                let _U = AssignedRelaxedPlonkInstance::new(
-                    &mut ctx,
-                    // TODO Move this to diff lvl
+            move |_region| {
+                let _U = FoldRelaxedPlonkInstanceChip::from_relaxed(
                     U.clone(),
                     input.public_params.limb_width,
                     input.public_params.n_limbs,
-                )?;
+                );
 
                 let _ro_circuit = RO::new(
                     config.main_gate_config.clone(),

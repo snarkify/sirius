@@ -54,6 +54,14 @@ pub enum Error {
 }
 
 impl<F: ff::PrimeField> BigUint<F> {
+    pub fn zero(limb_width: NonZeroUsize) -> Self {
+        BigUint {
+            limbs: vec![F::ZERO],
+            width: limb_width,
+        }
+    }
+
+    // TODO Check limbs width consistency
     pub fn from_limbs(
         limbs: impl Iterator<Item = F>,
         limb_width: NonZeroUsize,
@@ -123,6 +131,14 @@ impl<F: ff::PrimeField> BigUint<F> {
         limbs
             .map(|limbs| Self::from_limbs(limbs.into_iter(), limb_width))
             .transpose()
+    }
+
+    pub fn from_f(
+        _input: F,
+        _limb_width: NonZeroUsize,
+        _limbs_count_limit: NonZeroUsize,
+    ) -> Result<Self, Error> {
+        todo!()
     }
 
     pub fn from_bigint(

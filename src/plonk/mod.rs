@@ -64,7 +64,7 @@ impl<C: CurveAffine> Default for PlonkInstance<C> {
     fn default() -> Self {
         Self {
             W_commitment: C::from_xy(C::Base::ZERO, C::Base::ZERO).unwrap(),
-            instance: vec![], // TODO Fix Me
+            instance: vec![C::ScalarExt::ZERO, C::ScalarExt::ZERO], // TODO Fix Me
             y: C::ScalarExt::ZERO,
         }
     }
