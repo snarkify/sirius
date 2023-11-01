@@ -16,7 +16,7 @@ use halo2curves::{
 use sirius::{
     ivc::{self, PublicParams, SimpleFloorPlanner, StepCircuit, SynthesisError, IVC},
     plonk::TableData,
-    poseidon::{poseidon_hash, ROTrait},
+    poseidon::{poseidon_circuit, ROCircuitTrait},
 };
 
 mod table16;
@@ -304,8 +304,9 @@ impl StepCircuit<ARITY, pallas::Base> for TestSha256Circuit {
     }
 }
 
-type RandomOracle<C, F> = poseidon_hash::PoseidonHash<C, F, 10, 10>;
-type RandomOracleConstant<C, F> = <RandomOracle<C, F> as ROTrait<C>>::Constants;
+//type RandomOracle<C, F> = poseidon_hash::PoseidonHash<C, F, 10, 10>;
+type RandomOracle<F> = poseidon_circuit::PoseidonChip<F, 10, 10>;
+type RandomOracleConstant<F> = <RandomOracle<F> as ROCircuitTrait<F>>::Args;
 
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(pallas::Base::S as usize) };
 const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
@@ -326,15 +327,15 @@ fn main() {
         ARITY,
         vesta::Affine,
         pallas::Affine,
-        RandomOracle<vesta::Affine, <vesta::Affine as CurveAffine>::Base>,
-        RandomOracle<pallas::Affine, <pallas::Affine as CurveAffine>::Base>,
+        RandomOracle<<vesta::Affine as CurveAffine>::Base>,
+        RandomOracle<<pallas::Affine as CurveAffine>::Base>,
     >::new(
         LIMB_WIDTH,
         LIMBS_COUNT_LIMIT,
         &sc1,
-        RandomOracleConstant::<vesta::Affine, <vesta::Affine as CurveAffine>::Base>::new(10, 10), // TODO Normal new params
+        RandomOracleConstant::<<vesta::Affine as CurveAffine>::Base>::new(10, 10), // TODO Normal new params
         &sc2,
-        RandomOracleConstant::<pallas::Affine, <pallas::Affine as CurveAffine>::Base>::new(10, 10), // TODO Normal new params
+        RandomOracleConstant::<<pallas::Affine as CurveAffine>::Base>::new(10, 10), // TODO Normal new params
     );
 
     let mut ivc = IVC::new(

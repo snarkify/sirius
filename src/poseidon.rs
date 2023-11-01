@@ -13,7 +13,7 @@ pub trait AbsorbInRO<C: CurveAffine, RO: ROTrait<C>> {
 }
 
 /// A helper trait that defines the constants associated with a hash function
-pub trait ROConstantsTrait: Clone {
+pub trait ROConstantsTrait {
     /// produces constants/parameters associated with the hash function
     fn new(r_f: usize, r_p: usize) -> Self;
 }
@@ -37,6 +37,11 @@ pub trait ROTrait<C: CurveAffine> {
 
 /// A helper trait that defines the behavior of a hash function that we use as an RO in the circuit model
 pub trait ROCircuitTrait<F: PrimeFieldBits + FromUniformBytes<64>> {
+    type Args: Clone;
+    type Config;
+
+    fn new(config: Self::Config, args: Self::Args) -> Self;
+
     /// Adds a scalar to the internal state
     fn absorb_base(&mut self, base: WrapValue<F>);
 

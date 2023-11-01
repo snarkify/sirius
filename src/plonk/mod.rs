@@ -60,6 +60,16 @@ pub struct PlonkInstance<C: CurveAffine> {
     pub(crate) y: C::ScalarExt,
 }
 
+impl<C: CurveAffine> Default for PlonkInstance<C> {
+    fn default() -> Self {
+        Self {
+            W_commitment: C::from_xy(C::Base::ZERO, C::Base::ZERO).unwrap(),
+            instance: vec![], // TODO Fix Me
+            y: C::ScalarExt::ZERO,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PlonkWitness<F: PrimeField> {
     pub(crate) num_advice_columns: usize,
@@ -73,6 +83,12 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
     pub(crate) E_commitment: C,
     pub(crate) u: C::ScalarExt,
     pub(crate) y: C::ScalarExt,
+}
+
+impl<C: CurveAffine> Default for RelaxedPlonkInstance<C> {
+    fn default() -> Self {
+        todo!()
+    }
 }
 
 #[derive(Clone, Debug)]

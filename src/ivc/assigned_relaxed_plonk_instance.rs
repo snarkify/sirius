@@ -1,57 +1,64 @@
 use std::num::NonZeroUsize;
 
-use ff::Field;
-use halo2_proofs::{circuit::AssignedCell, plonk::ConstraintSystem};
+use ff::{FromUniformBytes, PrimeFieldBits};
+use halo2_proofs::circuit::AssignedCell;
 use halo2curves::CurveAffine;
 
 use crate::{
-    gadgets::nonnative::bn::big_nat::BigNat,
+    gadgets::{ecc::AssignedPoint, nonnative::bn::big_nat::BigNat},
+    main_gate::RegionCtx,
     nifs::CrossTermCommits,
-    plonk::RelaxedPlonkInstance,
-    poseidon::{AbsorbInRO, ROTrait},
+    plonk::{PlonkInstance, RelaxedPlonkInstance},
+    poseidon::ROCircuitTrait,
 };
 
 use super::SynthesisError;
 
-/// `AssignedPoint` provides an elliptic curve abstraction inside a circuit.
-#[derive(Clone)]
-pub(crate) struct AssignedPoint<F: Field> {
-    pub x: AssignedCell<F, F>,
-    pub y: AssignedCell<F, F>,
-    pub is_infinity: AssignedCell<F, F>,
-}
-
 /// An Allocated Relaxed R1CS Instance
 pub(crate) struct AssignedRelaxedPlonkInstance<C: CurveAffine> {
-    pub W: AssignedPoint<C::Base>,
-    pub E: AssignedPoint<C::Base>,
+    pub W: AssignedPoint<C>,
+    pub E: AssignedPoint<C>,
     pub u: AssignedCell<C::Base, C::Base>,
 
     pub X0: BigNat<C::Scalar>,
     pub X1: BigNat<C::Scalar>,
 }
 
-impl<RO: ROTrait<C>, C: CurveAffine> AbsorbInRO<C, RO> for AssignedRelaxedPlonkInstance<C> {
-    fn absorb_into(&self, _ro: &mut RO) {
+impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C>
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+{
+    pub fn from_instance(
+        _region: &mut RegionCtx<C::Scalar>,
+        _instance: PlonkInstance<C>,
+        _limb_width: NonZeroUsize,
+        _limbs_count: NonZeroUsize,
+    ) -> Result<Self, halo2_proofs::plonk::Error> {
         todo!()
     }
-}
 
-impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
     pub fn new(
-        _cs: &mut ConstraintSystem<C::Base>,
-        _instance: &RelaxedPlonkInstance<C>,
+        _region: &mut RegionCtx<C::Scalar>,
+        _instance: RelaxedPlonkInstance<C>,
         _limb_width: NonZeroUsize,
-        _n_limbs: NonZeroUsize,
-    ) -> Self {
+        _limbs_count: NonZeroUsize,
+    ) -> Result<Self, halo2_proofs::plonk::Error> {
+        todo!()
+    }
+
+    fn absorb_in_ro(
+        &self,
+        _ro_circuit: &mut impl ROCircuitTrait<C::Base>,
+    ) -> Result<(), SynthesisError> {
         todo!()
     }
 
     pub fn fold(
-        &self,
-        _cs: &mut ConstraintSystem<C::Base>,
+        self,
+        _region: &mut RegionCtx<C::Scalar>,
+        _ro_circuit: impl ROCircuitTrait<C::Base>,
         _public_params_commit: &C::Base,
-        _instance: &RelaxedPlonkInstance<C>,
+        _instance: &PlonkInstance<C>,
         _cross_term_commits: &CrossTermCommits<C>,
     ) -> Result<Self, SynthesisError> {
         todo!()

@@ -206,6 +206,12 @@ impl<F: PrimeField> From<Value<F>> for WrapValue<F> {
     }
 }
 
+impl<F: PrimeField> From<F> for WrapValue<F> {
+    fn from(val: F) -> Self {
+        WrapValue::Unassigned(Value::known(val))
+    }
+}
+
 impl<F: PrimeField> From<AssignedValue<F>> for WrapValue<F> {
     fn from(val: AssignedValue<F>) -> Self {
         WrapValue::Assigned(val)
