@@ -1,2 +1,2 @@
-pub mod big_nat;
-pub mod big_nat_mul_mod_chip;
+pub mod big_uint;
+pub mod big_uint_mul_mod_chip;

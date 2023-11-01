@@ -87,7 +87,7 @@ mod mult_mod_tests {
             trace!("Start synthesize");
 
             let chip =
-                BigNatMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT);
+                BigUintMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT);
 
             let (quotient, remainder): (Vec<_>, Vec<_>) = layouter
                 .assign_region(
@@ -206,12 +206,12 @@ mod mult_mod_tests {
 
             println!("{lhs} * {rhs} = {quotient} * {modulus} + {remainer}");
 
-            let lhs = BigNat::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-            let rhs = BigNat::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-            let modulus = BigNat::from_bigint(&modulus, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let lhs = BigUint::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let rhs = BigUint::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let modulus = BigUint::from_bigint(&modulus, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
 
-            let quotient = BigNat::from_bigint(&quotient, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-            let remainer = BigNat::from_bigint(&remainer, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let quotient = BigUint::from_bigint(&quotient, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let remainer = BigUint::from_bigint(&remainer, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
 
             let prover = match MockProver::run(
                 K,
@@ -316,7 +316,7 @@ mod components_tests {
             trace!("Start synthesize");
 
             let chip =
-                BigNatMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT);
+                BigUintMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT);
 
             let (assigned_mult, assigned_sum, grouped_mult): (Vec<_>, Vec<_>, Vec<_>) = layouter
                 .assign_region(
@@ -352,9 +352,10 @@ mod components_tests {
                             })
                             .unzip();
 
-                        let max_word_without_overflow: F =
-                            big_nat::nat_to_f(&big_nat::get_big_int_with_n_ones(LIMB_WIDTH.get()))
-                                .unwrap_or_default();
+                        let max_word_without_overflow: F = big_uint::nat_to_f(
+                            &big_uint::get_big_int_with_n_ones(LIMB_WIDTH.get()),
+                        )
+                        .unwrap_or_default();
 
                         let mult = chip
                             .assign_mult(
@@ -369,10 +370,10 @@ mod components_tests {
                         let sum = chip
                             .assign_sum(
                                 &mut region,
-                                &OverflowingBigNat {
+                                &OverflowingBigUint {
                                     cells: lhs.clone(),
-                                    max_word: big_nat::nat_to_f::<F>(
-                                        &big_nat::get_big_int_with_n_ones(LIMB_WIDTH.get()),
+                                    max_word: big_uint::nat_to_f::<F>(
+                                        &big_uint::get_big_int_with_n_ones(LIMB_WIDTH.get()),
                                     )
                                     .unwrap_or_default(),
                                 },
@@ -458,7 +459,7 @@ mod components_tests {
         }
     }
 
-    fn mult_with_overflow<F: PrimeField>(lhs: &BigNat<F>, rhs: &BigNat<F>) -> BigNat<F> {
+    fn mult_with_overflow<F: PrimeField>(lhs: &BigUint<F>, rhs: &BigUint<F>) -> BigUint<F> {
         let lhs_limbs_count = lhs.limbs().len();
         let rhs_limbs_count = rhs.limbs().len();
 
@@ -473,11 +474,11 @@ mod components_tests {
             }
         }
 
-        BigNat::from_limbs(production_cells.into_iter().flatten(), LIMB_WIDTH).unwrap()
+        BigUint::from_limbs(production_cells.into_iter().flatten(), LIMB_WIDTH).unwrap()
     }
 
-    fn sum_with_overflow<F: PrimeField>(lhs: &BigNat<F>, rhs: &BigNat<F>) -> BigNat<F> {
-        BigNat::from_limbs(
+    fn sum_with_overflow<F: PrimeField>(lhs: &BigUint<F>, rhs: &BigUint<F>) -> BigUint<F> {
+        BigUint::from_limbs(
             lhs.limbs()
                 .iter()
                 .zip_longest(rhs.limbs().iter())
@@ -508,7 +509,7 @@ mod components_tests {
         .unwrap()
     }
 
-    fn group_limbs<F: PrimeField>(inp: &BigNat<F>, max_word: BigInt) -> BigNat<F> {
+    fn group_limbs<F: PrimeField>(inp: &BigUint<F>, max_word: BigInt) -> BigUint<F> {
         let limb_width = LIMB_WIDTH.get();
         let limbs_per_group =
             calc_limbs_per_group::<F>(calc_carry_bits(&max_word, limb_width).unwrap(), limb_width)
@@ -518,7 +519,7 @@ mod components_tests {
             .nth(limb_width)
             .unwrap();
 
-        BigNat::from_limbs(
+        BigUint::from_limbs(
             inp.limbs()
                 .iter()
                 .chunks(limbs_per_group)
@@ -539,14 +540,49 @@ mod components_tests {
         let lhs = BigInt::from_u64(u64::MAX).unwrap() * BigInt::from_u64(100).unwrap();
         let rhs = BigInt::from_u64(u64::MAX).unwrap() * BigInt::from_u64(u64::MAX).unwrap();
 
-        let lhs = BigNat::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-        let rhs = BigNat::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let lhs = BigUint::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let rhs = BigUint::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
         let prod = mult_with_overflow(&lhs, &rhs);
         log::info!("prod {prod:?}");
         let sum = sum_with_overflow(&lhs, &rhs);
         log::info!("sum {sum:?}");
 
-        let max_word = big_nat::get_big_int_with_n_ones(LIMB_WIDTH.get());
+        let max_word = big_uint::get_big_int_with_n_ones(LIMB_WIDTH.get());
+        let grouped = group_limbs(&prod, &max_word * &max_word);
+        log::info!("grouped {grouped:?}");
+
+        const K: u32 = 11;
+        let ts = TestCircuit::<Fp>::default();
+        let prover = match MockProver::run(
+            K,
+            &ts,
+            vec![
+                lhs.limbs().to_vec(),
+                rhs.limbs().to_vec(),
+                prod.limbs().to_vec(),
+                sum.limbs().to_vec(),
+                grouped.limbs().to_vec(),
+            ],
+        ) {
+            Ok(prover) => prover,
+            Err(e) => panic!("{:?}", e),
+        };
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[test_log::test]
+    fn test_zero() {
+        let lhs = BigInt::from_u64(u64::MAX).unwrap() * BigInt::from_u64(100).unwrap();
+        let rhs = BigInt::from_u64(0).unwrap();
+
+        let lhs = BigUint::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let rhs = BigUint::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let prod = mult_with_overflow(&lhs, &rhs);
+        log::info!("prod {prod:?}");
+        let sum = sum_with_overflow(&lhs, &rhs);
+        log::info!("sum {sum:?}");
+
+        let max_word = big_uint::get_big_int_with_n_ones(LIMB_WIDTH.get());
         let grouped = group_limbs(&prod, &max_word * &max_word);
         log::info!("grouped {grouped:?}");
 

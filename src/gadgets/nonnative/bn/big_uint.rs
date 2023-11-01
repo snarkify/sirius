@@ -20,7 +20,7 @@ use crate::{error::Halo2PlonkError, main_gate::RegionCtx};
 // integer-type, but only a wrapper for
 // storing a natural number with limbs.
 #[derive(PartialEq, Debug)]
-pub struct BigNat<F: ff::PrimeField> {
+pub struct BigUint<F: ff::PrimeField> {
     limbs: Vec<F>,
     width: NonZeroUsize,
 }
@@ -33,7 +33,7 @@ pub enum Error {
     #[error("The limb count check failed, it was expected to be less than {limit} and came up with {actual}")]
     LimbLimitReached { limit: NonZeroUsize, actual: usize },
     #[error("TODO")]
-    ZeroLimbNotAllowed,
+    EmptyLimbsNotAllowed,
     #[error("TODO")]
     AssignFixedError {
         annotation: String,
@@ -53,24 +53,24 @@ pub enum Error {
     LimbNotFound { limb_index: usize },
 }
 
-impl<F: ff::PrimeField> BigNat<F> {
+impl<F: ff::PrimeField> BigUint<F> {
     pub fn from_limbs(
         limbs: impl Iterator<Item = F>,
         limb_width: NonZeroUsize,
     ) -> Result<Self, Error> {
-        let mut is_all_limbs_zero = true;
-        let limbs = limbs
-            .inspect(|v| is_all_limbs_zero &= bool::from(v.is_zero()))
-            .collect::<Vec<_>>();
+        let limbs = limbs.collect::<Vec<_>>();
 
-        if is_all_limbs_zero || limbs.is_empty() {
-            Err(Error::ZeroLimbNotAllowed)
+        Ok(if limbs.is_empty() {
+            Self {
+                limbs: vec![F::ZERO],
+                width: limb_width,
+            }
         } else {
-            Ok(Self {
+            Self {
                 limbs,
                 width: limb_width,
-            })
-        }
+            }
+        })
     }
 
     pub fn from_u64(
@@ -257,8 +257,8 @@ mod tests {
 
     #[test]
     fn from_u64() {
-        for input in [1, 256, u64::MAX / 2, u64::MAX] {
-            let bn = BigNat::<Fp>::from_u64(
+        for input in [0, 256, u64::MAX / 2, u64::MAX] {
+            let bn = BigUint::<Fp>::from_u64(
                 input,
                 NonZeroUsize::new(mem::size_of::<u64>() * 8).unwrap(),
                 NonZeroUsize::new(4).unwrap(),
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn from_u128() {
         for input in [u128::from(u64::MAX) + 1, u128::MAX / 2, u128::MAX] {
-            let bn = BigNat::<Fp>::from_u128(
+            let bn = BigUint::<Fp>::from_u128(
                 input,
                 NonZeroUsize::new(mem::size_of::<u128>() * 8).unwrap(),
                 NonZeroUsize::new(4).unwrap(),
@@ -288,7 +288,7 @@ mod tests {
     #[test]
     fn from_two_limbs() {
         let input = BigInt::from(u128::MAX) * BigInt::from(u128::MAX);
-        let bn = BigNat::<Fp>::from_bigint(
+        let bn = BigUint::<Fp>::from_bigint(
             &input,
             NonZeroUsize::new(mem::size_of::<u128>() * 8).unwrap(),
             NonZeroUsize::new(4).unwrap(),
@@ -309,7 +309,7 @@ mod tests {
     #[test]
     fn limbs_count_err() {
         let input = BigInt::from(u128::MAX) * BigInt::from(u128::MAX);
-        let result_with_bn = BigNat::<Fp>::from_bigint(
+        let result_with_bn = BigUint::<Fp>::from_bigint(
             &input,
             NonZeroUsize::new(mem::size_of::<u64>() * 8).unwrap(),
             NonZeroUsize::new(1).unwrap(),

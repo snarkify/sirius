@@ -15,12 +15,12 @@ use num_traits::{One, ToPrimitive, Zero};
 
 use crate::main_gate::{AssignAdviceFrom, MainGate, MainGateConfig, RegionCtx};
 
-use super::big_nat::{self, BigNat};
+use super::big_uint::{self, BigUint};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
-    BigNat(#[from] big_nat::Error),
+    BigUint(#[from] big_uint::Error),
     #[error(transparent)]
     Halo2(#[from] halo2_proofs::plonk::Error),
     #[error(
@@ -33,13 +33,13 @@ pub const MAIN_GATE_T: usize = 4;
 
 /// Multiplication of two large natural numbers by mod
 #[derive(Debug)]
-pub struct BigNatMulModChip<F: ff::PrimeField> {
+pub struct BigUintMulModChip<F: ff::PrimeField> {
     main_gate: MainGate<F, MAIN_GATE_T>,
     limb_width: NonZeroUsize,
     limbs_count_limit: NonZeroUsize,
 }
 
-impl<F: ff::PrimeField> BigNatMulModChip<F> {
+impl<F: ff::PrimeField> BigUintMulModChip<F> {
     pub fn new(
         config: <Self as Chip<F>>::Config,
         limb_width: NonZeroUsize,
@@ -52,8 +52,8 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         }
     }
 
-    pub fn to_bignat(&self, input: &BigInt) -> Result<BigNat<F>, Error> {
-        Ok(BigNat::<F>::from_bigint(
+    pub fn to_bignat(&self, input: &BigInt) -> Result<BigUint<F>, Error> {
+        Ok(BigUint::<F>::from_bigint(
             input,
             self.limb_width,
             self.limbs_count_limit,
@@ -87,7 +87,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     fn assign_sum(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        lhs: &OverflowingBigNat<F>,
+        lhs: &OverflowingBigUint<F>,
         rhs: &[F],
     ) -> Result<SumContext<F>, Error> {
         let lhs_column = &self.config().state[0];
@@ -141,12 +141,12 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         )?;
 
         let rhs_max_word =
-            big_nat::nat_to_f::<F>(&big_nat::get_big_int_with_n_ones(self.limb_width.get()))
+            big_uint::nat_to_f::<F>(&big_uint::get_big_int_with_n_ones(self.limb_width.get()))
                 .unwrap_or_default();
 
         Ok(SumContext {
             rhs: rhs_cells,
-            res: OverflowingBigNat {
+            res: OverflowingBigUint {
                 cells: sum_cells,
                 max_word: lhs.max_word + rhs_max_word,
             },
@@ -310,20 +310,20 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         Ok(MultContext {
             lhs: lhs_cells.into_iter().flatten().collect(),
             rhs: rhs_cells.into_iter().flatten().collect(),
-            res: OverflowingBigNat {
+            res: OverflowingBigUint {
                 cells: production_cells,
                 max_word: min_limbs_count * rhs_max_word * lhs_max_word,
             },
         })
     }
 
-    /// Re-group limbs of `BigNat`
+    /// Re-group limbs of `BigUint`
     ///
     /// This function performs re-grouping limbs
     /// With [`calc_limbs_per_group`] we calculate how many
     /// limbs will fit in one group, given that the current
     /// limbs are merged into new limbs. The result is wrapped
-    /// in [`GroupedBigNat`]
+    /// in [`GroupedBigUint`]
     ///
     /// For every `k` rows looks like:
     /// ```markdown
@@ -344,12 +344,12 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     fn group_limbs(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        bignat_cells: OverflowingBigNat<F>,
-    ) -> Result<GroupedBigNat<F>, Error> {
+        bignat_cells: OverflowingBigUint<F>,
+    ) -> Result<GroupedBigUint<F>, Error> {
         trace!("Group {} limbs: {:?}", bignat_cells.len(), bignat_cells);
 
         let limb_width = self.limb_width.get();
-        let carry_bits = calc_carry_bits(&big_nat::f_to_nat(&bignat_cells.max_word), limb_width)?;
+        let carry_bits = calc_carry_bits(&big_uint::f_to_nat(&bignat_cells.max_word), limb_width)?;
         let limbs_per_group = calc_limbs_per_group::<F>(carry_bits, limb_width)?;
 
         let group_count = bignat_cells.cells.len().sub(1).div(limbs_per_group).add(1);
@@ -446,13 +446,13 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
             acc
         });
 
-        Ok(GroupedBigNat {
+        Ok(GroupedBigUint {
             cells: grouped,
-            max_word: big_nat::nat_to_f::<F>(&grouped_max_word).unwrap() * bignat_cells.max_word,
+            max_word: big_uint::nat_to_f::<F>(&grouped_max_word).unwrap() * bignat_cells.max_word,
         })
     }
 
-    /// Compares two [`GroupedBigNat`] numbers for equality.
+    /// Compares two [`GroupedBigUint`] numbers for equality.
     ///
     /// The algorithm can be described as follows:
     /// ```latex
@@ -503,27 +503,27 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     /// }
     /// ```
     /// - also at each step except the last one we check that the carry
-    ///   fits ([`BigNatMulModChip::check_fits_in_bits`]) into the carry
+    ///   fits ([`BigUintMulModChip::check_fits_in_bits`]) into the carry
     ///   bits ([`calc_carry_bits`]).
     /// - in the last step, we check that `carry[n] = m[n]`
     fn is_equal(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        lhs: GroupedBigNat<F>,
-        rhs: GroupedBigNat<F>,
+        lhs: GroupedBigUint<F>,
+        rhs: GroupedBigUint<F>,
     ) -> Result<(), Error> {
         let limb_width = self.limb_width.get();
 
         let max_word_bn: BigInt = cmp::max(
-            big_nat::f_to_nat(&lhs.max_word),
-            big_nat::f_to_nat(&rhs.max_word),
+            big_uint::f_to_nat(&lhs.max_word),
+            big_uint::f_to_nat(&rhs.max_word),
         );
-        let max_word: F = big_nat::nat_to_f(&max_word_bn).unwrap();
+        let max_word: F = big_uint::nat_to_f(&max_word_bn).unwrap();
 
         debug!("max word: {max_word_bn}");
 
         let target_base_bn = BigInt::one() << limb_width;
-        let target_base: F = big_nat::nat_to_f(&target_base_bn).expect("TODO");
+        let target_base: F = big_uint::nat_to_f(&target_base_bn).expect("TODO");
 
         let mut accumulated_extra = BigInt::zero();
         let carry_bits = calc_carry_bits(&max_word_bn, limb_width)?;
@@ -577,7 +577,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                     || "max word for equal check",
                     *m_i_column,
                     Value::known(
-                        big_nat::nat_to_f(&(&accumulated_extra % &target_base_bn)).expect("TODO"),
+                        big_uint::nat_to_f(&(&accumulated_extra % &target_base_bn)).expect("TODO"),
                     ),
                 )?;
                 debug!("assigned_m_i: {:?}", assigned_m_i);
@@ -669,9 +669,9 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
                 // -carry [i] * w
                 let carry =
                     (prev_carry + lhs_sub_rhs + assigned_max_word.value()).map(|dividend_carry| {
-                        let dividend_carry = big_nat::f_to_nat(&dividend_carry);
+                        let dividend_carry = big_uint::f_to_nat(&dividend_carry);
 
-                        big_nat::nat_to_f(&(dividend_carry / &target_base_bn)).unwrap()
+                        big_uint::nat_to_f(&(dividend_carry / &target_base_bn)).unwrap()
                     });
 
                 let carry_cell =
@@ -702,7 +702,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         let _m_n = ctx.assign_advice(
             || "`m_n` for equal check",
             *m_i_column,
-            Value::known(big_nat::nat_to_f(&accumulated_extra).unwrap()),
+            Value::known(big_uint::nat_to_f(&accumulated_extra).unwrap()),
         )?;
         ctx.assign_fixed(|| "selector `m_n`", *m_i_selector, -F::ONE)?;
 
@@ -783,7 +783,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     /// First it splits the cell value into bits, takes the first
     /// `expected_bits_count` and assigns them to advice column,
     /// proving that each of the bits is 0 or 1 by
-    /// [`BigNatMulModChip::assign_and_check_bits`].
+    /// [`BigUintMulModChip::assign_and_check_bits`].
     ///
     /// Second, it checks that the sum of all these bits converges
     /// to the cell value using multiplication by powers of two.
@@ -891,11 +891,11 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
 }
 
 #[derive(Debug, Clone)]
-struct OverflowingBigNat<F: ff::PrimeField> {
+struct OverflowingBigUint<F: ff::PrimeField> {
     cells: Vec<AssignedCell<F, F>>,
     max_word: F,
 }
-impl<F: ff::PrimeField> Deref for OverflowingBigNat<F> {
+impl<F: ff::PrimeField> Deref for OverflowingBigUint<F> {
     type Target = [AssignedCell<F, F>];
     fn deref(&self) -> &Self::Target {
         self.cells.as_slice()
@@ -903,11 +903,11 @@ impl<F: ff::PrimeField> Deref for OverflowingBigNat<F> {
 }
 
 #[derive(Debug, Clone)]
-struct GroupedBigNat<F: ff::PrimeField> {
+struct GroupedBigUint<F: ff::PrimeField> {
     cells: Vec<AssignedCell<F, F>>,
     max_word: F,
 }
-impl<F: ff::PrimeField> Deref for GroupedBigNat<F> {
+impl<F: ff::PrimeField> Deref for GroupedBigUint<F> {
     type Target = [AssignedCell<F, F>];
     fn deref(&self) -> &Self::Target {
         self.cells.as_slice()
@@ -931,19 +931,19 @@ impl<F: PrimeField> Deref for MultModResult<F> {
 pub struct MultContext<F: PrimeField> {
     lhs: Vec<AssignedCell<F, F>>,
     rhs: Vec<AssignedCell<F, F>>,
-    res: OverflowingBigNat<F>,
+    res: OverflowingBigUint<F>,
 }
 
 pub struct SumContext<F: PrimeField> {
     rhs: Vec<AssignedCell<F, F>>,
-    res: OverflowingBigNat<F>,
+    res: OverflowingBigUint<F>,
 }
 
-impl<F: ff::PrimeField> BigNatMulModChip<F> {
+impl<F: ff::PrimeField> BigUintMulModChip<F> {
     /// Performs the multiplication of `lhs` and `rhs` taking into account the `modulus`.
     ///
     /// This method serves as an implementation of modular multiplication in the context
-    /// of Halo2 protocol. This implementation leverages the use of the `BigNatMulModChip`
+    /// of Halo2 protocol. This implementation leverages the use of the `BigUintMulModChip`
     /// to perform efficient calculation of large primes.
     ///
     /// # Arguments
@@ -953,8 +953,8 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     /// * `modulus`: array of `AssignedCell` representing the modulus.
     ///
     /// # Order of Operations
-    /// 1. Convert `lhs`, `rhs`, and `modulus` to `BigNat` objects using [`big_nat::BigNat::from_assigned_cells`].
-    /// 2. Perform the modular multiplication `lhs * rhs` using the converted `BigNat` numbers.
+    /// 1. Convert `lhs`, `rhs`, and `modulus` to `BigUint` objects using [`big_uint::BigUint::from_assigned_cells`].
+    /// 2. Perform the modular multiplication `lhs * rhs` using the converted `BigUint` numbers.
     /// 2.1. This includes the calculation of the quotient and remainder.
     /// 3. Assign the modular multiplication to the left using [`Self::assign_mult`].
     /// 4. Calculate `q * m` and the sum `q * m + r` using [`Self::assign_mult`] and [`Self::assign_sum`] respectively.
@@ -965,7 +965,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     /// * A result wrapping `MultModResult` object containing the calculated quotient and remainder.
     ///
     /// # Errors
-    /// This method will return an error if there is an issue in the conversion of `lhs`, `rhs`, or `modulus` into `BigNat`
+    /// This method will return an error if there is an issue in the conversion of `lhs`, `rhs`, or `modulus` into `BigUint`
     /// or if the assignment of multiplication and addition fails
     pub fn mult_mod(
         &self,
@@ -977,7 +977,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         // lhs * rhs = q * m + r
 
         let to_bn = |val| {
-            big_nat::BigNat::from_assigned_cells(val, self.limb_width, self.limbs_count_limit)
+            big_uint::BigUint::from_assigned_cells(val, self.limb_width, self.limbs_count_limit)
         };
 
         let mod_bn = to_bn(modulus)?;
@@ -1003,7 +1003,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
         // lhs * rhs
 
         let max_word_without_overflow: F =
-            big_nat::nat_to_f(&big_nat::get_big_int_with_n_ones(self.limb_width.get()))
+            big_uint::nat_to_f(&big_uint::get_big_int_with_n_ones(self.limb_width.get()))
                 .unwrap_or_default();
 
         let MultContext { res: left, .. } = self.assign_mult(
@@ -1052,7 +1052,7 @@ impl<F: ff::PrimeField> BigNatMulModChip<F> {
     }
 }
 
-impl<F: ff::PrimeField> Chip<F> for BigNatMulModChip<F> {
+impl<F: ff::PrimeField> Chip<F> for BigUintMulModChip<F> {
     type Config = MainGateConfig<MAIN_GATE_T>;
     type Loaded = ();
 
