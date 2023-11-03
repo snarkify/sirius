@@ -10,10 +10,11 @@ use halo2_proofs::plonk::ConstraintSystem;
 use halo2_proofs::plonk::Expression as PE;
 use halo2_proofs::poly::Rotation;
 
-/// starting from vector lookup: {(a1,a2,...,ak)} \subset {(t1,t2,...,tk)}
+/// Starting from vector lookup: {(a1,a2,...,ak)} \subset {(t1,t2,...,tk)}
 /// where {ai} are expressions over columns (x1,...xa)
 /// {ti} are expressions over columns (y1,...,yb)
-/// we assume (y1,...,yb) are fixed columns
+///
+/// We assume (y1,...,yb) are fixed columns
 /// compress them into one multi-polynomial:
 /// lookup_poly = L(x1,...,xa) = a1+a2*r+a3*r^2+...
 /// table_poly = T(y1,...,yb) = t1+t2*r+t3*r^2+...
@@ -26,17 +27,17 @@ pub struct Argument<F: PrimeField> {
 /// lookup structure includes all the necessary information of folding scheme for lookup
 #[derive(Clone, PartialEq)]
 pub struct Structure<C: CurveAffine> {
-    // 2^k1 is the length of lookup vector [`Witness`] l
+    /// 2^k1 is the length of lookup vector [`Witness::l`]
     pub(crate) k1: usize,
-    // 2^k2 is the length of table vector [`Witness`] t
+    /// 2^k2 is the length of table vector [`Witness::t`]
     pub(crate) k2: usize,
-    // commitment of [t], we assume table t is constructed by fixed columns
+    /// commitment of [`Witness::t`], we assume table t is constructed by fixed columns
     pub(crate) t_commitment: C,
-    // check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
+    /// check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
     pub(crate) l_rel: MultiPolynomial<C::ScalarExt>,
-    // check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
+    /// check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
     pub(crate) t_rel: MultiPolynomial<C::ScalarExt>,
-    // check sum_i h_i = sum_i g_i
+    /// check sum_i h_i = sum_i g_i
     pub(crate) h_mat: SparseMatrix<C::ScalarExt>,
     pub(crate) g_mat: SparseMatrix<C::ScalarExt>,
 }
