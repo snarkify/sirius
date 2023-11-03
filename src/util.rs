@@ -30,7 +30,7 @@ pub fn bits_to_bytes_le(bits: Vec<bool>) -> Vec<u8> {
     bytes
 }
 
-pub fn fe_to_bits_le<F: PrimeField>(fe: F) -> Vec<bool> {
+pub fn fe_to_bits_le<F: PrimeField>(fe: &F) -> Vec<bool> {
     let big = fe_to_big(fe);
     let bytes = big.to_bytes_le();
     bytes_to_bits_le(bytes)
@@ -45,30 +45,39 @@ pub fn bits_to_fe_le<F: PrimeField>(bits: Vec<bool>) -> F {
 }
 
 pub fn modulus<F: PrimeField>() -> BigUint {
-    fe_to_big(-F::ONE) + 1usize
+    fe_to_big(&(-F::ONE)) + 1usize
 }
 
-pub fn fe_from_big<F: PrimeField>(big: BigUint) -> F {
+pub fn fe_from_big<F: PrimeField>(big: BigUint) -> Option<F> {
     let bytes = big.to_bytes_le();
     let mut repr = F::Repr::default();
-    assert!(bytes.len() <= repr.as_ref().len());
+
+    if bytes.len() > repr.as_ref().len() {
+        return None;
+    }
+
     repr.as_mut()[..bytes.len()].clone_from_slice(bytes.as_slice());
-    F::from_repr(repr).unwrap()
+
+    F::from_repr(repr).into()
 }
 
-pub fn fe_to_big<F: PrimeField>(fe: F) -> BigUint {
+pub fn fe_to_big<F: PrimeField>(fe: &F) -> BigUint {
     BigUint::from_bytes_le(fe.to_repr().as_ref())
 }
 
-pub fn fe_to_fe<F1: PrimeField, F2: PrimeField>(fe: F1) -> F2 {
+pub fn fe_to_fe<F1: PrimeField, F2: PrimeField>(fe: &F1) -> Option<F2> {
     fe_from_big(fe_to_big(fe) % modulus::<F2>())
 }
 
-pub fn fe_to_fe_safe<F1: PrimeField, F2: PrimeField>(fe: F1) -> F2 {
+pub fn fe_to_fe_safe<F1: PrimeField, F2: PrimeField>(fe: &F1) -> Option<F2> {
     let bn1 = fe_to_big(fe);
     let bn2 = modulus::<F2>();
-    assert!(bn1 < bn2);
-    fe_from_big(bn1)
+
+    if bn1 >= bn2 {
+        None
+    } else {
+        fe_from_big(bn1)
+    }
 }
 
 fn invert<F: Field>(

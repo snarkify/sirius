@@ -454,7 +454,7 @@ mod tests {
                         ctx.next();
                         ecc_chip.add(ctx, &a, &b)
                     } else {
-                        let lambda: C::Base = fe_to_fe_safe(self.lambda);
+                        let lambda: C::Base = fe_to_fe_safe(&self.lambda).unwrap();
                         let bit_len = lambda.to_le_bits().len();
                         let lambda = ctx.assign_advice(
                             || "lambda",
