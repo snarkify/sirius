@@ -252,10 +252,12 @@ impl<C: CurveAffine<ScalarExt = F>, F: PrimeField> Structure<C> {
         // check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
         let t_rel = (g * (t + r) - m).expand();
         // check sum_i h_i = sum_i g_i, i.e. h_mat * h = g_mat * g
-        let mut h_mat = Vec::new();
-        let mut g_mat = Vec::new();
-        let _ = (0..2_usize.pow(k1 as u32)).map(|i| h_mat.push((0, i, F::ONE)));
-        let _ = (0..2_usize.pow(k2 as u32)).map(|i| g_mat.push((0, i, F::ONE)));
+        let h_mat = (0..2_usize.pow(k1 as u32))
+            .map(|i| (0, i, F::ONE))
+            .collect();
+        let g_mat = (0..2_usize.pow(k2 as u32))
+            .map(|i| (0, i, F::ONE))
+            .collect();
 
         Self {
             k1,
