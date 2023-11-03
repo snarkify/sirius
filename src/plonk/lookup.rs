@@ -227,25 +227,14 @@ impl<F: PrimeField> Argument<F> {
                 })
                 .expand()
         };
-        let input_polys = cs
-            .lookups()
-            .iter()
-            .map(|arg| compress_expression(arg.input_expressions()))
-            .collect::<Vec<_>>();
-        let table_polys = cs
-            .lookups()
-            .iter()
-            .map(|arg| compress_expression(arg.table_expressions()))
-            .collect::<Vec<_>>();
 
-        input_polys
-            .into_iter()
-            .zip(table_polys)
-            .map(|(lookup_poly, table_poly)| Self {
-                lookup_poly,
-                table_poly,
+        cs.lookups()
+            .iter()
+            .map(|arg| Self {
+                lookup_poly: compress_expression(arg.input_expressions()),
+                table_poly: compress_expression(arg.table_expressions()),
             })
-            .collect::<Vec<_>>()
+            .collect()
     }
 }
 
