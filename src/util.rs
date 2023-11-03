@@ -71,9 +71,8 @@ pub fn fe_to_fe<F1: PrimeField, F2: PrimeField>(fe: &F1) -> Option<F2> {
 
 pub fn fe_to_fe_safe<F1: PrimeField, F2: PrimeField>(fe: &F1) -> Option<F2> {
     let bn1 = fe_to_big(fe);
-    let bn2 = modulus::<F2>();
 
-    if bn1 >= bn2 {
+    if bn1 >= modulus::<F2>() {
         None
     } else {
         fe_from_big(bn1)

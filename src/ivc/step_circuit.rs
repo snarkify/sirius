@@ -201,7 +201,7 @@ where
     fn synthesize<RO: ROCircuitTrait<C::Base, Config = MainGateConfig>>(
         &self,
         config: StepConfig<ARITY, C, Self>,
-        layouter: &mut impl Layouter<C::Scalar>,
+        layouter: &mut impl Layouter<C::Base>,
         input: StepInputs<ARITY, C, RO>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
         // Synthesize the circuit for the base case and get the new running instance
@@ -217,7 +217,7 @@ where
 
     fn synthesize_step_base_case<RO: ROCircuitTrait<C::Base, Config = MainGateConfig>>(
         &self,
-        layouter: &mut impl Layouter<C::Scalar>,
+        layouter: &mut impl Layouter<C::Base>,
         public_params: &SynthesizeStepParams<C, RO>,
         u: Option<&PlonkInstance<C>>,
     ) -> Result<FoldRelaxedPlonkInstanceChip<C>, SynthesisError> {
@@ -248,7 +248,7 @@ where
     fn synthesize_step_not_base_case<RO: ROCircuitTrait<C::Base, Config = MainGateConfig>>(
         &self,
         config: &StepConfig<ARITY, C, Self>,
-        layouter: &mut impl Layouter<C::Scalar>,
+        layouter: &mut impl Layouter<C::Base>,
         input: StepInputs<ARITY, C, RO>,
     ) -> Result<FoldRelaxedPlonkInstanceChip<C>, SynthesisError> {
         // TODO Check hash of params
