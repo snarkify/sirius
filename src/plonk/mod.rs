@@ -116,7 +116,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb_point(self.W_commitment);
         for inst in self.instance.iter().take(2) {
-            ro.absorb_base(fe_to_fe(*inst));
+            ro.absorb_base(fe_to_fe(inst).unwrap());
         }
     }
 }
@@ -125,9 +125,9 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb_point(self.W_commitment);
         for inst in self.instance.iter().take(2) {
-            ro.absorb_base(fe_to_fe(*inst));
+            ro.absorb_base(fe_to_fe(inst).unwrap());
         }
-        ro.absorb_base(fe_to_fe(self.u));
+        ro.absorb_base(fe_to_fe(&self.u).unwrap());
         ro.absorb_point(self.E_commitment);
     }
 }
