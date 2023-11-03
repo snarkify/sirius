@@ -173,7 +173,7 @@ impl<
         }
 
         let output = self.state.inner[1];
-        let bits = fe_to_bits_le(output)[..num_bits].to_vec();
+        let bits = fe_to_bits_le(&output)[..num_bits].to_vec();
         bits_to_fe_le(bits)
     }
 
