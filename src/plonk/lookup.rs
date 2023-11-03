@@ -2,9 +2,7 @@
 //!
 //! This module implements a special soundness protocol for lookup arguments
 //! within zero-knowledge proofs, utilizing a logarithmic derivative approach
-//! to efficiently prove the inclusion of one set within another. The protocol
-//! is designed to work with the Halo2 proving system and leverages the
-//! arithmetic over prime fields and elliptic curve operations.
+//! to efficiently prove the inclusion of one set within another.
 //!
 //! ## Overview
 //!
@@ -12,8 +10,6 @@
 //! commitments, lookup arguments are a crucial component. They allow a prover
 //! to assert that a set of values (the lookup vector) is contained within
 //! another set (the table vector), without revealing the actual values.
-//! This module provides the necessary constructs to perform these assertions
-//! in a way that is both succinct and sound.
 //!
 //! The protocol follows the principles outlined in the "protostar" paper,
 //! focusing on the use of logarithmic derivatives to compress multiple
@@ -44,7 +40,10 @@
 //! - Calculate inverse terms required for the protocol.
 //! - Verify the satisfaction of the lookup argument.
 //!
-//! Reference: Section 4.3 in [Protostar](https://eprint.iacr.org/2023/620)
+//! ## References
+//!
+//! - Lookup argument in [halo2](https://zcash.github.io/halo2/design/proving-system/lookup.html)
+//! - IVC description in Section 4.3 in [Protostar](https://eprint.iacr.org/2023/620)
 
 use ff::PrimeField;
 use halo2_proofs::{
