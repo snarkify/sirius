@@ -1,7 +1,50 @@
-//! This mod implements the special soundness protocol for lookup arguments
-//! using log derivative approach.
+//! # Special Soundness Protocol for Lookup Arguments
 //!
-//! Reference: Section 4.3 in [protostar](https://eprint.iacr.org/2023/620)
+//! This module implements a special soundness protocol for lookup arguments
+//! within zero-knowledge proofs, utilizing a logarithmic derivative approach
+//! to efficiently prove the inclusion of one set within another. The protocol
+//! is designed to work with the Halo2 proving system and leverages the
+//! arithmetic over prime fields and elliptic curve operations.
+//!
+//! ## Overview
+//!
+//! In zero-knowledge proofs, particularly those involving polynomial
+//! commitments, lookup arguments are a crucial component. They allow a prover
+//! to assert that a set of values (the lookup vector) is contained within
+//! another set (the table vector), without revealing the actual values.
+//! This module provides the necessary constructs to perform these assertions
+//! in a way that is both succinct and sound.
+//!
+//! The protocol follows the principles outlined in the "protostar" paper,
+//! focusing on the use of logarithmic derivatives to compress multiple
+//! expressions into a single polynomial.
+//!
+//! ## Key Components
+//!
+//! - [`Argument`]: Represents the lookup argument with compressed polynomials
+//!   for both the lookup vector and the table vector.
+//! - [`Structure`]: Contains all the necessary information for the folding
+//!   scheme of the lookup argument, including commitments and relations.
+//! - [`Instance`]: Holds commitments for the lookup and table vectors, along
+//!   with a random challenge.
+//! - [`Witness`]: Represents the actual values for the lookup and table vectors,
+//!   along with multiplicity and inverse terms.
+//! - [`RelaxedInstance`]: A variant of `Instance` that includes additional
+//!   commitments for error terms.
+//! - [`RelaxedWitness`]: A variant of `Witness` that includes error vectors
+//!   for relaxed instances.
+//!
+//! ## Functionality
+//!
+//! The module provides functions to:
+//!
+//! - Compress multiple lookup arguments into a single polynomial.
+//! - Construct new structures with commitments based on the table vector.
+//! - Calculate coefficients for the logarithmic derivative formula.
+//! - Calculate inverse terms required for the protocol.
+//! - Verify the satisfaction of the lookup argument.
+//!
+//! Reference: Section 4.3 in [Protostar](https://eprint.iacr.org/2023/620)
 
 use ff::PrimeField;
 use halo2_proofs::{
