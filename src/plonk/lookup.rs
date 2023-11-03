@@ -15,96 +15,150 @@ use crate::{
     polynomial::{sparse::SparseMatrix, Expression, MultiPolynomial, Query},
 };
 
-/// Starting from vector lookup: {(a1,a2,...,ak)} \subset {(t1,t2,...,tk)}
-/// where {ai} are expressions over columns (x1,...xa)
-/// {ti} are expressions over columns (y1,...,yb)
+/// Lookup Argument
 ///
-/// We assume (y1,...,yb) are fixed columns
-/// compress them into one multi-polynomial:
-/// lookup_poly = L(x1,...,xa) = a1+a2*r+a3*r^2+...
-/// table_poly = T(y1,...,yb) = t1+t2*r+t3*r^2+...
+/// Starting from vector lookup:
+/// {(a_1, a_2, ..., a_k)} subset of {(t_1, t_2, ..., t_k)}
+/// where:
+/// - a_i are expressions over columns (x_1, ..., x_a)
+/// - t_i are expressions over columns (y_1, ..., y_b)
+///
+/// We assume (y_1,...,y_b) are fixed columns compress them
+/// into one multi-polynomial:
+/// - lookup_poly = L(x_1,...,x_a) = a_1 + a_2*r + a_3*r^2 + ...
+/// - table_poly  = T(y_1,...,y_b) = t_1 + t_2*r + t_3*r^2 + ...
 #[derive(Clone, PartialEq)]
 pub struct Argument<F: PrimeField> {
+    /// Multi-polynomial representation of the lookup vector.
     pub(crate) lookup_poly: MultiPolynomial<F>,
+    /// Multi-polynomial representation of the table vector.
     pub(crate) table_poly: MultiPolynomial<F>,
 }
 
-/// lookup structure includes all the necessary information of folding scheme for lookup
+/// Lookup structure includes all the necessary information of folding scheme for lookup
+///
+/// This includes the necessary components for the folding scheme of lookup arguments,
+/// such as commitments and relations. It is a key part of the IVC scheme,
+/// allowing for efficient verification of lookup arguments.
 #[derive(Clone, PartialEq)]
 pub struct Structure<C: CurveAffine> {
     /// 2^k1 is the length of lookup vector [`Witness::l`]
     pub(crate) k1: usize,
     /// 2^k2 is the length of table vector [`Witness::t`]
     pub(crate) k2: usize,
-    /// commitment of [`Witness::t`], we assume table t is constructed by fixed columns
+    /// Commitment of [`Witness::t`], we assume table t is constructed by fixed columns
     pub(crate) t_commitment: C,
-    /// check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
+    /// Check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
     pub(crate) l_rel: MultiPolynomial<C::ScalarExt>,
-    /// check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
+    /// Check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
     pub(crate) t_rel: MultiPolynomial<C::ScalarExt>,
-    /// check sum_i h_i = sum_i g_i
+    /// Check sum_i h_i = sum_i g_i
     pub(crate) h_mat: SparseMatrix<C::ScalarExt>,
     pub(crate) g_mat: SparseMatrix<C::ScalarExt>,
 }
 
+/// Represents an instance of a lookup argument
+///
+/// This structure holds commitments and a random challenge, which are essential
+/// for the evaluation and verification of lookup arguments in the IVC scheme
 pub struct Instance<C: CurveAffine> {
-    // commitment of l\cup m
+    /// Commitment to the concatenation of witness vectors [`Witness::l`] and [`Witness::m`].
     pub(crate) l_m_commitment: C,
-    // commitment of h\cup g
+    /// Commitment to the concatenation of witness vectors [`Witness::h`] and [`Witness::g`].
     pub(crate) h_g_commitment: C,
+    /// Random challenge used in the verification process.
     pub(crate) r: C::ScalarExt,
 }
 
-/// multiplicity_vec = \vec{m_i}
+/// Contains the witness vectors for a lookup argument
+///
+/// The witness vectors are crucial for constructing and verifying lookup arguments.
+/// They are used to calculate multiplicity vectors and inverse terms as part of the
+/// IVC scheme's verification process.
 #[derive(Clone)]
 pub struct Witness<F: PrimeField> {
-    //  l_i = L(x1[i],...,xa[i])
+    /// Lookup vector, used to calculate the multiplicity vector.
+    ///
+    /// l_i = L(x1[i],...,xa[i])
     pub(crate) l: Vec<F>,
-    // t: is used to calculate m, h, g; no need to fold
+
+    /// Table vector, used in the calculation of `m`, `h`, and `g`.
+    /// No need to fold
     pub(crate) t: Vec<F>,
-    // multiplicity vector
+
+    /// Multiplicity vector, representing the coefficients in the log
+    /// derivative formula.
     pub(crate) m: Vec<F>,
+
+    /// Inverse terms for the lookup vector.
+    /// This vector contains the inverse of each element in the lookup
+    /// vector plus a random challenge `r`.
     pub(crate) h: Vec<F>,
+
+    /// Inverse terms for the table vector.
+    /// This vector contains the product of the multiplicity vector and the inverse
+    /// of each element in the table vector plus a random challenge `r`.
     pub(crate) g: Vec<F>,
 }
 
+/// Represents a relaxed instance of a lookup argument
+///
+/// This structure is used when a more flexible approach to lookup argument verification is needed.
+/// It includes additional commitments and variables that allow for a relaxed verification process,
+/// which can be beneficial in certain scenarios within the IVC scheme.
 pub struct RelaxedInstance<C: CurveAffine> {
-    // commitment of l\cup m
+    /// Commitment to the concatenation of witness vectors [`Witness::l`] and [`Witness::m`].
     pub(crate) l_m_commitment: C,
-    // commitment of h\cup g
+    /// Commitment to the concatenation of witness vectors [`Witness::h`] and [`Witness::g`].
     pub(crate) h_g_commitment: C,
-    // commitment of e_l\cup e_t
+    /// Commitment to the error vectors `e_l` and `e_t`.
     pub(crate) E_commitment: C,
-    // random challenge
+    /// Random challenge used in the verification process
     pub(crate) r: C::ScalarExt,
-    // homogenous variable
+    /// Homogenous variable used in the relaxed verification process
     pub(crate) u: C::ScalarExt,
 }
 
+/// Contains the relaxed witness vectors for a lookup argument.
+///
+/// Similar to the standard witness structure, but includes error vectors for a more flexible
+/// verification process.
 #[derive(Clone)]
 pub struct RelaxedWitness<F: PrimeField> {
-    // l: folded from multiple Witness.l
+    /// Folded from multiple [`Witness::l`]
     pub(crate) l: Vec<F>,
-    // m: folded from multiple Witness.m
+    /// Folded from multiple [`Witness::m`]
     pub(crate) m: Vec<F>,
-    // h: folded from multiple Witness.h
+    /// Folded from multiple [`Witness::h`]
     pub(crate) h: Vec<F>,
-    // g: folded from multiple Witness.g
+    /// g: folded from multiple [`Witness::g`]
     pub(crate) g: Vec<F>,
-    // error vector of l_rel, length 2^k1
+    /// Error vector of `l_rel`, length 2^k1
     pub(crate) e_l: Vec<F>,
-    // error vector of t_rel, length 2^k2
+    /// Error vector of `t_rel`, length 2^k2
     pub(crate) e_t: Vec<F>,
 }
 
-/// Used for evaluate lookup relation
+/// Provides a domain for evaluating lookup relations
+///
+/// This structure is used to hold references to witness vectors for the purpose of evaluating
+/// lookup relations. It is a utility structure that facilitates the computation of expressions
+/// within the IVC scheme.
 pub struct LookupEvalDomain<'a, F: PrimeField> {
+    /// Reference to the first witness vector.
+    /// This is used to evaluate the lookup relation for the first set of witness values.
     pub(crate) W1: &'a Witness<F>,
+    /// Reference to the second witness vector.
+    /// This is used to evaluate the lookup relation for the second set of witness values.
     pub(crate) W2: &'a Witness<F>,
 }
 
 impl<F: PrimeField> Argument<F> {
-    /// retrieve and compress vector of Lookup Arguments from constraint system
+    /// Compresses a vector of Lookup Arguments from a constraint system into a single multi-polynomial.
+    ///
+    /// This function is crucial for the IVC scheme as it reduces the complexity of the lookup argument,
+    /// making it more efficient to verify.
+    ///
     /// TODO #39:  halo2 assumes lookup relation to be true over all rows, in reality we may only
     /// lookup a few items. need find a way to remove padded rows for lookup_vec
     pub fn compress_from(cs: &ConstraintSystem<F>) -> Vec<Self> {
@@ -153,6 +207,19 @@ impl<F: PrimeField> Argument<F> {
 }
 
 impl<C: CurveAffine<ScalarExt = F>, F: PrimeField> Structure<C> {
+    /// Constructs a new `Structure` instance for managing lookup arguments.
+    /// This function initializes the structure with the necessary components for the folding scheme.
+    ///
+    /// # Arguments
+    ///
+    /// * `k1` - The power of 2 that determines the length of the lookup vector.
+    /// * `k2` - The power of 2 that determines the length of the table vector.
+    /// * `t_vec` - The table vector used to calculate the commitment.
+    /// * `ck` - A reference to the commitment key used for generating cryptographic commitments.
+    ///
+    /// # Returns
+    ///
+    /// A new instance of `Structure` with initialized fields.
     pub fn new(&self, k1: usize, k2: usize, t_vec: Vec<F>, ck: &CommitmentKey<C>) -> Self {
         let t_commitment = ck.commit(&t_vec[..]);
 
