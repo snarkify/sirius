@@ -1,14 +1,19 @@
 //! This mod implements the special soundness protocol for lookup arguments
 //! using log derivative approach.
-//! Reference: section 4.3 in [protostar](https://eprint.iacr.org/2023/620)  
-use crate::commitment::CommitmentKey;
-use crate::polynomial::sparse::SparseMatrix;
-use crate::polynomial::{Expression, MultiPolynomial, Query};
+//!
+//! Reference: Section 4.3 in [protostar](https://eprint.iacr.org/2023/620)
+
 use ff::PrimeField;
-use halo2_proofs::arithmetic::CurveAffine;
-use halo2_proofs::plonk::ConstraintSystem;
-use halo2_proofs::plonk::Expression as PE;
-use halo2_proofs::poly::Rotation;
+use halo2_proofs::{
+    arithmetic::CurveAffine,
+    plonk::{ConstraintSystem, Expression as PE},
+    poly::Rotation,
+};
+
+use crate::{
+    commitment::CommitmentKey,
+    polynomial::{sparse::SparseMatrix, Expression, MultiPolynomial, Query},
+};
 
 /// Starting from vector lookup: {(a1,a2,...,ak)} \subset {(t1,t2,...,tk)}
 /// where {ai} are expressions over columns (x1,...xa)
