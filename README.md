@@ -13,7 +13,7 @@ More precisely, $F$ is a function that accepts $z_{in}$ as input and $w$ as a pr
 
 This project is structured into three layers. The frontend layer accommodates constraint systems such as Plonk, R1CS, and AIR. The middle layer incorporates a folding scheme to accumulate the computation of n steps of $F$. Lastly, the backend layer utilizes polynomial IOP and polynomial commitment scheme to ensure the final verification is succinct and zero-knowledge.
 
-The project is still in its early stage, and we use box color to indicate the current progress.
+The project is still in its early stage, and we use blue color to indicate the current progress.
 <img width="1017" alt="fig4" src="https://github.com/snarkify/sirius/assets/3767044/4aa58340-acda-48db-9170-3941645e7c26">
 
 
