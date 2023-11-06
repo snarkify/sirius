@@ -239,6 +239,22 @@ pub struct MainGateConfig<const T: usize> {
     pub(crate) rc: Column<Fixed>,
 }
 
+impl<const T: usize> MainGateConfig<T> {
+    pub fn into_size<const N: usize>(&self) -> Option<MainGateConfig<N>> {
+        Some(MainGateConfig {
+            state: self.state.clone().as_slice().try_into().ok()?,
+            input: self.input,
+            out: self.out,
+            q_m: self.q_m,
+            q_1: self.q_1.clone().as_slice().try_into().ok()?,
+            q_5: self.q_5.clone().as_slice().try_into().ok()?,
+            q_i: self.q_i,
+            q_o: self.q_o,
+            rc: self.rc,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct MainGate<F: PrimeField, const T: usize> {
     config: MainGateConfig<T>,

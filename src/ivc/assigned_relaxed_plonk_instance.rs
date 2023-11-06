@@ -1,23 +1,24 @@
 use std::{iter, num::NonZeroUsize};
 
-use ff::{Field, FromUniformBytes, PrimeFieldBits};
+use ff::{Field, FromUniformBytes, PrimeFieldBits, WithSmallOrderMulGroup};
 use halo2_proofs::circuit::Value;
 use halo2curves::{Coordinates, CurveAffine};
 
 use crate::{
     constants::NUM_CHALLENGE_BITS,
     gadgets::{
-        ecc::AssignedPoint,
-        nonnative::bn::big_uint::{self, BigUint},
+        ecc::{AssignedPoint, EccChip},
+        nonnative::bn::{
+            big_uint::{self, BigUint},
+            big_uint_mul_mod_chip::BigUintMulModChip,
+        },
     },
-    main_gate::{AssignedBit, AssignedValue, MainGateConfig, RegionCtx, WrapValue},
+    main_gate::{AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
     nifs::CrossTermCommits,
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
     util,
 };
-
-use super::SynthesisError;
 
 pub(crate) struct FoldRelaxedPlonkInstanceChip<C: CurveAffine> {
     W: C,
@@ -40,7 +41,7 @@ struct AssignedWitness<C: CurveAffine> {
 
     plonk_W_commitment: AssignedPoint<C>,
     plonk_instance: Vec<Vec<AssignedValue<C::Base>>>,
-    cross_terms: Vec<AssignedPoint<C>>,
+    cross_terms_commits: Vec<AssignedPoint<C>>,
 
     r: Vec<AssignedBit<C::Base>>,
 }
@@ -114,7 +115,7 @@ where
         public_params_commit: &C::Base,
         instance: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
-    ) -> Result<Self, SynthesisError> {
+    ) -> Result<Self, Error> {
         let AssignedWitness {
             public_params_commit,
             W,
@@ -124,7 +125,7 @@ where
             assigned_X1,
             plonk_W_commitment,
             plonk_instance,
-            cross_terms,
+            cross_terms_commits,
             r,
         } = self.generate_challenge(
             region,
@@ -134,18 +135,45 @@ where
             instance,
             cross_term_commits,
         )?;
+
+        let ecc = EccChip::<C, C::Base, T>::new(config.clone());
+
+        let rW = ecc.scalar_mul(region, &plonk_W_commitment, &r)?;
+        let W_fold = ecc.add(region, &W, &rW);
+
+        // TODO Check what with all commits
+        let rT = ecc.scalar_mul(region, &cross_terms_commits[0], &r)?;
+        let E_fold = ecc.add(region, &E, &rT);
+
+        let gate = MainGate::new(config.clone());
+
+        let r_val = gate.le_bits_to_num(region, &r)?;
+        let u_fold = gate.add(region, &u, &r_val)?;
+
+        // TODO Copy constraint
+        let r_bn = BigUint::from_assigned_cells(&[r_val], self.limb_width, self.limbs_count)?;
+
+        // TODO Chagne `ZETA` to `m`
+        let m_bn = BigUint::from_f(C::Base::ZETA, self.limb_width, self.limbs_count);
+
+        let _bn_chip = BigUintMulModChip::<C::Base>::new(
+            config.into_size().unwrap(),
+            self.limb_width,
+            self.limbs_count,
+        );
+
         todo!()
     }
 
     fn generate_challenge<const T: usize>(
-        self,
+        &self,
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
         mut ro_circuit: impl ROCircuitTrait<C::Base>,
         public_params_commit: &C::Base,
         instance: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
-    ) -> Result<AssignedWitness<C>, SynthesisError> {
+    ) -> Result<AssignedWitness<C>, Error> {
         let mut advice_columns = config
             .state
             .iter()
@@ -303,6 +331,8 @@ where
 
         region.next();
 
+        let r = ro_circuit.squeeze_n_bits(region, NUM_CHALLENGE_BITS)?;
+
         Ok(AssignedWitness {
             public_params_commit: assigned_public_params_commit,
             W: assigned_W,
@@ -312,8 +342,8 @@ where
             assigned_X1,
             plonk_W_commitment: assigned_instance_W_commitment_coordinates,
             plonk_instance: assigned_input_instance,
-            cross_terms: assigned_cross_term_commits,
-            r: ro_circuit.squeeze_n_bits(region, NUM_CHALLENGE_BITS)?,
+            cross_terms_commits: assigned_cross_term_commits,
+            r,
         })
     }
 }
