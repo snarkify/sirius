@@ -5,7 +5,7 @@ use halo2_proofs::{
     circuit::{AssignedCell, Value},
     plonk::{Advice, Column},
 };
-use num_bigint::{BigInt, Sign};
+use num_bigint::BigUint as BigUintRaw;
 use num_traits::{identities::One, Zero};
 
 use crate::{error::Halo2PlonkError, main_gate::RegionCtx};
@@ -13,7 +13,7 @@ use crate::{error::Halo2PlonkError, main_gate::RegionCtx};
 // A big natural number with limbs in field `F`
 //
 // Stores inside limbs of a certain length,
-// created from [`num_bigint::BigInt`] and
+// created from [`num_bigint::BigUintRaw`] and
 // allows access to certain limbs
 //
 // IMPORTANT: It is not an independent
@@ -79,7 +79,7 @@ impl<F: ff::PrimeField> BigUint<F> {
         limbs_count_limit: NonZeroUsize,
     ) -> Result<Self, Error> {
         // FIXME Simplify
-        Self::from_bigint(&BigInt::from(input), limb_width, limbs_count_limit)
+        Self::from_biguint(&BigUintRaw::from(input), limb_width, limbs_count_limit)
     }
 
     pub fn from_u128(
@@ -88,7 +88,7 @@ impl<F: ff::PrimeField> BigUint<F> {
         limbs_count_limit: NonZeroUsize,
     ) -> Result<Self, Error> {
         // FIXME Simplify
-        Self::from_bigint(&BigInt::from(input), limb_width, limbs_count_limit)
+        Self::from_biguint(&BigUintRaw::from(input), limb_width, limbs_count_limit)
     }
 
     // If the values in Cell are unknown, they will be filled in
@@ -125,8 +125,18 @@ impl<F: ff::PrimeField> BigUint<F> {
             .transpose()
     }
 
-    pub fn from_bigint(
-        input: &BigInt,
+    pub fn from_f(
+        input: &F,
+        limb_width: NonZeroUsize,
+        limbs_count_limit: NonZeroUsize,
+    ) -> Result<Self, Error> {
+        let bu = BigUintRaw::from_bytes_le(input.to_repr().as_ref());
+
+        Self::from_biguint(&bu, limb_width, limbs_count_limit)
+    }
+
+    pub fn from_biguint(
+        input: &BigUintRaw,
         limb_width: NonZeroUsize,
         limbs_count_limit: NonZeroUsize,
     ) -> Result<Self, Error> {
@@ -160,11 +170,11 @@ impl<F: ff::PrimeField> BigUint<F> {
         todo!("Implement and test the conversion of an element from another field")
     }
 
-    pub fn into_bigint(&self) -> BigInt {
+    pub fn into_bigint(&self) -> num_bigint::BigUint {
         self.limbs
             .iter()
             .rev()
-            .fold(BigInt::zero(), |mut result, limb| {
+            .fold(BigUintRaw::zero(), |mut result, limb| {
                 result <<= self.limb_width().get();
                 result + f_to_nat(limb)
             })
@@ -217,7 +227,7 @@ impl<F: ff::PrimeField> BigUint<F> {
     }
 }
 
-pub fn nat_to_f<Scalar: ff::PrimeField>(n: &BigInt) -> Option<Scalar> {
+pub fn nat_to_f<Scalar: ff::PrimeField>(n: &num_bigint::BigUint) -> Option<Scalar> {
     Scalar::from_str_vartime(&format!("{n}"))
 }
 
@@ -229,17 +239,17 @@ fn write_be<F: PrimeField, W: io::Write>(f: &F, mut writer: W) -> io::Result<()>
         .try_for_each(|digit| writer.write_all(&[*digit]))
 }
 
-pub fn f_to_nat<Scalar: PrimeField>(f: &Scalar) -> BigInt {
+pub fn f_to_nat<Scalar: PrimeField>(f: &Scalar) -> num_bigint::BigUint {
     let mut s = Vec::new();
     write_be(f, &mut s).unwrap(); // f.to_repr().write_be(&mut s).unwrap();
-    BigInt::from_bytes_le(Sign::Plus, f.to_repr().as_ref())
+    BigUintRaw::from_bytes_le(f.to_repr().as_ref())
 }
 
 // Calculate `2 ^ n - 1`
-pub fn get_big_int_with_n_ones(n: usize) -> BigInt {
+pub fn get_big_int_with_n_ones(n: usize) -> num_bigint::BigUint {
     match n {
-        0 => BigInt::zero(),
-        n => (BigInt::one() << n) - 1,
+        0 => BigUintRaw::zero(),
+        n => (BigUintRaw::one() << n) - 1u8,
     }
 }
 
@@ -266,7 +276,7 @@ mod tests {
             .unwrap();
             assert_eq!(bn.limbs_count().get(), 1, "Limbs > 1 at {input}");
             assert_eq!(bn.limbs(), &[Fp::from_u128(input.into())]);
-            assert_eq!(bn.into_bigint(), BigInt::from(input));
+            assert_eq!(bn.into_bigint(), BigUintRaw::from(input));
         }
     }
 
@@ -281,14 +291,14 @@ mod tests {
             .unwrap();
             assert_eq!(bn.limbs_count().get(), 1, "Limbs > 1 at {input}");
             assert_eq!(bn.limbs(), &[Fp::from_u128(input)]);
-            assert_eq!(bn.into_bigint(), BigInt::from(input));
+            assert_eq!(bn.into_bigint(), BigUintRaw::from(input));
         }
     }
 
     #[test]
     fn from_two_limbs() {
-        let input = BigInt::from(u128::MAX) * BigInt::from(u128::MAX);
-        let bn = BigUint::<Fp>::from_bigint(
+        let input = BigUintRaw::from(u128::MAX) * BigUintRaw::from(u128::MAX);
+        let bn = BigUint::<Fp>::from_biguint(
             &input,
             NonZeroUsize::new(mem::size_of::<u128>() * 8).unwrap(),
             NonZeroUsize::new(4).unwrap(),
@@ -308,8 +318,8 @@ mod tests {
 
     #[test]
     fn limbs_count_err() {
-        let input = BigInt::from(u128::MAX) * BigInt::from(u128::MAX);
-        let result_with_bn = BigUint::<Fp>::from_bigint(
+        let input = BigUintRaw::from(u128::MAX) * BigUintRaw::from(u128::MAX);
+        let result_with_bn = BigUint::<Fp>::from_biguint(
             &input,
             NonZeroUsize::new(mem::size_of::<u64>() * 8).unwrap(),
             NonZeroUsize::new(1).unwrap(),

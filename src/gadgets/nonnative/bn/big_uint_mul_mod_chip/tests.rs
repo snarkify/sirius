@@ -197,21 +197,21 @@ mod mult_mod_tests {
         ];
 
         for Context { lhs, rhs, modulus } in cases {
-            let lhs = BigInt::from_u128(lhs).unwrap();
-            let rhs = BigInt::from_u128(rhs).unwrap();
-            let modulus = BigInt::from_u128(modulus).unwrap();
+            let lhs = BigUintRaw::from_u128(lhs).unwrap();
+            let rhs = BigUintRaw::from_u128(rhs).unwrap();
+            let modulus = BigUintRaw::from_u128(modulus).unwrap();
 
             let quotient = (&lhs * &rhs) / &modulus;
             let remainer = (&lhs * &rhs) % &modulus;
 
             println!("{lhs} * {rhs} = {quotient} * {modulus} + {remainer}");
 
-            let lhs = BigUint::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-            let rhs = BigUint::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-            let modulus = BigUint::from_bigint(&modulus, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let lhs = BigUint::from_biguint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let rhs = BigUint::from_biguint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let modulus = BigUint::from_biguint(&modulus, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
 
-            let quotient = BigUint::from_bigint(&quotient, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-            let remainer = BigUint::from_bigint(&remainer, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let quotient = BigUint::from_biguint(&quotient, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let remainer = BigUint::from_biguint(&remainer, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
 
             let prover = match MockProver::run(
                 K,
@@ -509,7 +509,7 @@ mod components_tests {
         .unwrap()
     }
 
-    fn group_limbs<F: PrimeField>(inp: &BigUint<F>, max_word: BigInt) -> BigUint<F> {
+    fn group_limbs<F: PrimeField>(inp: &BigUint<F>, max_word: BigUintRaw) -> BigUint<F> {
         let limb_width = LIMB_WIDTH.get();
         let limbs_per_group =
             calc_limbs_per_group::<F>(calc_carry_bits(&max_word, limb_width).unwrap(), limb_width)
@@ -537,11 +537,11 @@ mod components_tests {
 
     #[test_log::test]
     fn test_bn() {
-        let lhs = BigInt::from_u64(u64::MAX).unwrap() * BigInt::from_u64(100).unwrap();
-        let rhs = BigInt::from_u64(u64::MAX).unwrap() * BigInt::from_u64(u64::MAX).unwrap();
+        let lhs = BigUintRaw::from_u64(u64::MAX).unwrap() * BigUintRaw::from_u64(100).unwrap();
+        let rhs = BigUintRaw::from_u64(u64::MAX).unwrap() * BigUintRaw::from_u64(u64::MAX).unwrap();
 
-        let lhs = BigUint::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-        let rhs = BigUint::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let lhs = BigUint::from_biguint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let rhs = BigUint::from_biguint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
         let prod = mult_with_overflow(&lhs, &rhs);
         log::info!("prod {prod:?}");
         let sum = sum_with_overflow(&lhs, &rhs);
@@ -572,11 +572,11 @@ mod components_tests {
 
     #[test_log::test]
     fn test_zero() {
-        let lhs = BigInt::from_u64(u64::MAX).unwrap() * BigInt::from_u64(100).unwrap();
-        let rhs = BigInt::from_u64(0).unwrap();
+        let lhs = BigUintRaw::from_u64(u64::MAX).unwrap() * BigUintRaw::from_u64(100).unwrap();
+        let rhs = BigUintRaw::from_u64(0).unwrap();
 
-        let lhs = BigUint::from_bigint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-        let rhs = BigUint::from_bigint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let lhs = BigUint::from_biguint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let rhs = BigUint::from_biguint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
         let prod = mult_with_overflow(&lhs, &rhs);
         log::info!("prod {prod:?}");
         let sum = sum_with_overflow(&lhs, &rhs);
