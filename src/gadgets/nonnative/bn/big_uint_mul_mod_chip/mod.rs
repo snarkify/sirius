@@ -10,7 +10,7 @@ use ff::PrimeField;
 use halo2_proofs::circuit::{AssignedCell, Chip, Value};
 use itertools::{EitherOrBoth, Itertools};
 use log::*;
-use num_bigint::BigInt;
+use num_bigint::BigUint as BigUintRaw;
 use num_traits::{One, ToPrimitive, Zero};
 
 use crate::main_gate::{AssignAdviceFrom, MainGate, MainGateConfig, RegionCtx};
@@ -52,8 +52,8 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         }
     }
 
-    pub fn to_bignat(&self, input: &BigInt) -> Result<BigUint<F>, Error> {
-        Ok(BigUint::<F>::from_bigint(
+    pub fn to_bignat(&self, input: &BigUintRaw) -> Result<BigUint<F>, Error> {
+        Ok(BigUint::<F>::from_biguint(
             input,
             self.limb_width,
             self.limbs_count_limit,
@@ -441,7 +441,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let grouped_max_word: BigInt = (0..limbs_per_group).fold(BigInt::zero(), |mut acc, i| {
+        let grouped_max_word: BigUintRaw = (0..limbs_per_group).fold(BigUintRaw::zero(), |mut acc, i| {
             acc.set_bit((i * limb_width) as u64, true);
             acc
         });
@@ -514,7 +514,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
     ) -> Result<(), Error> {
         let limb_width = self.limb_width.get();
 
-        let max_word_bn: BigInt = cmp::max(
+        let max_word_bn: BigUintRaw = cmp::max(
             big_uint::f_to_nat(&lhs.max_word),
             big_uint::f_to_nat(&rhs.max_word),
         );
@@ -522,10 +522,10 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
 
         debug!("max word: {max_word_bn}");
 
-        let target_base_bn = BigInt::one() << limb_width;
+        let target_base_bn = BigUintRaw::one() << limb_width;
         let target_base: F = big_uint::nat_to_f(&target_base_bn).expect("TODO");
 
-        let mut accumulated_extra = BigInt::zero();
+        let mut accumulated_extra = BigUintRaw::zero();
         let carry_bits = calc_carry_bits(&max_word_bn, limb_width)?;
         debug!("carry_bits {carry_bits}");
 
@@ -1065,11 +1065,11 @@ impl<F: ff::PrimeField> Chip<F> for BigUintMulModChip<F> {
     }
 }
 
-fn calc_carry_bits(max_word: &BigInt, limb_width: usize) -> Result<NonZeroUsize, Error> {
+fn calc_carry_bits(max_word: &BigUintRaw, limb_width: usize) -> Result<NonZeroUsize, Error> {
     // FIXME: Is `f64` really needed here
-    // We can calculate `log2` for BigInt without f64
+    // We can calculate `log2` for BigUintRaw without f64
     let carry_bits = max_word
-        .mul(BigInt::one() + BigInt::one())
+        .mul(BigUintRaw::one() + BigUintRaw::one())
         .to_f64()
         .ok_or(Error::CarryBitsCalculate)?
         .log2()

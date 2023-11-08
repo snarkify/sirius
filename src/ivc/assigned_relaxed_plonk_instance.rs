@@ -83,8 +83,8 @@ where
             W: plonk_instance.W_commitment,
             E: C::default(),
             u: C::Scalar::ONE,
-            X0: BigUint::from_f(plonk_instance.instance[0], limb_width, limbs_count)?,
-            X1: BigUint::from_f(plonk_instance.instance[1], limb_width, limbs_count)?,
+            X0: BigUint::from_f(&plonk_instance.instance[0], limb_width, limbs_count)?,
+            X1: BigUint::from_f(&plonk_instance.instance[1], limb_width, limbs_count)?,
             limb_width,
             limbs_count,
         })
@@ -99,8 +99,8 @@ where
             W: relaxed.W_commitment,
             E: relaxed.E_commitment,
             u: C::Scalar::default(),
-            X0: BigUint::from_f(relaxed.instance[0], limb_width, limbs_count)?,
-            X1: BigUint::from_f(relaxed.instance[1], limb_width, limbs_count)?,
+            X0: BigUint::from_f(&relaxed.instance[0], limb_width, limbs_count)?,
+            X1: BigUint::from_f(&relaxed.instance[1], limb_width, limbs_count)?,
             limb_width,
             limbs_count,
         })
@@ -116,6 +116,8 @@ where
         instance: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
     ) -> Result<Self, Error> {
+        assert!(T >= 4); // TODO remaster, if possible
+
         let AssignedWitness {
             public_params_commit,
             W,
@@ -154,7 +156,7 @@ where
         let r_bn = BigUint::from_assigned_cells(&[r_val], self.limb_width, self.limbs_count)?;
 
         // TODO Chagne `ZETA` to `m`
-        let m_bn = BigUint::from_f(C::Base::ZETA, self.limb_width, self.limbs_count);
+        //let m_bn = BigUint::from_f(C::Base::ZETA, self.limb_width, self.limbs_count);
 
         let _bn_chip = BigUintMulModChip::<C::Base>::new(
             config.into_size().unwrap(),
@@ -303,7 +305,7 @@ where
             .enumerate()
             .map(|(index, val)| {
                 let val: C::Base = util::fe_to_fe_safe(val).unwrap();
-                let limbs = BigUint::from_f(val, self.limb_width, self.limbs_count)?
+                let limbs = BigUint::from_f(&val, self.limb_width, self.limbs_count)?
                     .limbs()
                     .iter()
                     .enumerate()
