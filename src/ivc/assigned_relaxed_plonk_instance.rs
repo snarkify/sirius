@@ -1,8 +1,9 @@
 use std::{iter, num::NonZeroUsize};
 
-use ff::{Field, FromUniformBytes, PrimeFieldBits, WithSmallOrderMulGroup};
+use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::circuit::Value;
 use halo2curves::{Coordinates, CurveAffine};
+use num_traits::Num;
 
 use crate::{
     constants::NUM_CHALLENGE_BITS,
@@ -10,7 +11,7 @@ use crate::{
         ecc::{AssignedPoint, EccChip},
         nonnative::bn::{
             big_uint::{self, BigUint},
-            big_uint_mul_mod_chip::BigUintMulModChip,
+            big_uint_mul_mod_chip::{self, BigUintMulModChip, MultModResult},
         },
     },
     main_gate::{AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
@@ -44,12 +45,15 @@ struct AssignedWitness<C: CurveAffine> {
     cross_terms_commits: Vec<AssignedPoint<C>>,
 
     r: Vec<AssignedBit<C::Base>>,
+    m_bn: Vec<AssignedValue<C::Base>>,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("TODO")]
     BigUint(#[from] big_uint::Error),
+    #[error("TODO")]
+    BigUintChip(#[from] big_uint_mul_mod_chip::Error),
     #[error(transparent)]
     Halo2(#[from] halo2_proofs::plonk::Error),
     #[error("TODO")]
@@ -129,6 +133,7 @@ where
             plonk_instance,
             cross_terms_commits,
             r,
+            m_bn,
         } = self.generate_challenge(
             region,
             config,
@@ -152,17 +157,23 @@ where
         let r_val = gate.le_bits_to_num(region, &r)?;
         let u_fold = gate.add(region, &u, &r_val)?;
 
-        // TODO Copy constraint
-        let r_bn = BigUint::from_assigned_cells(&[r_val], self.limb_width, self.limbs_count)?;
-
-        // TODO Chagne `ZETA` to `m`
-        let m_bn = BigUint::from_f(&C::Base::ZETA, self.limb_width, self.limbs_count);
-
-        let _bn_chip = BigUintMulModChip::<C::Base>::new(
+        let bn_chip = BigUintMulModChip::<C::Base>::new(
             config.into_size().unwrap(),
             self.limb_width,
             self.limbs_count,
         );
+
+        let r_bn = bn_chip.from_assigned_cell_to_limbs(region, &r_val)?;
+
+        let X0_bn =
+            BigUint::from_assigned_cells(&assigned_X0, self.limb_width, self.limbs_count)?.unwrap();
+        let X1_bn =
+            BigUint::from_assigned_cells(&assigned_X1, self.limb_width, self.limbs_count)?.unwrap();
+
+        let MultModResult {
+            quotient: _,
+            remainder,
+        } = bn_chip.mult_mod(region, &assigned_X0, &r_bn, &m_bn)?;
 
         todo!()
     }
@@ -190,7 +201,7 @@ where
             move |annotation: &str, region: &mut RegionCtx<C::Base>, val| {
                 let (index, column) = advice_columns.by_ref().next().expect("Safe because cycle");
 
-                if index != 0 && index % (T + 2) == 0 {
+                if index == 0 {
                     region.next();
                 }
 
@@ -335,6 +346,46 @@ where
 
         let r = ro_circuit.squeeze_n_bits(region, NUM_CHALLENGE_BITS)?;
 
+        let mut fixed_columns = config
+            .q_1
+            .iter()
+            .chain(config.q_5.iter())
+            .chain(iter::once(&config.q_m))
+            .chain(iter::once(&config.q_i))
+            .chain(iter::once(&config.q_o))
+            .chain(iter::once(&config.rc))
+            .enumerate()
+            .cycle();
+
+        // A closure using a cyclic iterator that allows you to take available advice columns
+        // regardless of `T`, making as few row offsets as possible
+        let mut assign_next_fixed =
+            move |annotation: &str, region: &mut RegionCtx<C::Base>, val| {
+                let (index, column) = fixed_columns.by_ref().next().expect("Safe because cycle");
+
+                if index == 0 {
+                    region.next();
+                }
+
+                region.assign_fixed(|| annotation.to_owned(), *column, val)
+            };
+
+        // TODO Check correctness
+        let m_bn = BigUint::<C::Base>::from_biguint(
+            &num_bigint::BigUint::from_str_radix(<C::Scalar as PrimeField>::MODULUS, 10).unwrap(),
+            self.limb_width,
+            self.limbs_count,
+        )?
+        .limbs()
+        .iter()
+        .enumerate()
+        .map(|(limb_index, limb)| {
+            assign_next_fixed(format!("{limb_index}").as_str(), region, *limb)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+        region.next();
+
         Ok(AssignedWitness {
             public_params_commit: assigned_public_params_commit,
             W: assigned_W,
@@ -346,6 +397,7 @@ where
             plonk_instance: assigned_input_instance,
             cross_terms_commits: assigned_cross_term_commits,
             r,
+            m_bn,
         })
     }
 }

@@ -917,8 +917,8 @@ impl<F: ff::PrimeField> Deref for GroupedBigUint<F> {
 
 #[derive(Debug)]
 pub struct MultModResult<F: PrimeField> {
-    quotient: Vec<AssignedCell<F, F>>,
-    remainder: Vec<AssignedCell<F, F>>,
+    pub quotient: Vec<AssignedCell<F, F>>,
+    pub remainder: Vec<AssignedCell<F, F>>,
 }
 
 impl<F: PrimeField> Deref for MultModResult<F> {
