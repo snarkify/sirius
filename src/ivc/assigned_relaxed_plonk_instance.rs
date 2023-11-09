@@ -156,7 +156,7 @@ where
         let r_bn = BigUint::from_assigned_cells(&[r_val], self.limb_width, self.limbs_count)?;
 
         // TODO Chagne `ZETA` to `m`
-        //let m_bn = BigUint::from_f(C::Base::ZETA, self.limb_width, self.limbs_count);
+        let m_bn = BigUint::from_f(&C::Base::ZETA, self.limb_width, self.limbs_count);
 
         let _bn_chip = BigUintMulModChip::<C::Base>::new(
             config.into_size().unwrap(),
