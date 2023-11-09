@@ -809,3 +809,136 @@ mod red_mod_tests {
         }
     }
 }
+
+mod decompose_tests {
+    use std::marker::PhantomData;
+
+    use halo2_proofs::{
+        circuit::SimpleFloorPlanner,
+        dev::MockProver,
+        plonk::{Advice, Circuit, Column, Instance},
+    };
+    use halo2curves::pasta::Fp;
+
+    use super::*;
+
+    #[derive(Clone)]
+    struct Config {
+        main_gate_config: MainGateConfig<MAIN_GATE_T>,
+        val: Column<Instance>,
+        limbs: Column<Instance>,
+
+        formal_val: Column<Advice>,
+    }
+
+    const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(Fp::S as usize) };
+    const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(5) };
+
+    #[derive(Debug, Default)]
+    struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits>(PhantomData<F>);
+
+    impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
+        type Config = Config;
+        type FloorPlanner = SimpleFloorPlanner;
+
+        fn without_witnesses(&self) -> Self {
+            todo!()
+        }
+
+        fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
+            let val = meta.instance_column();
+            meta.enable_equality(val);
+
+            let limbs = meta.instance_column();
+            meta.enable_equality(limbs);
+
+            let formal_val = meta.advice_column();
+            meta.enable_equality(formal_val);
+
+            Config {
+                val,
+                limbs,
+                formal_val,
+                main_gate_config: MainGate::<F, MAIN_GATE_T>::configure(meta),
+            }
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl halo2_proofs::circuit::Layouter<F>,
+        ) -> Result<(), halo2_proofs::plonk::Error> {
+            trace!("Start synthesize");
+
+            let config_clone = config.clone();
+
+            let chip =
+                BigUintMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT);
+
+            let limbs: Vec<_> = layouter
+                .assign_region(
+                    || "from_assigned_cell_to_limbs",
+                    |mut region| {
+
+                        let mut region = RegionCtx::new(region, 0);
+
+                        let val = region
+                            .assign_advice_from_instance(|| "val", config.formal_val, config.val, 0)
+                            .unwrap();
+
+                        region.next();
+
+                        let limbs = chip.from_assigned_cell_to_limbs(&mut region, &val).unwrap();
+
+                        Ok(limbs)
+                    },
+                )
+                .unwrap();
+
+            for (offset, limb) in limbs.into_iter().enumerate() {
+                layouter.constrain_instance(limb.cell(), config.limbs, offset)?;
+            }
+
+            Ok(())
+        }
+    }
+
+    struct Context {
+        val: u128,
+    }
+
+    #[test_log::test]
+    fn test_red_mod_bn() {
+        const K: u32 = 11;
+        let ts = TestCircuit::<Fp>::default();
+
+        let cases = [
+            Context { val: u128::MAX },
+            Context {
+                val: u64::MAX as u128,
+            },
+            Context { val: u128::MAX },
+            Context { val: u128::MAX },
+            Context { val: 256u128 },
+            Context { val: 0 },
+        ];
+
+        for Context { val } in cases {
+            let prover = match MockProver::run(
+                K,
+                &ts,
+                vec![
+                    vec![Fp::from_u128(val)],
+                    BigUint::from_u128(val, LIMB_WIDTH, LIMBS_COUNT_LIMIT)
+                        .unwrap()
+                        .limbs()
+                        .to_vec(),
+                ],
+            ) {
+                Ok(prover) => prover,
+                Err(e) => panic!("{:?}", e),
+            };
+            assert_eq!(prover.verify(), Ok(()));
+        }
+    }
+}

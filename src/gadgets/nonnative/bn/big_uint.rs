@@ -92,6 +92,7 @@ impl<F: ff::PrimeField> BigUint<F> {
     }
 
     // If the values in Cell are unknown, they will be filled in
+    // Without any copy-constraint!
     pub fn from_assigned_cells(
         input: &[AssignedCell<F, F>],
         limb_width: NonZeroUsize,
@@ -130,9 +131,11 @@ impl<F: ff::PrimeField> BigUint<F> {
         limb_width: NonZeroUsize,
         limbs_count_limit: NonZeroUsize,
     ) -> Result<Self, Error> {
-        let bu = BigUintRaw::from_bytes_le(input.to_repr().as_ref());
-
-        Self::from_biguint(&bu, limb_width, limbs_count_limit)
+        Self::from_biguint(
+            &BigUintRaw::from_bytes_le(input.to_repr().as_ref()),
+            limb_width,
+            limbs_count_limit,
+        )
     }
 
     pub fn from_biguint(
