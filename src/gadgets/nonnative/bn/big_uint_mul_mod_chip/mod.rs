@@ -941,6 +941,148 @@ pub struct SumContext<F: PrimeField> {
 }
 
 impl<F: ff::PrimeField> BigUintMulModChip<F> {
+    /// Converts a single assigned cell to a list of limbs, according to the limb width and count limit.
+    ///
+    /// This function assigns to the region context, evaluated `AssignedCells` representing the limbs of the
+    /// original `AssignedCell` in the `BigUint` representation.
+    ///
+    /// # Arguments
+    /// * `ctx`: Mutable reference to the `RegionCtx` provides the constraint system and metadata.
+    /// * `input`: A reference to the `AssignedCell` representing the input value.
+    ///
+    /// For every `k` rows looks like:
+    /// ```markdown
+    /// |   ---    |  ---  |  ---  |  ---  |  ---  |  ---   |
+    /// | state[0] | q1[0] |  q_i  | input |  q_o  | output |
+    /// |   ---    |  ---  |  ---  |  ---  |  ---  |  ---   |
+    /// |   ...    |  ...  |  ...  |  ...  |  ...  |  ...   |
+    /// |  limb_k  |   1   | shift |  p_k  |  -1   |  s_k   |
+    /// |   ...    |  ...  |  ...  |  ...  |  ...  |  ...   |
+    /// ```
+    /// where:
+    ///     - `limb_k` it's limb of input in big uint representation
+    ///     - `shift` it's constant equal `2 ^ self.limb_width`
+    ///     - `p_k` partial sum of [0..k-1] limbs
+    ///     - `s_k` partial sum of [0..k] limbs
+    ///
+    /// The `s_n` it's equal with original input and check by copy constraint
+    pub fn from_assigned_cell_to_limbs(
+        &self,
+        ctx: &mut RegionCtx<'_, F>,
+        input: &AssignedCell<F, F>,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        trace!("Input: {:?}", input.value().unwrap());
+        let bignat_limb_column = &self.config().state[0];
+        let bignat_limb_shift = &self.config().q_1[0];
+
+        let prev_column = &self.config().input;
+        let prev_selector = &self.config().q_i;
+
+        let partial_sum_column = &self.config().out;
+        let partial_sum_selector = &self.config().q_o;
+
+        let shift = F::from(2).pow_vartime([self.limb_width.get() as u64]); // base = 2^limb_width
+        trace!("Shift {shift:?}");
+
+        let mut prev_partial_sum = Option::<AssignedCell<F, F>>::None;
+
+        let limbs = BigUint::from_f(
+            &input.value().unwrap().copied().unwrap_or_default(),
+            self.limb_width,
+            self.limbs_count_limit,
+        )?
+        .limbs()
+        .iter()
+        .map(Some)
+        .chain(iter::repeat(None))
+        .take(self.limbs_count_limit.get())
+        .enumerate()
+        .inspect(|(limb_index, limb)| trace!("limbs[{limb_index}]={limb:?}"))
+        .map(|(limb_index, limb)| {
+            ctx.assign_fixed(
+                || format!("{limb_index} selector"),
+                *bignat_limb_shift,
+                F::ONE,
+            )?;
+
+            let cell = ctx.assign_advice(
+                || format!("{limb_index} limb"),
+                *bignat_limb_column,
+                Value::known(limb.copied().unwrap_or(F::ZERO)),
+            )?;
+
+            let shift = ctx
+                .assign_fixed(
+                    || {
+                        format!(
+                            "previous limbs (to {:?}) sum selector",
+                            limb_index.checked_sub(1)
+                        )
+                    },
+                    *prev_selector,
+                    shift,
+                )?
+                .value()
+                .copied();
+
+            let shifted_prev = shift
+                * match &prev_partial_sum {
+                    Some(prev_partial_sum) if limb.is_some() => ctx
+                        .assign_advice_from(
+                            || {
+                                format!(
+                                    "previous limbs (to {:?}) sum value",
+                                    limb_index.checked_sub(1)
+                                )
+                            },
+                            *prev_column,
+                            prev_partial_sum,
+                        )?
+                        .value()
+                        .copied(),
+                    _ => Value::known(F::ZERO),
+                };
+
+            trace!(
+                "Previos partial sum: {:?}",
+                prev_partial_sum.as_ref().and_then(|c| *c.value().unwrap())
+            );
+            trace!("Previos shifted partial sum: {:?}", shifted_prev.unwrap());
+
+            ctx.assign_fixed(
+                || format!("sum of limbs from 0 to {limb_index} selector",),
+                *partial_sum_selector,
+                -F::ONE,
+            )?;
+
+            if limb.is_some() {
+                prev_partial_sum = Some(ctx.assign_advice(
+                    || format!("sum of limbs from 0 to {limb_index}",),
+                    *partial_sum_column,
+                    shifted_prev + cell.value(),
+                )?);
+            }
+
+            trace!(
+                "New partial sum: {:?}",
+                prev_partial_sum.as_ref().unwrap().value().unwrap()
+            );
+
+            ctx.next();
+
+            Result::<_, Error>::Ok(cell)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+        assert_eq!(
+            prev_partial_sum.clone().unwrap().value().unwrap(),
+            input.value().unwrap()
+        );
+        ctx.constrain_equal(prev_partial_sum.unwrap().cell(), input.cell())?;
+
+        Ok(limbs)
+    }
+
     /// Performs the multiplication of `lhs` and `rhs` taking into account the `modulus`.
     ///
     /// This method serves as an implementation of modular multiplication in the context
@@ -963,7 +1105,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
     /// 6. Check for the equivalence between the left and right operations using [`Self::is_equal`].
     ///
     /// # Returns
-    /// * A result wrapping `MultModResult` object containing the calculated quotient and remainder.
+    /// * A result wrapping [`MultModResult`] object containing the calculated quotient and remainder.
     ///
     /// # Errors
     /// This method will return an error if there is an issue in the conversion of `lhs`, `rhs`, or `modulus` into `BigUint`
