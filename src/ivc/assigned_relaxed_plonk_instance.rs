@@ -11,7 +11,7 @@ use crate::{
         ecc::{AssignedPoint, EccChip},
         nonnative::bn::{
             big_uint::{self, BigUint},
-            big_uint_mul_mod_chip::{self, BigUintMulModChip, MultModResult},
+            big_uint_mul_mod_chip::{self, BigUintMulModChip, ModOperationResult},
         },
     },
     main_gate::{AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
@@ -182,9 +182,9 @@ where
         let X1_bn =
             BigUint::from_assigned_cells(&assigned_X1, self.limb_width, self.limbs_count)?.unwrap();
 
-        let MultModResult {
+        let ModOperationResult {
             quotient: _,
-            remainder,
+            remainder: remainder_1,
         } = bn_chip.mult_mod(region, &assigned_X0, &r_bn, &m_bn)?;
 
         todo!()

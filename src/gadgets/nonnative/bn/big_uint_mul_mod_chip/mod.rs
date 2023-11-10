@@ -916,12 +916,12 @@ impl<F: ff::PrimeField> Deref for GroupedBigUint<F> {
 }
 
 #[derive(Debug)]
-pub struct MultModResult<F: PrimeField> {
+pub struct ModOperationResult<F: PrimeField> {
     pub quotient: Vec<AssignedCell<F, F>>,
     pub remainder: Vec<AssignedCell<F, F>>,
 }
 
-impl<F: PrimeField> Deref for MultModResult<F> {
+impl<F: PrimeField> Deref for ModOperationResult<F> {
     type Target = [AssignedCell<F, F>];
     fn deref(&self) -> &Self::Target {
         self.remainder.as_slice()
@@ -1086,7 +1086,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         lhs: &[AssignedCell<F, F>],
         rhs: &[AssignedCell<F, F>],
         modulus: &[AssignedCell<F, F>],
-    ) -> Result<MultModResult<F>, Error> {
+    ) -> Result<ModOperationResult<F>, Error> {
         // lhs * rhs = q * m + r
 
         let to_bn = |val| {
@@ -1158,7 +1158,115 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
 
         self.is_equal(ctx, grouped_left, grouped_right)?;
 
-        Ok(MultModResult {
+        Ok(ModOperationResult {
+            quotient: assigned_q,
+            remainder: assigned_r,
+        })
+    }
+
+    /// Performs modular reduction of `val` by `modulus`.
+    ///
+    /// This method is part of the Halo2 protocol's arithmetic operations on big integers.
+    /// It reduces a big integer value (`val`) modulo a given modulus (`modulus`) efficiently
+    /// using the `BigUintMulModChip`. The operation is crucial in cryptographic computations
+    /// where maintaining values within a finite field is necessary.
+    ///
+    /// # Arguments
+    /// * `ctx`: mutable reference to the `RegionCtx` which provides the constraint system
+    ///   and metadata necessary for the operation within the Halo2 protocol.
+    /// * `val`: array of `AssignedCell` representing the value to be reduced.
+    /// * `modulus`: array of `AssignedCell` representing the modulus for the reduction.
+    ///
+    /// # Order of Operations
+    /// 1. Convert `val` and `modulus` to `BigUint` objects using
+    ///    [`big_uint::BigUint::from_assigned_cells`].
+    /// 2. Perform the modular reduction `val % modulus` using the converted `BigUint` numbers.
+    /// 2.1. This includes the calculation of the quotient and remainder.
+    /// 3. Assign the reduction result using [`Self::assign_mult`] for `q * m` (quotient times modulus)
+    ///    and [`Self::assign_sum`] for `q * m + r` (sum of quotient times modulus and remainder).
+    /// 4. Group the limbs of the calculated values using [`Self::group_limbs`].
+    /// 5. Check for equivalence between the original value and the calculated sum using
+    ///    [`Self::is_equal`].
+    ///
+    /// # Returns
+    /// * A result wrapping [`ModOperationResult`] object containing the calculated quotient
+    ///   and remainder from the modular reduction.
+    ///
+    /// # Errors
+    /// This method will return an error if there is an issue in the conversion of `val` or
+    /// `modulus` into `BigUint`, or if the assignment of multiplication and addition fails.
+    pub fn red_mod(
+        &self,
+        ctx: &mut RegionCtx<'_, F>,
+        val: &[AssignedCell<F, F>],
+        modulus: &[AssignedCell<F, F>],
+    ) -> Result<ModOperationResult<F>, Error> {
+        // lhs * rhs = q * m + r
+
+        let to_bn = |val| {
+            big_uint::BigUint::from_assigned_cells(val, self.limb_width, self.limbs_count_limit)
+        };
+
+        let mod_bn = to_bn(modulus)?;
+
+        let val_bi = to_bn(val)?.map(|bn| bn.into_bigint());
+        let mod_bi = mod_bn.as_ref().map(|bn| bn.into_bigint());
+
+        let (q, r) = val_bi
+            .as_ref()
+            .zip(mod_bi.as_ref())
+            .map(|(val_bi, mod_bi)| {
+                Result::<_, Error>::Ok((
+                    self.to_bignat(&(val_bi / mod_bi))?,
+                    self.to_bignat(&(val_bi % mod_bi))?,
+                ))
+            })
+            .transpose()?
+            .unzip();
+
+        // lhs * rhs
+
+        let max_word_without_overflow: F =
+            big_uint::nat_to_f(&big_uint::get_big_int_with_n_ones(self.limb_width.get()))
+                .unwrap_or_default();
+
+        let empty = iter::repeat(F::ZERO)
+            .take(self.limbs_count_limit.get())
+            .collect::<Box<[_]>>();
+
+        // q * m + r
+        let MultContext {
+            lhs: assigned_q,
+            res: q_mul_m,
+            ..
+        } = self.assign_mult(
+            ctx,
+            q.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
+            mod_bn.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
+            &max_word_without_overflow,
+            &max_word_without_overflow,
+        )?;
+        let SumContext {
+            rhs: assigned_r,
+            res: right,
+        } = self.assign_sum(
+            ctx,
+            &q_mul_m,
+            r.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
+        )?;
+
+        // q * m + r
+        let left = OverflowingBigUint {
+            cells: val.to_vec(),
+            max_word: max_word_without_overflow,
+        };
+
+        let grouped_left = self.group_limbs(ctx, left)?;
+        let grouped_right = self.group_limbs(ctx, right)?;
+
+        self.is_equal(ctx, grouped_left, grouped_right)?;
+
+        Ok(ModOperationResult {
             quotient: assigned_q,
             remainder: assigned_r,
         })
