@@ -130,7 +130,7 @@ mod mult_mod_tests {
                                 res
                             }));
 
-                        let MultModResult {
+                        let ModOperationResult {
                             quotient,
                             remainder,
                         } = chip.mult_mod(&mut region, &lhs, &rhs, &module).unwrap();
@@ -536,7 +536,7 @@ mod components_tests {
     }
 
     #[test_log::test]
-    fn test_bn() {
+    fn test_mult_mod_bn() {
         let lhs = BigUintRaw::from_u64(u64::MAX).unwrap() * BigUintRaw::from_u64(100).unwrap();
         let rhs = BigUintRaw::from_u64(u64::MAX).unwrap() * BigUintRaw::from_u64(u64::MAX).unwrap();
 
@@ -571,7 +571,7 @@ mod components_tests {
     }
 
     #[test_log::test]
-    fn test_zero() {
+    fn test_mult_mod_zero() {
         let lhs = BigUintRaw::from_u64(u64::MAX).unwrap() * BigUintRaw::from_u64(100).unwrap();
         let rhs = BigUintRaw::from_u64(0).unwrap();
 
@@ -603,5 +603,209 @@ mod components_tests {
             Err(e) => panic!("{:?}", e),
         };
         assert_eq!(prover.verify(), Ok(()));
+    }
+}
+
+mod red_mod_tests {
+    use std::marker::PhantomData;
+
+    use halo2_proofs::{
+        circuit::SimpleFloorPlanner,
+        dev::MockProver,
+        plonk::{Advice, Circuit, Column, Instance},
+    };
+    use halo2curves::pasta::Fp;
+    use num_traits::FromPrimitive;
+
+    use super::*;
+
+    #[derive(Clone)]
+    struct Config {
+        main_gate_config: MainGateConfig<MAIN_GATE_T>,
+        val: Column<Instance>,
+        module: Column<Instance>,
+        quotient: Column<Instance>,
+        remainder: Column<Instance>,
+
+        formal_val: Column<Advice>,
+        formal_mod: Column<Advice>,
+    }
+
+    const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(Fp::S as usize) };
+    const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
+
+    #[derive(Debug, Default)]
+    struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits>(PhantomData<F>);
+
+    impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
+        type Config = Config;
+        type FloorPlanner = SimpleFloorPlanner;
+
+        fn without_witnesses(&self) -> Self {
+            todo!()
+        }
+
+        fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
+            let val = meta.instance_column();
+            meta.enable_equality(val);
+
+            let module = meta.instance_column();
+            meta.enable_equality(module);
+
+            let quotient = meta.instance_column();
+            meta.enable_equality(quotient);
+
+            let remainder = meta.instance_column();
+            meta.enable_equality(remainder);
+
+            let formal_val = meta.advice_column();
+            meta.enable_equality(formal_val);
+
+            let formal_mod = meta.advice_column();
+            meta.enable_equality(formal_mod);
+
+            Config {
+                val,
+                module,
+                quotient,
+                remainder,
+                formal_val,
+                formal_mod,
+                main_gate_config: MainGate::<F, MAIN_GATE_T>::configure(meta),
+            }
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl halo2_proofs::circuit::Layouter<F>,
+        ) -> Result<(), halo2_proofs::plonk::Error> {
+            trace!("Start synthesize");
+
+            let chip =
+                BigUintMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT);
+
+            let (quotient, remainder): (Vec<_>, Vec<_>) = layouter
+                .assign_region(
+                    || "assign_mult",
+                    |region| {
+                        let mut region = RegionCtx::new(region, 0);
+
+                        let limbs_count_limit = LIMBS_COUNT_LIMIT.get();
+                        let (val, module): (Vec<_>, Vec<_>) =
+                            itertools::multiunzip((0..limbs_count_limit).map(|limb_index| {
+                                let res = (
+                                    region
+                                        .assign_advice_from_instance(
+                                            || format!("lhs {limb_index}"),
+                                            config.formal_val,
+                                            config.val,
+                                            limb_index,
+                                        )
+                                        .unwrap(),
+                                    region
+                                        .assign_advice_from_instance(
+                                            || format!("mod {limb_index}"),
+                                            config.formal_mod,
+                                            config.module,
+                                            limb_index,
+                                        )
+                                        .unwrap(),
+                                );
+
+                                region.next();
+
+                                res
+                            }));
+
+                        let ModOperationResult {
+                            quotient,
+                            remainder,
+                        } = chip.red_mod(&mut region, &val, &module).unwrap();
+
+                        Ok((quotient, remainder))
+                    },
+                )
+                .unwrap();
+
+            for (offset, limb) in quotient.into_iter().enumerate() {
+                layouter.constrain_instance(limb.cell(), config.quotient, offset)?;
+            }
+
+            for (offset, limb) in remainder.into_iter().enumerate() {
+                layouter.constrain_instance(limb.cell(), config.remainder, offset)?;
+            }
+
+            Ok(())
+        }
+    }
+
+    struct Context {
+        val: u128,
+        modulus: u128,
+    }
+
+    #[test_log::test]
+    fn test_red_mod_bn() {
+        const K: u32 = 11;
+        let ts = TestCircuit::<Fp>::default();
+
+        let cases = [
+            Context {
+                val: u128::MAX,
+                modulus: 256,
+            },
+            Context {
+                val: u64::MAX as u128,
+                modulus: 256,
+            },
+            Context {
+                val: u128::MAX,
+                modulus: 256,
+            },
+            Context {
+                val: u128::MAX,
+                modulus: 512,
+            },
+            Context {
+                val: 256u128,
+                modulus: 11,
+            },
+            Context {
+                val: 0,
+                modulus: 11,
+            },
+        ];
+
+        for Context { val, modulus } in cases {
+            let val = BigUintRaw::from_u128(val).unwrap();
+            let modulus = BigUintRaw::from_u128(modulus).unwrap();
+
+            let quotient = &val / &modulus;
+            let remainer = &val % &modulus;
+
+            println!("{val} = {quotient} * {modulus} + {remainer}");
+
+            let val = BigUint::from_biguint(&val, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let modulus = BigUint::from_biguint(&modulus, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+
+            let quotient = BigUint::from_biguint(&quotient, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let remainer = BigUint::from_biguint(&remainer, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+
+            let prover = match MockProver::run(
+                K,
+                &ts,
+                vec![
+                    val.limbs().to_vec(),
+                    modulus.limbs().to_vec(),
+                    quotient.limbs().to_vec(),
+                    remainer.limbs().to_vec(),
+                ],
+            ) {
+                Ok(prover) => prover,
+                Err(e) => panic!("{:?}", e),
+            };
+            assert_eq!(prover.verify(), Ok(()));
+        }
     }
 }
