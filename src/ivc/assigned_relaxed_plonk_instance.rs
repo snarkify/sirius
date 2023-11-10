@@ -48,18 +48,30 @@ struct AssignedWitness<C: CurveAffine> {
     m_bn: Vec<AssignedValue<C::Base>>,
 }
 
+/// Enumerates possible errors that can occur during the folding process
+/// in the fold algorithm.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("TODO")]
+    #[error("BigUint Error: {0:?}")]
     BigUint(#[from] big_uint::Error),
-    #[error("TODO")]
+
+    #[error("BigUint Chip Error: {0:?}")]
     BigUintChip(#[from] big_uint_mul_mod_chip::Error),
-    #[error(transparent)]
+
+    #[error("Halo2 proof system error: {0:?}")]
     Halo2(#[from] halo2_proofs::plonk::Error),
-    #[error("TODO")]
-    CantBuildCoordinates { variable_name: &'static str },
-    #[error("TODO")]
-    WhileScalarToBase { variable_name: &'static str },
+
+    #[error("Error constructing elliptic curve coordinates for {variable_name}: {variable_str}")]
+    CantBuildCoordinates {
+        variable_name: &'static str,
+        variable_str: String,
+    },
+
+    #[error("Error converting scalar to base field element for {variable_name}: {variable_str}")]
+    WhileScalarToBase {
+        variable_name: &'static str,
+        variable_str: String,
+    },
 }
 
 impl<C: CurveAffine> FoldRelaxedPlonkInstanceChip<C>
@@ -213,6 +225,7 @@ where
                 let coordinates: Coordinates<C> =
                     Option::from($input.coordinates()).ok_or(Error::CantBuildCoordinates {
                         variable_name: stringify!($input),
+                        variable_str: format!("{:?}", $input),
                     })?;
 
                 let output = AssignedPoint::<C> {
@@ -242,6 +255,7 @@ where
                 let val: C::Base =
                     util::fe_to_fe_safe(&$input).ok_or(Error::WhileScalarToBase {
                         variable_name: stringify!($input),
+                        variable_str: format!("{:?}", $input),
                     })?;
 
                 let assigned = assign_next_advice(stringify!($input), region, val)?;
@@ -272,6 +286,7 @@ where
             .map(|(limb_index, (limb, annot))| {
                 let limb = util::fe_to_fe_safe(limb).ok_or(Error::WhileScalarToBase {
                     variable_name: annot,
+                    variable_str: format!("{limb:?}"),
                 })?;
 
                 let limb_cell = assign_next_advice(
@@ -295,6 +310,7 @@ where
             .map(|(limb_index, (limb, annot))| {
                 let limb = util::fe_to_fe_safe(limb).ok_or(Error::WhileScalarToBase {
                     variable_name: annot,
+                    variable_str: format!("{limb:?}"),
                 })?;
 
                 let limb_cell = assign_next_advice(
