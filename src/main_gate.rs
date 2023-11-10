@@ -233,6 +233,22 @@ pub struct MainGateConfig<const T: usize> {
     pub(crate) rc: Column<Fixed>,
 }
 
+impl<const T: usize> MainGateConfig<T> {
+    pub fn name_columns<F: PrimeField>(&self, region: &mut Region<'_, F>) {
+        for i in 0..T {
+            region.name_column(|| format!("state[{i}]"), self.state[i]);
+            region.name_column(|| format!("q_1[{i}]"), self.q_1[i]);
+            region.name_column(|| format!("q_5[{i}]"), self.q_5[i]);
+        }
+        region.name_column(|| "input", self.input);
+        region.name_column(|| "out", self.out);
+        region.name_column(|| "q_i", self.q_i);
+        region.name_column(|| "q_o", self.q_o);
+        region.name_column(|| "q_m", self.q_m);
+        region.name_column(|| "rc", self.rc);
+    }
+}
+
 #[derive(Debug)]
 pub struct MainGate<F: PrimeField, const T: usize> {
     config: MainGateConfig<T>,

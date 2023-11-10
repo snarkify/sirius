@@ -879,6 +879,7 @@ mod decompose_tests {
                 .assign_region(
                     || "from_assigned_cell_to_limbs",
                     |mut region| {
+                        config_clone.main_gate_config.name_columns(&mut region);
 
                         let mut region = RegionCtx::new(region, 0);
 
