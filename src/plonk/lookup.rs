@@ -54,7 +54,7 @@ use halo2_proofs::{
 
 use crate::{
     commitment::CommitmentKey,
-    polynomial::{sparse::SparseMatrix, Expression, MultiPolynomial, Query},
+    polynomial::{Expression, MultiPolynomial, Query},
 };
 
 /// Lookup Argument
@@ -88,15 +88,14 @@ pub struct Structure<C: CurveAffine> {
     pub(crate) k1: usize,
     /// 2^k2 is the length of table vector [`Witness::t`]
     pub(crate) k2: usize,
-    /// Commitment of [`Witness::t`], we assume table t is constructed by fixed columns
+    /// Table vector, used in the calculation of `m`, `h`, and `g`.
+    pub(crate) t: Vec<C::ScalarExt>,
+    /// Commitment of table vector, we assume table t is constructed by fixed columns
     pub(crate) t_commitment: C,
     /// Check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
     pub(crate) l_rel: MultiPolynomial<C::ScalarExt>,
     /// Check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
     pub(crate) t_rel: MultiPolynomial<C::ScalarExt>,
-    /// Check sum_i h_i = sum_i g_i
-    pub(crate) h_mat: SparseMatrix<C::ScalarExt>,
-    pub(crate) g_mat: SparseMatrix<C::ScalarExt>,
 }
 
 /// Represents an instance of a lookup argument
@@ -123,10 +122,6 @@ pub struct Witness<F: PrimeField> {
     ///
     /// l_i = L(x1[i],...,xa[i])
     pub(crate) l: Vec<F>,
-
-    /// Table vector, used in the calculation of `m`, `h`, and `g`.
-    /// No need to fold
-    pub(crate) t: Vec<F>,
 
     /// Multiplicity vector, representing the coefficients in the log
     /// derivative formula.
@@ -157,7 +152,7 @@ pub struct RelaxedInstance<C: CurveAffine> {
     pub(crate) E_commitment: C,
     /// Random challenge used in the verification process
     pub(crate) r: C::ScalarExt,
-    /// Homogenous variable used in the relaxed verification process
+    /// slack variable to make polynomial relation homogenous
     pub(crate) u: C::ScalarExt,
 }
 
@@ -254,11 +249,11 @@ impl<C: CurveAffine<ScalarExt = F>, F: PrimeField> Structure<C> {
     pub fn new(&self, k1: usize, k2: usize, t_vec: Vec<F>, ck: &CommitmentKey<C>) -> Self {
         let t_commitment = ck.commit(&t_vec[..]);
 
-        let l = Expression::Polynomial(Query {
+        let t = Expression::Polynomial(Query {
             index: 0,
             rotation: Rotation(0),
         });
-        let t = Expression::Polynomial(Query {
+        let l = Expression::Polynomial(Query {
             index: 1,
             rotation: Rotation(0),
         });
@@ -282,22 +277,13 @@ impl<C: CurveAffine<ScalarExt = F>, F: PrimeField> Structure<C> {
         let l_rel = (h * (l + r.clone()) - Expression::Constant(F::ONE)).expand();
         // check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
         let t_rel = (g * (t + r) - m).expand();
-        // check sum_i h_i = sum_i g_i, i.e. h_mat * h = g_mat * g
-        let h_mat = (0..2_usize.pow(k1 as u32))
-            .map(|i| (0, i, F::ONE))
-            .collect();
-        let g_mat = (0..2_usize.pow(k2 as u32))
-            .map(|i| (0, i, F::ONE))
-            .collect();
-
         Self {
             k1,
             k2,
+            t: t_vec,
             t_commitment,
             l_rel,
             t_rel,
-            h_mat,
-            g_mat,
         }
     }
 }
@@ -305,10 +291,13 @@ impl<C: CurveAffine<ScalarExt = F>, F: PrimeField> Structure<C> {
 impl<F: PrimeField> Witness<F> {
     /// calculate the coefficients {m_i} in the log derivative formula
     /// m_i = sum_j \xi(w_j=t_i) assuming {t_i} have no duplicates
-    pub fn log_derivative_coeffs(&self) -> Vec<F> {
+    pub fn log_derivative_coeffs<C: CurveAffine<ScalarExt = F>>(
+        &self,
+        ss: &Structure<C>,
+    ) -> Vec<F> {
         let mut m: Vec<F> = Vec::new();
         let mut processed_t = Vec::new();
-        for t_i in &self.t {
+        for t_i in &ss.t {
             if processed_t.contains(&t_i) {
                 // If the current t_i has already been processed, push 0 to m
                 m.push(F::ZERO);
@@ -324,27 +313,35 @@ impl<F: PrimeField> Witness<F> {
     /// calculate the inverse in log derivative formula
     /// h_i := \frac{1}{l_i+r}
     /// g_i := \frac{m_i}{t_i+r}
-    pub fn calc_inverse_terms(&self, r: F, m: &[F]) -> (Vec<F>, Vec<F>) {
+    pub fn calc_inverse_terms<C: CurveAffine<ScalarExt = F>>(
+        &self,
+        ss: &Structure<C>,
+        r: F,
+        m: &[F],
+    ) -> (Vec<F>, Vec<F>) {
         let h = self
             .l
             .iter()
             .map(|&l_i| Option::from((l_i + r).invert()).unwrap_or(F::ZERO))
             .collect::<Vec<F>>();
-        let g = self
-            .t
-            .iter()
-            .zip(m)
-            .map(|(t_i, m_i)| *m_i * Option::from((*t_i + r).invert()).unwrap_or(F::ZERO))
-            .collect::<Vec<F>>();
+        let g =
+            ss.t.iter()
+                .zip(m)
+                .map(|(t_i, m_i)| *m_i * Option::from((*t_i + r).invert()).unwrap_or(F::ZERO))
+                .collect::<Vec<F>>();
         (h, g)
     }
 
     /// check whether the lookup argument is satisfied
     /// the remaining check L(x1,...,xa)=l and T(y1,...,ya)=t
     /// are carried in upper level check
-    pub fn is_sat(&self, r: F) -> Result<(), String> {
-        let m = self.log_derivative_coeffs();
-        let (h, g) = self.calc_inverse_terms(r, &m);
+    pub fn is_sat<C: CurveAffine<ScalarExt = F>>(
+        &self,
+        ss: &Structure<C>,
+        r: F,
+    ) -> Result<(), String> {
+        let m = self.log_derivative_coeffs(ss);
+        let (h, g) = self.calc_inverse_terms(ss, r, &m);
         // check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
         let c1 = self
             .l
@@ -355,14 +352,13 @@ impl<F: PrimeField> Witness<F> {
             .count();
 
         // check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
-        let c2 = self
-            .t
-            .iter()
-            .zip(g.iter())
-            .zip(m)
-            .map(|((ti, gi), mi)| *gi * (*ti + r) - mi)
-            .filter(|d| F::ZERO.ne(d))
-            .count();
+        let c2 =
+            ss.t.iter()
+                .zip(g.iter())
+                .zip(m)
+                .map(|((ti, gi), mi)| *gi * (*ti + r) - mi)
+                .filter(|d| F::ZERO.ne(d))
+                .count();
 
         // check sum_i h_i = sum_i g_i
         let sum = h
