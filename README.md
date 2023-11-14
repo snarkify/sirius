@@ -1,4 +1,4 @@
-
+<img width="200" alt="logo" src="https://github.com/snarkify/sirius/assets/3767044/6afd527d-1ff3-4a1f-886a-071060121c91">
 
 > Sirius, renowned as the most luminous star in the night sky,
 > deceives the naked eye by appearing as a solitary point of light when,
