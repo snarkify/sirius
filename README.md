@@ -1,4 +1,4 @@
-<img width="200" alt="logo" src="https://github.com/snarkify/sirius/assets/751669/7e11beee-60f1-4d3c-9ec3-0c68634c8c2d">
+
 
 > Sirius, renowned as the most luminous star in the night sky,
 > deceives the naked eye by appearing as a solitary point of light when,
@@ -11,19 +11,18 @@
 Sirius is an open-source constraint-system-agnostic folding framework for Incrementally Verifiable Computation [[IVC](https://iacr.org/archive/tcc2008/49480001/49480001.pdf)]. 
 
 <p align="center">
-<img width="500" alt="fig1" src="https://github.com/snarkify/sirius/assets/3767044/903002b6-e95e-4b7b-ac2c-525760995220">
+<img width="500" alt="fig1" src="https://github.com/snarkify/sirius/assets/3767044/5adba269-ec82-45e2-9b05-427a05104553">
 </p>
 
+
 Within the context of an IVC scheme, the prover's role is to demonstrate that, upon consecutively applying a step function `F` exactly `n` times to an initial value $z_0$, the result is $z_n$. Here, the step function `F` takes two inputs $z_i$ and $w$, and yields an output $z_{i+1}$.
-
-
 
 # Architecture
 
 The `Sirius` folding framework is designed with a three-tiered architecture.
 
 <p align="center">
-<img width="800" alt="fig2" src="https://github.com/snarkify/sirius/assets/3767044/66989e29-9658-4a41-a6c4-214988d1ae55">
+<img width="800" alt="fig2" src="https://github.com/snarkify/sirius/assets/3767044/12cdcff5-7e7e-4b1d-82ed-1aa690e5624f">
 </p>
 
 - **Frontend Layer**: This layer serves as the interface for various constraint systems, including Plonk, R1CS, and AIR. It's engineered to allow developers to work with their preferred constraint systems. User-defined circuits and witness data are converted into an intermediate representation format defined by the folding scheme. Our current implementation follows the _Special-sound interactive protocol_ [[SPS](https://eprint.iacr.org/2023/620)]. An alternative scheme would be the _Customizable Constraint Systems protocol_ [[CCS](https://eprint.iacr.org/2023/552)]. 
