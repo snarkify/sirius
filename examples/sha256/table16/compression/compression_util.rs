@@ -3,11 +3,11 @@ use super::{
     RoundWordSpread, State, UpperSigmaVar,
 };
 use crate::table16::{util::*, AssignedBits, SpreadVar, SpreadWord, StateWord, Table16Assignment};
+use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Region, Value},
     plonk::{Advice, Column, Error},
 };
-use halo2curves::pasta::pallas;
 use std::convert::TryInto;
 
 // Test vector 'abc'
@@ -197,12 +197,12 @@ pub fn get_digest_efgh_row() -> usize {
 }
 
 impl CompressionConfig {
-    pub(super) fn decompose_abcd(
+    pub(super) fn decompose_abcd<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         row: usize,
         val: Value<u32>,
-    ) -> Result<AbcdVar, Error> {
+    ) -> Result<AbcdVar<F>, Error> {
         self.s_decompose_abcd.enable(region, row)?;
 
         let a_3 = self.extras[0];
@@ -210,7 +210,7 @@ impl CompressionConfig {
         let a_5 = self.message_schedule;
         let a_6 = self.extras[2];
 
-        let spread_pieces = val.map(AbcdVar::pieces);
+        let spread_pieces = val.map(AbcdVar::<F>::pieces);
         let spread_pieces = spread_pieces.transpose_vec(6);
 
         let a = SpreadVar::without_lookup(
@@ -268,12 +268,12 @@ impl CompressionConfig {
         })
     }
 
-    pub(super) fn decompose_efgh(
+    pub(super) fn decompose_efgh<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         row: usize,
         val: Value<u32>,
-    ) -> Result<EfghVar, Error> {
+    ) -> Result<EfghVar<F>, Error> {
         self.s_decompose_efgh.enable(region, row)?;
 
         let a_3 = self.extras[0];
@@ -281,7 +281,7 @@ impl CompressionConfig {
         let a_5 = self.message_schedule;
         let a_6 = self.extras[2];
 
-        let spread_pieces = val.map(EfghVar::pieces);
+        let spread_pieces = val.map(EfghVar::<F>::pieces);
         let spread_pieces = spread_pieces.transpose_vec(6);
 
         let a_lo = SpreadVar::without_lookup(
@@ -339,12 +339,12 @@ impl CompressionConfig {
         })
     }
 
-    pub(super) fn decompose_a(
+    pub(super) fn decompose_a<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: RoundIdx,
         a_val: Value<u32>,
-    ) -> Result<RoundWordA, Error> {
+    ) -> Result<RoundWordA<F>, Error> {
         let row = get_decompose_a_row(round_idx);
 
         let (dense_halves, spread_halves) = self.assign_word_halves(region, row, a_val)?;
@@ -352,12 +352,12 @@ impl CompressionConfig {
         Ok(RoundWordA::new(a_pieces, dense_halves, spread_halves))
     }
 
-    pub(super) fn decompose_e(
+    pub(super) fn decompose_e<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: RoundIdx,
         e_val: Value<u32>,
-    ) -> Result<RoundWordE, Error> {
+    ) -> Result<RoundWordE<F>, Error> {
         let row = get_decompose_e_row(round_idx);
 
         let (dense_halves, spread_halves) = self.assign_word_halves(region, row, e_val)?;
@@ -365,12 +365,12 @@ impl CompressionConfig {
         Ok(RoundWordE::new(e_pieces, dense_halves, spread_halves))
     }
 
-    pub(super) fn assign_upper_sigma_0(
+    pub(super) fn assign_upper_sigma_0<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: MainRoundIdx,
-        word: AbcdVar,
-    ) -> Result<(AssignedBits<16>, AssignedBits<16>), Error> {
+        word: AbcdVar<F>,
+    ) -> Result<(AssignedBits<F, 16>, AssignedBits<F, 16>), Error> {
         // Rename these here for ease of matching the gates to the specification.
         let a_3 = self.extras[0];
         let a_4 = self.extras[1];
@@ -423,12 +423,12 @@ impl CompressionConfig {
         )
     }
 
-    pub(super) fn assign_upper_sigma_1(
+    pub(super) fn assign_upper_sigma_1<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: MainRoundIdx,
-        word: EfghVar,
-    ) -> Result<(AssignedBits<16>, AssignedBits<16>), Error> {
+        word: EfghVar<F>,
+    ) -> Result<(AssignedBits<F, 16>, AssignedBits<F, 16>), Error> {
         // Rename these here for ease of matching the gates to the specification.
         let a_3 = self.extras[0];
         let a_4 = self.extras[1];
@@ -482,15 +482,15 @@ impl CompressionConfig {
         )
     }
 
-    fn assign_ch_outputs(
+    fn assign_ch_outputs<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         row: usize,
         r_0_even: Value<[bool; 16]>,
         r_0_odd: Value<[bool; 16]>,
         r_1_even: Value<[bool; 16]>,
         r_1_odd: Value<[bool; 16]>,
-    ) -> Result<(AssignedBits<16>, AssignedBits<16>), Error> {
+    ) -> Result<(AssignedBits<F, 16>, AssignedBits<F, 16>), Error> {
         let a_3 = self.extras[0];
 
         let (_even, odd) = self.assign_spread_outputs(
@@ -507,13 +507,13 @@ impl CompressionConfig {
         Ok(odd)
     }
 
-    pub(super) fn assign_ch(
+    pub(super) fn assign_ch<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: MainRoundIdx,
-        spread_halves_e: RoundWordSpread,
-        spread_halves_f: RoundWordSpread,
-    ) -> Result<(AssignedBits<16>, AssignedBits<16>), Error> {
+        spread_halves_e: RoundWordSpread<F>,
+        spread_halves_f: RoundWordSpread<F>,
+    ) -> Result<(AssignedBits<F, 16>, AssignedBits<F, 16>), Error> {
         let a_3 = self.extras[0];
         let a_4 = self.extras[1];
 
@@ -553,13 +553,13 @@ impl CompressionConfig {
         self.assign_ch_outputs(region, row, p_0_even, p_0_odd, p_1_even, p_1_odd)
     }
 
-    pub(super) fn assign_ch_neg(
+    pub(super) fn assign_ch_neg<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: MainRoundIdx,
-        spread_halves_e: RoundWordSpread,
-        spread_halves_g: RoundWordSpread,
-    ) -> Result<(AssignedBits<16>, AssignedBits<16>), Error> {
+        spread_halves_e: RoundWordSpread<F>,
+        spread_halves_g: RoundWordSpread<F>,
+    ) -> Result<(AssignedBits<F, 16>, AssignedBits<F, 16>), Error> {
         let row = get_ch_neg_row(round_idx);
 
         self.s_ch_neg.enable(region, row)?;
@@ -590,7 +590,7 @@ impl CompressionConfig {
             .value()
             .map(|spread_e_lo| negate_spread(spread_e_lo.0));
         // Assign spread_neg_e_lo
-        AssignedBits::<32>::assign_bits(
+        AssignedBits::<F, 32>::assign_bits(
             region,
             || "spread_neg_e_lo",
             a_3,
@@ -604,7 +604,7 @@ impl CompressionConfig {
             .value()
             .map(|spread_e_hi| negate_spread(spread_e_hi.0));
         // Assign spread_neg_e_hi
-        AssignedBits::<32>::assign_bits(
+        AssignedBits::<F, 32>::assign_bits(
             region,
             || "spread_neg_e_hi",
             a_4,
@@ -632,15 +632,15 @@ impl CompressionConfig {
         self.assign_ch_outputs(region, row, p_0_even, p_0_odd, p_1_even, p_1_odd)
     }
 
-    fn assign_maj_outputs(
+    fn assign_maj_outputs<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         row: usize,
         r_0_even: Value<[bool; 16]>,
         r_0_odd: Value<[bool; 16]>,
         r_1_even: Value<[bool; 16]>,
         r_1_odd: Value<[bool; 16]>,
-    ) -> Result<(AssignedBits<16>, AssignedBits<16>), Error> {
+    ) -> Result<(AssignedBits<F, 16>, AssignedBits<F, 16>), Error> {
         let a_3 = self.extras[0];
         let (_even, odd) = self.assign_spread_outputs(
             region,
@@ -656,14 +656,14 @@ impl CompressionConfig {
         Ok(odd)
     }
 
-    pub(super) fn assign_maj(
+    pub(super) fn assign_maj<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: MainRoundIdx,
-        spread_halves_a: RoundWordSpread,
-        spread_halves_b: RoundWordSpread,
-        spread_halves_c: RoundWordSpread,
-    ) -> Result<(AssignedBits<16>, AssignedBits<16>), Error> {
+        spread_halves_a: RoundWordSpread<F>,
+        spread_halves_b: RoundWordSpread<F>,
+        spread_halves_c: RoundWordSpread<F>,
+    ) -> Result<(AssignedBits<F, 16>, AssignedBits<F, 16>), Error> {
         let a_4 = self.extras[1];
         let a_5 = self.message_schedule;
 
@@ -714,17 +714,17 @@ impl CompressionConfig {
 
     // s_h_prime to get H' = H + Ch(E, F, G) + s_upper_sigma_1(E) + K + W
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn assign_h_prime(
+    pub(super) fn assign_h_prime<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: MainRoundIdx,
-        h: RoundWordDense,
-        ch: (AssignedBits<16>, AssignedBits<16>),
-        ch_neg: (AssignedBits<16>, AssignedBits<16>),
-        sigma_1: (AssignedBits<16>, AssignedBits<16>),
+        h: RoundWordDense<F>,
+        ch: (AssignedBits<F, 16>, AssignedBits<F, 16>),
+        ch_neg: (AssignedBits<F, 16>, AssignedBits<F, 16>),
+        sigma_1: (AssignedBits<F, 16>, AssignedBits<F, 16>),
         k: u32,
-        w: &(AssignedBits<16>, AssignedBits<16>),
-    ) -> Result<RoundWordDense, Error> {
+        w: &(AssignedBits<F, 16>, AssignedBits<F, 16>),
+    ) -> Result<RoundWordDense<F>, Error> {
         let row = get_h_prime_row(round_idx);
         self.s_h_prime.enable(region, row)?;
 
@@ -748,8 +748,14 @@ impl CompressionConfig {
         let k_lo: [bool; 16] = k[..16].try_into().unwrap();
         let k_hi: [bool; 16] = k[16..].try_into().unwrap();
         {
-            AssignedBits::<16>::assign_bits(region, || "k_lo", a_6, row - 1, Value::known(k_lo))?;
-            AssignedBits::<16>::assign_bits(region, || "k_hi", a_6, row, Value::known(k_hi))?;
+            AssignedBits::<F, 16>::assign_bits(
+                region,
+                || "k_lo",
+                a_6,
+                row - 1,
+                Value::known(k_lo),
+            )?;
+            AssignedBits::<F, 16>::assign_bits(region, || "k_hi", a_6, row, Value::known(k_hi))?;
         }
 
         // Assign and copy w
@@ -781,30 +787,40 @@ impl CompressionConfig {
                 || "h_prime_carry",
                 a_9,
                 row + 1,
-                || h_prime_carry.map(pallas::Base::from),
+                || h_prime_carry.map(F::from),
             )?;
 
             let h_prime: Value<[bool; 32]> = h_prime.map(|w| i2lebsp(w.into()));
             let h_prime_lo: Value<[bool; 16]> = h_prime.map(|w| w[..16].try_into().unwrap());
             let h_prime_hi: Value<[bool; 16]> = h_prime.map(|w| w[16..].try_into().unwrap());
 
-            let h_prime_lo =
-                AssignedBits::<16>::assign_bits(region, || "h_prime_lo", a_7, row + 1, h_prime_lo)?;
-            let h_prime_hi =
-                AssignedBits::<16>::assign_bits(region, || "h_prime_hi", a_8, row + 1, h_prime_hi)?;
+            let h_prime_lo = AssignedBits::<F, 16>::assign_bits(
+                region,
+                || "h_prime_lo",
+                a_7,
+                row + 1,
+                h_prime_lo,
+            )?;
+            let h_prime_hi = AssignedBits::<F, 16>::assign_bits(
+                region,
+                || "h_prime_hi",
+                a_8,
+                row + 1,
+                h_prime_hi,
+            )?;
 
             Ok((h_prime_lo, h_prime_hi).into())
         }
     }
 
     // s_e_new to get E_new = H' + D
-    pub(super) fn assign_e_new(
+    pub(super) fn assign_e_new<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: MainRoundIdx,
-        d: &RoundWordDense,
-        h_prime: &RoundWordDense,
-    ) -> Result<RoundWordDense, Error> {
+        d: &RoundWordDense<F>,
+        h_prime: &RoundWordDense<F>,
+    ) -> Result<RoundWordDense<F>, Error> {
         let row = get_e_new_row(round_idx);
 
         self.s_e_new.enable(region, row)?;
@@ -824,25 +840,20 @@ impl CompressionConfig {
         ]);
 
         let e_new_dense = self.assign_word_halves_dense(region, row, a_8, row + 1, a_8, e_new)?;
-        region.assign_advice(
-            || "e_new_carry",
-            a_9,
-            row + 1,
-            || e_new_carry.map(pallas::Base::from),
-        )?;
+        region.assign_advice(|| "e_new_carry", a_9, row + 1, || e_new_carry.map(F::from))?;
 
         Ok(e_new_dense)
     }
 
     // s_a_new to get A_new = H' + Maj(A, B, C) + s_upper_sigma_0(A)
-    pub(super) fn assign_a_new(
+    pub(super) fn assign_a_new<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: MainRoundIdx,
-        maj: (AssignedBits<16>, AssignedBits<16>),
-        sigma_0: (AssignedBits<16>, AssignedBits<16>),
-        h_prime: RoundWordDense,
-    ) -> Result<RoundWordDense, Error> {
+        maj: (AssignedBits<F, 16>, AssignedBits<F, 16>),
+        sigma_0: (AssignedBits<F, 16>, AssignedBits<F, 16>),
+        h_prime: RoundWordDense<F>,
+    ) -> Result<RoundWordDense<F>, Error> {
         let row = get_a_new_row(round_idx);
 
         self.s_a_new.enable(region, row)?;
@@ -878,35 +889,30 @@ impl CompressionConfig {
         ]);
 
         let a_new_dense = self.assign_word_halves_dense(region, row, a_8, row + 1, a_8, a_new)?;
-        region.assign_advice(
-            || "a_new_carry",
-            a_9,
-            row,
-            || a_new_carry.map(pallas::Base::from),
-        )?;
+        region.assign_advice(|| "a_new_carry", a_9, row, || a_new_carry.map(F::from))?;
 
         Ok(a_new_dense)
     }
 
-    pub fn assign_word_halves_dense(
+    pub fn assign_word_halves_dense<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         lo_row: usize,
         lo_col: Column<Advice>,
         hi_row: usize,
         hi_col: Column<Advice>,
         word: Value<u32>,
-    ) -> Result<RoundWordDense, Error> {
+    ) -> Result<RoundWordDense<F>, Error> {
         let word: Value<[bool; 32]> = word.map(|w| i2lebsp(w.into()));
 
         let lo = {
             let lo: Value<[bool; 16]> = word.map(|w| w[..16].try_into().unwrap());
-            AssignedBits::<16>::assign_bits(region, || "lo", lo_col, lo_row, lo)?
+            AssignedBits::<F, 16>::assign_bits(region, || "lo", lo_col, lo_row, lo)?
         };
 
         let hi = {
             let hi: Value<[bool; 16]> = word.map(|w| w[16..].try_into().unwrap());
-            AssignedBits::<16>::assign_bits(region, || "hi", hi_col, hi_row, hi)?
+            AssignedBits::<F, 16>::assign_bits(region, || "hi", hi_col, hi_row, hi)?
         };
 
         Ok((lo, hi).into())
@@ -914,12 +920,12 @@ impl CompressionConfig {
 
     // Assign hi and lo halves for both dense and spread versions of a word
     #[allow(clippy::type_complexity)]
-    pub fn assign_word_halves(
+    pub fn assign_word_halves<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         row: usize,
         word: Value<u32>,
-    ) -> Result<(RoundWordDense, RoundWordSpread), Error> {
+    ) -> Result<(RoundWordDense<F>, RoundWordSpread<F>), Error> {
         // Rename these here for ease of matching the gates to the specification.
         let a_7 = self.extras[3];
         let a_8 = self.extras[4];
@@ -940,17 +946,18 @@ impl CompressionConfig {
 }
 
 #[allow(clippy::many_single_char_names)]
-pub fn match_state(
-    state: State,
+#[allow(clippy::type_complexity)]
+pub fn match_state<F: PrimeField>(
+    state: State<F>,
 ) -> (
-    RoundWordA,
-    RoundWord,
-    RoundWord,
-    RoundWordDense,
-    RoundWordE,
-    RoundWord,
-    RoundWord,
-    RoundWordDense,
+    RoundWordA<F>,
+    RoundWord<F>,
+    RoundWord<F>,
+    RoundWordDense<F>,
+    RoundWordE<F>,
+    RoundWord<F>,
+    RoundWord<F>,
+    RoundWordDense<F>,
 ) {
     let a = match state.a {
         Some(StateWord::A(a)) => a,

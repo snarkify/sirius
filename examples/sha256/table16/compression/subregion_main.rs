@@ -1,17 +1,16 @@
 use super::super::{AssignedBits, RoundWord, RoundWordA, RoundWordE, StateWord, ROUND_CONSTANTS};
 use super::{compression_util::*, CompressionConfig, State};
 use halo2_proofs::{circuit::Region, plonk::Error};
-use halo2curves::pasta::pallas;
 
 impl CompressionConfig {
     #[allow(clippy::many_single_char_names)]
-    pub fn assign_round(
+    pub fn assign_round<F: ff::PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: MainRoundIdx,
-        state: State,
-        schedule_word: &(AssignedBits<16>, AssignedBits<16>),
-    ) -> Result<State, Error> {
+        state: State<F>,
+        schedule_word: &(AssignedBits<F, 16>, AssignedBits<F, 16>),
+    ) -> Result<State<F>, Error> {
         let a_3 = self.extras[0];
         let a_4 = self.extras[1];
         let a_7 = self.extras[3];

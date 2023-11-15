@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{array, iter, num::NonZeroUsize};
+use std::{array, iter, marker::PhantomData, num::NonZeroUsize};
 
 use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
@@ -257,41 +257,54 @@ pub mod sha256 {
 pub use sha256::{BlockWord, Sha256, Table16Chip, Table16Config};
 
 #[derive(Default, Debug)]
-struct TestSha256Circuit {}
+struct TestSha256Circuit<F: PrimeField> {
+    _p: PhantomData<F>,
+}
 
 // TODO
 const ARITY: usize = BLOCK_SIZE / 2;
 
-impl StepCircuit<ARITY, pallas::Base> for TestSha256Circuit {
+impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
     type Config = Table16Config;
     type FloopPlanner = SimpleFloorPlanner;
 
-    fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         Table16Chip::configure(meta)
     }
 
     fn synthesize_step(
         &self,
         config: Self::Config,
-        layouter: &mut impl Layouter<pallas::Base>,
-        z_in: &[AssignedCell<pallas::Base, pallas::Base>; ARITY],
-    ) -> Result<[AssignedCell<pallas::Base, pallas::Base>; ARITY], SynthesisError> {
+        layouter: &mut impl Layouter<F>,
+        z_in: &[AssignedCell<F, F>; ARITY],
+    ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
         Table16Chip::load(config.clone(), layouter)?;
         let table16_chip = Table16Chip::construct(config);
 
-        let input: [AssignedCell<pallas::Base, pallas::Base>; BLOCK_SIZE] =
-            iter::repeat(z_in.iter())
-                .take(2)
-                .flatten()
-                .cloned()
-                .collect::<Vec<AssignedCell<pallas::Base, pallas::Base>>>()
-                .try_into()
-                .expect("Unreachable, ARITY * 2 == BLOCK_SIZE");
+        let input: [AssignedCell<F, F>; BLOCK_SIZE] = iter::repeat(z_in.iter())
+            .take(2)
+            .flatten()
+            .cloned()
+            .collect::<Vec<AssignedCell<F, F>>>()
+            .try_into()
+            .expect("Unreachable, ARITY * 2 == BLOCK_SIZE");
 
         let values = input
             .iter()
             .map(|cell| cell.value().map(|v| *v).unwrap().unwrap_or_default())
-            .map(|field_value| u32::from_be_bytes(field_value.to_repr()[0..4].try_into().unwrap()))
+            .map(|field_value| {
+                u32::from_be_bytes(
+                    field_value
+                        .to_repr()
+                        .as_ref()
+                        .iter()
+                        .take(4)
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .unwrap(),
+                )
+            })
             .map(|value| BlockWord(Value::known(value)))
             .collect::<Box<[BlockWord]>>();
 
@@ -363,6 +376,6 @@ fn main() {
 
     todo!(
         "#33 Waiting for IVC Circuit for test {:?}",
-        TestSha256Circuit {}
+        TestSha256Circuit::<pallas::Base>::default()
     );
 }

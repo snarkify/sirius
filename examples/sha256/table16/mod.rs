@@ -2,11 +2,11 @@ use std::convert::TryInto;
 use std::marker::PhantomData;
 
 use super::sha256::Sha256Instructions;
+use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Region, Value},
     plonk::{Advice, Any, Assigned, Column, ConstraintSystem, Error},
 };
-use halo2curves::pasta::pallas;
 
 mod compression;
 mod gates;
@@ -81,10 +81,10 @@ impl<const LEN: usize> From<&Bits<LEN>> for [bool; LEN] {
     }
 }
 
-impl<const LEN: usize> From<&Bits<LEN>> for Assigned<pallas::Base> {
-    fn from(bits: &Bits<LEN>) -> Assigned<pallas::Base> {
+impl<F: PrimeField, const LEN: usize> From<&Bits<LEN>> for Assigned<F> {
+    fn from(bits: &Bits<LEN>) -> Assigned<F> {
         assert!(LEN <= 64);
-        pallas::Base::from(lebs2ip(&bits.0)).into()
+        F::from(lebs2ip(&bits.0)).into()
     }
 }
 
@@ -113,19 +113,19 @@ impl From<u32> for Bits<32> {
 }
 
 #[derive(Clone, Debug)]
-pub struct AssignedBits<const LEN: usize>(pub AssignedCell<Bits<LEN>, pallas::Base>);
+pub struct AssignedBits<F: PrimeField, const LEN: usize>(pub AssignedCell<Bits<LEN>, F>);
 
-impl<const LEN: usize> std::ops::Deref for AssignedBits<LEN> {
-    type Target = AssignedCell<Bits<LEN>, pallas::Base>;
+impl<F: PrimeField, const LEN: usize> std::ops::Deref for AssignedBits<F, LEN> {
+    type Target = AssignedCell<Bits<LEN>, F>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<const LEN: usize> AssignedBits<LEN> {
+impl<F: PrimeField, const LEN: usize> AssignedBits<F, LEN> {
     fn assign_bits<A, AR, T: TryInto<[bool; LEN]> + std::fmt::Debug + Clone>(
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         annotation: A,
         column: impl Into<Column<Any>>,
         offset: usize,
@@ -157,13 +157,13 @@ impl<const LEN: usize> AssignedBits<LEN> {
     }
 }
 
-impl AssignedBits<16> {
+impl<F: PrimeField> AssignedBits<F, 16> {
     fn value_u16(&self) -> Value<u16> {
         self.value().map(|v| v.into())
     }
 
     fn assign<A, AR>(
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         annotation: A,
         column: impl Into<Column<Any>>,
         offset: usize,
@@ -192,13 +192,13 @@ impl AssignedBits<16> {
     }
 }
 
-impl AssignedBits<32> {
+impl<F: PrimeField> AssignedBits<F, 32> {
     fn value_u32(&self) -> Value<u32> {
         self.value().map(|v| v.into())
     }
 
     fn assign<A, AR>(
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         annotation: A,
         column: impl Into<Column<Any>>,
         offset: usize,
@@ -237,12 +237,12 @@ pub struct Table16Config {
 
 /// A chip that implements SHA-256 with a maximum lookup table size of $2^16$.
 #[derive(Clone, Debug)]
-pub struct Table16Chip {
+pub struct Table16Chip<F: PrimeField> {
     config: Table16Config,
-    _marker: PhantomData<pallas::Base>,
+    _marker: PhantomData<F>,
 }
 
-impl Chip<pallas::Base> for Table16Chip {
+impl<F: PrimeField> Chip<F> for Table16Chip<F> {
     type Config = Table16Config;
     type Loaded = ();
 
@@ -255,9 +255,9 @@ impl Chip<pallas::Base> for Table16Chip {
     }
 }
 
-impl Table16Chip {
+impl<F: PrimeField> Table16Chip<F> {
     /// Reconstructs this chip from the given config.
-    pub fn construct(config: <Self as Chip<pallas::Base>>::Config) -> Self {
+    pub fn construct(config: <Self as Chip<F>>::Config) -> Self {
         Self {
             config,
             _marker: PhantomData,
@@ -265,9 +265,7 @@ impl Table16Chip {
     }
 
     /// Configures a circuit to include this chip.
-    pub fn configure(
-        meta: &mut ConstraintSystem<pallas::Base>,
-    ) -> <Self as Chip<pallas::Base>>::Config {
+    pub fn configure(meta: &mut ConstraintSystem<F>) -> <Self as Chip<F>>::Config {
         // Columns required by this chip:
         let message_schedule = meta.advice_column();
         let extras = [
@@ -318,28 +316,22 @@ impl Table16Chip {
     }
 
     /// Loads the lookup table required by this chip into the circuit.
-    pub fn load(
-        config: Table16Config,
-        layouter: &mut impl Layouter<pallas::Base>,
-    ) -> Result<(), Error> {
+    pub fn load(config: Table16Config, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         SpreadTableChip::load(config.lookup, layouter)
     }
 }
 
-impl Sha256Instructions<pallas::Base> for Table16Chip {
-    type State = State;
+impl<F: PrimeField> Sha256Instructions<F> for Table16Chip<F> {
+    type State = State<F>;
     type BlockWord = BlockWord;
 
-    fn initialization_vector(
-        &self,
-        layouter: &mut impl Layouter<pallas::Base>,
-    ) -> Result<State, Error> {
+    fn initialization_vector(&self, layouter: &mut impl Layouter<F>) -> Result<State<F>, Error> {
         self.config().compression.initialize_with_iv(layouter, IV)
     }
 
     fn initialization(
         &self,
-        layouter: &mut impl Layouter<pallas::Base>,
+        layouter: &mut impl Layouter<F>,
         init_state: &Self::State,
     ) -> Result<Self::State, Error> {
         self.config()
@@ -351,10 +343,10 @@ impl Sha256Instructions<pallas::Base> for Table16Chip {
     // message block and return the final state.
     fn compress(
         &self,
-        layouter: &mut impl Layouter<pallas::Base>,
+        layouter: &mut impl Layouter<F>,
         initialized_state: &Self::State,
         input: [Self::BlockWord; super::BLOCK_SIZE],
-        input_cells: [AssignedCell<pallas::Base, pallas::Base>; super::BLOCK_SIZE],
+        input_cells: [AssignedCell<F, F>; super::BLOCK_SIZE],
     ) -> Result<Self::State, Error> {
         let config = self.config();
 
@@ -377,7 +369,7 @@ impl Sha256Instructions<pallas::Base> for Table16Chip {
 
     fn digest(
         &self,
-        layouter: &mut impl Layouter<pallas::Base>,
+        layouter: &mut impl Layouter<F>,
         state: &Self::State,
     ) -> Result<[Self::BlockWord; super::DIGEST_SIZE], Error> {
         // Copy the dense forms of the state variable chunks down to this gate.
@@ -387,9 +379,9 @@ impl Sha256Instructions<pallas::Base> for Table16Chip {
 
     fn digest_cells(
         &self,
-        layouter: &mut impl Layouter<pallas::Base>,
+        layouter: &mut impl Layouter<F>,
         state: &Self::State,
-    ) -> Result<[AssignedCell<pallas::Base, pallas::Base>; super::DIGEST_SIZE], Error> {
+    ) -> Result<[AssignedCell<F, F>; super::DIGEST_SIZE], Error> {
         // Copy the dense forms of the state variable chunks down to this gate.
         // Reconstruct the 32-bit dense words.
         self.config()
@@ -399,13 +391,13 @@ impl Sha256Instructions<pallas::Base> for Table16Chip {
 }
 
 /// Common assignment patterns used by Table16 regions.
-trait Table16Assignment {
+trait Table16Assignment<F: PrimeField> {
     /// Assign cells for general spread computation used in sigma, ch, ch_neg, maj gates
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::type_complexity)]
     fn assign_spread_outputs(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         lookup: &SpreadInputs,
         a_3: Column<Advice>,
         row: usize,
@@ -415,8 +407,8 @@ trait Table16Assignment {
         r_1_odd: Value<[bool; 16]>,
     ) -> Result<
         (
-            (AssignedBits<16>, AssignedBits<16>),
-            (AssignedBits<16>, AssignedBits<16>),
+            (AssignedBits<F, 16>, AssignedBits<F, 16>),
+            (AssignedBits<F, 16>, AssignedBits<F, 16>),
         ),
         Error,
     > {
@@ -457,7 +449,7 @@ trait Table16Assignment {
     #[allow(clippy::too_many_arguments)]
     fn assign_sigma_outputs(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         lookup: &SpreadInputs,
         a_3: Column<Advice>,
         row: usize,
@@ -465,7 +457,7 @@ trait Table16Assignment {
         r_0_odd: Value<[bool; 16]>,
         r_1_even: Value<[bool; 16]>,
         r_1_odd: Value<[bool; 16]>,
-    ) -> Result<(AssignedBits<16>, AssignedBits<16>), Error> {
+    ) -> Result<(AssignedBits<F, 16>, AssignedBits<F, 16>), Error> {
         let (even, _odd) = self.assign_spread_outputs(
             region, lookup, a_3, row, r_0_even, r_0_odd, r_1_even, r_1_odd,
         )?;
@@ -490,7 +482,7 @@ mod tests {
         use plotters::prelude::*;
         struct MyCircuit {}
 
-        impl Circuit<pallas::Base> for MyCircuit {
+        impl Circuit<F> for MyCircuit {
             type Config = Table16Config;
             type FloorPlanner = SimpleFloorPlanner;
             #[cfg(feature = "circuit-params")]
@@ -500,14 +492,14 @@ mod tests {
                 MyCircuit {}
             }
 
-            fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
+            fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
                 Table16Chip::configure(meta)
             }
 
             fn synthesize(
                 &self,
                 config: Self::Config,
-                mut layouter: impl Layouter<pallas::Base>,
+                mut layouter: impl Layouter<F>,
             ) -> Result<(), Error> {
                 let table16_chip = Table16Chip::construct(config.clone());
                 Table16Chip::load(config, &mut layouter)?;
@@ -536,7 +528,7 @@ mod tests {
 
         let circuit = MyCircuit {};
         halo2_proofs::dev::CircuitLayout::default()
-            .render::<pallas::Base, _, _>(17, &circuit, &root)
+            .render::<F, _, _>(17, &circuit, &root)
             .unwrap();
     }
 }

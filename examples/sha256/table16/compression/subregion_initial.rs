@@ -1,19 +1,19 @@
 use super::super::{RoundWord, StateWord, STATE};
 use super::{compression_util::*, CompressionConfig, State};
 
+use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Region, Value},
     plonk::Error,
 };
-use halo2curves::pasta::pallas;
 
 impl CompressionConfig {
     #[allow(clippy::many_single_char_names)]
-    pub fn initialize_iv(
+    pub fn initialize_iv<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         iv: [u32; STATE],
-    ) -> Result<State, Error> {
+    ) -> Result<State<F>, Error> {
         let a_7 = self.extras[3];
 
         // Decompose E into (6, 5, 14, 7)-bit chunks
@@ -53,11 +53,11 @@ impl CompressionConfig {
     }
 
     #[allow(clippy::many_single_char_names)]
-    pub fn initialize_state(
+    pub fn initialize_state<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
-        state: State,
-    ) -> Result<State, Error> {
+        region: &mut Region<'_, F>,
+        state: State<F>,
+    ) -> Result<State<F>, Error> {
         let a_7 = self.extras[3];
         let (a, b, c, d, e, f, g, h) = match_state(state);
 
@@ -103,12 +103,12 @@ impl CompressionConfig {
         ))
     }
 
-    fn decompose_b(
+    fn decompose_b<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: InitialRound,
         b_val: Value<u32>,
-    ) -> Result<RoundWord, Error> {
+    ) -> Result<RoundWord<F>, Error> {
         let row = get_decompose_b_row(round_idx);
 
         let (dense_halves, spread_halves) = self.assign_word_halves(region, row, b_val)?;
@@ -116,12 +116,12 @@ impl CompressionConfig {
         Ok(RoundWord::new(dense_halves, spread_halves))
     }
 
-    fn decompose_c(
+    fn decompose_c<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: InitialRound,
         c_val: Value<u32>,
-    ) -> Result<RoundWord, Error> {
+    ) -> Result<RoundWord<F>, Error> {
         let row = get_decompose_c_row(round_idx);
 
         let (dense_halves, spread_halves) = self.assign_word_halves(region, row, c_val)?;
@@ -129,12 +129,12 @@ impl CompressionConfig {
         Ok(RoundWord::new(dense_halves, spread_halves))
     }
 
-    fn decompose_f(
+    fn decompose_f<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: InitialRound,
         f_val: Value<u32>,
-    ) -> Result<RoundWord, Error> {
+    ) -> Result<RoundWord<F>, Error> {
         let row = get_decompose_f_row(round_idx);
 
         let (dense_halves, spread_halves) = self.assign_word_halves(region, row, f_val)?;
@@ -142,12 +142,12 @@ impl CompressionConfig {
         Ok(RoundWord::new(dense_halves, spread_halves))
     }
 
-    fn decompose_g(
+    fn decompose_g<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         round_idx: InitialRound,
         g_val: Value<u32>,
-    ) -> Result<RoundWord, Error> {
+    ) -> Result<RoundWord<F>, Error> {
         let row = get_decompose_g_row(round_idx);
 
         let (dense_halves, spread_halves) = self.assign_word_halves(region, row, g_val)?;
