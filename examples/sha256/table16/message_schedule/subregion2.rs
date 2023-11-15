@@ -1,29 +1,29 @@
 use super::super::{util::*, AssignedBits, Bits, SpreadVar, SpreadWord, Table16Assignment};
 use super::{schedule_util::*, MessageScheduleConfig, MessageWord};
+use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Region, Value},
     plonk::Error,
 };
-use halo2curves::pasta::pallas;
 use std::convert::TryInto;
 
 /// A word in subregion 2
 /// (3, 4, 3, 7, 1, 1, 13)-bit chunks
 #[derive(Clone, Debug)]
-pub struct Subregion2Word {
+pub struct Subregion2Word<F: PrimeField> {
     index: usize,
-    a: AssignedBits<3>,
-    b: AssignedBits<4>,
-    c: AssignedBits<3>,
-    d: AssignedBits<7>,
-    e: AssignedBits<1>,
-    f: AssignedBits<1>,
-    g: AssignedBits<13>,
-    spread_d: AssignedBits<14>,
-    spread_g: AssignedBits<26>,
+    a: AssignedBits<F, 3>,
+    b: AssignedBits<F, 4>,
+    c: AssignedBits<F, 3>,
+    d: AssignedBits<F, 7>,
+    e: AssignedBits<F, 1>,
+    f: AssignedBits<F, 1>,
+    g: AssignedBits<F, 13>,
+    spread_d: AssignedBits<F, 14>,
+    spread_g: AssignedBits<F, 26>,
 }
 
-impl Subregion2Word {
+impl<F: PrimeField> Subregion2Word<F> {
     fn spread_a(&self) -> Value<[bool; 6]> {
         self.a.value().map(|v| v.spread())
     }
@@ -153,13 +153,15 @@ impl Subregion2Word {
 
 impl MessageScheduleConfig {
     // W_[14..49]
-    pub fn assign_subregion2(
+
+    #[allow(clippy::type_complexity)]
+    pub fn assign_subregion2<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
-        lower_sigma_0_output: Vec<(AssignedBits<16>, AssignedBits<16>)>,
-        w: &mut Vec<MessageWord>,
-        w_halves: &mut Vec<(AssignedBits<16>, AssignedBits<16>)>,
-    ) -> Result<Vec<(AssignedBits<16>, AssignedBits<16>)>, Error> {
+        region: &mut Region<'_, F>,
+        lower_sigma_0_output: Vec<(AssignedBits<F, 16>, AssignedBits<F, 16>)>,
+        w: &mut Vec<MessageWord<F>>,
+        w_halves: &mut Vec<(AssignedBits<F, 16>, AssignedBits<F, 16>)>,
+    ) -> Result<Vec<(AssignedBits<F, 16>, AssignedBits<F, 16>)>, Error> {
         let a_5 = self.message_schedule;
         let a_6 = self.extras[2];
         let a_7 = self.extras[3];
@@ -167,9 +169,9 @@ impl MessageScheduleConfig {
         let a_9 = self.extras[5];
 
         let mut lower_sigma_0_v2_results =
-            Vec::<(AssignedBits<16>, AssignedBits<16>)>::with_capacity(SUBREGION_2_LEN);
+            Vec::<(AssignedBits<F, 16>, AssignedBits<F, 16>)>::with_capacity(SUBREGION_2_LEN);
         let mut lower_sigma_1_v2_results =
-            Vec::<(AssignedBits<16>, AssignedBits<16>)>::with_capacity(SUBREGION_2_LEN);
+            Vec::<(AssignedBits<F, 16>, AssignedBits<F, 16>)>::with_capacity(SUBREGION_2_LEN);
 
         // Closure to compose new word
         // W_i = sigma_1(W_{i - 2}) + W_{i - 7} + sigma_0(W_{i - 15}) + W_{i - 16}
@@ -179,98 +181,99 @@ impl MessageScheduleConfig {
         // sigma_0_v2(W_[14..36]) will be used to get the new W_[29..51]
         // sigma_1_v2(W_[14..49]) will be used to get the W_[16..51]
         // The lowest-index words involved will be W_[0..13]
-        let mut new_word = |idx: usize,
-                            sigma_0_output: &(AssignedBits<16>, AssignedBits<16>)|
-         -> Result<Vec<(AssignedBits<16>, AssignedBits<16>)>, Error> {
-            // Decompose word into (3, 4, 3, 7, 1, 1, 13)-bit chunks
-            let word = self.decompose_word(region, w[idx].value(), idx)?;
+        let mut new_word =
+            |idx: usize,
+             sigma_0_output: &(AssignedBits<F, 16>, AssignedBits<F, 16>)|
+             -> Result<Vec<(AssignedBits<F, 16>, AssignedBits<F, 16>)>, Error> {
+                // Decompose word into (3, 4, 3, 7, 1, 1, 13)-bit chunks
+                let word = self.decompose_word(region, w[idx].value(), idx)?;
 
-            // sigma_0 v2 and sigma_1 v2 on word
-            lower_sigma_0_v2_results.push(self.lower_sigma_0_v2(region, word.clone())?);
-            lower_sigma_1_v2_results.push(self.lower_sigma_1_v2(region, word)?);
+                // sigma_0 v2 and sigma_1 v2 on word
+                lower_sigma_0_v2_results.push(self.lower_sigma_0_v2(region, word.clone())?);
+                lower_sigma_1_v2_results.push(self.lower_sigma_1_v2(region, word)?);
 
-            let new_word_idx = idx + 2;
+                let new_word_idx = idx + 2;
 
-            // Copy sigma_0(W_{i - 15}) output from Subregion 1
-            sigma_0_output.0.copy_advice(
-                || format!("sigma_0(W_{})_lo", new_word_idx - 15),
-                region,
-                a_6,
-                get_word_row(new_word_idx - 16),
-            )?;
-            sigma_0_output.1.copy_advice(
-                || format!("sigma_0(W_{})_hi", new_word_idx - 15),
-                region,
-                a_6,
-                get_word_row(new_word_idx - 16) + 1,
-            )?;
+                // Copy sigma_0(W_{i - 15}) output from Subregion 1
+                sigma_0_output.0.copy_advice(
+                    || format!("sigma_0(W_{})_lo", new_word_idx - 15),
+                    region,
+                    a_6,
+                    get_word_row(new_word_idx - 16),
+                )?;
+                sigma_0_output.1.copy_advice(
+                    || format!("sigma_0(W_{})_hi", new_word_idx - 15),
+                    region,
+                    a_6,
+                    get_word_row(new_word_idx - 16) + 1,
+                )?;
 
-            // Copy sigma_1(W_{i - 2})
-            lower_sigma_1_v2_results[new_word_idx - 16].0.copy_advice(
-                || format!("sigma_1(W_{})_lo", new_word_idx - 2),
-                region,
-                a_7,
-                get_word_row(new_word_idx - 16),
-            )?;
-            lower_sigma_1_v2_results[new_word_idx - 16].1.copy_advice(
-                || format!("sigma_1(W_{})_hi", new_word_idx - 2),
-                region,
-                a_7,
-                get_word_row(new_word_idx - 16) + 1,
-            )?;
+                // Copy sigma_1(W_{i - 2})
+                lower_sigma_1_v2_results[new_word_idx - 16].0.copy_advice(
+                    || format!("sigma_1(W_{})_lo", new_word_idx - 2),
+                    region,
+                    a_7,
+                    get_word_row(new_word_idx - 16),
+                )?;
+                lower_sigma_1_v2_results[new_word_idx - 16].1.copy_advice(
+                    || format!("sigma_1(W_{})_hi", new_word_idx - 2),
+                    region,
+                    a_7,
+                    get_word_row(new_word_idx - 16) + 1,
+                )?;
 
-            // Copy W_{i - 7}
-            w_halves[new_word_idx - 7].0.copy_advice(
-                || format!("W_{}_lo", new_word_idx - 7),
-                region,
-                a_8,
-                get_word_row(new_word_idx - 16),
-            )?;
-            w_halves[new_word_idx - 7].1.copy_advice(
-                || format!("W_{}_hi", new_word_idx - 7),
-                region,
-                a_8,
-                get_word_row(new_word_idx - 16) + 1,
-            )?;
+                // Copy W_{i - 7}
+                w_halves[new_word_idx - 7].0.copy_advice(
+                    || format!("W_{}_lo", new_word_idx - 7),
+                    region,
+                    a_8,
+                    get_word_row(new_word_idx - 16),
+                )?;
+                w_halves[new_word_idx - 7].1.copy_advice(
+                    || format!("W_{}_hi", new_word_idx - 7),
+                    region,
+                    a_8,
+                    get_word_row(new_word_idx - 16) + 1,
+                )?;
 
-            // Calculate W_i, carry_i
-            let (word, carry) = sum_with_carry(vec![
-                (
-                    lower_sigma_1_v2_results[new_word_idx - 16].0.value_u16(),
-                    lower_sigma_1_v2_results[new_word_idx - 16].1.value_u16(),
-                ),
-                (
-                    w_halves[new_word_idx - 7].0.value_u16(),
-                    w_halves[new_word_idx - 7].1.value_u16(),
-                ),
-                (sigma_0_output.0.value_u16(), sigma_0_output.1.value_u16()),
-                (
-                    w_halves[new_word_idx - 16].0.value_u16(),
-                    w_halves[new_word_idx - 16].1.value_u16(),
-                ),
-            ]);
+                // Calculate W_i, carry_i
+                let (word, carry) = sum_with_carry(vec![
+                    (
+                        lower_sigma_1_v2_results[new_word_idx - 16].0.value_u16(),
+                        lower_sigma_1_v2_results[new_word_idx - 16].1.value_u16(),
+                    ),
+                    (
+                        w_halves[new_word_idx - 7].0.value_u16(),
+                        w_halves[new_word_idx - 7].1.value_u16(),
+                    ),
+                    (sigma_0_output.0.value_u16(), sigma_0_output.1.value_u16()),
+                    (
+                        w_halves[new_word_idx - 16].0.value_u16(),
+                        w_halves[new_word_idx - 16].1.value_u16(),
+                    ),
+                ]);
 
-            // Assign W_i, carry_i
-            region.assign_advice(
-                || format!("W_{}", new_word_idx),
-                a_5,
-                get_word_row(new_word_idx - 16) + 1,
-                || word.map(|word| pallas::Base::from(word as u64)),
-            )?;
-            region.assign_advice(
-                || format!("carry_{}", new_word_idx),
-                a_9,
-                get_word_row(new_word_idx - 16) + 1,
-                || carry.map(pallas::Base::from),
-            )?;
-            let (word, halves) = self.assign_word_and_halves(region, word, new_word_idx)?;
-            w.push(MessageWord(word));
-            w_halves.push(halves);
+                // Assign W_i, carry_i
+                region.assign_advice(
+                    || format!("W_{}", new_word_idx),
+                    a_5,
+                    get_word_row(new_word_idx - 16) + 1,
+                    || word.map(|word| F::from(word as u64)),
+                )?;
+                region.assign_advice(
+                    || format!("carry_{}", new_word_idx),
+                    a_9,
+                    get_word_row(new_word_idx - 16) + 1,
+                    || carry.map(F::from),
+                )?;
+                let (word, halves) = self.assign_word_and_halves(region, word, new_word_idx)?;
+                w.push(MessageWord(word));
+                w_halves.push(halves);
 
-            Ok(lower_sigma_0_v2_results.clone())
-        };
+                Ok(lower_sigma_0_v2_results.clone())
+            };
 
-        let mut tmp_lower_sigma_0_v2_results: Vec<(AssignedBits<16>, AssignedBits<16>)> =
+        let mut tmp_lower_sigma_0_v2_results: Vec<(AssignedBits<F, 16>, AssignedBits<F, 16>)> =
             Vec::with_capacity(SUBREGION_2_LEN);
 
         // Use up all the output from Subregion 1 lower_sigma_0
@@ -288,12 +291,12 @@ impl MessageScheduleConfig {
     }
 
     /// Pieces of length [3, 4, 3, 7, 1, 1, 13]
-    fn decompose_word(
+    fn decompose_word<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         word: Value<&Bits<32>>,
         index: usize,
-    ) -> Result<Subregion2Word, Error> {
+    ) -> Result<Subregion2Word<F>, Error> {
         let row = get_word_row(index);
 
         let pieces = word.map(|word| {
@@ -314,24 +317,24 @@ impl MessageScheduleConfig {
         let a_4 = self.extras[1];
 
         // Assign `a` (3-bit piece)
-        let a = AssignedBits::<3>::assign_bits(region, || "a", a_3, row - 1, pieces[0].clone())?;
+        let a = AssignedBits::<F, 3>::assign_bits(region, || "a", a_3, row - 1, pieces[0].clone())?;
 
         // Assign `b` (4-bit piece) lookup
         let spread_b: Value<SpreadWord<4, 8>> = pieces[1].clone().map(SpreadWord::try_new);
         let spread_b = SpreadVar::with_lookup(region, &self.lookup, row + 1, spread_b)?;
 
         // Assign `c` (3-bit piece)
-        let c = AssignedBits::<3>::assign_bits(region, || "c", a_4, row - 1, pieces[2].clone())?;
+        let c = AssignedBits::<F, 3>::assign_bits(region, || "c", a_4, row - 1, pieces[2].clone())?;
 
         // Assign `d` (7-bit piece) lookup
         let spread_d: Value<SpreadWord<7, 14>> = pieces[3].clone().map(SpreadWord::try_new);
         let spread_d = SpreadVar::with_lookup(region, &self.lookup, row, spread_d)?;
 
         // Assign `e` (1-bit piece)
-        let e = AssignedBits::<1>::assign_bits(region, || "e", a_3, row + 1, pieces[4].clone())?;
+        let e = AssignedBits::<F, 1>::assign_bits(region, || "e", a_3, row + 1, pieces[4].clone())?;
 
         // Assign `f` (1-bit piece)
-        let f = AssignedBits::<1>::assign_bits(region, || "f", a_4, row + 1, pieces[5].clone())?;
+        let f = AssignedBits::<F, 1>::assign_bits(region, || "f", a_4, row + 1, pieces[5].clone())?;
 
         // Assign `g` (13-bit piece) lookup
         let spread_g = pieces[6].clone().map(SpreadWord::try_new);
@@ -354,11 +357,11 @@ impl MessageScheduleConfig {
     /// A word in subregion 2
     /// (3, 4, 3, 7, 1, 1, 13)-bit chunks
     #[allow(clippy::type_complexity)]
-    fn assign_lower_sigma_v2_pieces(
+    fn assign_lower_sigma_v2_pieces<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         row: usize,
-        word: &Subregion2Word,
+        word: &Subregion2Word<F>,
     ) -> Result<(), Error> {
         let a_3 = self.extras[0];
         let a_4 = self.extras[1];
@@ -370,7 +373,7 @@ impl MessageScheduleConfig {
         word.a.copy_advice(|| "a", region, a_3, row + 1)?;
 
         // Witness `spread_a`
-        AssignedBits::<6>::assign_bits(region, || "spread_a", a_4, row + 1, word.spread_a())?;
+        AssignedBits::<F, 6>::assign_bits(region, || "spread_a", a_4, row + 1, word.spread_a())?;
 
         // Split `b` (4-bit chunk) into `b_hi` and `b_lo`
         // Assign `b_lo`, `spread_b_lo`
@@ -378,9 +381,9 @@ impl MessageScheduleConfig {
         let b_lo: Value<[bool; 2]> = word.b.value().map(|b| b.0[..2].try_into().unwrap());
         let spread_b_lo = b_lo.map(spread_bits);
         {
-            AssignedBits::<2>::assign_bits(region, || "b_lo", a_3, row - 1, b_lo)?;
+            AssignedBits::<F, 2>::assign_bits(region, || "b_lo", a_3, row - 1, b_lo)?;
 
-            AssignedBits::<4>::assign_bits(region, || "spread_b_lo", a_4, row - 1, spread_b_lo)?;
+            AssignedBits::<F, 4>::assign_bits(region, || "spread_b_lo", a_4, row - 1, spread_b_lo)?;
         };
 
         // Split `b` (2-bit chunk) into `b_hi` and `b_lo`
@@ -388,9 +391,9 @@ impl MessageScheduleConfig {
         let b_hi: Value<[bool; 2]> = word.b.value().map(|b| b.0[2..].try_into().unwrap());
         let spread_b_hi = b_hi.map(spread_bits);
         {
-            AssignedBits::<2>::assign_bits(region, || "b_hi", a_5, row - 1, b_hi)?;
+            AssignedBits::<F, 2>::assign_bits(region, || "b_hi", a_5, row - 1, b_hi)?;
 
-            AssignedBits::<4>::assign_bits(region, || "spread_b_hi", a_6, row - 1, spread_b_hi)?;
+            AssignedBits::<F, 4>::assign_bits(region, || "spread_b_hi", a_6, row - 1, spread_b_hi)?;
         };
 
         // Assign `b` and copy constraint
@@ -400,7 +403,7 @@ impl MessageScheduleConfig {
         word.c.copy_advice(|| "c", region, a_5, row + 1)?;
 
         // Witness `spread_c`
-        AssignedBits::<6>::assign_bits(region, || "spread_c", a_6, row + 1, word.spread_c())?;
+        AssignedBits::<F, 6>::assign_bits(region, || "spread_c", a_6, row + 1, word.spread_c())?;
 
         // Assign `spread_d` and copy constraint
         word.spread_d.copy_advice(|| "spread_d", region, a_4, row)?;
@@ -417,11 +420,11 @@ impl MessageScheduleConfig {
         Ok(())
     }
 
-    fn lower_sigma_0_v2(
+    fn lower_sigma_0_v2<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
-        word: Subregion2Word,
-    ) -> Result<(AssignedBits<16>, AssignedBits<16>), Error> {
+        region: &mut Region<'_, F>,
+        word: Subregion2Word<F>,
+    ) -> Result<(AssignedBits<F, 16>, AssignedBits<F, 16>), Error> {
         let a_3 = self.extras[0];
         let row = get_word_row(word.index) + 3;
 
@@ -450,11 +453,11 @@ impl MessageScheduleConfig {
         )
     }
 
-    fn lower_sigma_1_v2(
+    fn lower_sigma_1_v2<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
-        word: Subregion2Word,
-    ) -> Result<(AssignedBits<16>, AssignedBits<16>), Error> {
+        region: &mut Region<'_, F>,
+        word: Subregion2Word<F>,
+    ) -> Result<(AssignedBits<F, 16>, AssignedBits<F, 16>), Error> {
         let a_3 = self.extras[0];
         let row = get_word_row(word.index) + SIGMA_0_V2_ROWS + 3;
 

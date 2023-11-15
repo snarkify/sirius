@@ -1,8 +1,8 @@
+use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Region, Value},
     plonk::{Advice, Column, Error},
 };
-use halo2curves::pasta::pallas;
 
 use crate::AssignedCell;
 
@@ -14,10 +14,10 @@ use crate::DIGEST_SIZE;
 
 impl CompressionConfig {
     #[allow(clippy::many_single_char_names)]
-    pub fn assign_digest(
+    pub fn assign_digest<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
-        state: State,
+        region: &mut Region<'_, F>,
+        state: State<F>,
     ) -> Result<[BlockWord; DIGEST_SIZE], Error> {
         let a_3 = self.extras[0];
         let a_4 = self.extras[1];
@@ -41,12 +41,7 @@ impl CompressionConfig {
             .1
             .copy_advice(|| "a_hi", region, a_4, abcd_row)?;
         let a = a.dense_halves.value();
-        region.assign_advice(
-            || "a",
-            a_5,
-            abcd_row,
-            || a.map(|a| pallas::Base::from(a as u64)),
-        )?;
+        region.assign_advice(|| "a", a_5, abcd_row, || a.map(|a| F::from(a as u64)))?;
 
         let b = self.assign_digest_word(region, abcd_row, a_6, a_7, a_8, b.dense_halves)?;
         let c = self.assign_digest_word(region, abcd_row + 1, a_3, a_4, a_5, c.dense_halves)?;
@@ -60,12 +55,7 @@ impl CompressionConfig {
             .1
             .copy_advice(|| "e_hi", region, a_4, efgh_row)?;
         let e = e.dense_halves.value();
-        region.assign_advice(
-            || "e",
-            a_5,
-            efgh_row,
-            || e.map(|e| pallas::Base::from(e as u64)),
-        )?;
+        region.assign_advice(|| "e", a_5, efgh_row, || e.map(|e| F::from(e as u64)))?;
 
         let f = self.assign_digest_word(region, efgh_row, a_6, a_7, a_8, f.dense_halves)?;
         let g = self.assign_digest_word(region, efgh_row + 1, a_3, a_4, a_5, g.dense_halves)?;
@@ -83,11 +73,11 @@ impl CompressionConfig {
         ])
     }
 
-    pub fn assign_digest_cells(
+    pub fn assign_digest_cells<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
-        state: State,
-    ) -> Result<[AssignedCell<pallas::Base, pallas::Base>; DIGEST_SIZE], Error> {
+        region: &mut Region<'_, F>,
+        state: State<F>,
+    ) -> Result<[AssignedCell<F, F>; DIGEST_SIZE], Error> {
         let a_3 = self.extras[0];
         let a_4 = self.extras[1];
         let a_5 = self.message_schedule;
@@ -110,12 +100,8 @@ impl CompressionConfig {
             .1
             .copy_advice(|| "a_hi", region, a_4, abcd_row)?;
         let a = a.dense_halves.value();
-        let a_cell = region.assign_advice(
-            || "a",
-            a_5,
-            abcd_row,
-            || a.map(|a| pallas::Base::from(a as u64)),
-        )?;
+        let a_cell =
+            region.assign_advice(|| "a", a_5, abcd_row, || a.map(|a| F::from(a as u64)))?;
 
         let b_cell =
             self.assign_digest_word_cell(region, abcd_row, a_6, a_7, a_8, b.dense_halves)?;
@@ -131,12 +117,8 @@ impl CompressionConfig {
             .1
             .copy_advice(|| "e_hi", region, a_4, efgh_row)?;
         let e = e.dense_halves.value();
-        let e_cell = region.assign_advice(
-            || "e",
-            a_5,
-            efgh_row,
-            || e.map(|e| pallas::Base::from(e as u64)),
-        )?;
+        let e_cell =
+            region.assign_advice(|| "e", a_5, efgh_row, || e.map(|e| F::from(e as u64)))?;
 
         let f_cell =
             self.assign_digest_word_cell(region, efgh_row, a_6, a_7, a_8, f.dense_halves)?;
@@ -149,15 +131,15 @@ impl CompressionConfig {
         ])
     }
 
-    fn assign_digest_word_cell(
+    fn assign_digest_word_cell<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         row: usize,
         lo_col: Column<Advice>,
         hi_col: Column<Advice>,
         word_col: Column<Advice>,
-        dense_halves: RoundWordDense,
-    ) -> Result<AssignedCell<pallas::Base, pallas::Base>, Error> {
+        dense_halves: RoundWordDense<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
         dense_halves.0.copy_advice(|| "lo", region, lo_col, row)?;
         dense_halves.1.copy_advice(|| "hi", region, hi_col, row)?;
 
@@ -166,18 +148,18 @@ impl CompressionConfig {
             || "word",
             word_col,
             row,
-            || val.map(|val| pallas::Base::from(val as u64)),
+            || val.map(|val| F::from(val as u64)),
         )
     }
 
-    fn assign_digest_word(
+    fn assign_digest_word<F: PrimeField>(
         &self,
-        region: &mut Region<'_, pallas::Base>,
+        region: &mut Region<'_, F>,
         row: usize,
         lo_col: Column<Advice>,
         hi_col: Column<Advice>,
         word_col: Column<Advice>,
-        dense_halves: RoundWordDense,
+        dense_halves: RoundWordDense<F>,
     ) -> Result<Value<u32>, Error> {
         dense_halves.0.copy_advice(|| "lo", region, lo_col, row)?;
         dense_halves.1.copy_advice(|| "hi", region, hi_col, row)?;
@@ -187,7 +169,7 @@ impl CompressionConfig {
             || "word",
             word_col,
             row,
-            || val.map(|val| pallas::Base::from(val as u64)),
+            || val.map(|val| F::from(val as u64)),
         )?;
 
         Ok(val)

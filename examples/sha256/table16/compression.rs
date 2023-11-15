@@ -1,12 +1,12 @@
 use std::convert::TryInto;
 use std::ops::Range;
 
+use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Selector},
     poly::Rotation,
 };
-use halo2curves::pasta::pallas;
 
 use super::{
     util::{i2lebsp, lebs2ip},
@@ -82,16 +82,16 @@ pub trait UpperSigmaVar<
 ///   We align the columns to make it efficient to copy-constrain these forms where they
 ///   are needed.
 #[derive(Clone, Debug)]
-pub struct AbcdVar {
-    a: SpreadVar<2, 4>,
-    b: SpreadVar<11, 22>,
-    c_lo: SpreadVar<3, 6>,
-    c_mid: SpreadVar<3, 6>,
-    c_hi: SpreadVar<3, 6>,
-    d: SpreadVar<10, 20>,
+pub struct AbcdVar<F: ff::PrimeField> {
+    a: SpreadVar<F, 2, 4>,
+    b: SpreadVar<F, 11, 22>,
+    c_lo: SpreadVar<F, 3, 6>,
+    c_mid: SpreadVar<F, 3, 6>,
+    c_hi: SpreadVar<F, 3, 6>,
+    d: SpreadVar<F, 10, 20>,
 }
 
-impl AbcdVar {
+impl<F: PrimeField> AbcdVar<F> {
     fn a_range() -> Range<usize> {
         0..2
     }
@@ -129,7 +129,7 @@ impl AbcdVar {
     }
 }
 
-impl UpperSigmaVar<4, 22, 18, 20> for AbcdVar {
+impl<F: PrimeField> UpperSigmaVar<4, 22, 18, 20> for AbcdVar<F> {
     fn spread_a(&self) -> Value<[bool; 4]> {
         self.a.spread.value().map(|v| v.0)
     }
@@ -171,16 +171,16 @@ impl UpperSigmaVar<4, 22, 18, 20> for AbcdVar {
 ///   We align the columns to make it efficient to copy-constrain these forms where they
 ///   are needed.
 #[derive(Clone, Debug)]
-pub struct EfghVar {
-    a_lo: SpreadVar<3, 6>,
-    a_hi: SpreadVar<3, 6>,
-    b_lo: SpreadVar<2, 4>,
-    b_hi: SpreadVar<3, 6>,
-    c: SpreadVar<14, 28>,
-    d: SpreadVar<7, 14>,
+pub struct EfghVar<F: PrimeField> {
+    a_lo: SpreadVar<F, 3, 6>,
+    a_hi: SpreadVar<F, 3, 6>,
+    b_lo: SpreadVar<F, 2, 4>,
+    b_hi: SpreadVar<F, 3, 6>,
+    c: SpreadVar<F, 14, 28>,
+    d: SpreadVar<F, 7, 14>,
 }
 
-impl EfghVar {
+impl<F: PrimeField> EfghVar<F> {
     fn a_lo_range() -> Range<usize> {
         0..3
     }
@@ -218,7 +218,7 @@ impl EfghVar {
     }
 }
 
-impl UpperSigmaVar<12, 10, 28, 14> for EfghVar {
+impl<F: PrimeField> UpperSigmaVar<12, 10, 28, 14> for EfghVar<F> {
     fn spread_a(&self) -> Value<[bool; 12]> {
         self.a_lo
             .spread
@@ -259,15 +259,15 @@ impl UpperSigmaVar<12, 10, 28, 14> for EfghVar {
 }
 
 #[derive(Clone, Debug)]
-pub struct RoundWordDense(AssignedBits<16>, AssignedBits<16>);
+pub struct RoundWordDense<F: PrimeField>(AssignedBits<F, 16>, AssignedBits<F, 16>);
 
-impl From<(AssignedBits<16>, AssignedBits<16>)> for RoundWordDense {
-    fn from(halves: (AssignedBits<16>, AssignedBits<16>)) -> Self {
+impl<F: PrimeField> From<(AssignedBits<F, 16>, AssignedBits<F, 16>)> for RoundWordDense<F> {
+    fn from(halves: (AssignedBits<F, 16>, AssignedBits<F, 16>)) -> Self {
         Self(halves.0, halves.1)
     }
 }
 
-impl RoundWordDense {
+impl<F: PrimeField> RoundWordDense<F> {
     pub fn value(&self) -> Value<u32> {
         self.0
             .value_u16()
@@ -277,15 +277,15 @@ impl RoundWordDense {
 }
 
 #[derive(Clone, Debug)]
-pub struct RoundWordSpread(AssignedBits<32>, AssignedBits<32>);
+pub struct RoundWordSpread<F: PrimeField>(AssignedBits<F, 32>, AssignedBits<F, 32>);
 
-impl From<(AssignedBits<32>, AssignedBits<32>)> for RoundWordSpread {
-    fn from(halves: (AssignedBits<32>, AssignedBits<32>)) -> Self {
+impl<F: PrimeField> From<(AssignedBits<F, 32>, AssignedBits<F, 32>)> for RoundWordSpread<F> {
+    fn from(halves: (AssignedBits<F, 32>, AssignedBits<F, 32>)) -> Self {
         Self(halves.0, halves.1)
     }
 }
 
-impl RoundWordSpread {
+impl<F: PrimeField> RoundWordSpread<F> {
     pub fn value(&self) -> Value<u64> {
         self.0
             .value_u32()
@@ -295,17 +295,17 @@ impl RoundWordSpread {
 }
 
 #[derive(Clone, Debug)]
-pub struct RoundWordA {
-    pieces: Option<AbcdVar>,
-    dense_halves: RoundWordDense,
-    spread_halves: Option<RoundWordSpread>,
+pub struct RoundWordA<F: PrimeField> {
+    pieces: Option<AbcdVar<F>>,
+    dense_halves: RoundWordDense<F>,
+    spread_halves: Option<RoundWordSpread<F>>,
 }
 
-impl RoundWordA {
+impl<F: PrimeField> RoundWordA<F> {
     pub fn new(
-        pieces: AbcdVar,
-        dense_halves: RoundWordDense,
-        spread_halves: RoundWordSpread,
+        pieces: AbcdVar<F>,
+        dense_halves: RoundWordDense<F>,
+        spread_halves: RoundWordSpread<F>,
     ) -> Self {
         RoundWordA {
             pieces: Some(pieces),
@@ -314,7 +314,7 @@ impl RoundWordA {
         }
     }
 
-    pub fn new_dense(dense_halves: RoundWordDense) -> Self {
+    pub fn new_dense(dense_halves: RoundWordDense<F>) -> Self {
         RoundWordA {
             pieces: None,
             dense_halves,
@@ -324,17 +324,17 @@ impl RoundWordA {
 }
 
 #[derive(Clone, Debug)]
-pub struct RoundWordE {
-    pieces: Option<EfghVar>,
-    dense_halves: RoundWordDense,
-    spread_halves: Option<RoundWordSpread>,
+pub struct RoundWordE<F: PrimeField> {
+    pieces: Option<EfghVar<F>>,
+    dense_halves: RoundWordDense<F>,
+    spread_halves: Option<RoundWordSpread<F>>,
 }
 
-impl RoundWordE {
+impl<F: PrimeField> RoundWordE<F> {
     pub fn new(
-        pieces: EfghVar,
-        dense_halves: RoundWordDense,
-        spread_halves: RoundWordSpread,
+        pieces: EfghVar<F>,
+        dense_halves: RoundWordDense<F>,
+        spread_halves: RoundWordSpread<F>,
     ) -> Self {
         RoundWordE {
             pieces: Some(pieces),
@@ -343,7 +343,7 @@ impl RoundWordE {
         }
     }
 
-    pub fn new_dense(dense_halves: RoundWordDense) -> Self {
+    pub fn new_dense(dense_halves: RoundWordDense<F>) -> Self {
         RoundWordE {
             pieces: None,
             dense_halves,
@@ -353,13 +353,13 @@ impl RoundWordE {
 }
 
 #[derive(Clone, Debug)]
-pub struct RoundWord {
-    dense_halves: RoundWordDense,
-    spread_halves: RoundWordSpread,
+pub struct RoundWord<F: PrimeField> {
+    dense_halves: RoundWordDense<F>,
+    spread_halves: RoundWordSpread<F>,
 }
 
-impl RoundWord {
-    pub fn new(dense_halves: RoundWordDense, spread_halves: RoundWordSpread) -> Self {
+impl<F: PrimeField> RoundWord<F> {
+    pub fn new(dense_halves: RoundWordDense<F>, spread_halves: RoundWordSpread<F>) -> Self {
         RoundWord {
             dense_halves,
             spread_halves,
@@ -369,29 +369,29 @@ impl RoundWord {
 
 /// The internal state for SHA-256.
 #[derive(Clone, Debug)]
-pub struct State {
-    a: Option<StateWord>,
-    b: Option<StateWord>,
-    c: Option<StateWord>,
-    d: Option<StateWord>,
-    e: Option<StateWord>,
-    f: Option<StateWord>,
-    g: Option<StateWord>,
-    h: Option<StateWord>,
+pub struct State<F: PrimeField> {
+    a: Option<StateWord<F>>,
+    b: Option<StateWord<F>>,
+    c: Option<StateWord<F>>,
+    d: Option<StateWord<F>>,
+    e: Option<StateWord<F>>,
+    f: Option<StateWord<F>>,
+    g: Option<StateWord<F>>,
+    h: Option<StateWord<F>>,
 }
 
-impl State {
+impl<F: PrimeField> State<F> {
     #[allow(clippy::many_single_char_names)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        a: StateWord,
-        b: StateWord,
-        c: StateWord,
-        d: StateWord,
-        e: StateWord,
-        f: StateWord,
-        g: StateWord,
-        h: StateWord,
+        a: StateWord<F>,
+        b: StateWord<F>,
+        c: StateWord<F>,
+        d: StateWord<F>,
+        e: StateWord<F>,
+        f: StateWord<F>,
+        g: StateWord<F>,
+        h: StateWord<F>,
     ) -> Self {
         State {
             a: Some(a),
@@ -420,15 +420,15 @@ impl State {
 }
 
 #[derive(Clone, Debug)]
-pub enum StateWord {
-    A(RoundWordA),
-    B(RoundWord),
-    C(RoundWord),
-    D(RoundWordDense),
-    E(RoundWordE),
-    F(RoundWord),
-    G(RoundWord),
-    H(RoundWordDense),
+pub enum StateWord<F: PrimeField> {
+    A(RoundWordA<F>),
+    B(RoundWord<F>),
+    C(RoundWord<F>),
+    D(RoundWordDense<F>),
+    E(RoundWordE<F>),
+    F(RoundWord<F>),
+    G(RoundWord<F>),
+    H(RoundWordDense<F>),
 }
 
 #[derive(Clone, Debug)]
@@ -455,11 +455,11 @@ pub(super) struct CompressionConfig {
     s_digest: Selector,
 }
 
-impl Table16Assignment for CompressionConfig {}
+impl<F: PrimeField> Table16Assignment<F> for CompressionConfig {}
 
 impl CompressionConfig {
-    pub(super) fn configure(
-        meta: &mut ConstraintSystem<pallas::Base>,
+    pub(super) fn configure<F: PrimeField>(
+        meta: &mut ConstraintSystem<F>,
         lookup: SpreadInputs,
         message_schedule: Column<Advice>,
         extras: [Column<Advice>; 6],
@@ -863,11 +863,11 @@ impl CompressionConfig {
 
     /// Initialize compression with a constant Initialization Vector of 32-byte words.
     /// Returns an initialized state.
-    pub(super) fn initialize_with_iv(
+    pub(super) fn initialize_with_iv<F: PrimeField>(
         &self,
-        layouter: &mut impl Layouter<pallas::Base>,
+        layouter: &mut impl Layouter<F>,
         init_state: [u32; STATE],
-    ) -> Result<State, Error> {
+    ) -> Result<State<F>, Error> {
         let mut new_state = State::empty_state();
         layouter.assign_region(
             || "initialize_with_iv",
@@ -881,11 +881,11 @@ impl CompressionConfig {
 
     /// Initialize compression with some initialized state. This could be a state
     /// output from a previous compression round.
-    pub(super) fn initialize_with_state(
+    pub(super) fn initialize_with_state<F: PrimeField>(
         &self,
-        layouter: &mut impl Layouter<pallas::Base>,
-        init_state: State,
-    ) -> Result<State, Error> {
+        layouter: &mut impl Layouter<F>,
+        init_state: State<F>,
+    ) -> Result<State<F>, Error> {
         let mut new_state = State::empty_state();
         layouter.assign_region(
             || "initialize_with_state",
@@ -898,12 +898,12 @@ impl CompressionConfig {
     }
 
     /// Given an initialized state and a message schedule, perform 64 compression rounds.
-    pub(super) fn compress(
+    pub(super) fn compress<F: PrimeField>(
         &self,
-        layouter: &mut impl Layouter<pallas::Base>,
-        initialized_state: State,
-        w_halves: [(AssignedBits<16>, AssignedBits<16>); ROUNDS],
-    ) -> Result<State, Error> {
+        layouter: &mut impl Layouter<F>,
+        initialized_state: State<F>,
+        w_halves: [(AssignedBits<F, 16>, AssignedBits<F, 16>); ROUNDS],
+    ) -> Result<State<F>, Error> {
         let mut state = State::empty_state();
         layouter.assign_region(
             || "compress",
@@ -919,10 +919,10 @@ impl CompressionConfig {
     }
 
     /// After the final round, convert the state into the final digest.
-    pub(super) fn digest(
+    pub(super) fn digest<F: PrimeField>(
         &self,
-        layouter: &mut impl Layouter<pallas::Base>,
-        state: State,
+        layouter: &mut impl Layouter<F>,
+        state: State<F>,
     ) -> Result<[BlockWord; DIGEST_SIZE], Error> {
         let mut digest = [BlockWord(Value::known(0)); DIGEST_SIZE];
         layouter.assign_region(
@@ -937,11 +937,11 @@ impl CompressionConfig {
     }
 
     /// After the final round, convert the state into the final digest.
-    pub(super) fn digest_cells(
+    pub(super) fn digest_cells<F: PrimeField>(
         &self,
-        layouter: &mut impl Layouter<pallas::Base>,
-        state: State,
-    ) -> Result<[AssignedCell<pallas::Base, pallas::Base>; DIGEST_SIZE], Error> {
+        layouter: &mut impl Layouter<F>,
+        state: State<F>,
+    ) -> Result<[AssignedCell<F, F>; DIGEST_SIZE], Error> {
         layouter.assign_region(
             || "digest",
             |mut region| self.assign_digest_cells(&mut region, state.clone()),
@@ -965,7 +965,7 @@ mod tests {
     fn compress() {
         struct MyCircuit {}
 
-        impl Circuit<pallas::Base> for MyCircuit {
+        impl Circuit<F> for MyCircuit {
             type Config = Table16Config;
             type FloorPlanner = SimpleFloorPlanner;
             #[cfg(feature = "circuit-params")]
@@ -975,14 +975,14 @@ mod tests {
                 MyCircuit {}
             }
 
-            fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
+            fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
                 Table16Chip::configure(meta)
             }
 
             fn synthesize(
                 &self,
                 config: Self::Config,
-                mut layouter: impl Layouter<pallas::Base>,
+                mut layouter: impl Layouter<F>,
             ) -> Result<(), Error> {
                 Table16Chip::load(config.clone(), &mut layouter)?;
 
@@ -1012,7 +1012,7 @@ mod tests {
 
         let circuit: MyCircuit = MyCircuit {};
 
-        let prover = match MockProver::<pallas::Base>::run(17, &circuit, vec![]) {
+        let prover = match MockProver::<F>::run(17, &circuit, vec![]) {
             Ok(prover) => prover,
             Err(e) => panic!("{:?}", e),
         };
