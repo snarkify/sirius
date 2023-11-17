@@ -35,6 +35,7 @@ The `Sirius` folding framework is designed with a three-tiered architecture.
 - [ ] 2023Q4 - IVC circuit
 - [ ] 2023Q4 - folding scheme for lookup arguments
 - [ ] 2024Q1 - high-degree gate optimization from [Protostar](https://eprint.iacr.org/2023/620)
+- [ ] 2024Q1 - [Snarkify Cloud](https://cloud.snarkify.io/) integration and GPU acceleration
 - [ ] 2024Q2 - IOP+PCS backend support ([Spartan](https://eprint.iacr.org/2019/550) / [Hyperplonk](https://eprint.iacr.org/2022/1355))
 - [ ] 2024Q3 - on-chain verifier support
 
