@@ -11,8 +11,8 @@ use halo2_proofs::{
 
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 
-use bn256::G1 as F1;
-use grumpkin::G1 as F2;
+use bn256::G1 as C1;
+use grumpkin::G1 as C2;
 
 use sirius::{
     ivc::{step_circuit, PublicParams, SimpleFloorPlanner, StepCircuit, SynthesisError, IVC},
@@ -327,63 +327,63 @@ const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10)
 type TrivialCircuit =
     step_circuit::trivial::Circuit<ARITY, <grumpkin::G1Affine as CurveAffine>::Base>;
 
-type F1Affine = <F1 as halo2curves::group::prime::PrimeCurve>::Affine;
-type F2Affine = <F2 as halo2curves::group::prime::PrimeCurve>::Affine;
+type C1Affine = <C1 as halo2curves::group::prime::PrimeCurve>::Affine;
+type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
 
-type F1Scalar = <F1 as halo2curves::group::Group>::Scalar;
-type F2Scalar = <F2 as halo2curves::group::Group>::Scalar;
+type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
+type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
 
 fn main() {
-    // F1
+    // C1
     let sc1 = TestSha256Circuit::default();
-    // F2
+    // C2
     let sc2 = TrivialCircuit::default();
 
-    let _cs1 = TableData::<<F1 as CurveExt>::Base>::new(11, vec![]);
-    let _cs2 = TableData::<<F2 as CurveExt>::Base>::new(11, vec![]);
+    let _cs1 = TableData::<<C1 as CurveExt>::Base>::new(11, vec![]);
+    let _cs2 = TableData::<<C2 as CurveExt>::Base>::new(11, vec![]);
 
     let pp = PublicParams::<
         ARITY,
         ARITY,
-        F2Affine,
-        F1Affine,
-        RandomOracle<F2Affine, <F2Affine as CurveAffine>::Base>,
-        RandomOracle<F1Affine, <F1Affine as CurveAffine>::Base>,
+        C2Affine,
+        C1Affine,
+        RandomOracle<C2Affine, <C2Affine as CurveAffine>::Base>,
+        RandomOracle<C1Affine, <C1Affine as CurveAffine>::Base>,
     >::new(
         LIMB_WIDTH,
         LIMBS_COUNT_LIMIT,
         &sc1,
-        RandomOracleConstant::<F2Affine, <F2Affine as CurveAffine>::Base>::new(10, 10), // TODO Normal new params
+        RandomOracleConstant::<C2Affine, <C2Affine as CurveAffine>::Base>::new(10, 10), // TODO Normal new params
         &sc2,
-        RandomOracleConstant::<F1Affine, <F1Affine as CurveAffine>::Base>::new(10, 10), // TODO Normal new params
+        RandomOracleConstant::<C1Affine, <C1Affine as CurveAffine>::Base>::new(10, 10), // TODO Normal new params
     );
 
     let mut ivc = IVC::new(
         &pp,
         sc1,
-        array::from_fn(|i| F2Scalar::from_u128(i as u128)),
+        array::from_fn(|i| C2Scalar::from_u128(i as u128)),
         sc2,
-        array::from_fn(|i| F1Scalar::from_u128(i as u128)),
+        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
     )
     .unwrap();
 
     ivc.prove_step(
         &pp,
-        array::from_fn(|i| F2Scalar::from_u128(i as u128)),
-        array::from_fn(|i| F1Scalar::from_u128(i as u128)),
+        array::from_fn(|i| C2Scalar::from_u128(i as u128)),
+        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
     )
     .unwrap();
 
     ivc.verify(
         &pp,
         2,
-        array::from_fn(|i| F2Scalar::from_u128(i as u128)),
-        array::from_fn(|i| F1Scalar::from_u128(i as u128)),
+        array::from_fn(|i| C2Scalar::from_u128(i as u128)),
+        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
     )
     .unwrap();
 
     todo!(
         "#33 Waiting for IVC Circuit for test {:?}",
-        TestSha256Circuit::<<F1 as CurveExt>::Base>::default()
+        TestSha256Circuit::<<C1 as CurveExt>::Base>::default()
     );
 }
