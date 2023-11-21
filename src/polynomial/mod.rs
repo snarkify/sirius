@@ -1,10 +1,3 @@
-use crate::plonk::lookup::LookupEvalDomain;
-use crate::plonk::PlonkEvalDomain;
-use crate::util::trim_leading_zeros;
-use ff::PrimeField;
-use halo2_proofs::arithmetic::CurveAffine;
-use halo2_proofs::plonk::Expression as PE;
-use halo2_proofs::poly::Rotation;
 use std::{
     cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd},
     collections::{HashMap, HashSet},
@@ -12,6 +5,11 @@ use std::{
     fmt::{Debug, Display},
     ops::{Add, Mul, Neg, Sub},
 };
+
+use ff::PrimeField;
+use halo2_proofs::{arithmetic::CurveAffine, plonk::Expression as PE, poly::Rotation};
+
+use crate::{plonk::lookup::LookupEvalDomain, plonk::PlonkEvalDomain, util::trim_leading_zeros};
 
 pub mod sparse;
 
