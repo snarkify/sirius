@@ -212,6 +212,12 @@ impl<F: PrimeField> From<AssignedValue<F>> for WrapValue<F> {
     }
 }
 
+impl<F: PrimeField> From<F> for WrapValue<F> {
+    fn from(val: F) -> Self {
+        WrapValue::Unassigned(Value::known(val))
+    }
+}
+
 impl<F: PrimeField> From<&AssignedValue<F>> for WrapValue<F> {
     fn from(val: &AssignedValue<F>) -> Self {
         WrapValue::Assigned(val.clone())
@@ -246,6 +252,20 @@ impl<const T: usize> MainGateConfig<T> {
         region.name_column(|| "q_o", self.q_o);
         region.name_column(|| "q_m", self.q_m);
         region.name_column(|| "rc", self.rc);
+    }
+
+    pub fn into_size<const N: usize>(&self) -> Option<MainGateConfig<N>> {
+        Some(MainGateConfig {
+            state: self.state.clone().as_slice().try_into().ok()?,
+            input: self.input,
+            out: self.out,
+            q_m: self.q_m,
+            q_1: self.q_1.clone().as_slice().try_into().ok()?,
+            q_5: self.q_5.clone().as_slice().try_into().ok()?,
+            q_i: self.q_i,
+            q_o: self.q_o,
+            rc: self.rc,
+        })
     }
 }
 
