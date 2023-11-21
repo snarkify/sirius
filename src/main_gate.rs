@@ -240,18 +240,35 @@ pub struct MainGateConfig<const T: usize> {
 }
 
 impl<const T: usize> MainGateConfig<T> {
+    /// Names the columns in the `MainGateConfig` for easier debugging and more informative error messages.
+    ///
+    /// This function is particularly useful during interactions within a region. By naming each column,
+    /// it helps to identify them quickly in error messages or debugging output, making the debugging
+    /// process more intuitive and efficient.
     pub fn name_columns<F: PrimeField>(&self, region: &mut Region<'_, F>) {
-        for i in 0..T {
-            region.name_column(|| format!("state[{i}]"), self.state[i]);
-            region.name_column(|| format!("q_1[{i}]"), self.q_1[i]);
-            region.name_column(|| format!("q_5[{i}]"), self.q_5[i]);
+        // Internal macro to name a column based on field name
+        macro_rules! name_column {
+            ($field:ident[$index:expr]) => {
+                let name = format!("{}[{}]", stringify!($field), $index);
+                region.name_column(|| &name, self.$field[$index]);
+            };
+            ($field:ident) => {
+                region.name_column(|| stringify!($field), self.$field);
+            };
         }
-        region.name_column(|| "input", self.input);
-        region.name_column(|| "out", self.out);
-        region.name_column(|| "q_i", self.q_i);
-        region.name_column(|| "q_o", self.q_o);
-        region.name_column(|| "q_m", self.q_m);
-        region.name_column(|| "rc", self.rc);
+
+        for i in 0..T {
+            name_column!(state[i]);
+            name_column!(q_1[i]);
+            name_column!(q_5[i]);
+        }
+
+        name_column!(input);
+        name_column!(out);
+        name_column!(q_i);
+        name_column!(q_o);
+        name_column!(q_m);
+        name_column!(rc);
     }
 
     /// Converts the current `MainGateConfig` to a new configuration with a smaller size `N`.
