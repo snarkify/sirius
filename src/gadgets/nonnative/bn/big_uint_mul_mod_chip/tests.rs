@@ -813,6 +813,7 @@ mod red_mod_tests {
 mod decompose_tests {
     use std::marker::PhantomData;
 
+    use ff::Field;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
         dev::MockProver,
@@ -891,6 +892,25 @@ mod decompose_tests {
 
                         let limbs = chip.from_assigned_cell_to_limbs(&mut region, &val).unwrap();
 
+                        for val in [
+                            F::from_u128(0u128),
+                            F::from_u128(u128::MAX / 2),
+                            F::from_u128(u128::MAX),
+                            F::from_u128(u128::MAX) * F::from_u128(1_000_000_000),
+                        ] {
+                            dbg!(&val);
+                            region.next();
+
+                            let new_val = region
+                                .assign_advice(|| "val", config.formal_val, Value::known(val))
+                                .unwrap();
+
+                            region.next();
+
+                            chip.from_assigned_cell_to_limbs(&mut region, &new_val)
+                                .unwrap();
+                        }
+
                         Ok(limbs)
                     },
                 )
@@ -909,7 +929,7 @@ mod decompose_tests {
     }
 
     #[test_log::test]
-    fn test_red_mod_bn() {
+    fn test_from_assigned_cell() {
         const K: u32 = 11;
         let ts = TestCircuit::<Fp>::default();
 
@@ -919,23 +939,19 @@ mod decompose_tests {
                 val: u64::MAX as u128,
             },
             Context { val: u128::MAX },
-            Context { val: u128::MAX },
+            Context { val: u128::MAX / 2 },
+            Context { val: u128::MAX / 4 },
             Context { val: 256u128 },
             Context { val: 0 },
         ];
 
         for Context { val } in cases {
-            let prover = match MockProver::run(
-                K,
-                &ts,
-                vec![
-                    vec![Fp::from_u128(val)],
-                    BigUint::from_u128(val, LIMB_WIDTH, LIMBS_COUNT_LIMIT)
-                        .unwrap()
-                        .limbs()
-                        .to_vec(),
-                ],
-            ) {
+            let mut limbs = BigUint::from_u128(val, LIMB_WIDTH, LIMBS_COUNT_LIMIT)
+                .unwrap()
+                .limbs()
+                .to_vec();
+            limbs.resize(LIMBS_COUNT_LIMIT.get(), Fp::ZERO);
+            let prover = match MockProver::run(K, &ts, vec![vec![Fp::from_u128(val)], limbs]) {
                 Ok(prover) => prover,
                 Err(e) => panic!("{:?}", e),
             };

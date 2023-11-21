@@ -971,7 +971,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         ctx: &mut RegionCtx<'_, F>,
         input: &AssignedCell<F, F>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        trace!("Input: {:?}", input.value().unwrap());
+        debug!("Input: {:?}", input.value().unwrap());
         let bignat_limb_column = &self.config().state[0];
         let bignat_limb_shift = &self.config().q_1[0];
 
@@ -982,97 +982,100 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         let partial_sum_selector = &self.config().q_o;
 
         let shift = F::from(2).pow_vartime([self.limb_width.get() as u64]); // base = 2^limb_width
-        trace!("Shift {shift:?}");
+        debug!("Shift {shift:?}");
 
         let mut prev_partial_sum = Option::<AssignedCell<F, F>>::None;
 
-        let limbs = BigUint::from_f(
+        let mut limbs = BigUint::from_f(
             &input.value().unwrap().copied().unwrap_or_default(),
             self.limb_width,
             self.limbs_count_limit,
         )?
         .limbs()
-        .iter()
-        .map(Some)
-        .chain(iter::repeat(None))
-        .take(self.limbs_count_limit.get())
-        .enumerate()
-        .inspect(|(limb_index, limb)| trace!("limbs[{limb_index}]={limb:?}"))
-        .map(|(limb_index, limb)| {
-            ctx.assign_fixed(
-                || format!("{limb_index} selector"),
-                *bignat_limb_shift,
-                F::ONE,
-            )?;
+        .to_vec();
 
-            let cell = ctx.assign_advice(
-                || format!("{limb_index} limb"),
-                *bignat_limb_column,
-                Value::known(limb.copied().unwrap_or(F::ZERO)),
-            )?;
+        limbs.resize(self.limbs_count_limit.get(), F::ZERO);
 
-            let shift = ctx
-                .assign_fixed(
-                    || {
-                        format!(
-                            "previous limbs (to {:?}) sum selector",
-                            limb_index.checked_sub(1)
-                        )
-                    },
-                    *prev_selector,
-                    shift,
-                )?
-                .value()
-                .copied();
+        let mut limbs = limbs
+            .into_iter()
+            .enumerate()
+            .rev()
+            .inspect(|(limb_index, limb)| trace!("limbs[{limb_index}]={limb:?}"))
+            .map(|(limb_index, limb)| {
+                debug!("Limb[{limb_index}] = {limb:?}");
 
-            let shifted_prev = shift
-                * match &prev_partial_sum {
-                    Some(prev_partial_sum) if limb.is_some() => ctx
-                        .assign_advice_from(
-                            || {
-                                format!(
-                                    "previous limbs (to {:?}) sum value",
-                                    limb_index.checked_sub(1)
-                                )
-                            },
-                            *prev_column,
-                            prev_partial_sum,
-                        )?
-                        .value()
-                        .copied(),
-                    _ => Value::known(F::ZERO),
-                };
+                ctx.assign_fixed(
+                    || format!("{limb_index} selector"),
+                    *bignat_limb_shift,
+                    F::ONE,
+                )?;
 
-            trace!(
-                "Previos partial sum: {:?}",
-                prev_partial_sum.as_ref().and_then(|c| *c.value().unwrap())
-            );
-            trace!("Previos shifted partial sum: {:?}", shifted_prev.unwrap());
+                let limb_cell = ctx.assign_advice(
+                    || format!("{limb_index} limb"),
+                    *bignat_limb_column,
+                    Value::known(limb),
+                )?;
 
-            ctx.assign_fixed(
-                || format!("sum of limbs from 0 to {limb_index} selector",),
-                *partial_sum_selector,
-                -F::ONE,
-            )?;
+                let shift = ctx
+                    .assign_fixed(
+                        || {
+                            format!(
+                                "previous limbs (to {:?}) sum selector",
+                                limb_index.checked_sub(1)
+                            )
+                        },
+                        *prev_selector,
+                        shift,
+                    )?
+                    .value()
+                    .copied();
 
-            if limb.is_some() {
+                let shifted_prev = shift
+                    * match &prev_partial_sum {
+                        Some(prev_partial_sum) => ctx
+                            .assign_advice_from(
+                                || {
+                                    format!(
+                                        "previous limbs (to {:?}) sum value",
+                                        limb_index.checked_sub(1)
+                                    )
+                                },
+                                *prev_column,
+                                prev_partial_sum,
+                            )?
+                            .value()
+                            .copied(),
+                        _ => Value::known(F::ZERO),
+                    };
+
+                debug!(
+                    "Previos partial sum: {:?}",
+                    prev_partial_sum.as_ref().and_then(|c| *c.value().unwrap())
+                );
+                debug!("Previos shifted partial sum: {:?}", shifted_prev.unwrap());
+
+                ctx.assign_fixed(
+                    || format!("sum of limbs from 0 to {limb_index} selector",),
+                    *partial_sum_selector,
+                    -F::ONE,
+                )?;
+
                 prev_partial_sum = Some(ctx.assign_advice(
                     || format!("sum of limbs from 0 to {limb_index}",),
                     *partial_sum_column,
-                    shifted_prev + cell.value(),
+                    shifted_prev + limb_cell.value(),
                 )?);
-            }
 
-            trace!(
-                "New partial sum: {:?}",
-                prev_partial_sum.as_ref().unwrap().value().unwrap()
-            );
+                debug!(
+                    "New partial sum: {:?}",
+                    prev_partial_sum.as_ref().unwrap().value().unwrap()
+                );
 
-            ctx.next();
+                ctx.next();
 
-            Result::<_, Error>::Ok(cell)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+                Result::<_, Error>::Ok(limb_cell)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         assert_eq!(
             prev_partial_sum.clone().unwrap().value().unwrap(),
@@ -1080,6 +1083,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         );
         ctx.constrain_equal(prev_partial_sum.unwrap().cell(), input.cell())?;
 
+        limbs.reverse();
         Ok(limbs)
     }
 
