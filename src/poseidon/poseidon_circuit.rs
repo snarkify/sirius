@@ -21,6 +21,18 @@ pub struct PoseidonChip<F: PrimeFieldBits, const T: usize, const RATE: usize> {
 impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize> ROCircuitTrait<F>
     for PoseidonChip<F, T, RATE>
 {
+    type Args = Spec<F, T, RATE>;
+    type Config = MainGateConfig<T>;
+
+    fn new(config: Self::Config, spec: Self::Args) -> Self {
+        let main_gate: MainGate<F, T> = MainGate::new(config);
+        Self {
+            main_gate,
+            spec,
+            buf: Vec::new(),
+        }
+    }
+
     fn absorb_base(&mut self, base: WrapValue<F>) {
         self.update(&[base])
     }
