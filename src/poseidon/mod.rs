@@ -35,11 +35,20 @@ pub trait ROTrait<C: CurveAffine> {
     fn squeeze(&mut self, num_bits: usize) -> C::Scalar;
 }
 
-/// A helper trait that defines the behavior of a hash function that we use as an RO in the circuit model
+/// A helper trait that defines the behavior of a hash function used as a Random Oracle (RO)
+/// within a circuit.
 pub trait ROCircuitTrait<F: PrimeFieldBits + FromUniformBytes<64>> {
+    /// Associated type represents the arguments required to initialize the hash function in the circuit.
+    /// These could include various parameters like the number of rounds, the internal state size, etc.
     type Args: Clone;
+
+    /// Associated type represents the configuration settings for the hash function within the circuit.
+    ///
+    /// This includes defining the layout of gates, wires, and other circuit-specific parameters necessary for
+    /// the hash function's operation within the proof system.
     type Config;
 
+    /// Constructs a new instance of the random oracle circuit
     fn new(config: Self::Config, args: Self::Args) -> Self;
 
     /// Adds a scalar to the internal state
