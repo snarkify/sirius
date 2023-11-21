@@ -20,9 +20,18 @@ use crate::{error::Halo2PlonkError, main_gate::RegionCtx};
 // integer-type, but only a wrapper for
 // storing a natural number with limbs.
 #[derive(PartialEq, Debug)]
-pub struct BigUint<F: ff::PrimeField> {
+pub struct BigUint<F: PrimeField> {
     limbs: Vec<F>,
     width: NonZeroUsize,
+}
+
+impl<F: PrimeField> BigUint<F> {
+    pub fn zero(limb_width: NonZeroUsize) -> Self {
+        Self {
+            limbs: vec![F::ZERO],
+            width: limb_width,
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
