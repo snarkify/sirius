@@ -254,7 +254,24 @@ impl<const T: usize> MainGateConfig<T> {
         region.name_column(|| "rc", self.rc);
     }
 
-    pub fn into_size<const N: usize>(&self) -> Option<MainGateConfig<N>> {
+    /// Converts the current `MainGateConfig` to a new configuration with a smaller size `N`.
+    ///
+    /// This method is used to adapt the main gate configuration of a circuit to a different size,
+    /// which can be necessary for various circuit optimizations or specific implementations.
+    /// It attempts to reconfigure the existing columns and constants to match the new size
+    /// while preserving the original configuration's structure and values.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `N`: The new, smaller size for the main gate configuration. This determines the number
+    ///   of columns and constants in the resized configuration. `N` must be less than or equal
+    ///   to `T`.
+    ///
+    /// # Returns
+    ///
+    /// If `N > T` return `None`
+    /// If `N <= T` return `Some(MainGateConfig<N>)`
+    pub fn into_smaller_size<const N: usize>(&self) -> Option<MainGateConfig<N>> {
         Some(MainGateConfig {
             state: self.state.clone().as_slice().try_into().ok()?,
             input: self.input,
