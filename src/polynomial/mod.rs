@@ -23,6 +23,7 @@ pub struct Query {
 pub enum Expression<F> {
     Constant(F),
     Polynomial(Query),
+    Challenge(usize),
     Negated(Box<Expression<F>>),
     Sum(Box<Expression<F>>, Box<Expression<F>>),
     Product(Box<Expression<F>>, Box<Expression<F>>),
@@ -35,12 +36,15 @@ impl<F: PrimeField> Display for Expression<F> {
     }
 }
 impl<F: PrimeField> Expression<F> {
-    // uniquely determined by (rotation, poly_index)
-    pub fn poly_set(&self, set: &mut HashSet<(i32, usize)>) {
+    // uniquely determined by (rotation, index, var_type)
+    pub fn poly_set(&self, set: &mut HashSet<(i32, usize, usize)>) {
         match self {
             Expression::Constant(_) => (),
             Expression::Polynomial(poly) => {
-                set.insert((poly.rotation.0, poly.index));
+                set.insert((poly.rotation.0, poly.index, 0));
+            }
+            Expression::Challenge(index) => {
+                set.insert((0, *index, 1));
             }
             Expression::Negated(a) => a.poly_set(set),
             Expression::Sum(a, b) => {
@@ -55,21 +59,51 @@ impl<F: PrimeField> Expression<F> {
         }
     }
 
+    // return the number of challenges in expression
+    pub fn num_challenges(&self) -> usize {
+        let mut set = HashSet::<(i32, usize, usize)>::new();
+        self._num_challenges(&mut set);
+        set.len()
+    }
+
+    pub fn _num_challenges(&self, set: &mut HashSet<(i32, usize, usize)>) {
+        match self {
+            Expression::Constant(_) => (),
+            Expression::Polynomial(_) => (),
+            Expression::Challenge(index) => {
+                set.insert((0, *index, 1));
+            }
+            Expression::Negated(a) => a._num_challenges(set),
+            Expression::Sum(a, b) => {
+                a._num_challenges(set);
+                b._num_challenges(set);
+            }
+            Expression::Product(a, b) => {
+                a._num_challenges(set);
+                b._num_challenges(set);
+            }
+            Expression::Scaled(a, _) => a._num_challenges(set),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn evaluate<T>(
         &self,
         constant: &impl Fn(F) -> T,
         poly: &impl Fn(Query) -> T,
+        challenge: &impl Fn(usize) -> T,
         negated: &impl Fn(T) -> T,
         sum: &impl Fn(T, T) -> T,
         product: &impl Fn(T, T) -> T,
         scaled: &impl Fn(T, F) -> T,
     ) -> T {
-        let evaluate =
-            |expr: &Expression<F>| expr.evaluate(constant, poly, negated, sum, product, scaled);
+        let evaluate = |expr: &Expression<F>| {
+            expr.evaluate(constant, poly, challenge, negated, sum, product, scaled)
+        };
         match self {
             Expression::Constant(scalar) => constant(*scalar),
             Expression::Polynomial(query) => poly(*query),
+            Expression::Challenge(usize) => challenge(*usize),
             Expression::Negated(a) => {
                 let a = evaluate(a);
                 negated(a)
@@ -91,7 +125,7 @@ impl<F: PrimeField> Expression<F> {
         }
     }
 
-    fn _expand(&self, index_to_poly: &Vec<(i32, usize)>) -> MultiPolynomial<F> {
+    fn _expand(&self, index_to_poly: &Vec<(i32, usize, usize)>) -> MultiPolynomial<F> {
         self.evaluate(
             &|c| {
                 let arity = index_to_poly.len();
@@ -105,7 +139,20 @@ impl<F: PrimeField> Expression<F> {
                 let mut exponents = vec![0; arity];
                 let index = index_to_poly
                     .iter()
-                    .position(|&(a, b)| a == poly.rotation.0 && b == poly.index)
+                    .position(|&(a, b, t)| a == poly.rotation.0 && b == poly.index && t == 0)
+                    .unwrap();
+                exponents[index] = 1;
+                MultiPolynomial {
+                    arity,
+                    monomials: vec![Monomial::new(index_to_poly.clone(), F::ONE, exponents)],
+                }
+            },
+            &|cha_index| {
+                let arity = index_to_poly.len();
+                let mut exponents = vec![0; arity];
+                let index = index_to_poly
+                    .iter()
+                    .position(|&(a, b, t)| a == 0 && b == cha_index && t == 1)
                     .unwrap();
                 exponents[index] = 1;
                 MultiPolynomial {
@@ -123,32 +170,35 @@ impl<F: PrimeField> Expression<F> {
     pub fn expand(&self) -> MultiPolynomial<F> {
         let mut set = HashSet::new();
         self.poly_set(&mut set);
-        let mut index_to_poly: Vec<(i32, usize)> = set.into_iter().collect();
+        let mut index_to_poly: Vec<(i32, usize, usize)> = set.into_iter().collect();
         index_to_poly.sort();
         self._expand(&index_to_poly)
     }
 
     // fold_transform will fold a polynomial expression P(f_1,...f_m, x_1,...,x_n)
     // and output P(f_1,...,f_m, x_1+r*y_1,...,x_n+r*y_n)
-    // here m = num_fixed+num_selectors
-    // n = num_advice(+potential extra variables)
+    // here mm = num_fixed+num_selectors
+    // nn = num_advice(+potential extra variables)
     pub fn fold_transform(&self, mm: usize, nn: usize) -> Self {
+        let num_challenges = self.num_challenges();
+        let r = Expression::Challenge(2 * num_challenges);
         self.evaluate(
             &|c| Expression::Constant(c),
             &|poly| {
                 if poly.index < mm {
                     return Expression::Polynomial(poly);
                 }
-                let r = Expression::Polynomial(Query {
-                    index: mm + 2 * nn,
-                    rotation: Rotation(0),
-                });
                 let y = Expression::Polynomial(Query {
                     index: poly.index + nn,
                     rotation: poly.rotation,
                 });
                 // fold variable x_i -> x_i + r * y_i
-                Expression::Polynomial(poly) + r * y
+                Expression::Polynomial(poly) + r.clone() * y
+            },
+            &|index| {
+                let y = Expression::Challenge(index + num_challenges);
+                // fold variable x_i -> x_i + r * y_i
+                Expression::Challenge(index) + r.clone() * y
             },
             &|a| -a,
             &|a, b| a + b,
@@ -168,6 +218,7 @@ impl<F: PrimeField> Expression<F> {
                 };
                 format!("Z_{}{}", poly.index, rotation)
             },
+            &|index| format!("r_{}", index),
             &|a| format!("(-{})", a),
             &|a, b| format!("({} + {})", a, b),
             &|a, b| format!("({} * {})", a, b),
@@ -244,15 +295,18 @@ impl_expression_ops!(Sub, sub, Sum, Expression<F>, Neg::neg);
 impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
 
 /// Monomial: c_i*x_0^d_0*..*x_{n-1}^d_{n-1} with arity n
-/// index_to_poly is mapping from i to (rotation, column_index)
-/// poly_to_index is mapping from (rotation, column_index) to i \in [0,..,n-1]
+/// index_to_poly is mapping from i to (rotation, column_index, type)
+/// poly_to_index is mapping from (rotation, column_index, type) to i \in [0,..,n-1]
+// type=0 => poly with (rotation, column_index, 0)
+// type=1 => challenge with (0, index, 1)
 #[derive(Clone)]
 pub struct Monomial<F: PrimeField> {
     pub arity: usize,
-    // poly: (rotation, column_index)
-    pub index_to_poly: Vec<(i32, usize)>,
-    // (rotation, column_index) -> index
-    pub poly_to_index: HashMap<(i32, usize), usize>,
+    // poly or challenge: (rotation, column_index, type)
+    pub index_to_poly: Vec<(i32, usize, usize)>,
+    // (rotation, column_index, var_type) -> index
+    // when type = 1 as a challenge, we always set rotation = 0
+    pub poly_to_index: HashMap<(i32, usize, usize), usize>,
     pub coeff: F,
     pub exponents: Vec<usize>,
 }
@@ -270,17 +324,29 @@ impl<F: PrimeField> Display for Monomial<F> {
             if *exp == 0 {
                 continue;
             }
-            let (rid, cid) = self.index_to_poly[i];
+            let (rid, cid, var_type) = self.index_to_poly[i];
             let shift = match rid.cmp(&0) {
                 Ordering::Equal => "".to_owned(),
                 Ordering::Greater => format!("[+{rid}]"),
                 Ordering::Less => format!("[{rid}]"),
             };
 
-            if *exp == 1 {
-                write!(f, "(Z_{}{})", cid, shift)?;
-            } else {
-                write!(f, "(Z_{}{}^{})", cid, shift, exp)?;
+            match var_type {
+                0 => {
+                    if *exp == 1 {
+                        write!(f, "(Z_{}{})", cid, shift)?;
+                    } else {
+                        write!(f, "(Z_{}{}^{})", cid, shift, exp)?;
+                    }
+                }
+                1 => {
+                    if *exp == 1 {
+                        write!(f, "(r_{})", cid)?;
+                    } else {
+                        write!(f, "(r_{}^{})", cid, exp)?;
+                    }
+                }
+                _ => unimplemented!("other variable type not supported"),
             }
         }
         write!(f, "")
@@ -288,10 +354,10 @@ impl<F: PrimeField> Display for Monomial<F> {
 }
 
 impl<F: PrimeField> Monomial<F> {
-    pub fn new(index_to_poly: Vec<(i32, usize)>, coeff: F, exponents: Vec<usize>) -> Self {
+    pub fn new(index_to_poly: Vec<(i32, usize, usize)>, coeff: F, exponents: Vec<usize>) -> Self {
         let arity = index_to_poly.len();
         assert!(arity == exponents.len());
-        let mut poly_to_index: HashMap<(i32, usize), usize> = HashMap::new();
+        let mut poly_to_index: HashMap<(i32, usize, usize), usize> = HashMap::new();
         for (i, key) in index_to_poly.iter().enumerate() {
             poly_to_index.insert(*key, i);
         }
@@ -311,21 +377,32 @@ impl<F: PrimeField> Monomial<F> {
         mono.arity += 1;
         mono.exponents
             .push(degree - self.degree_for_folding(offset));
-        mono.index_to_poly.push((0, u_index));
-        mono.poly_to_index.insert((0, u_index), mono.arity);
+        mono.index_to_poly.push((0, u_index, 0));
+        mono.poly_to_index.insert((0, u_index, 0), mono.arity);
         mono
     }
 
     pub fn to_expression(&self) -> Expression<F> {
         let mut expr = Expression::Constant(self.coeff);
         for (i, exp) in self.exponents.iter().enumerate() {
-            let (rot, idx) = self.index_to_poly[i];
-            for _ in 0..(*exp) {
-                let x0 = Expression::<F>::Polynomial(Query {
-                    index: idx,
-                    rotation: Rotation(rot),
-                });
-                expr = Expression::Product(Box::new(expr), Box::new(x0));
+            let (rot, idx, var_type) = self.index_to_poly[i];
+            match var_type {
+                0 => {
+                    for _ in 0..(*exp) {
+                        let x0 = Expression::<F>::Polynomial(Query {
+                            index: idx,
+                            rotation: Rotation(rot),
+                        });
+                        expr = Expression::Product(Box::new(expr), Box::new(x0));
+                    }
+                }
+                1 => {
+                    for _ in 0..(*exp) {
+                        let r = Expression::<F>::Challenge(idx);
+                        expr = Expression::Product(Box::new(expr), Box::new(r));
+                    }
+                }
+                _ => unimplemented!("variable type not supported"),
             }
         }
         expr
@@ -351,7 +428,7 @@ impl<F: PrimeField> Monomial<F> {
         self.exponents
             .iter()
             .zip(self.index_to_poly.iter())
-            .filter_map(|(exp, (_, col_index))| (col_index >= &offset).then_some(exp))
+            .filter_map(|(exp, (_, col_index, _))| (col_index >= &offset).then_some(exp))
             .sum()
     }
 
@@ -456,7 +533,8 @@ where
         let row_size = W1.W.len() / num_advice;
         let vars: Vec<F> = (0..self.arity)
             .map(|i| {
-                let (rot, col) = self.index_to_poly[i];
+                let (rot, col, _var_type) = self.index_to_poly[i];
+                // TODO: add eval for challenge
                 let row1 = if (rot + row as i32) >= 0 {
                     rot as usize + row
                 } else {
@@ -572,6 +650,10 @@ impl<F: PrimeField> MultiPolynomial<F> {
         }
     }
 
+    pub fn num_challenges(&self) -> usize {
+        self.to_expression().num_challenges()
+    }
+
     pub fn to_expression(&self) -> Expression<F> {
         let mut expr = Expression::Constant(F::ZERO);
         for mono in self.monomials.iter() {
@@ -592,8 +674,8 @@ impl<F: PrimeField> MultiPolynomial<F> {
             .expand()
     }
 
-    // get coefficient of X^k, where X identified by (ratation, index) in 0..arity, k=degree
-    pub fn coeff_of(&self, var: (i32, usize), degree: usize) -> Self {
+    // get coefficient of X^k, where X identified by (ratation, index, var_type) in 0..arity, k=degree
+    pub fn coeff_of(&self, var: (i32, usize, usize), degree: usize) -> Self {
         assert!(!self.monomials.is_empty());
         assert!(self.monomials[0].poly_to_index.contains_key(&var));
 
