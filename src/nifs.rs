@@ -82,7 +82,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         let num_row = S.fixed_columns[0].len();
         let num_vars = gate.arity - offset; // number of variables to be folded
         let normalized = gate.fold_transform(offset, num_vars);
-        let r_index = offset + 2 * (num_vars + 1); // after adding u
+        let r_index = normalized.num_challenges() - 1;
         let degree = gate.degree_for_folding(offset);
         let data = PlonkEvalDomain {
             S,
@@ -92,7 +92,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
             W2: &W2.to_relax(),
         };
         let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
-            .map(|k| normalized.coeff_of((0, r_index), k))
+            .map(|k| normalized.coeff_of((0, r_index, 1), k))
             .map(|multipoly| {
                 (0..num_row)
                     .into_par_iter()
