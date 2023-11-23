@@ -202,8 +202,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
         let U2 = RelaxedPlonkInstance::new(U.instance.len());
         let W2 = RelaxedPlonkWitness::new(self.k as u32, self.num_advice_columns);
         let offset = self.selectors.len() + self.fixed_columns.len();
-        let u_index = offset + self.num_advice_columns + 1;
-        let poly = self.gate.homogeneous(offset, u_index);
+        let poly = self.gate.homogeneous(offset);
         let data = PlonkEvalDomain {
             S: self,
             U1: U,

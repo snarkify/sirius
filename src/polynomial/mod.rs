@@ -178,7 +178,7 @@ impl<F: PrimeField> Expression<F> {
     // fold_transform will fold a polynomial expression P(f_1,...f_m, x_1,...,x_n)
     // and output P(f_1,...,f_m, x_1+r*y_1,...,x_n+r*y_n)
     // here mm = num_fixed+num_selectors
-    // nn = num_advice(+potential extra variables)
+    // nn = num_advice
     pub fn fold_transform(&self, mm: usize, nn: usize) -> Self {
         let num_challenges = self.num_challenges();
         let r = Expression::Challenge(2 * num_challenges);
@@ -377,8 +377,8 @@ impl<F: PrimeField> Monomial<F> {
         mono.arity += 1;
         mono.exponents
             .push(degree - self.degree_for_folding(offset));
-        mono.index_to_poly.push((0, u_index, 0));
-        mono.poly_to_index.insert((0, u_index, 0), mono.arity);
+        mono.index_to_poly.push((0, u_index, 1));
+        mono.poly_to_index.insert((0, u_index, 1), mono.arity);
         mono
     }
 
@@ -637,7 +637,8 @@ impl<F: PrimeField> MultiPolynomial<F> {
     }
 
     // when make polynomial homogeneous, we need specify the index of u
-    pub fn homogeneous(&self, offset: usize, u_index: usize) -> Self {
+    pub fn homogeneous(&self, offset: usize) -> Self {
+        let u_index = self.num_challenges();
         let degree = self.degree_for_folding(offset);
         let monos = self
             .monomials
@@ -666,11 +667,11 @@ impl<F: PrimeField> MultiPolynomial<F> {
     // p(f_1,...,f_m,x_1,...,x_n) -> p'(f_1,...,f_m,x_1,...,x_n,u)
     // (2) fold variable x_i while keep variable f_i unchanged
     // p' -> p'(f_1,...,f_m, x_1+r*y_1,x_2+r*y_2,...,x_n+r*y_n)
-    // mm = num_fixed + num_selectors, nn = num_advice(+ potential extra variables)
+    // mm = num_fixed + num_selectors, nn = num_advice
     pub fn fold_transform(&self, mm: usize, nn: usize) -> Self {
-        self.homogeneous(mm, mm + nn) // u_index = mm +nn is the homogeneous variable index
+        self.homogeneous(mm)
             .to_expression()
-            .fold_transform(mm, nn + 1) // after p -> p', num_vars of p' is increased by 1
+            .fold_transform(mm, nn)
             .expand()
     }
 
@@ -838,8 +839,8 @@ mod tests {
         });
         let expr3 = expr1.clone() + expr2.clone();
         assert_eq!(
-            format!("{}", expr3.expand().homogeneous(0, 2)),
-            "(Z_2^2) + (Z_0)(Z_2) + (Z_0)(Z_1)"
+            format!("{}", expr3.expand().homogeneous(0)),
+            "(r_0^2) + (Z_0)(r_0) + (Z_0)(Z_1)"
         );
     }
 }
