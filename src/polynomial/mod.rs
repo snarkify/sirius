@@ -19,6 +19,9 @@ pub struct Query {
     pub rotation: Rotation,
 }
 
+pub(crate) const POLYNOMIAL_TYPE: usize = 0;
+pub(crate) const CHALLENGE_TYPE: usize = 1;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expression<F> {
     Constant(F),
@@ -41,10 +44,10 @@ impl<F: PrimeField> Expression<F> {
         match self {
             Expression::Constant(_) => (),
             Expression::Polynomial(poly) => {
-                set.insert((poly.rotation.0, poly.index, 0));
+                set.insert((poly.rotation.0, poly.index, POLYNOMIAL_TYPE));
             }
             Expression::Challenge(index) => {
-                set.insert((0, *index, 1));
+                set.insert((0, *index, CHALLENGE_TYPE));
             }
             Expression::Negated(a) => a.poly_set(set),
             Expression::Sum(a, b) => {
@@ -71,7 +74,7 @@ impl<F: PrimeField> Expression<F> {
             Expression::Constant(_) => (),
             Expression::Polynomial(_) => (),
             Expression::Challenge(index) => {
-                set.insert((0, *index, 1));
+                set.insert((0, *index, CHALLENGE_TYPE));
             }
             Expression::Negated(a) => a._num_challenges(set),
             Expression::Sum(a, b) => {
@@ -139,7 +142,9 @@ impl<F: PrimeField> Expression<F> {
                 let mut exponents = vec![0; arity];
                 let index = index_to_poly
                     .iter()
-                    .position(|&(a, b, t)| a == poly.rotation.0 && b == poly.index && t == 0)
+                    .position(|&(a, b, t)| {
+                        a == poly.rotation.0 && b == poly.index && t == POLYNOMIAL_TYPE
+                    })
                     .unwrap();
                 exponents[index] = 1;
                 MultiPolynomial {
@@ -152,7 +157,7 @@ impl<F: PrimeField> Expression<F> {
                 let mut exponents = vec![0; arity];
                 let index = index_to_poly
                     .iter()
-                    .position(|&(a, b, t)| a == 0 && b == cha_index && t == 1)
+                    .position(|&(a, b, t)| a == 0 && b == cha_index && t == CHALLENGE_TYPE)
                     .unwrap();
                 exponents[index] = 1;
                 MultiPolynomial {
@@ -297,15 +302,14 @@ impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
 /// Monomial: c_i*x_0^d_0*..*x_{n-1}^d_{n-1} with arity n
 /// index_to_poly is mapping from i to (rotation, column_index, type)
 /// poly_to_index is mapping from (rotation, column_index, type) to i \in [0,..,n-1]
-// type=0 => poly with (rotation, column_index, 0)
-// type=1 => challenge with (0, index, 1)
+/// type has value either CHALLENGE_TYPE or POLYNOMIAL_TYPE
 #[derive(Clone)]
 pub struct Monomial<F: PrimeField> {
     pub arity: usize,
     // poly or challenge: (rotation, column_index, type)
     pub index_to_poly: Vec<(i32, usize, usize)>,
     // (rotation, column_index, var_type) -> index
-    // when type = 1 as a challenge, we always set rotation = 0
+    // when type = CHALLENGE_TYPE as a challenge, we always set rotation = 0
     pub poly_to_index: HashMap<(i32, usize, usize), usize>,
     pub coeff: F,
     pub exponents: Vec<usize>,
@@ -332,14 +336,14 @@ impl<F: PrimeField> Display for Monomial<F> {
             };
 
             match var_type {
-                0 => {
+                POLYNOMIAL_TYPE => {
                     if *exp == 1 {
                         write!(f, "(Z_{}{})", cid, shift)?;
                     } else {
                         write!(f, "(Z_{}{}^{})", cid, shift, exp)?;
                     }
                 }
-                1 => {
+                CHALLENGE_TYPE => {
                     if *exp == 1 {
                         write!(f, "(r_{})", cid)?;
                     } else {
@@ -377,8 +381,9 @@ impl<F: PrimeField> Monomial<F> {
         mono.arity += 1;
         mono.exponents
             .push(degree - self.degree_for_folding(offset));
-        mono.index_to_poly.push((0, u_index, 1));
-        mono.poly_to_index.insert((0, u_index, 1), mono.arity);
+        mono.index_to_poly.push((0, u_index, CHALLENGE_TYPE));
+        mono.poly_to_index
+            .insert((0, u_index, CHALLENGE_TYPE), mono.arity);
         mono
     }
 
@@ -532,49 +537,51 @@ where
             .map(|i| {
                 let (rot, col, var_type) = self.index_to_poly[i];
 
-                // evaluation for challenges
-                // layout of challenge index is:
-                // |y1|u1|y2|u2|
-                if var_type == 1 {
-                    match col {
+                match var_type {
+                    // evaluation for challenges
+                    // layout of challenges:
+                    // |num_challenges1|num_challenges2|
+                    CHALLENGE_TYPE => match col {
                         col if col < S.num_challenges => U1.challenges[col],
-                        col => {
-                            U2.challenges[col - S.num_challenges]
-                        }
-                    }
-                } else {
-                    // evaluation for polynomial query
-                    // layout of the poly index is:
-                    // |num_selectors|num_fixed|num_advice|num_advice2|
-                    let row1 = if (rot + row as i32) >= 0 {
-                        rot as usize + row
-                    } else {
-                        // TODO: check how halo2 handle
-                        // (1): row+rot<0
-                        // (2): row+rot>=2^K
-                        row_size - (-rot as usize) + row
-                    };
-                    match col {
-                        // selector column
-                        col if col < selector_offset => {
-                            if S.selectors[col][row1] {
-                                F::ONE
-                            } else {
-                                F::ZERO
+                        col => U2.challenges[col - S.num_challenges],
+                    },
+                    POLYNOMIAL_TYPE => {
+                        // evaluation for polynomial query
+                        // layout of the poly index is:
+                        // |num_selectors|num_fixed|num_advice1|num_advice2|
+                        let row1 = if (rot + row as i32) >= 0 {
+                            rot as usize + row
+                        } else {
+                            // TODO: check how halo2 handle
+                            // (1): row+rot<0
+                            // (2): row+rot>=2^K
+                            row_size - (-rot as usize) + row
+                        };
+                        match col {
+                            // selector column
+                            col if col < selector_offset => {
+                                if S.selectors[col][row1] {
+                                    F::ONE
+                                } else {
+                                    F::ZERO
+                                }
                             }
+                            // fixed column
+                            col if col < fixed_offset => {
+                                S.fixed_columns[col - selector_offset][row1]
+                            }
+                            // advice column for (U1, W1)
+                            col if col < second_instance_offset => {
+                                W1.W[(col - fixed_offset) * row_size + row1]
+                            }
+                            // advice column for (U2, W2)
+                            col if col < total_len => {
+                                W2.W[(col - second_instance_offset) * row_size + row1]
+                            }
+                            col => panic!("index out of boundary: {col}"),
                         }
-                        // fixed column
-                        col if col < fixed_offset => S.fixed_columns[col - selector_offset][row1],
-                        // advice column for (U1, W1)
-                        col if col < second_instance_offset => {
-                            W1.W[(col - fixed_offset) * row_size + row1]
-                        }
-                        // advice column for (U2, W2)
-                        col if col < total_len => {
-                            W2.W[(col - second_instance_offset) * row_size + row1]
-                        }
-                        col => panic!("index out of boundary: {col}"),
                     }
+                    _ => unimplemented!("other variable type is not supported"),
                 }
             })
             .collect();
