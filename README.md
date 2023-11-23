@@ -8,7 +8,7 @@
 
 # Introduction
 
-Sirius is an open-source constraint-system-agnostic folding framework for Incrementally Verifiable Computation [[IVC](https://iacr.org/archive/tcc2008/49480001/49480001.pdf)]. 
+Sirius is an open-source plonkish folding framework for Incrementally Verifiable Computation [[IVC](https://iacr.org/archive/tcc2008/49480001/49480001.pdf)]. 
 
 <p align="center">
 <img width="500" alt="fig1" src="https://github.com/snarkify/sirius/assets/3767044/5adba269-ec82-45e2-9b05-427a05104553">
@@ -25,7 +25,7 @@ The `Sirius` folding framework is designed with a three-tiered architecture.
 <img width="800" alt="fig2" src="https://github.com/snarkify/sirius/assets/3767044/12cdcff5-7e7e-4b1d-82ed-1aa690e5624f">
 </p>
 
-- **Frontend Layer**: This layer serves as the interface for various constraint systems, including Plonk, R1CS, and AIR. It's engineered to allow developers to work with their preferred constraint systems. User-defined circuits and witness data are converted into an intermediate representation format defined by the folding scheme. Our current implementation follows the _Special-sound interactive protocol_ [[SPS](https://eprint.iacr.org/2023/620)]. An alternative scheme would be the _Customizable Constraint Systems protocol_ [[CCS](https://eprint.iacr.org/2023/552)]. 
+- **Frontend Layer**: This layer serves as the interface for various constraint systems. It's engineered to allow developers to work with their preferred constraint systems. User-defined circuits and witness data are converted into an intermediate representation format defined by the folding scheme. Our current implementation follows the _Special-sound interactive protocol_ [[SPS](https://eprint.iacr.org/2023/620)]. An alternative scheme would be the _Customizable Constraint Systems protocol_ [[CCS](https://eprint.iacr.org/2023/552)]. 
 - **Folding Scheme Layer**: At the heart of the framework are the folding schemes IVC that accumulate the computations of multiple steps. At each step, the prover first calculates the instance-witness pairs from the previous step and folds them into the accumulator, then computes the cross terms and error vector for the folded instance-witness pairs. An IVC circuit then takes the outputs from the prover and performs the following steps: apply the step function `F`, fold the previous step's instance into the accumulator instance, and verify the inputs of the IVC circuit.
 - **Backend Layer**: The backend leverages Polynomial Interactive Oracle Proofs (PIOP) and Polynomial Commitment Schemes (PCS) to generate zkSNARKs for succinct and zero-knowledge verification. Polynomial relation checks of the IVC decider are converted to the multi-variate sum-check protocol. The evaluation phase of the sum-check protocol depends on the polynomial commitment scheme we choose (e.g. [Hyrax](https://eprint.iacr.org/2017/1132.pdf)). It is worth noting that when the polynomials are sparse, we can use the Spark compiler [[Spartan](https://eprint.iacr.org/2019/550)] to handle them efficiently. 
 
@@ -38,6 +38,7 @@ The `Sirius` folding framework is designed with a three-tiered architecture.
 - [ ] 2024Q1 - [Snarkify Cloud](https://cloud.snarkify.io/) integration and GPU acceleration
 - [ ] 2024Q2 - IOP+PCS backend support ([Spartan](https://eprint.iacr.org/2019/550) / [Hyperplonk](https://eprint.iacr.org/2022/1355))
 - [ ] 2024Q3 - on-chain verifier support
+- [ ] 2024Q3 - non-uniform circuit folding
 
 _The estimated timeline is subject to change_.
 
