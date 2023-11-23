@@ -77,13 +77,12 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         U2: &PlonkInstance<C>,
         W2: &PlonkWitness<C::ScalarExt>,
     ) -> (CrossTerms<C>, CrossTermCommits<C>) {
-        let gate = &S.gate;
         let offset = S.selectors.len() + S.fixed_columns.len();
         let num_row = S.fixed_columns[0].len();
-        let num_vars = gate.arity - offset; // number of variables to be folded
-        let normalized = gate.fold_transform(offset, num_vars);
+        let num_vars = S.gate.arity - offset; // number of variables to be folded
+        let normalized = S.gate.fold_transform(offset, num_vars);
         let r_index = normalized.num_challenges() - 1;
-        let degree = gate.degree_for_folding(offset);
+        let degree = S.gate.degree_for_folding(offset);
         let data = PlonkEvalDomain {
             S,
             U1,
@@ -138,8 +137,10 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         S.absorb_into(ro);
         let mut U2 = td.plonk_instance(ck);
         U2.absorb_into(ro);
-        // y is used to combined multiple gates for instance U2
-        U2.y = ro.squeeze(NUM_CHALLENGE_BITS);
+        if S.num_challenges > 1 {
+            // the first challenge is used to combined multiple gates for instance U2
+            U2.challenges = vec![ro.squeeze(NUM_CHALLENGE_BITS)];
+        } 
 
         let W2 = td.plonk_witness();
         U1.absorb_into(ro);
@@ -181,7 +182,11 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         S.absorb_into(ro);
         let mut U2 = U2;
         U2.absorb_into(ro);
-        U2.y = ro.squeeze(NUM_CHALLENGE_BITS);
+        if S.num_challenges > 1 {
+            // the first challenge is used to combined multiple gates for instance U2
+            U2.challenges = vec![ro.squeeze(NUM_CHALLENGE_BITS)];
+        } 
+
 
         U1.absorb_into(ro);
         self.cross_term_commits
@@ -275,9 +280,9 @@ mod tests {
         td2: &TableData<F>,
     ) {
         // we assume td.assembly() is already called
-        let mut f_U = RelaxedPlonkInstance::new(td1.instance.len());
-        let mut f_W = RelaxedPlonkWitness::new(td1.k, td1.advice.len());
         let S = td1.plonk_structure(ck);
+        let mut f_U = RelaxedPlonkInstance::new(td1.instance.len(), S.num_challenges);
+        let mut f_W = RelaxedPlonkWitness::new(td1.k, td1.advice.len());
         let U1 = td1.plonk_instance(ck);
         let W1 = td1.plonk_witness();
         let res = S.is_sat(ck, &U1, &W1);

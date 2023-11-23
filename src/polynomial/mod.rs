@@ -522,55 +522,59 @@ where
     /// then calculate the evaluation of monomial: c*x_1^{d_1}*...*x_n^{d_n}
     fn eval(&self, row: usize, data: &PlonkEvalDomain<C, F>) -> F {
         let PlonkEvalDomain { S, U1, W1, U2, W2 } = data;
-        let num_selectors = S.selectors.len();
-        let offset = S.fixed_columns.len() + num_selectors;
-        let num_advice = S.num_advice_columns;
-        let y1_index = offset + num_advice;
-        let u1_index = y1_index + 1;
-        let y2_index = offset + 2 * num_advice + 2;
-        let u2_index = y2_index + 1;
+        let selector_offset = S.selectors.len();
+        let fixed_offset = S.fixed_columns.len() + selector_offset;
+        let second_instance_offset = fixed_offset + S.num_advice_columns;
+        let total_len = second_instance_offset + S.num_advice_columns;
+        let row_size = W1.W.len() / S.num_advice_columns;
 
-        let row_size = W1.W.len() / num_advice;
         let vars: Vec<F> = (0..self.arity)
             .map(|i| {
-                let (rot, col, _var_type) = self.index_to_poly[i];
-                // TODO: add eval for challenge
-                let row1 = if (rot + row as i32) >= 0 {
-                    rot as usize + row
-                } else {
-                    // TODO: check how halo2 handle
-                    // (1): row+rot<0
-                    // (2): row+rot>=2^K
-                    row_size - (-rot as usize) + row
-                };
-                // layout of the index is:
-                // |num_selectors|num_fixed|num_advice|y1|u1|num_advice2|y2|u2|
-                // given column index of a variable x_i, we are able to find the correct location of that variable
-                // and hence its value
-                match col {
-                    // selector column
-                    col if col < num_selectors => {
-                        if S.selectors[col][row1] {
-                            F::ONE
-                        } else {
-                            F::ZERO
+                let (rot, col, var_type) = self.index_to_poly[i];
+
+                // evaluation for challenges
+                // layout of challenge index is:
+                // |y1|u1|y2|u2|
+                if var_type == 1 {
+                    match col {
+                        col if col < S.num_challenges => U1.challenges[col],
+                        col => {
+                            U2.challenges[col - S.num_challenges]
                         }
                     }
-                    // fixed column
-                    col if col < offset => S.fixed_columns[col - num_selectors][row1],
-                    // advice column for (U1, W1)
-                    col if col < y1_index => W1.W[(col - offset) * row_size + row1],
-                    // challenge y1
-                    col if col == y1_index => U1.y,
-                    // homogeneous variable u1
-                    col if col == u1_index => U1.u,
-                    // advice column for (U2, W2)
-                    col if col < y2_index => W2.W[(col - u1_index - 1) * row_size + row1],
-                    // challenge y2
-                    col if col == y2_index => U2.y,
-                    // homogenous variable u2
-                    col if col == u2_index => U2.u,
-                    col => panic!("index out of boundary: {col}"),
+                } else {
+                    // evaluation for polynomial query
+                    // layout of the poly index is:
+                    // |num_selectors|num_fixed|num_advice|num_advice2|
+                    let row1 = if (rot + row as i32) >= 0 {
+                        rot as usize + row
+                    } else {
+                        // TODO: check how halo2 handle
+                        // (1): row+rot<0
+                        // (2): row+rot>=2^K
+                        row_size - (-rot as usize) + row
+                    };
+                    match col {
+                        // selector column
+                        col if col < selector_offset => {
+                            if S.selectors[col][row1] {
+                                F::ONE
+                            } else {
+                                F::ZERO
+                            }
+                        }
+                        // fixed column
+                        col if col < fixed_offset => S.fixed_columns[col - selector_offset][row1],
+                        // advice column for (U1, W1)
+                        col if col < second_instance_offset => {
+                            W1.W[(col - fixed_offset) * row_size + row1]
+                        }
+                        // advice column for (U2, W2)
+                        col if col < total_len => {
+                            W2.W[(col - second_instance_offset) * row_size + row1]
+                        }
+                        col => panic!("index out of boundary: {col}"),
+                    }
                 }
             })
             .collect();
