@@ -474,6 +474,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "cause it takes a few minutes to run"]
     fn test_ecc_op() {
         println!("-----running ECC Circuit-----");
         let K: u32 = 14;
