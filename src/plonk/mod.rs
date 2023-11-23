@@ -348,7 +348,11 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
         let challenges = self
             .challenges
             .iter()
-            .zip(U2.challenges.iter().chain(std::iter::once(&C::ScalarExt::ONE)))
+            .zip(
+                U2.challenges
+                    .iter()
+                    .chain(std::iter::once(&C::ScalarExt::ONE)),
+            )
             .map(|(a, b)| *a + *r * b)
             .collect::<Vec<C::ScalarExt>>();
 
@@ -498,7 +502,13 @@ impl<F: PrimeField> TableData<F> {
 
         // suppose we have n polynomial expression: p_1,p_2,...,p_n
         // we combined them together as one: combined_poly = p_1*y^{n-1}+p_2*y^{n-2}+...+p_n
-        let num_gates = self.cs.gates().iter().flat_map(|gate| gate.polynomials().iter()).collect::<Vec<_>>().len();
+        let num_gates = self
+            .cs
+            .gates()
+            .iter()
+            .flat_map(|gate| gate.polynomials().iter())
+            .collect::<Vec<_>>()
+            .len();
         // total number of challenges, this will be different after we including lookup
         let num_challenges = if num_gates > 1 { 2 } else { 1 };
         let y = Expression::Challenge(0);

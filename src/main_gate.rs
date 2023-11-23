@@ -643,8 +643,7 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::polynomial::Expression;
-    // use pasta_curves::Fp;
+    use crate::polynomial::{Expression, CHALLENGE_TYPE};
     use halo2curves::pasta::Fp;
 
     fn main_gate_expressions() -> (Vec<Vec<Expression<Fp>>>, (usize, usize, usize)) {
@@ -692,8 +691,8 @@ mod tests {
         let num_vars = meta.1 + meta.2;
         let res = multipoly.fold_transform(num_fixed, num_vars);
         let r_index = res.num_challenges() - 1;
-        let e1 = res.coeff_of((0, r_index, 1), 0);
-        let e2 = res.coeff_of((0, r_index, 1), 5);
+        let e1 = res.coeff_of((0, r_index, CHALLENGE_TYPE), 0);
+        let e2 = res.coeff_of((0, r_index, CHALLENGE_TYPE), 5);
         // E1: "(u1^5)(rc) + (q1_0)(u1^4)(s1_0) + (q5_0)(s1_0^5) + (u1^4)(q1_1)(s1_1) + (u1^3)(qm)(s1_0)(s1_1) + (q5_1)(s1_1^5) + (u1^4)(qi)(in1) + (u1^4)(qo)(out1)"
         assert_eq!(format!("{}", e1), "(r_0^5)(Z_7) + (Z_0)(r_0^4)(Z_8) + (Z_2)(Z_8^5) + (r_0^4)(Z_1)(Z_9) + (r_0^3)(Z_4)(Z_8)(Z_9) + (Z_3)(Z_9^5) + (r_0^4)(Z_5)(Z_10) + (r_0^4)(Z_6)(Z_11)");
 

@@ -14,6 +14,7 @@ use crate::plonk::{
     PlonkEvalDomain, PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance,
     RelaxedPlonkWitness, TableData,
 };
+use crate::polynomial::CHALLENGE_TYPE;
 use crate::poseidon::{AbsorbInRO, ROTrait};
 use halo2_proofs::arithmetic::CurveAffine;
 use rayon::prelude::*;
@@ -91,7 +92,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
             W2: &W2.to_relax(),
         };
         let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
-            .map(|k| normalized.coeff_of((0, r_index, 1), k))
+            .map(|k| normalized.coeff_of((0, r_index, CHALLENGE_TYPE), k))
             .map(|multipoly| {
                 (0..num_row)
                     .into_par_iter()
@@ -140,7 +141,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         if S.num_challenges > 1 {
             // the first challenge is used to combined multiple gates for instance U2
             U2.challenges = vec![ro.squeeze(NUM_CHALLENGE_BITS)];
-        } 
+        }
 
         let W2 = td.plonk_witness();
         U1.absorb_into(ro);
@@ -185,8 +186,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         if S.num_challenges > 1 {
             // the first challenge is used to combined multiple gates for instance U2
             U2.challenges = vec![ro.squeeze(NUM_CHALLENGE_BITS)];
-        } 
-
+        }
 
         U1.absorb_into(ro);
         self.cross_term_commits
@@ -295,6 +295,7 @@ mod tests {
         f_U = U;
         f_W = W;
         let res = S.is_sat_relaxed(ck, &f_U, &f_W);
+        println!("hehe, res ={:?}", &res);
         assert!(res.is_ok());
         let perm_res = S.is_sat_perm(&f_U, &f_W);
         assert!(perm_res.is_ok());
