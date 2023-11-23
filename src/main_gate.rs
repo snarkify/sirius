@@ -289,13 +289,17 @@ impl<const T: usize> MainGateConfig<T> {
     /// If `N > T` return `None`
     /// If `N <= T` return `Some(MainGateConfig<N>)`
     pub fn into_smaller_size<const N: usize>(&self) -> Option<MainGateConfig<N>> {
-        Some(MainGateConfig {
-            state: self.state.clone().as_slice().try_into().ok()?,
+        if N > T {
+            return None;
+        }
+
+        Some(MainGateConfig::<N> {
+            state: self.state[..N].try_into().ok()?,
             input: self.input,
             out: self.out,
             q_m: self.q_m,
-            q_1: self.q_1.clone().as_slice().try_into().ok()?,
-            q_5: self.q_5.clone().as_slice().try_into().ok()?,
+            q_1: self.q_1[..N].try_into().ok()?,
+            q_5: self.q_5[..N].try_into().ok()?,
             q_i: self.q_i,
             q_o: self.q_o,
             rc: self.rc,
