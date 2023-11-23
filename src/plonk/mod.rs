@@ -19,7 +19,7 @@ use crate::{
     plonk::util::{cell_to_z_idx, column_index, fill_sparse_matrix},
     polynomial::{
         sparse::{matrix_multiply, SparseMatrix},
-        Expression, MultiPolynomial, Query,
+        Expression, MultiPolynomial,
     },
     poseidon::{AbsorbInRO, ROTrait},
     util::{batch_invert_assigned, fe_to_fe},
@@ -33,7 +33,6 @@ use halo2_proofs::{
         Advice, Any, Assigned, Assignment, Challenge, Circuit, Column, ConstraintSystem, Error,
         Fixed, FloorPlanner, Instance, Selector,
     },
-    poly::Rotation,
 };
 use log::*;
 use rayon::prelude::*;
@@ -49,6 +48,8 @@ pub struct PlonkStructure<C: CurveAffine> {
     pub(crate) selectors: Vec<Vec<bool>>,
     pub(crate) fixed_columns: Vec<Vec<C::ScalarExt>>,
     pub(crate) num_advice_columns: usize,
+    pub(crate) num_challenges: usize, // total number of challenges including homogenous variable
+    // combined custom gates
     pub(crate) gate: MultiPolynomial<C::ScalarExt>,
     pub(crate) fixed_commitment: C, // concatenate selectors and num_fixed_columns together, then commit
     pub(crate) permutation_matrix: SparseMatrix<C::ScalarExt>,
@@ -59,7 +60,8 @@ pub struct PlonkStructure<C: CurveAffine> {
 pub struct PlonkInstance<C: CurveAffine> {
     pub(crate) W_commitment: C, // concatenate num_advice_columns together, then commit
     pub(crate) instance: Vec<C::ScalarExt>, // inst = [X0, X1]
-    pub(crate) y: C::ScalarExt,
+    // contains challenges
+    pub(crate) challenges: Vec<C::ScalarExt>,
 }
 
 impl<C: CurveAffine> Default for PlonkInstance<C> {
@@ -81,10 +83,10 @@ pub struct PlonkWitness<F: PrimeField> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RelaxedPlonkInstance<C: CurveAffine> {
     pub(crate) W_commitment: C,
-    pub(crate) instance: Vec<C::ScalarExt>,
     pub(crate) E_commitment: C,
-    pub(crate) u: C::ScalarExt,
-    pub(crate) y: C::ScalarExt,
+    pub(crate) instance: Vec<C::ScalarExt>,
+    // contains challenges and homogenous variable u
+    pub(crate) challenges: Vec<C::ScalarExt>,
 }
 
 impl<C: CurveAffine> Default for RelaxedPlonkInstance<C> {
@@ -146,11 +148,13 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkInstance<C> {
 impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb_point(self.W_commitment);
-        for inst in self.instance.iter().take(2) {
+        ro.absorb_point(self.E_commitment);
+        for inst in self.instance.iter() {
             ro.absorb_base(fe_to_fe(inst).unwrap());
         }
-        ro.absorb_base(fe_to_fe(&self.u).unwrap());
-        ro.absorb_point(self.E_commitment);
+        for cha in self.challenges.iter() {
+            ro.absorb_base(fe_to_fe(cha).unwrap());
+        }
     }
 }
 
@@ -166,7 +170,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
         F: PrimeField,
     {
         let nrow = 2usize.pow(self.k as u32);
-        let U2 = RelaxedPlonkInstance::new(U.instance.len());
+        let U2 = RelaxedPlonkInstance::new(U.instance.len(), self.num_challenges);
         let W2 = RelaxedPlonkWitness::new(self.k as u32, self.num_advice_columns);
         let data = PlonkEvalDomain {
             S: self,
@@ -199,7 +203,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
         F: PrimeField,
     {
         let nrow = 2usize.pow(self.k as u32);
-        let U2 = RelaxedPlonkInstance::new(U.instance.len());
+        let U2 = RelaxedPlonkInstance::new(U.instance.len(), self.num_challenges);
         let W2 = RelaxedPlonkWitness::new(self.k as u32, self.num_advice_columns);
         let offset = self.selectors.len() + self.fixed_columns.len();
         let poly = self.gate.homogeneous(offset);
@@ -295,22 +299,25 @@ impl<C: CurveAffine> PlonkInstance<C> {
     pub fn to_relax(&self) -> RelaxedPlonkInstance<C> {
         RelaxedPlonkInstance {
             W_commitment: self.W_commitment,
-            instance: self.instance.clone(),
             E_commitment: C::identity(),
-            u: C::ScalarExt::ONE,
-            y: self.y,
+            instance: self.instance.clone(),
+            challenges: self
+                .challenges
+                .iter()
+                .cloned()
+                .chain(std::iter::once(C::ScalarExt::ONE))
+                .collect(),
         }
     }
 }
 
 impl<C: CurveAffine> RelaxedPlonkInstance<C> {
-    pub fn new(num_io: usize) -> Self {
+    pub fn new(num_io: usize, num_challenges: usize) -> Self {
         Self {
             W_commitment: CommitmentKey::<C>::default_value(),
             E_commitment: CommitmentKey::<C>::default_value(),
-            u: C::ScalarExt::ONE,
             instance: vec![C::ScalarExt::ZERO; num_io],
-            y: C::ScalarExt::ONE,
+            challenges: vec![C::ScalarExt::ONE; num_challenges],
         }
     }
 
@@ -337,8 +344,13 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             .zip(&U2.instance)
             .map(|(a, b)| *a + *r * b)
             .collect::<Vec<C::ScalarExt>>();
-        let u = self.u + *r;
-        let y = self.y + *r * U2.y;
+
+        let challenges = self
+            .challenges
+            .iter()
+            .zip(U2.challenges.iter().chain(std::iter::once(&C::ScalarExt::ONE)))
+            .map(|(a, b)| *a + *r * b)
+            .collect::<Vec<C::ScalarExt>>();
 
         let comm_E = cross_term_commits
             .iter()
@@ -348,10 +360,9 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
 
         RelaxedPlonkInstance {
             W_commitment: comm_W.to_affine(),
-            instance,
             E_commitment: comm_E,
-            u,
-            y,
+            instance,
+            challenges,
         }
     }
 }
@@ -484,24 +495,25 @@ impl<F: PrimeField> TableData<F> {
                 .chain(selector_columns)
                 .collect::<Vec<_>>()[..],
         );
-        let num_selector = self.cs.num_selectors();
-        let num_fixed = self.cs.num_fixed_columns();
-        let num_advice = self.cs.num_advice_columns();
 
-        // we use the same challenge y for combining custom gates and multiple lookup arguments
-        // need first commit all witness before generating y
-        let y = Expression::Polynomial(Query {
-            index: num_selector + num_fixed + num_advice,
-            rotation: Rotation(0),
-        });
         // suppose we have n polynomial expression: p_1,p_2,...,p_n
         // we combined them together as one: combined_poly = p_1*y^{n-1}+p_2*y^{n-2}+...+p_n
-        let combined_poly: MultiPolynomial<C::ScalarExt> = self
+        let num_gates = self.cs.gates().iter().flat_map(|gate| gate.polynomials().iter()).collect::<Vec<_>>().len();
+        // total number of challenges, this will be different after we including lookup
+        let num_challenges = if num_gates > 1 { 2 } else { 1 };
+        let y = Expression::Challenge(0);
+        let gate: MultiPolynomial<F> = self
             .cs
             .gates()
             .iter()
             .flat_map(|gate| gate.polynomials().iter())
-            .map(|expr| Expression::from_halo2_expr(expr, num_selector, num_fixed))
+            .map(|expr| {
+                Expression::from_halo2_expr(
+                    expr,
+                    self.cs.num_selectors(),
+                    self.cs.num_fixed_columns(),
+                )
+            })
             .fold(Expression::Constant(F::ZERO), |acc, expr| {
                 Expression::Sum(
                     Box::new(expr),
@@ -516,7 +528,8 @@ impl<F: PrimeField> TableData<F> {
             selectors,
             fixed_columns,
             num_advice_columns: self.cs.num_advice_columns(),
-            gate: combined_poly,
+            num_challenges,
+            gate,
             fixed_commitment,
             permutation_matrix,
             lookups: self.lookups.clone(),
@@ -536,7 +549,7 @@ impl<F: PrimeField> TableData<F> {
         PlonkInstance {
             W_commitment,
             instance,
-            y: F::ONE, // just a place holder, will be replaced later
+            challenges: vec![],
         }
     }
 
