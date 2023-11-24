@@ -295,7 +295,6 @@ mod tests {
         f_U = U;
         f_W = W;
         let res = S.is_sat_relaxed(ck, &f_U, &f_W);
-        println!("hehe, res ={:?}", &res);
         assert!(res.is_ok());
         let perm_res = S.is_sat_perm(&f_U, &f_W);
         assert!(perm_res.is_ok());

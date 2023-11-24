@@ -511,26 +511,35 @@ impl<F: PrimeField> TableData<F> {
             .len();
         // total number of challenges, this will be different after we including lookup
         let num_challenges = if num_gates > 1 { 2 } else { 1 };
-        let y = Expression::Challenge(0);
-        let gate: MultiPolynomial<F> = self
-            .cs
-            .gates()
-            .iter()
-            .flat_map(|gate| gate.polynomials().iter())
-            .map(|expr| {
-                Expression::from_halo2_expr(
-                    expr,
-                    self.cs.num_selectors(),
-                    self.cs.num_fixed_columns(),
-                )
-            })
-            .fold(Expression::Constant(F::ZERO), |acc, expr| {
-                Expression::Sum(
-                    Box::new(expr),
-                    Box::new(Expression::Product(Box::new(acc), Box::new(y.clone()))),
-                )
-            })
-            .expand();
+        let gate: MultiPolynomial<F> = if num_gates > 1 {
+            let y = Expression::Challenge(0);
+            self.cs
+                .gates()
+                .iter()
+                .flat_map(|gate| gate.polynomials().iter())
+                .map(|expr| {
+                    Expression::from_halo2_expr(
+                        expr,
+                        self.cs.num_selectors(),
+                        self.cs.num_fixed_columns(),
+                    )
+                })
+                .fold(Expression::Constant(F::ZERO), |acc, expr| {
+                    Expression::Sum(
+                        Box::new(expr),
+                        Box::new(Expression::Product(Box::new(acc), Box::new(y.clone()))),
+                    )
+                })
+                .expand()
+        } else {
+            Expression::from_halo2_expr(
+                &self.cs.gates()[0].polynomials()[0],
+                self.cs.num_selectors(),
+                self.cs.num_fixed_columns(),
+            )
+            .expand()
+        };
+
         let permutation_matrix = self.permutation_matrix();
 
         PlonkStructure {
