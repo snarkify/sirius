@@ -255,22 +255,12 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
 mod tests {
     use super::*;
     use crate::util::fe_to_fe_safe;
+    use crate::{create_and_verify_proof, run_mock_prover_test};
     use ff::Field;
     use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
-    use halo2_proofs::plonk::{
-        create_proof, keygen_pk, keygen_vk, verify_proof, Circuit, Column, ConstraintSystem,
-        Instance,
-    };
-    use halo2_proofs::poly::commitment::ParamsProver;
-    use halo2_proofs::poly::ipa::commitment::{IPACommitmentScheme, ParamsIPA};
-    use halo2_proofs::poly::ipa::multiopen::ProverIPA;
-    use halo2_proofs::poly::{ipa::strategy::SingleStrategy, VerificationStrategy};
-    use halo2_proofs::transcript::{
-        Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
-    };
-    use halo2curves::pasta::{pallas, vesta, EqAffine, Fp, Fq};
+    use halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
+    use halo2curves::pasta::{pallas, EqAffine, Fp, Fq};
     use rand_core::OsRng;
-
     #[derive(Clone, Debug)]
     struct Point<C: CurveAffine> {
         x: C::Base,
@@ -477,9 +467,6 @@ mod tests {
     #[ignore = "cause it takes a few minutes to run"]
     fn test_ecc_op() {
         println!("-----running ECC Circuit-----");
-        let K: u32 = 14;
-        type Scheme = IPACommitmentScheme<EqAffine>;
-        let params: ParamsIPA<vesta::Affine> = ParamsIPA::<EqAffine>::new(K);
         let p: Point<pallas::Affine> = Point::random_vartime();
         let q: Point<pallas::Affine> = Point {
             x: Fp::ZERO,
@@ -495,37 +482,15 @@ mod tests {
         ]);
         let r = p.scalar_mul(&lambda);
         let circuit = TestCircuit::new(p, q, lambda, 1);
-
-        let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
-        let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
         let public_inputs: &[&[Fp]] = &[&[r.x, r.y]];
-        let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
-        create_proof::<IPACommitmentScheme<_>, ProverIPA<_>, _, _, _, _>(
-            &params,
-            &pk,
-            &[circuit],
-            &[public_inputs],
-            OsRng,
-            &mut transcript,
-        )
-        .expect("proof generation should not fail");
 
-        let proof = transcript.finalize();
-        let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        let strategy = SingleStrategy::new(&params);
-        verify_proof(
-            &params,
-            pk.get_vk(),
-            strategy,
-            &[public_inputs],
-            &mut transcript,
-        )
-        .unwrap();
+        let K: u32 = 14;
+        create_and_verify_proof!(IPA, K, circuit, public_inputs, EqAffine);
+        println!("-----ECC circuit works fine-----");
     }
 
     #[test]
     fn test_ecc_mock() {
-        use halo2_proofs::dev::MockProver;
         let K: u32 = 14;
         let p: Point<pallas::Affine> = Point::random_vartime();
         let q: Point<pallas::Affine> = Point {
@@ -539,10 +504,6 @@ mod tests {
         let r = p.scalar_mul(&lambda);
         let circuit = TestCircuit::new(p, q, lambda, 1);
         let public_inputs = vec![vec![r.x, r.y]];
-        let prover = match MockProver::run(K, &circuit, public_inputs) {
-            Ok(prover) => prover,
-            Err(e) => panic!("{:#?}", e),
-        };
-        assert_eq!(prover.verify(), Ok(()));
+        run_mock_prover_test!(K, circuit, public_inputs);
     }
 }

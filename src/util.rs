@@ -174,3 +174,79 @@ pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>, bit_len: usize) {
         bits.push(false);
     }
 }
+
+/// A macro used for MockProver certain circuit by leveraging halo2_proofs.
+#[macro_export]
+macro_rules! run_mock_prover_test {
+    ($k:expr, $circuit:expr, $public_inputs:expr) => {
+        use halo2_proofs::dev::MockProver;
+
+        let prover = match MockProver::run($k, &$circuit, $public_inputs) {
+            Ok(prover) => prover,
+            Err(e) => panic!("MockProver meet error when k is {:?}, {:#?}", $k, e),
+        };
+        assert_eq!(prover.verify(), Ok(()));
+    };
+}
+
+/// A macro used for create and verify proof for certain circuit by leveraging halo2_proofs.
+/// Including three phases:
+///     1. setup: generate param, verify key, prove key
+///     2. prove: generate proof
+///     3. verify: verify proof
+///
+/// For now, it only supports IPA commitment scheme.
+#[macro_export]
+macro_rules! create_and_verify_proof {
+    (IPA, $k:expr, $circuit:expr, $public_inputs:expr, $curve_point:ident) => {{
+        use halo2_proofs::{
+            plonk::{create_proof, keygen_pk, keygen_vk, verify_proof},
+            poly::{
+                commitment::ParamsProver,
+                ipa::{
+                    commitment::{IPACommitmentScheme, ParamsIPA},
+                    multiopen::ProverIPA,
+                    strategy::SingleStrategy,
+                },
+                VerificationStrategy,
+            },
+            transcript::{
+                Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer,
+                TranscriptWriterBuffer,
+            },
+        };
+        use rand_core::OsRng;
+
+        // setup
+        let params: ParamsIPA<$curve_point> = ParamsIPA::<$curve_point>::new($k);
+        let vk = keygen_vk(&params, &$circuit).expect("keygen_vk should not fail");
+        let pk = keygen_pk(&params, vk, &$circuit).expect("keygen_pk should not fail");
+
+        // prove
+        let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
+        create_proof::<IPACommitmentScheme<_>, ProverIPA<_>, _, _, _, _>(
+            &params,
+            &pk,
+            &[$circuit],
+            &[$public_inputs],
+            OsRng,
+            &mut transcript,
+        )
+        .expect("proof generation should not fail");
+
+        // verify
+        let proof = transcript.finalize();
+        let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+        let strategy = SingleStrategy::new(&params);
+        verify_proof(
+            &params,
+            pk.get_vk(),
+            strategy,
+            &[$public_inputs],
+            &mut transcript,
+        )
+        .unwrap();
+
+        proof
+    }};
+}
