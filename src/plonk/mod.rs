@@ -69,7 +69,7 @@ impl<C: CurveAffine> Default for PlonkInstance<C> {
         Self {
             W_commitment: C::from_xy(C::Base::ZERO, C::Base::ZERO).unwrap(),
             instance: vec![C::ScalarExt::ZERO, C::ScalarExt::ZERO], // TODO Fix Me
-            y: C::ScalarExt::ZERO,
+            challenges: vec![],
         }
     }
 }
@@ -87,18 +87,6 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
     pub(crate) instance: Vec<C::ScalarExt>,
     // contains challenges and homogenous variable u
     pub(crate) challenges: Vec<C::ScalarExt>,
-}
-
-impl<C: CurveAffine> Default for RelaxedPlonkInstance<C> {
-    fn default() -> Self {
-        Self {
-            W_commitment: C::from_xy(C::Base::ZERO, C::Base::ZERO).unwrap(),
-            instance: vec![C::ScalarExt::ZERO, C::ScalarExt::ZERO], // TODO Fix Me
-            E_commitment: C::from_xy(C::Base::ZERO, C::Base::ZERO).unwrap(),
-            u: C::ScalarExt::ONE,
-            y: C::ScalarExt::ZERO,
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
