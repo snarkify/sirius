@@ -706,7 +706,13 @@ mod red_mod_tests {
                         let ModOperationResult {
                             quotient,
                             remainder,
-                        } = chip.red_mod(&mut region, &val, &module).unwrap();
+                        } = chip
+                            .red_mod(
+                                &mut region,
+                                OverflowingBigUint::new(val, LIMB_WIDTH),
+                                &module,
+                            )
+                            .unwrap();
 
                         Ok((quotient, remainder))
                     },
