@@ -399,35 +399,41 @@ mod tests {
         super::BLOCK_SIZE, util::lebs2ip, BlockWord, SpreadTableChip, Table16Chip, Table16Config,
     };
     use super::schedule_util::*;
+    use ff::PrimeField;
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         dev::MockProver,
         plonk::{Circuit, ConstraintSystem, Error},
     };
     use halo2curves::pasta::pallas;
+    use sirius::run_mock_prover_test;
+    use std::marker::PhantomData;
 
     #[test]
     fn message_schedule() {
-        struct MyCircuit {}
-
-        impl Circuit<pallas::Base> for MyCircuit {
+        struct MyCircuit<F: PrimeField> {
+            _marker: PhantomData<F>,
+        }
+        impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
             type Config = Table16Config;
             type FloorPlanner = SimpleFloorPlanner;
             #[cfg(feature = "circuit-params")]
             type Params = ();
 
             fn without_witnesses(&self) -> Self {
-                MyCircuit {}
+                MyCircuit {
+                    _marker: Default::default(),
+                }
             }
 
-            fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
+            fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
                 Table16Chip::configure(meta)
             }
 
             fn synthesize(
                 &self,
                 config: Self::Config,
-                mut layouter: impl Layouter<pallas::Base>,
+                mut layouter: impl Layouter<F>,
             ) -> Result<(), Error> {
                 // Load lookup table
                 SpreadTableChip::load(config.lookup.clone(), &mut layouter)?;
@@ -448,12 +454,10 @@ mod tests {
             }
         }
 
-        let circuit: MyCircuit = MyCircuit {};
-
-        let prover = match MockProver::<pallas::Base>::run(17, &circuit, vec![]) {
-            Ok(prover) => prover,
-            Err(e) => panic!("{:?}", e),
+        let circuit: MyCircuit<pallas::Base> = MyCircuit {
+            _marker: Default::default(),
         };
-        assert_eq!(prover.verify(), Ok(()));
+
+        run_mock_prover_test!(17, circuit, vec![]);
     }
 }

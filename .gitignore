@@ -4,3 +4,4 @@
 *.sh
 *.txt
 .vscode
+.idea

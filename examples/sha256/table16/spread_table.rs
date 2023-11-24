@@ -290,6 +290,7 @@ mod tests {
     use super::{get_tag, SpreadTableChip, SpreadTableConfig};
     use ff::PrimeField;
     use rand::Rng;
+    use std::marker::PhantomData;
 
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner, Value},
@@ -297,6 +298,7 @@ mod tests {
         plonk::{Advice, Circuit, Column, ConstraintSystem, Error},
     };
     use halo2curves::pasta::Fp;
+    use sirius::run_mock_prover_test;
 
     #[test]
     fn lookup_table() {
@@ -304,16 +306,20 @@ mod tests {
         #[derive(Copy, Clone, Debug)]
         pub struct Variable(Column<Advice>, usize);
 
-        struct MyCircuit {}
+        struct MyCircuit<F: PrimeField> {
+            _marker: PhantomData<F>,
+        }
 
-        impl<F: PrimeField> Circuit<F> for MyCircuit {
+        impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
             type Config = SpreadTableConfig;
             type FloorPlanner = SimpleFloorPlanner;
             #[cfg(feature = "circuit-params")]
             type Params = ();
 
             fn without_witnesses(&self) -> Self {
-                MyCircuit {}
+                MyCircuit {
+                    _marker: Default::default(),
+                }
             }
 
             fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
@@ -442,12 +448,10 @@ mod tests {
             }
         }
 
-        let circuit: MyCircuit = MyCircuit {};
-
-        let prover = match MockProver::<Fp>::run(17, &circuit, vec![]) {
-            Ok(prover) => prover,
-            Err(e) => panic!("{:?}", e),
+        let circuit: MyCircuit<Fp> = MyCircuit {
+            _marker: Default::default(),
         };
-        assert_eq!(prover.verify(), Ok(()));
+
+        run_mock_prover_test!(17, circuit, vec![]);
     }
 }

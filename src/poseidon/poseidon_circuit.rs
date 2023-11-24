@@ -395,22 +395,12 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
 mod tests {
     use super::*;
     use crate::main_gate::MainGateConfig;
+    use crate::{create_and_verify_proof, run_mock_prover_test};
     use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
-    use halo2_proofs::plonk::{
-        create_proof, keygen_pk, keygen_vk, verify_proof, Circuit, Column, ConstraintSystem,
-        Instance,
-    };
-    use halo2_proofs::poly::commitment::ParamsProver;
-    use halo2_proofs::poly::ipa::commitment::{IPACommitmentScheme, ParamsIPA};
-    use halo2_proofs::poly::ipa::multiopen::ProverIPA;
-    use halo2_proofs::poly::{ipa::strategy::SingleStrategy, VerificationStrategy};
-    use halo2_proofs::transcript::{
-        Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
-    };
+    use halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
     use halo2curves::group::ff::FromUniformBytes;
-    use halo2curves::pasta::{vesta, EqAffine, Fp};
+    use halo2curves::pasta::{EqAffine, Fp};
     use poseidon::Spec;
-    use rand_core::OsRng;
 
     const T: usize = 3;
     const RATE: usize = 2;
@@ -482,49 +472,24 @@ mod tests {
     #[test]
     fn test_poseidon_circuit() {
         println!("-----running Poseidon Circuit-----");
-        const K: u32 = 10;
-        type Scheme = IPACommitmentScheme<EqAffine>;
-        let params: ParamsIPA<vesta::Affine> = ParamsIPA::<EqAffine>::new(K);
         let mut inputs = Vec::new();
         let num_bits = 128;
         for i in 0..5 {
             inputs.push(Fp::from(i as u64));
         }
+
+        const K: u32 = 10;
         let circuit = TestCircuit::new(inputs, num_bits);
 
-        let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
-        let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
-        // let out_hash = Fp::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();
         let out_hash = Fp::from_str_vartime("277726250230731218669330566268314254439").unwrap();
         let public_inputs: &[&[Fp]] = &[&[out_hash]];
-        let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
-        create_proof::<IPACommitmentScheme<_>, ProverIPA<_>, _, _, _, _>(
-            &params,
-            &pk,
-            &[circuit],
-            &[public_inputs],
-            OsRng,
-            &mut transcript,
-        )
-        .expect("proof generation should not fail");
 
-        let proof = transcript.finalize();
-        let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        let strategy = SingleStrategy::new(&params);
-        verify_proof(
-            &params,
-            pk.get_vk(),
-            strategy,
-            &[public_inputs],
-            &mut transcript,
-        )
-        .unwrap();
+        create_and_verify_proof!(IPA, K, circuit, public_inputs, EqAffine);
         println!("-----poseidon circuit works fine-----");
     }
 
     #[test]
     fn test_mock() {
-        use halo2_proofs::dev::MockProver;
         const K: u32 = 10;
         let mut inputs = Vec::new();
         let num_bits = 128;
@@ -535,10 +500,7 @@ mod tests {
         // let out_hash = Fp::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();
         let out_hash = Fp::from_str_vartime("277726250230731218669330566268314254439").unwrap();
         let public_inputs = vec![vec![out_hash]];
-        let prover = match MockProver::run(K, &circuit, public_inputs) {
-            Ok(prover) => prover,
-            Err(e) => panic!("{:#?}", e),
-        };
-        assert_eq!(prover.verify(), Ok(()));
+
+        run_mock_prover_test!(K, circuit, public_inputs);
     }
 }

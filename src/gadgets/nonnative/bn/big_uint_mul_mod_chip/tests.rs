@@ -3,9 +3,9 @@ use super::*;
 mod mult_mod_tests {
     use std::marker::PhantomData;
 
+    use crate::run_mock_prover_test;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
-        dev::MockProver,
         plonk::{Advice, Circuit, Column, Instance},
     };
     use halo2curves::pasta::Fp;
@@ -213,21 +213,14 @@ mod mult_mod_tests {
             let quotient = BigUint::from_biguint(&quotient, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
             let remainer = BigUint::from_biguint(&remainer, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
 
-            let prover = match MockProver::run(
-                K,
-                &ts,
-                vec![
-                    lhs.limbs().to_vec(),
-                    rhs.limbs().to_vec(),
-                    modulus.limbs().to_vec(),
-                    quotient.limbs().to_vec(),
-                    remainer.limbs().to_vec(),
-                ],
-            ) {
-                Ok(prover) => prover,
-                Err(e) => panic!("{:?}", e),
-            };
-            assert_eq!(prover.verify(), Ok(()));
+            let public_inputs = vec![
+                lhs.limbs().to_vec(),
+                rhs.limbs().to_vec(),
+                modulus.limbs().to_vec(),
+                quotient.limbs().to_vec(),
+                remainer.limbs().to_vec(),
+            ];
+            run_mock_prover_test!(K, ts, public_inputs);
         }
     }
 }
@@ -235,9 +228,9 @@ mod mult_mod_tests {
 mod components_tests {
     use std::{marker::PhantomData, mem};
 
+    use crate::run_mock_prover_test;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
-        dev::MockProver,
         plonk::{Advice, Circuit, Column, Instance},
     };
     use halo2curves::pasta::Fp;
@@ -553,21 +546,17 @@ mod components_tests {
 
         const K: u32 = 11;
         let ts = TestCircuit::<Fp>::default();
-        let prover = match MockProver::run(
+        run_mock_prover_test!(
             K,
-            &ts,
+            ts,
             vec![
                 lhs.limbs().to_vec(),
                 rhs.limbs().to_vec(),
                 prod.limbs().to_vec(),
                 sum.limbs().to_vec(),
                 grouped.limbs().to_vec(),
-            ],
-        ) {
-            Ok(prover) => prover,
-            Err(e) => panic!("{:?}", e),
-        };
-        assert_eq!(prover.verify(), Ok(()));
+            ]
+        );
     }
 
     #[test_log::test]
@@ -588,30 +577,26 @@ mod components_tests {
 
         const K: u32 = 11;
         let ts = TestCircuit::<Fp>::default();
-        let prover = match MockProver::run(
+        run_mock_prover_test!(
             K,
-            &ts,
+            ts,
             vec![
                 lhs.limbs().to_vec(),
                 rhs.limbs().to_vec(),
                 prod.limbs().to_vec(),
                 sum.limbs().to_vec(),
                 grouped.limbs().to_vec(),
-            ],
-        ) {
-            Ok(prover) => prover,
-            Err(e) => panic!("{:?}", e),
-        };
-        assert_eq!(prover.verify(), Ok(()));
+            ]
+        );
     }
 }
 
 mod red_mod_tests {
     use std::marker::PhantomData;
 
+    use crate::run_mock_prover_test;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
-        dev::MockProver,
         plonk::{Advice, Circuit, Column, Instance},
     };
     use halo2curves::pasta::Fp;
@@ -792,20 +777,16 @@ mod red_mod_tests {
             let quotient = BigUint::from_biguint(&quotient, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
             let remainer = BigUint::from_biguint(&remainer, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
 
-            let prover = match MockProver::run(
+            run_mock_prover_test!(
                 K,
-                &ts,
+                ts,
                 vec![
                     val.limbs().to_vec(),
                     modulus.limbs().to_vec(),
                     quotient.limbs().to_vec(),
                     remainer.limbs().to_vec(),
-                ],
-            ) {
-                Ok(prover) => prover,
-                Err(e) => panic!("{:?}", e),
-            };
-            assert_eq!(prover.verify(), Ok(()));
+                ]
+            );
         }
     }
 }
@@ -813,10 +794,10 @@ mod red_mod_tests {
 mod decompose_tests {
     use std::marker::PhantomData;
 
+    use crate::run_mock_prover_test;
     use ff::Field;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
-        dev::MockProver,
         plonk::{Advice, Circuit, Column, Instance},
     };
     use halo2curves::pasta::Fp;
@@ -951,11 +932,8 @@ mod decompose_tests {
                 .limbs()
                 .to_vec();
             limbs.resize(LIMBS_COUNT_LIMIT.get(), Fp::ZERO);
-            let prover = match MockProver::run(K, &ts, vec![vec![Fp::from_u128(val)], limbs]) {
-                Ok(prover) => prover,
-                Err(e) => panic!("{:?}", e),
-            };
-            assert_eq!(prover.verify(), Ok(()));
+
+            run_mock_prover_test!(K, ts, vec![vec![Fp::from_u128(val)], limbs]);
         }
     }
 }

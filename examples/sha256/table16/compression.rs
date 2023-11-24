@@ -954,25 +954,31 @@ mod tests {
     use super::super::{
         super::BLOCK_SIZE, msg_schedule_test_input, BlockWord, Table16Chip, Table16Config, IV,
     };
+    use ff::PrimeField;
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         dev::MockProver,
         plonk::{Circuit, ConstraintSystem, Error},
     };
-    use halo2curves::pasta::pallas;
+    use halo2curves::pasta::{pallas, Fp};
+    use sirius::run_mock_prover_test;
+    use std::marker::PhantomData;
 
     #[test]
     fn compress() {
-        struct MyCircuit {}
-
-        impl Circuit<F> for MyCircuit {
+        struct MyCircuit<F: PrimeField> {
+            _marker: PhantomData<F>,
+        }
+        impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
             type Config = Table16Config;
             type FloorPlanner = SimpleFloorPlanner;
             #[cfg(feature = "circuit-params")]
             type Params = ();
 
             fn without_witnesses(&self) -> Self {
-                MyCircuit {}
+                MyCircuit {
+                    _marker: Default::default(),
+                }
             }
 
             fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
@@ -1010,12 +1016,10 @@ mod tests {
             }
         }
 
-        let circuit: MyCircuit = MyCircuit {};
-
-        let prover = match MockProver::<F>::run(17, &circuit, vec![]) {
-            Ok(prover) => prover,
-            Err(e) => panic!("{:?}", e),
+        let circuit: MyCircuit<Fp> = MyCircuit {
+            _marker: Default::default(),
         };
-        assert_eq!(prover.verify(), Ok(()));
+
+        run_mock_prover_test!(17, circuit, vec![]);
     }
 }
