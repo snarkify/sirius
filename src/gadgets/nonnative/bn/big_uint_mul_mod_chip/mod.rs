@@ -83,12 +83,11 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
     /// - `s_i = lhs_i + rhs_i` where i in [0..l)
     /// - `s_i = lhs_i` where
     ///     - i in [l..k)
-    ///     - assumed that `lhs` has more limbs
-    fn assign_sum(
+    pub fn assign_sum<'a>(
         &self,
-        ctx: &mut RegionCtx<'_, F>,
+        ctx: &mut RegionCtx<'a, F>,
         lhs: &OverflowingBigUint<F>,
-        rhs: &[F],
+        rhs: &[impl AssignAdviceFrom<'a, F> + Clone + fmt::Debug],
     ) -> Result<SumContext<F>, Error> {
         let lhs_column = &self.config().state[0];
         let rhs_column = &self.config().state[1];
@@ -111,7 +110,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
                     let (lhs_cell, rhs_cell) = match value {
                         EitherOrBoth::Both(lhs, rhs) => (
                             ctx.assign_advice_from(|| "lhs", *lhs_column, lhs)?,
-                            ctx.assign_advice_from(|| "rhs", *rhs_column, rhs)?,
+                            ctx.assign_advice_from(|| "rhs", *rhs_column, rhs.clone())?,
                         ),
                         EitherOrBoth::Left(lhs_limb) => (
                             ctx.assign_advice_from(|| "lhs", *lhs_column, lhs_limb)?,
@@ -119,7 +118,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
                         ),
                         EitherOrBoth::Right(rhs_limb) => (
                             ctx.assign_advice_from(|| "lhs", *lhs_column, F::ZERO)?,
-                            ctx.assign_advice_from(|| "rhs", *rhs_column, rhs_limb)?,
+                            ctx.assign_advice_from(|| "rhs", *rhs_column, rhs_limb.clone())?,
                         ),
                     };
 
@@ -892,10 +891,24 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
 }
 
 #[derive(Debug, Clone)]
-struct OverflowingBigUint<F: ff::PrimeField> {
-    cells: Vec<AssignedCell<F, F>>,
-    max_word: F,
+pub struct OverflowingBigUint<F: ff::PrimeField> {
+    pub cells: Vec<AssignedCell<F, F>>,
+    pub max_word: F,
 }
+
+impl<F: ff::PrimeField> OverflowingBigUint<F> {
+    pub fn new(cells: Vec<AssignedCell<F, F>>, limb_width: NonZeroUsize) -> Self {
+        let max_word_without_overflow: F =
+            big_uint::nat_to_f(&big_uint::get_big_int_with_n_ones(limb_width.get()))
+                .unwrap_or_default();
+
+        Self {
+            cells,
+            max_word: max_word_without_overflow,
+        }
+    }
+}
+
 impl<F: ff::PrimeField> Deref for OverflowingBigUint<F> {
     type Target = [AssignedCell<F, F>];
     fn deref(&self) -> &Self::Target {
@@ -936,8 +949,8 @@ pub struct MultContext<F: PrimeField> {
 }
 
 pub struct SumContext<F: PrimeField> {
-    rhs: Vec<AssignedCell<F, F>>,
-    res: OverflowingBigUint<F>,
+    pub rhs: Vec<AssignedCell<F, F>>,
+    pub res: OverflowingBigUint<F>,
 }
 
 impl<F: ff::PrimeField> BigUintMulModChip<F> {
@@ -1232,7 +1245,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
     pub fn red_mod(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        val: &[AssignedCell<F, F>],
+        val: OverflowingBigUint<F>,
         modulus: &[AssignedCell<F, F>],
     ) -> Result<ModOperationResult<F>, Error> {
         // lhs * rhs = q * m + r
@@ -1243,7 +1256,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
 
         let mod_bn = to_bn(modulus)?;
 
-        let val_bi = to_bn(val)?.map(|bn| bn.into_bigint());
+        let val_bi = to_bn(&val.cells)?.map(|bn| bn.into_bigint());
         let mod_bi = mod_bn.as_ref().map(|bn| bn.into_bigint());
 
         let (q, r) = val_bi
@@ -1260,10 +1273,6 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
 
         // lhs * rhs
 
-        let max_word_without_overflow: F =
-            big_uint::nat_to_f(&big_uint::get_big_int_with_n_ones(self.limb_width.get()))
-                .unwrap_or_default();
-
         let empty = iter::repeat(F::ZERO)
             .take(self.limbs_count_limit.get())
             .collect::<Box<[_]>>();
@@ -1277,8 +1286,8 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             ctx,
             q.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
             mod_bn.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
-            &max_word_without_overflow,
-            &max_word_without_overflow,
+            &val.max_word,
+            &val.max_word,
         )?;
         let SumContext {
             rhs: assigned_r,
@@ -1292,7 +1301,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         // q * m + r
         let left = OverflowingBigUint {
             cells: val.to_vec(),
-            max_word: max_word_without_overflow,
+            max_word: val.max_word,
         };
 
         let grouped_left = self.group_limbs(ctx, left)?;
