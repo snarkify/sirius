@@ -19,6 +19,9 @@ pub struct Query {
     pub rotation: Rotation,
 }
 
+/// There are two types of variables in Expression:
+/// polynomial query ([`Expression::Polynomial`]) and challenge ([`Expression::Challenge`])
+/// we identify them by two global consts. It is used to identify the type of variable
 pub(crate) const POLYNOMIAL_TYPE: usize = 0;
 pub(crate) const CHALLENGE_TYPE: usize = 1;
 
@@ -65,27 +68,27 @@ impl<F: PrimeField> Expression<F> {
     // return the number of challenges in expression
     pub fn num_challenges(&self) -> usize {
         let mut set = HashSet::<(i32, usize, usize)>::new();
-        self._num_challenges(&mut set);
+        self.collect_challenges(&mut set);
         set.len()
     }
 
-    pub fn _num_challenges(&self, set: &mut HashSet<(i32, usize, usize)>) {
+    fn collect_challenges(&self, set: &mut HashSet<(i32, usize, usize)>) {
         match self {
             Expression::Constant(_) => (),
             Expression::Polynomial(_) => (),
             Expression::Challenge(index) => {
                 set.insert((0, *index, CHALLENGE_TYPE));
             }
-            Expression::Negated(a) => a._num_challenges(set),
+            Expression::Negated(a) => a.collect_challenges(set),
             Expression::Sum(a, b) => {
-                a._num_challenges(set);
-                b._num_challenges(set);
+                a.collect_challenges(set);
+                b.collect_challenges(set);
             }
             Expression::Product(a, b) => {
-                a._num_challenges(set);
-                b._num_challenges(set);
+                a.collect_challenges(set);
+                b.collect_challenges(set);
             }
-            Expression::Scaled(a, _) => a._num_challenges(set),
+            Expression::Scaled(a, _) => a.collect_challenges(set),
         }
     }
 
@@ -128,13 +131,14 @@ impl<F: PrimeField> Expression<F> {
         }
     }
 
-    fn _expand(&self, index_to_poly: &Vec<(i32, usize, usize)>) -> MultiPolynomial<F> {
+    /// index_to_poly is mapping from i to (rotation, column_index, type), see [`Monomial`]
+    fn _expand(&self, index_to_poly: &[(i32, usize, usize)]) -> MultiPolynomial<F> {
         self.evaluate(
             &|c| {
                 let arity = index_to_poly.len();
                 MultiPolynomial {
                     arity,
-                    monomials: vec![Monomial::new(index_to_poly.clone(), c, vec![0; arity])],
+                    monomials: vec![Monomial::new(index_to_poly.to_vec(), c, vec![0; arity])],
                 }
             },
             &|poly| {
@@ -149,7 +153,7 @@ impl<F: PrimeField> Expression<F> {
                 exponents[index] = 1;
                 MultiPolynomial {
                     arity,
-                    monomials: vec![Monomial::new(index_to_poly.clone(), F::ONE, exponents)],
+                    monomials: vec![Monomial::new(index_to_poly.to_vec(), F::ONE, exponents)],
                 }
             },
             &|cha_index| {
@@ -162,7 +166,7 @@ impl<F: PrimeField> Expression<F> {
                 exponents[index] = 1;
                 MultiPolynomial {
                     arity,
-                    monomials: vec![Monomial::new(index_to_poly.clone(), F::ONE, exponents)],
+                    monomials: vec![Monomial::new(index_to_poly.to_vec(), F::ONE, exponents)],
                 }
             },
             &|a| -a,
@@ -177,7 +181,7 @@ impl<F: PrimeField> Expression<F> {
         self.poly_set(&mut set);
         let mut index_to_poly: Vec<(i32, usize, usize)> = set.into_iter().collect();
         index_to_poly.sort();
-        self._expand(&index_to_poly)
+        self._expand(&index_to_poly[..])
     }
 
     // fold_transform will fold a polynomial expression P(f_1,...f_m, x_1,...,x_n)

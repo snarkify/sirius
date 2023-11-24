@@ -272,6 +272,13 @@ mod tests {
     /// there are several things to be checked: whether two such instances satisfy plonk relation
     /// (i.e. is_sat), whether two such folded instance satisfy relaxed plonk relation (i.e.
     /// is_sat_relax)
+    /// We have to check:
+    /// (1) each of the two individual witness-instance pairs satisfy custom gates relation as well
+    /// as copy constrains relation (i.e. permutation relation)
+    /// (2) the first folded witness-instance pair satisfies the relaxed polynomial relation and
+    /// copy constrains relation
+    /// (3) the second folded witness-instance pair satisfies the relaxed polynomial relation  and
+    /// copy constrains relation
     fn fold_instances<C: CurveAffine<ScalarExt = F>, F: PrimeField, RO: ROTrait<C>>(
         ck: &CommitmentKey<C>,
         ro1: &mut RO,
