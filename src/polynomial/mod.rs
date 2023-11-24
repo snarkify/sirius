@@ -392,7 +392,7 @@ impl<F: PrimeField> Monomial<F> {
         for (i, exp) in self.exponents.iter().enumerate() {
             let (rot, idx, var_type) = self.index_to_poly[i];
             match var_type {
-                0 => {
+                POLYNOMIAL_TYPE => {
                     for _ in 0..(*exp) {
                         let x0 = Expression::<F>::Polynomial(Query {
                             index: idx,
@@ -401,7 +401,7 @@ impl<F: PrimeField> Monomial<F> {
                         expr = Expression::Product(Box::new(expr), Box::new(x0));
                     }
                 }
-                1 => {
+                CHALLENGE_TYPE => {
                     for _ in 0..(*exp) {
                         let r = Expression::<F>::Challenge(idx);
                         expr = Expression::Product(Box::new(expr), Box::new(r));
@@ -433,7 +433,11 @@ impl<F: PrimeField> Monomial<F> {
         self.exponents
             .iter()
             .zip(self.index_to_poly.iter())
-            .filter_map(|(exp, (_, col_index, _))| (col_index >= &offset).then_some(exp))
+            .filter_map(|(exp, (_, col_index, var_type))| {
+                ((*var_type == POLYNOMIAL_TYPE && *col_index >= offset)
+                    || *var_type == CHALLENGE_TYPE)
+                    .then_some(exp)
+            })
             .sum()
     }
 
@@ -529,8 +533,8 @@ where
         let PlonkEvalDomain { S, U1, W1, U2, W2 } = data;
         let selector_offset = S.selectors.len();
         let fixed_offset = S.fixed_columns.len() + selector_offset;
-        let second_instance_offset = fixed_offset + S.num_advice_columns;
-        let total_len = second_instance_offset + S.num_advice_columns;
+        let U2_offset = fixed_offset + S.num_advice_columns;
+        let total_len = U2_offset + S.num_advice_columns;
         let row_size = W1.W.len() / S.num_advice_columns;
 
         let vars: Vec<F> = (0..self.arity)
@@ -543,7 +547,8 @@ where
                     // |num_challenges1|num_challenges2|
                     CHALLENGE_TYPE => match col {
                         col if col < S.num_challenges => U1.challenges[col],
-                        col => U2.challenges[col - S.num_challenges],
+                        col if col < 2 * S.num_challenges => U2.challenges[col - S.num_challenges],
+                        col => panic!("challenges index out of boundary: {col}"),
                     },
                     POLYNOMIAL_TYPE => {
                         // evaluation for polynomial query
@@ -571,14 +576,10 @@ where
                                 S.fixed_columns[col - selector_offset][row1]
                             }
                             // advice column for (U1, W1)
-                            col if col < second_instance_offset => {
-                                W1.W[(col - fixed_offset) * row_size + row1]
-                            }
+                            col if col < U2_offset => W1.W[(col - fixed_offset) * row_size + row1],
                             // advice column for (U2, W2)
-                            col if col < total_len => {
-                                W2.W[(col - second_instance_offset) * row_size + row1]
-                            }
-                            col => panic!("index out of boundary: {col}"),
+                            col if col < total_len => W2.W[(col - U2_offset) * row_size + row1],
+                            col => panic!("polynomial index out of boundary: {col}"),
                         }
                     }
                     _ => unimplemented!("other variable type is not supported"),
