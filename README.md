@@ -22,7 +22,7 @@ Within the context of an IVC scheme, the prover's role is to demonstrate that, u
 The `Sirius` folding framework is designed with a three-tiered architecture.
 
 <p align="center">
-<img width="800" alt="fig2" src="https://github.com/snarkify/sirius/assets/3767044/a1ace5c2-365b-45aa-801d-0a2c6d65bedc">
+<img width="800" alt="fig2" src="https://github.com/snarkify/sirius/assets/3767044/b6328e28-adb7-4287-84f8-1eb48df2579a">
 </p>
 
 - **Frontend Layer**: This layer serves as the interface of the constraint system. User-defined circuits and witness data are converted into an intermediate representation format defined by the folding scheme. Our current implementation follows the _special-sound interactive protocol_ (SPS) from [Protostar](https://eprint.iacr.org/2023/620). An alternative scheme would be the _Customizable Constraint Systems protocol_ ([CCS](https://eprint.iacr.org/2023/552)). 
