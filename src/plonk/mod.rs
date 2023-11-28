@@ -50,7 +50,7 @@ pub struct PlonkStructure<C: CurveAffine> {
     pub(crate) selectors: Vec<Vec<bool>>,
     pub(crate) fixed_columns: Vec<Vec<C::ScalarExt>>,
     pub(crate) num_advice_columns: usize,
-    /// total number of challenges including homogenous variable
+    /// total number of challenges
     pub(crate) num_challenges: usize,
     /// combined custom gates
     pub(crate) gate: MultiPolynomial<C::ScalarExt>,
@@ -92,8 +92,10 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
     pub(crate) W_commitment: C,
     pub(crate) E_commitment: C,
     pub(crate) instance: Vec<C::ScalarExt>,
-    /// contains challenges and homogenous variable u
+    /// contains challenges
     pub(crate) challenges: Vec<C::ScalarExt>,
+    /// homogenous variable u
+    pub(crate) u: C::ScalarExt,
 }
 
 #[derive(Clone, Debug)]
@@ -134,8 +136,11 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkStructure<C> {
 impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb_point(self.W_commitment);
-        for inst in self.instance.iter().take(2) {
+        for inst in self.instance.iter() {
             ro.absorb_base(fe_to_fe(inst).unwrap());
+        }
+        for cha in self.challenges.iter() {
+            ro.absorb_base(fe_to_fe(cha).unwrap());
         }
     }
 }
@@ -150,6 +155,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
         for cha in self.challenges.iter() {
             ro.absorb_base(fe_to_fe(cha).unwrap());
         }
+        ro.absorb_base(fe_to_fe(&self.u).unwrap());
     }
 }
 
@@ -302,6 +308,7 @@ impl<C: CurveAffine> PlonkInstance<C> {
                 .cloned()
                 .chain(iter::once(C::ScalarExt::ONE))
                 .collect(),
+            u: C::ScalarExt::ONE,
         }
     }
 }
@@ -313,6 +320,7 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             E_commitment: CommitmentKey::<C>::default_value(),
             instance: vec![C::ScalarExt::ZERO; num_io],
             challenges: vec![C::ScalarExt::ONE; num_challenges],
+            u: C::ScalarExt::ONE,
         }
     }
 
@@ -343,9 +351,11 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
         let challenges = self
             .challenges
             .iter()
-            .zip_eq(U2.challenges.iter().chain(iter::once(&C::ScalarExt::ONE)))
+            .zip_eq(U2.challenges.iter())
             .map(|(a, b)| *a + *r * b)
             .collect::<Vec<C::ScalarExt>>();
+
+        let u = self.u + *r;
 
         let comm_E = cross_term_commits
             .iter()
@@ -357,6 +367,7 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             W_commitment: comm_W.to_affine(),
             E_commitment: comm_E,
             instance,
+            u,
             challenges,
         }
     }
@@ -500,7 +511,7 @@ impl<F: PrimeField> TableData<F> {
             .flat_map(|gate| gate.polynomials().iter())
             .count();
         // total number of challenges, this will be different after we including lookup
-        let num_challenges = if num_gates > 1 { 2 } else { 1 };
+        let num_challenges = if num_gates > 1 { 1 } else { 0 };
         let gate: MultiPolynomial<F> = if num_gates > 1 {
             let y = Expression::Challenge(0);
             self.cs

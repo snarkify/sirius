@@ -548,10 +548,14 @@ where
                 match var_type {
                     // evaluation for challenges
                     // layout of challenges:
-                    // |num_challenges1|num_challenges2|
+                    // |num_challenges1|u1||num_challenges2|u2|
                     CHALLENGE_TYPE => match col {
                         col if col < S.num_challenges => U1.challenges[col],
-                        col if col < 2 * S.num_challenges => U2.challenges[col - S.num_challenges],
+                        col if col == S.num_challenges => U1.u,
+                        col if col < 2 * S.num_challenges + 1 => {
+                            U2.challenges[col - S.num_challenges - 1]
+                        }
+                        col if col == 2 * S.num_challenges + 1 => U2.u,
                         col => panic!("challenges index out of boundary: {col}"),
                     },
                     POLYNOMIAL_TYPE => {

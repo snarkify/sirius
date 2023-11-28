@@ -138,7 +138,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         S.absorb_into(ro);
         let mut U2 = td.plonk_instance(ck);
         U2.absorb_into(ro);
-        if S.num_challenges > 1 {
+        if S.num_challenges > 0 {
             // the first challenge is used to combined multiple gates for instance U2
             U2.challenges = vec![ro.squeeze(NUM_CHALLENGE_BITS)];
         }
