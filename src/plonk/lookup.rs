@@ -46,14 +46,11 @@
 //! - IVC description in Section 4.3 in [Protostar](https://eprint.iacr.org/2023/620)
 
 use ff::PrimeField;
-use halo2_proofs::{
-    arithmetic::CurveAffine,
-    plonk::{ConstraintSystem, Expression as PE},
-    poly::Rotation,
-};
+use halo2_proofs::{arithmetic::CurveAffine, plonk::ConstraintSystem, poly::Rotation};
 
 use crate::{
     commitment::CommitmentKey,
+    plonk::util::compress_expression,
     polynomial::{Expression, MultiPolynomial, Query},
 };
 
@@ -72,9 +69,11 @@ use crate::{
 #[derive(Clone, PartialEq)]
 pub struct Argument<F: PrimeField> {
     /// Multi-polynomial representation of the lookup vector.
-    pub(crate) lookup_poly: MultiPolynomial<F>,
+    pub(crate) lookup_polys: Vec<Expression<F>>,
     /// Multi-polynomial representation of the table vector.
-    pub(crate) table_poly: MultiPolynomial<F>,
+    pub(crate) table_polys: Vec<Expression<F>>,
+    /// return true when maximum length of lookup vector or table vector greater than 1
+    pub(crate) require_challenge: bool,
 }
 
 /// Lookup structure includes all the necessary information of folding scheme for lookup
@@ -198,37 +197,58 @@ impl<F: PrimeField> Argument<F> {
     ///
     /// TODO #39:  halo2 assumes lookup relation to be true over all rows, in reality we may only
     /// lookup a few items. need find a way to remove padded rows for lookup_vec
-    pub fn compress_from(cs: &ConstraintSystem<F>) -> Vec<Self> {
-        // we use the same challenge y for combining custom gates and multiple lookup arguments
-        // need first commit all witness before generating y
-        let y = Expression::Polynomial(Query {
-            index: cs.num_selectors() + cs.num_fixed_columns() + cs.num_advice_columns(),
-            rotation: Rotation(0),
-        });
+    pub fn compress_from(cs: &ConstraintSystem<F>) -> Option<Self> {
+        let max_lookup_len = cs
+            .lookups()
+            .iter()
+            .map(|arg| arg.input_expressions().len())
+            .max()
+            .unwrap_or(0);
+        let max_table_len = cs
+            .lookups()
+            .iter()
+            .map(|arg| arg.table_expressions().len())
+            .max()
+            .unwrap_or(0);
+        let max_len = max_lookup_len.max(max_table_len);
+        if max_len == 0 {
+            return None;
+        }
+
+        let require_challenge = max_len > 1;
+
         // suppose we have n polynomial expression: p_1,p_2,...,p_n
         // we combined them together as one: combined_poly = p_1*y^{n-1}+p_2*y^{n-2}+...+p_n
-        let compress_expression = |exprs: &[PE<F>]| -> MultiPolynomial<F> {
-            exprs
-                .iter()
-                .map(|expr| {
-                    Expression::from_halo2_expr(expr, cs.num_selectors(), cs.num_fixed_columns())
-                })
-                .fold(Expression::Constant(F::ZERO), |acc, expr| {
-                    Expression::Sum(
-                        Box::new(expr),
-                        Box::new(Expression::Product(Box::new(acc), Box::new(y.clone()))),
-                    )
-                })
-                .expand()
-        };
-
-        cs.lookups()
+        let lookup_polys = cs
+            .lookups()
             .iter()
-            .map(|arg| Self {
-                lookup_poly: compress_expression(arg.input_expressions()),
-                table_poly: compress_expression(arg.table_expressions()),
+            .map(|arg| {
+                compress_expression(
+                    &arg.input_expressions()[..],
+                    cs.num_selectors(),
+                    cs.num_fixed_columns(),
+                    0,
+                )
             })
-            .collect()
+            .collect::<Vec<_>>();
+        let table_polys = cs
+            .lookups()
+            .iter()
+            .map(|arg| {
+                compress_expression(
+                    &arg.table_expressions()[..],
+                    cs.num_selectors(),
+                    cs.num_fixed_columns(),
+                    0,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        Some(Self {
+            lookup_polys,
+            table_polys,
+            require_challenge,
+        })
     }
 }
 

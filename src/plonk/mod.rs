@@ -16,10 +16,10 @@
 //! a given Plonk instance and witness satisfy the circuit constraints.
 use crate::{
     commitment::CommitmentKey,
-    plonk::util::{cell_to_z_idx, column_index, fill_sparse_matrix},
+    plonk::util::{cell_to_z_idx, column_index, compress_expression, fill_sparse_matrix},
     polynomial::{
         sparse::{matrix_multiply, SparseMatrix},
-        Expression, MultiPolynomial,
+        MultiPolynomial,
     },
     poseidon::{AbsorbInRO, ROTrait},
     util::{batch_invert_assigned, fe_to_fe},
@@ -57,7 +57,7 @@ pub struct PlonkStructure<C: CurveAffine> {
     /// concatenate selectors and num_fixed_columns together, then commit
     pub(crate) fixed_commitment: C,
     pub(crate) permutation_matrix: SparseMatrix<C::ScalarExt>,
-    pub(crate) lookups: Vec<lookup::Argument<C::ScalarExt>>,
+    pub(crate) lookup_argument: Option<lookup::Argument<C::ScalarExt>>,
 }
 
 #[derive(Clone, Debug)]
@@ -438,7 +438,7 @@ pub struct TableData<F: PrimeField> {
     pub(crate) advice: Vec<Vec<Assigned<F>>>,
     pub(crate) challenges: HashMap<usize, F>,
     pub(crate) permutation: Option<permutation::Assembly>,
-    pub(crate) lookups: Vec<lookup::Argument<F>>,
+    pub(crate) lookup_argument: Option<lookup::Argument<F>>,
 }
 
 impl<F: PrimeField> TableData<F> {
@@ -453,7 +453,7 @@ impl<F: PrimeField> TableData<F> {
             advice: vec![],
             challenges: HashMap::new(),
             permutation: None,
-            lookups: vec![],
+            lookup_argument: None,
         }
     }
 
@@ -466,7 +466,7 @@ impl<F: PrimeField> TableData<F> {
             1 << self.k,
             &self.cs.permutation,
         ));
-        self.lookups = lookup::Argument::compress_from(&self.cs);
+        self.lookup_argument = lookup::Argument::compress_from(&self.cs);
         let n = 1 << self.k;
         assert!(self.cs.num_instance_columns() == 1);
         self.fixed = vec![vec![F::ZERO.into(); n]; self.cs.num_fixed_columns()];
@@ -512,35 +512,19 @@ impl<F: PrimeField> TableData<F> {
             .count();
         // total number of challenges, this will be different after we including lookup
         let num_challenges = if num_gates > 1 { 1 } else { 0 };
-        let gate: MultiPolynomial<F> = if num_gates > 1 {
-            let y = Expression::Challenge(0);
-            self.cs
-                .gates()
-                .iter()
-                .flat_map(|gate| gate.polynomials().iter())
-                .map(|expr| {
-                    Expression::from_halo2_expr(
-                        expr,
-                        self.cs.num_selectors(),
-                        self.cs.num_fixed_columns(),
-                    )
-                })
-                .fold(Expression::Constant(F::ZERO), |acc, expr| {
-                    Expression::Sum(
-                        Box::new(expr),
-                        Box::new(Expression::Product(Box::new(acc), Box::new(y.clone()))),
-                    )
-                })
-                .expand()
-        } else {
-            Expression::from_halo2_expr(
-                &self.cs.gates()[0].polynomials()[0],
-                self.cs.num_selectors(),
-                self.cs.num_fixed_columns(),
-            )
-            .expand()
-        };
-
+        let exprs = self
+            .cs
+            .gates()
+            .iter()
+            .flat_map(|gate| gate.polynomials().iter().cloned())
+            .collect::<Vec<_>>();
+        let gate = compress_expression(
+            &exprs[..],
+            self.cs.num_selectors(),
+            self.cs.num_fixed_columns(),
+            0,
+        )
+        .expand();
         let permutation_matrix = self.permutation_matrix();
 
         PlonkStructure {
@@ -552,7 +536,7 @@ impl<F: PrimeField> TableData<F> {
             gate,
             fixed_commitment,
             permutation_matrix,
-            lookups: self.lookups.clone(),
+            lookup_argument: self.lookup_argument.clone(),
         }
     }
 
