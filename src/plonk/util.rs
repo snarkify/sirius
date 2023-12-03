@@ -1,5 +1,7 @@
 use crate::polynomial::sparse::SparseMatrix;
+use crate::polynomial::Expression;
 use ff::PrimeField;
+use halo2_proofs::plonk::Expression as PE;
 use halo2_proofs::plonk::{Any, Column};
 use std::collections::HashSet;
 
@@ -45,5 +47,28 @@ pub(crate) fn fill_sparse_matrix<F: PrimeField>(
             let z_idx = cell_to_z_idx(*col, row, num_rows, num_io);
             sparse_matrix_p.push((z_idx, z_idx, F::ONE));
         }
+    }
+}
+
+/// compress a vector of halo2 expressions into one by random linear combine a challenge
+pub(crate) fn compress_expression<F: PrimeField>(
+    exprs: &[PE<F>],
+    num_selectors: usize,
+    num_fixed: usize,
+    cha_index: usize,
+) -> Expression<F> {
+    let y = Expression::Challenge(cha_index);
+    if exprs.len() > 1 {
+        exprs
+            .iter()
+            .map(|expr| Expression::from_halo2_expr(expr, num_selectors, num_fixed))
+            .fold(Expression::Constant(F::ZERO), |acc, expr| {
+                Expression::Sum(
+                    Box::new(expr),
+                    Box::new(Expression::Product(Box::new(acc), Box::new(y.clone()))),
+                )
+            })
+    } else {
+        Expression::from_halo2_expr(&exprs[0], num_selectors, num_fixed)
     }
 }
