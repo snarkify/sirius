@@ -55,13 +55,14 @@ pub(crate) fn compress_expression<F: PrimeField>(
     exprs: &[PE<F>],
     num_selectors: usize,
     num_fixed: usize,
+    offset_pad: usize,
     cha_index: usize,
 ) -> Expression<F> {
     let y = Expression::Challenge(cha_index);
     if exprs.len() > 1 {
         exprs
             .iter()
-            .map(|expr| Expression::from_halo2_expr(expr, num_selectors, num_fixed))
+            .map(|expr| Expression::from_halo2_expr(expr, num_selectors, num_fixed, offset_pad))
             .fold(Expression::Constant(F::ZERO), |acc, expr| {
                 Expression::Sum(
                     Box::new(expr),
@@ -69,6 +70,6 @@ pub(crate) fn compress_expression<F: PrimeField>(
                 )
             })
     } else {
-        Expression::from_halo2_expr(&exprs[0], num_selectors, num_fixed)
+        Expression::from_halo2_expr(&exprs[0], num_selectors, num_fixed, offset_pad)
     }
 }

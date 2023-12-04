@@ -676,7 +676,7 @@ mod tests {
             .map(|gate| {
                 gate.polynomials()
                     .iter()
-                    .map(|expr| Expression::from_halo2_expr(expr, num_selector, num_fixed))
+                    .map(|expr| Expression::from_halo2_expr(expr, num_selector, num_fixed, 0))
                     .collect()
             })
             .collect();

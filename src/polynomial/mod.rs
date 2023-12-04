@@ -19,6 +19,14 @@ pub struct Query {
     pub rotation: Rotation,
 }
 
+/// When integrating lookup expressions with custom gates expressions,
+/// we introduce extra "fixed" variables in Expression,
+/// such as table items (i.e. derived from "t=T(f1,...,fb)")
+/// it will change the num_fixed offset and indexes of the advice variables.
+/// By adding enough offset padding, it allows us to add
+/// extra fixed column variables without affect advice column variables
+pub(crate) const OFFSET_PAD: usize = 5;
+
 /// There are two types of variables in Expression:
 /// polynomial query ([`Expression::Polynomial`]) and challenge ([`Expression::Challenge`])
 /// we identify them by two global consts. It is used to identify the type of variable
@@ -186,7 +194,7 @@ impl<F: PrimeField> Expression<F> {
 
     // fold_transform will fold a polynomial expression P(f_1,...f_m, x_1,...,x_n)
     // and output P(f_1,...,f_m, x_1+r*y_1,...,x_n+r*y_n)
-    // here mm = num_fixed+num_selectors
+    // here mm = num_fixed+num_selectors+offset_pad
     // nn = num_advice
     pub fn fold_transform(&self, mm: usize, nn: usize) -> Self {
         let num_challenges = self.num_challenges();
@@ -235,7 +243,12 @@ impl<F: PrimeField> Expression<F> {
         )
     }
 
-    pub fn from_halo2_expr(expr: &PE<F>, num_selector: usize, num_fixed: usize) -> Self {
+    pub fn from_halo2_expr(
+        expr: &PE<F>,
+        num_selector: usize,
+        num_fixed: usize,
+        offset_pad: usize,
+    ) -> Self {
         match expr {
             PE::Constant(c) => Expression::Constant(*c),
             PE::Selector(sel) => Expression::Polynomial(Query {
@@ -247,25 +260,25 @@ impl<F: PrimeField> Expression<F> {
                 rotation: query.rotation(),
             }),
             PE::Advice(query) => Expression::Polynomial(Query {
-                index: num_selector + num_fixed + query.column_index(),
+                index: num_selector + num_fixed + offset_pad + query.column_index(),
                 rotation: query.rotation(),
             }),
             PE::Negated(a) => {
-                let a = Self::from_halo2_expr(a, num_selector, num_fixed);
+                let a = Self::from_halo2_expr(a, num_selector, num_fixed, offset_pad);
                 -a
             }
             PE::Sum(a, b) => {
-                let a = Self::from_halo2_expr(a, num_selector, num_fixed);
-                let b = Self::from_halo2_expr(b, num_selector, num_fixed);
+                let a = Self::from_halo2_expr(a, num_selector, num_fixed, offset_pad);
+                let b = Self::from_halo2_expr(b, num_selector, num_fixed, offset_pad);
                 a + b
             }
             PE::Product(a, b) => {
-                let a = Self::from_halo2_expr(a, num_selector, num_fixed);
-                let b = Self::from_halo2_expr(b, num_selector, num_fixed);
+                let a = Self::from_halo2_expr(a, num_selector, num_fixed, offset_pad);
+                let b = Self::from_halo2_expr(b, num_selector, num_fixed, offset_pad);
                 a * b
             }
             PE::Scaled(a, k) => {
-                let a = Self::from_halo2_expr(a, num_selector, num_fixed);
+                let a = Self::from_halo2_expr(a, num_selector, num_fixed, offset_pad);
                 a * *k
             }
             _ => unimplemented!("not supported"),
@@ -379,7 +392,7 @@ impl<F: PrimeField> Monomial<F> {
         }
     }
 
-    /// offset = num_selector+num_fixed, equals number of variables that are not folded,
+    /// offset = num_selector+num_fixed+offset_pad, equals number of variables that are not folded,
     pub fn homogeneous(&self, degree: usize, offset: usize, u_index: usize) -> Self {
         let mut mono = self.clone();
         mono.arity += 1;
@@ -431,7 +444,7 @@ impl<F: PrimeField> Monomial<F> {
     }
 
     // this is used for folding, each variable has index
-    // if the index < offset=num_selector+num_fixed, it will be treated as "const"
+    // if the index < offset=num_selector+num_fixed+offset_pad, it will be treated as "const"
     // i.e. not folded
     pub fn degree_for_folding(&self, offset: usize) -> usize {
         self.exponents
@@ -536,7 +549,7 @@ where
     fn eval(&self, row: usize, data: &PlonkEvalDomain<C, F>) -> F {
         let PlonkEvalDomain { S, U1, W1, U2, W2 } = data;
         let selector_offset = S.selectors.len();
-        let fixed_offset = S.fixed_columns.len() + selector_offset;
+        let fixed_offset = S.fixed_offset();
         let U2_offset = fixed_offset + S.num_advice_columns;
         let total_len = U2_offset + S.num_advice_columns;
         let row_size = W1.W.len() / S.num_advice_columns;
@@ -678,7 +691,7 @@ impl<F: PrimeField> MultiPolynomial<F> {
     // p(f_1,...,f_m,x_1,...,x_n) -> p'(f_1,...,f_m,x_1,...,x_n,u)
     // (2) fold variable x_i while keep variable f_i unchanged
     // p' -> p'(f_1,...,f_m, x_1+r*y_1,x_2+r*y_2,...,x_n+r*y_n)
-    // mm = num_fixed + num_selectors, nn = num_advice
+    // mm = num_fixed + num_selectors + offset_pad, nn = num_advice
     pub fn fold_transform(&self, mm: usize, nn: usize) -> Self {
         self.homogeneous(mm)
             .to_expression()
