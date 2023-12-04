@@ -38,7 +38,7 @@ use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
 
 use crate::{
     plonk::util::compress_expression,
-    polynomial::{Expression, Query},
+    polynomial::{Expression, Query, OFFSET_PAD},
 };
 
 /// Lookup Argument
@@ -101,6 +101,7 @@ impl<F: PrimeField> Argument<F> {
                     &arg.input_expressions()[..],
                     cs.num_selectors(),
                     cs.num_fixed_columns(),
+                    OFFSET_PAD,
                     0,
                 )
             })
@@ -113,6 +114,7 @@ impl<F: PrimeField> Argument<F> {
                     &arg.table_expressions()[..],
                     cs.num_selectors(),
                     cs.num_fixed_columns(),
+                    OFFSET_PAD,
                     0,
                 )
             })

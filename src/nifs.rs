@@ -78,10 +78,9 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         U2: &PlonkInstance<C>,
         W2: &PlonkWitness<C::ScalarExt>,
     ) -> (CrossTerms<C>, CrossTermCommits<C>) {
-        let offset = S.selectors.len() + S.fixed_columns.len();
+        let offset = S.fixed_offset();
         let num_row = S.fixed_columns[0].len();
-        let num_vars = S.gate.arity - offset; // number of variables to be folded
-        let normalized = S.gate.fold_transform(offset, num_vars);
+        let normalized = S.gate.fold_transform(offset, S.num_fold_vars());
         let r_index = normalized.num_challenges() - 1;
         let degree = S.gate.degree_for_folding(offset);
         let data = PlonkEvalDomain {

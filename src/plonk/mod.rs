@@ -19,7 +19,7 @@ use crate::{
     plonk::util::{cell_to_z_idx, column_index, compress_expression, fill_sparse_matrix},
     polynomial::{
         sparse::{matrix_multiply, SparseMatrix},
-        MultiPolynomial,
+        MultiPolynomial, OFFSET_PAD,
     },
     poseidon::{AbsorbInRO, ROTrait},
     util::{batch_invert_assigned, fe_to_fe},
@@ -160,6 +160,17 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
 }
 
 impl<C: CurveAffine> PlonkStructure<C> {
+    /// return the index offset of fixed variables(i.e. not folded)
+    pub fn fixed_offset(&self) -> usize {
+        self.fixed_columns.len() + self.selectors.len() + OFFSET_PAD
+    }
+
+    /// return the number of variables to be folded
+    pub fn num_fold_vars(&self) -> usize {
+        // TODO: add lookup variables
+        self.num_advice_columns
+    }
+
     pub fn is_sat<F>(
         &self,
         ck: &CommitmentKey<C>,
@@ -206,8 +217,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
         let nrow = 2usize.pow(self.k as u32);
         let U2 = RelaxedPlonkInstance::new(U.instance.len(), self.num_challenges);
         let W2 = RelaxedPlonkWitness::new(self.k as u32, self.num_advice_columns);
-        let offset = self.selectors.len() + self.fixed_columns.len();
-        let poly = self.gate.homogeneous(offset);
+        let poly = self.gate.homogeneous(self.fixed_offset());
         let data = PlonkEvalDomain {
             S: self,
             U1: U,
@@ -522,6 +532,7 @@ impl<F: PrimeField> TableData<F> {
             &exprs[..],
             self.cs.num_selectors(),
             self.cs.num_fixed_columns(),
+            OFFSET_PAD,
             0,
         )
         .expand();
