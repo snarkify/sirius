@@ -57,7 +57,7 @@ pub struct PlonkStructure<C: CurveAffine> {
     /// concatenate selectors and num_fixed_columns together, then commit
     pub(crate) fixed_commitment: C,
     pub(crate) permutation_matrix: SparseMatrix<C::ScalarExt>,
-    pub(crate) lookup_argument: Option<lookup::Argument<C::ScalarExt>>,
+    pub(crate) lookup_arguments: Option<lookup::Arguments<C::ScalarExt>>,
 }
 
 #[derive(Clone, Debug)]
@@ -448,7 +448,7 @@ pub struct TableData<F: PrimeField> {
     pub(crate) advice: Vec<Vec<Assigned<F>>>,
     pub(crate) challenges: HashMap<usize, F>,
     pub(crate) permutation: Option<permutation::Assembly>,
-    pub(crate) lookup_argument: Option<lookup::Argument<F>>,
+    pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
 }
 
 impl<F: PrimeField> TableData<F> {
@@ -463,7 +463,7 @@ impl<F: PrimeField> TableData<F> {
             advice: vec![],
             challenges: HashMap::new(),
             permutation: None,
-            lookup_argument: None,
+            lookup_arguments: None,
         }
     }
 
@@ -476,8 +476,9 @@ impl<F: PrimeField> TableData<F> {
             1 << self.k,
             &self.cs.permutation,
         ));
-        self.lookup_argument = lookup::Argument::compress_from(&self.cs);
+        self.lookup_arguments = lookup::Arguments::compress_from(&self.cs);
         let n = 1 << self.k;
+        // TODO: add support for user defined instance columns
         assert!(self.cs.num_instance_columns() == 1);
         self.fixed = vec![vec![F::ZERO.into(); n]; self.cs.num_fixed_columns()];
         self.selector = vec![vec![false; n]; self.cs.num_selectors()];
@@ -547,7 +548,7 @@ impl<F: PrimeField> TableData<F> {
             gate,
             fixed_commitment,
             permutation_matrix,
-            lookup_argument: self.lookup_argument.clone(),
+            lookup_arguments: self.lookup_arguments.clone(),
         }
     }
 
