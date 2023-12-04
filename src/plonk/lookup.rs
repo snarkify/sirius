@@ -35,6 +35,7 @@
 
 use ff::PrimeField;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
+use std::array;
 
 use crate::{
     plonk::util::compress_expression,
@@ -49,28 +50,23 @@ use crate::{
 /// - a_i are expressions over columns (x_1, ..., x_a)
 /// - t_i are expressions over columns (y_1, ..., y_b)
 ///
-/// We assume (y_1,...,y_b) are fixed columns compress them
-/// into one multi-polynomial:
+/// We assume (y_1,...,y_b) are fixed columns.
+/// Compress them
+/// into a single (i.e. non-vector) Expression:
 /// - lookup_poly = L(x_1,...,x_a) = a_1 + a_2*r + a_3*r^2 + ...
 /// - table_poly  = T(y_1,...,y_b) = t_1 + t_2*r + t_3*r^2 + ...
 #[derive(Clone, PartialEq)]
-pub struct Argument<F: PrimeField> {
-    /// vector of the lookup expressions
+pub struct Arguments<F: PrimeField> {
+    /// vector of the compressed lookup expressions
     pub(crate) lookup_polys: Vec<Expression<F>>,
     /// vector of the table expressions
     pub(crate) table_polys: Vec<Expression<F>>,
     /// return true when maximum length of lookup vector or table vector greater than 1
     pub(crate) require_challenge: bool,
-    /// Check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
-    /// same for every lookup
-    pub(crate) log_derivative_lhs: Expression<F>,
-    /// Check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
-    /// same for every lookup
-    pub(crate) log_derivative_rhs: Expression<F>,
 }
 
-impl<F: PrimeField> Argument<F> {
-    /// Compresses a vector of Lookup Arguments from a constraint system into a single multi-polynomial.
+impl<F: PrimeField> Arguments<F> {
+    /// Compresses a potentially vector Lookup Argument from a constraint system into non-vector expression.
     pub fn compress_from(cs: &ConstraintSystem<F>) -> Option<Self> {
         let max_lookup_len = cs
             .lookups()
@@ -119,41 +115,30 @@ impl<F: PrimeField> Argument<F> {
                 )
             })
             .collect::<Vec<_>>();
-        let (log_derivative_lhs, log_derivative_rhs) = Self::log_derivative_exprs();
 
         Some(Self {
             lookup_polys,
             table_polys,
             require_challenge,
-            log_derivative_lhs,
-            log_derivative_rhs,
         })
     }
 
-    pub fn log_derivative_exprs() -> (Expression<F>, Expression<F>) {
+    /// each lookup argument introduces 1 extra "fixed" variables, 4 extra "advice" variables and 1 challenge in
+    /// our Expression
+    pub fn log_derivative_exprs(
+        cs: &ConstraintSystem<F>,
+        fixed_offset: usize,
+    ) -> (Expression<F>, Expression<F>) {
+        let r = Expression::Challenge(0);
         let t = Expression::Polynomial(Query {
-            index: 0,
+            index: cs.num_selectors() + cs.num_fixed_columns(),
             rotation: Rotation(0),
         });
-        let l = Expression::Polynomial(Query {
-            index: 1,
-            rotation: Rotation(0),
-        });
-        let m = Expression::Polynomial(Query {
-            index: 2,
-            rotation: Rotation(0),
-        });
-        let r = Expression::Polynomial(Query {
-            index: 3,
-            rotation: Rotation(0),
-        });
-        let h = Expression::Polynomial(Query {
-            index: 4,
-            rotation: Rotation(0),
-        });
-        let g = Expression::Polynomial(Query {
-            index: 5,
-            rotation: Rotation(0),
+        let [l, m, h, g] = array::from_fn(|idx| {
+            Expression::Polynomial(Query {
+                index: fixed_offset + idx,
+                rotation: Rotation(0),
+            })
         });
         // check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
         let lhs_rel = h * (l + r.clone()) - Expression::Constant(F::ONE);
