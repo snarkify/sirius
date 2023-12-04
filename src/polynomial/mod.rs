@@ -9,7 +9,7 @@ use std::{
 use ff::PrimeField;
 use halo2_proofs::{arithmetic::CurveAffine, plonk::Expression as PE, poly::Rotation};
 
-use crate::{plonk::lookup::LookupEvalDomain, plonk::PlonkEvalDomain, util::trim_leading_zeros};
+use crate::{plonk::PlonkEvalDomain, util::trim_leading_zeros};
 
 pub mod sparse;
 
@@ -599,15 +599,6 @@ where
             .zip(self.exponents.iter())
             .map(|(x, exp)| x.pow([*exp as u64, 0, 0, 0]))
             .fold(self.coeff, |acc, v| acc * v)
-    }
-}
-
-impl<'a, F: PrimeField> Eval<LookupEvalDomain<'a, F>, F> for Monomial<F> {
-    /// evaluate monomial over {x_1,...,x_n}, n = self.arity
-    /// first get the value of x_i according to its (row, col) in the plonk table
-    /// then calculate the evaluation of monomial: c*x_1^{d_1}*...*x_n^{d_n}
-    fn eval(&self, _row: usize, _data: &LookupEvalDomain<F>) -> F {
-        todo!()
     }
 }
 
