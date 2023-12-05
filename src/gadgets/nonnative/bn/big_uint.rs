@@ -32,6 +32,13 @@ impl<F: PrimeField> BigUint<F> {
             width: limb_width,
         }
     }
+
+    pub fn one(limb_width: NonZeroUsize) -> Self {
+        Self {
+            limbs: vec![F::ONE],
+            width: limb_width,
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
