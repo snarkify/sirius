@@ -27,6 +27,10 @@ pub enum Error {
         "During the calculation of carry bits the number is converted to f64 and an error occurred"
     )]
     CarryBitsCalculate,
+    #[error("Error while calculate limbs per group count")]
+    ZeroLimbsPerGroup,
+    #[error("Carry bits equal capacity of `Curve::Base`")]
+    CarryBitsEqualCapacity,
 }
 
 pub const MAIN_GATE_T: usize = 4;
@@ -347,9 +351,9 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
     ) -> Result<GroupedBigUint<F>, Error> {
         trace!("Group {} limbs: {:?}", bignat_cells.len(), bignat_cells);
 
-        let limb_width = self.limb_width.get();
-        let carry_bits = calc_carry_bits(&big_uint::f_to_nat(&bignat_cells.max_word), limb_width)?;
-        let limbs_per_group = calc_limbs_per_group::<F>(carry_bits, limb_width)?;
+        let carry_bits =
+            calc_carry_bits(&big_uint::f_to_nat(&bignat_cells.max_word), self.limb_width)?;
+        let limbs_per_group = calc_limbs_per_group::<F>(carry_bits, self.limb_width)?.get();
 
         let group_count = bignat_cells.cells.len().sub(1).div(limbs_per_group).add(1);
 
@@ -360,7 +364,8 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             carry_bits: {carry_bits:?},
             limbs_per_group: {limbs_per_group},
             group_count: {group_count}",
-            bignat_cells.cells.len()
+            bignat_cells.cells.len(),
+            limb_width = self.limb_width.get()
         );
 
         let bignat_limb_column = &self.config().state[0];
@@ -372,7 +377,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         let group_output_selector = &self.config().q_o;
 
         let limb_block = iter::successors(Some(F::ONE), |l| Some(l.double()))
-            .nth(limb_width)
+            .nth(self.limb_width.get())
             .unwrap();
 
         let grouped = bignat_cells
@@ -442,7 +447,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
 
         let grouped_max_word: BigUintRaw =
             (0..limbs_per_group).fold(BigUintRaw::zero(), |mut acc, i| {
-                acc.set_bit((i * limb_width) as u64, true);
+                acc.set_bit((i * self.limb_width.get()) as u64, true);
                 acc
             });
 
@@ -526,7 +531,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         let target_base: F = big_uint::nat_to_f(&target_base_bn).expect("TODO");
 
         let mut accumulated_extra = BigUintRaw::zero();
-        let carry_bits = calc_carry_bits(&max_word_bn, limb_width)?;
+        let carry_bits = calc_carry_bits(&max_word_bn, self.limb_width)?;
         debug!("carry_bits {carry_bits}");
 
         let lhs_column = &self.config().state[0];
@@ -1161,7 +1166,6 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             .unzip();
 
         // lhs * rhs
-
         let max_word_without_overflow: F =
             big_uint::nat_to_f(&big_uint::get_big_int_with_n_ones(self.limb_width.get()))
                 .unwrap_or_default();
@@ -1255,9 +1259,12 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         };
 
         let mod_bn = to_bn(modulus)?;
+        debug!("red_mod: mod {mod_bn:?}");
 
         let val_bi = to_bn(&val.cells)?.map(|bn| bn.into_bigint());
+        debug!("red_mod: val {val_bi:?}");
         let mod_bi = mod_bn.as_ref().map(|bn| bn.into_bigint());
+        debug!("red_mod: mod_bi {mod_bi:?}");
 
         let (q, r) = val_bi
             .as_ref()
@@ -1270,6 +1277,12 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             })
             .transpose()?
             .unzip();
+
+        debug!(
+            "
+            red_mod: {q:?} * {mod_bi:?} + {r:?} = {val_bi:?} mod {mod_bi:?}
+        "
+        );
 
         // lhs * rhs
 
@@ -1329,7 +1342,7 @@ impl<F: ff::PrimeField> Chip<F> for BigUintMulModChip<F> {
     }
 }
 
-fn calc_carry_bits(max_word: &BigUintRaw, limb_width: usize) -> Result<NonZeroUsize, Error> {
+fn calc_carry_bits(max_word: &BigUintRaw, limb_width: NonZeroUsize) -> Result<NonZeroUsize, Error> {
     // FIXME: Is `f64` really needed here
     // We can calculate `log2` for BigUintRaw without f64
     let carry_bits = max_word
@@ -1337,7 +1350,7 @@ fn calc_carry_bits(max_word: &BigUintRaw, limb_width: usize) -> Result<NonZeroUs
         .to_f64()
         .ok_or(Error::CarryBitsCalculate)?
         .log2()
-        .sub(limb_width as f64)
+        .sub(limb_width.get() as f64)
         .ceil()
         .add(0.1);
 
@@ -1363,9 +1376,17 @@ fn calc_carry_bits(max_word: &BigUintRaw, limb_width: usize) -> Result<NonZeroUs
 /// let `limbs_per_group = capacity - carry_bits / limb_width`
 fn calc_limbs_per_group<F: PrimeField>(
     carry_bits: NonZeroUsize,
-    limb_width: usize,
-) -> Result<usize, Error> {
-    Ok((F::CAPACITY as usize - carry_bits.get()) / limb_width)
+    limb_width: NonZeroUsize,
+) -> Result<NonZeroUsize, Error> {
+    let capacity = F::CAPACITY as usize;
+    NonZeroUsize::new(
+        capacity
+            .checked_sub(carry_bits.get())
+            .ok_or(Error::CarryBitsEqualCapacity)?
+            .checked_div(limb_width.get())
+            .expect("Unreachable, because limb_width != 0"),
+    )
+    .ok_or(Error::ZeroLimbsPerGroup)
 }
 
 fn get_power_of_two_iter<F: ff::PrimeField>() -> impl Iterator<Item = F> {
