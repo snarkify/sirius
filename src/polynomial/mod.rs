@@ -19,14 +19,6 @@ pub struct Query {
     pub rotation: Rotation,
 }
 
-/// When integrating lookup expressions with custom gates expressions,
-/// we introduce extra "fixed" variables in Expression,
-/// such as table items (i.e. derived from "t=T(f1,...,fb)")
-/// it will change the num_fixed offset and indexes of the advice variables.
-/// By adding enough offset padding, it allows us to add
-/// extra fixed column variables without affect advice column variables
-pub(crate) const OFFSET_PAD: usize = 5;
-
 /// There are two types of variables in Expression:
 /// polynomial query ([`Expression::Polynomial`]) and challenge ([`Expression::Challenge`])
 /// we identify them by two global consts. It is used to identify the type of variable
