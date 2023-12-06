@@ -503,13 +503,13 @@ mod components_tests {
     }
 
     fn group_limbs<F: PrimeField>(inp: &BigUint<F>, max_word: BigUintRaw) -> BigUint<F> {
-        let limb_width = LIMB_WIDTH.get();
         let limbs_per_group =
-            calc_limbs_per_group::<F>(calc_carry_bits(&max_word, limb_width).unwrap(), limb_width)
-                .unwrap();
+            calc_limbs_per_group::<F>(calc_carry_bits(&max_word, LIMB_WIDTH).unwrap(), LIMB_WIDTH)
+                .unwrap()
+                .get();
 
         let limb_block = iter::successors(Some(F::ONE), |l| Some(l.double()))
-            .nth(limb_width)
+            .nth(LIMB_WIDTH.get())
             .unwrap();
 
         BigUint::from_limbs(
