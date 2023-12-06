@@ -1,8 +1,8 @@
 use std::{
     cmp, fmt, iter,
     num::NonZeroUsize,
-    ops::Deref,
     ops::{Add, Div, Mul, Sub},
+    ops::{Deref, Not},
 };
 
 use bitter::{BitReader, LittleEndianReader};
@@ -147,8 +147,20 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             big_uint::nat_to_f::<F>(&big_uint::get_big_int_with_n_ones(self.limb_width.get()))
                 .unwrap_or_default();
 
+        let (rhs_cells, rhs_tail) = rhs_cells.split_at(self.limbs_count_limit.get());
+
+        if rhs_tail.iter().any(|cell| {
+            bool::from(cell.value().unwrap().copied().unwrap_or_default().is_zero()).not()
+        }) {
+            return Err(big_uint::Error::LimbLimitReached {
+                limit: self.limbs_count_limit,
+                actual: rhs_cells.len() + rhs_tail.len(),
+            }
+            .into());
+        }
+
         Ok(SumContext {
-            rhs: rhs_cells,
+            rhs: rhs_cells.to_vec(),
             res: OverflowingBigUint {
                 cells: sum_cells,
                 max_word: lhs.max_word + rhs_max_word,
