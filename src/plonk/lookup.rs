@@ -39,7 +39,7 @@ use std::array;
 
 use crate::{
     plonk::util::compress_expression,
-    polynomial::{Expression, Query, OFFSET_PAD},
+    polynomial::{Expression, Query},
 };
 
 /// Lookup Argument
@@ -86,6 +86,7 @@ impl<F: PrimeField> Arguments<F> {
         }
 
         let require_challenge = max_len > 1;
+        let num_lookups = cs.lookups().len();
 
         // suppose we have n polynomial expression: p_1,p_2,...,p_n
         // we combined them together as one: combined_poly = p_1*y^{n-1}+p_2*y^{n-2}+...+p_n
@@ -97,7 +98,7 @@ impl<F: PrimeField> Arguments<F> {
                     &arg.input_expressions()[..],
                     cs.num_selectors(),
                     cs.num_fixed_columns(),
-                    OFFSET_PAD,
+                    num_lookups,
                     0,
                 )
             })
@@ -110,7 +111,7 @@ impl<F: PrimeField> Arguments<F> {
                     &arg.table_expressions()[..],
                     cs.num_selectors(),
                     cs.num_fixed_columns(),
-                    OFFSET_PAD,
+                    num_lookups,
                     0,
                 )
             })

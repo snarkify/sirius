@@ -19,7 +19,7 @@ use crate::{
     plonk::util::{cell_to_z_idx, column_index, compress_expression, fill_sparse_matrix},
     polynomial::{
         sparse::{matrix_multiply, SparseMatrix},
-        MultiPolynomial, OFFSET_PAD,
+        MultiPolynomial,
     },
     poseidon::{AbsorbInRO, ROTrait},
     util::{batch_invert_assigned, fe_to_fe},
@@ -162,13 +162,21 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
 impl<C: CurveAffine> PlonkStructure<C> {
     /// return the index offset of fixed variables(i.e. not folded)
     pub fn fixed_offset(&self) -> usize {
-        self.fixed_columns.len() + self.selectors.len() + OFFSET_PAD
+        self.fixed_columns.len() + self.selectors.len() + self.num_lookups()
     }
 
     /// return the number of variables to be folded
     pub fn num_fold_vars(&self) -> usize {
         // TODO: add lookup variables
         self.num_advice_columns
+    }
+
+    pub fn num_lookups(&self) -> usize {
+        if self.lookup_arguments.is_none() {
+            0
+        } else {
+            self.lookup_arguments.as_ref().unwrap().lookup_polys.len()
+        }
     }
 
     pub fn is_sat<F>(
@@ -467,6 +475,14 @@ impl<F: PrimeField> TableData<F> {
         }
     }
 
+    pub fn num_lookups(&self) -> usize {
+        if self.lookup_arguments.is_none() {
+            0
+        } else {
+            self.lookup_arguments.as_ref().unwrap().lookup_polys.len()
+        }
+    }
+
     pub fn assembly<ConcreteCircuit: Circuit<F>>(
         &mut self,
         circuit: &ConcreteCircuit,
@@ -529,11 +545,12 @@ impl<F: PrimeField> TableData<F> {
             .iter()
             .flat_map(|gate| gate.polynomials().iter().cloned())
             .collect::<Vec<_>>();
+
         let gate = compress_expression(
             &exprs[..],
             self.cs.num_selectors(),
             self.cs.num_fixed_columns(),
-            OFFSET_PAD,
+            self.num_lookups(),
             0,
         )
         .expand();
