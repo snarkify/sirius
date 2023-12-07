@@ -51,7 +51,7 @@ pub(crate) fn fill_sparse_matrix<F: PrimeField>(
 }
 
 /// compress a vector of halo2 expressions into one by random linear combine a challenge
-pub(crate) fn compress_expression<F: PrimeField>(
+pub(crate) fn compress_halo2_expression<F: PrimeField>(
     exprs: &[PE<F>],
     num_selectors: usize,
     num_fixed: usize,
@@ -71,5 +71,25 @@ pub(crate) fn compress_expression<F: PrimeField>(
             })
     } else {
         Expression::from_halo2_expr(&exprs[0], num_selectors, num_fixed, offset_pad)
+    }
+}
+
+/// compress a vector of [`Expression`] into one by random linear combine a challenge
+pub(crate) fn compress_expression<F: PrimeField>(
+    exprs: &[Expression<F>],
+    cha_index: usize,
+) -> Expression<F> {
+    let y = Expression::Challenge(cha_index);
+    if exprs.len() > 1 {
+        exprs
+            .iter()
+            .fold(Expression::Constant(F::ZERO), |acc, expr| {
+                Expression::Sum(
+                    Box::new(expr.clone()),
+                    Box::new(Expression::Product(Box::new(acc), Box::new(y.clone()))),
+                )
+            })
+    } else {
+        exprs[0].clone()
     }
 }
