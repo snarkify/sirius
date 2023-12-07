@@ -80,15 +80,15 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
     ) -> (CrossTerms<C>, CrossTermCommits<C>) {
         let offset = S.fixed_offset();
         let num_row = S.fixed_columns[0].len();
-        let normalized = S.gate.fold_transform(offset, S.num_fold_vars());
+        let normalized = S.poly.fold_transform(offset, S.num_fold_vars());
         let r_index = normalized.num_challenges() - 1;
-        let degree = S.gate.degree_for_folding(offset);
+        let degree = S.poly.degree_for_folding(offset);
         let data = PlonkEvalDomain {
             S,
             U1,
             W1,
             U2: &U2.to_relax(),
-            W2: &W2.to_relax(),
+            W2: &W2.to_relax(S.k),
         };
         let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
             .map(|k| normalized.coeff_of((0, r_index, CHALLENGE_TYPE), k))
@@ -135,14 +135,9 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         // TODO: hash gate into ro
         let S = td.plonk_structure(ck);
         S.absorb_into(ro);
-        let mut U2 = td.plonk_instance(ck);
-        U2.absorb_into(ro);
-        if S.num_challenges > 0 {
-            // the first challenge is used to combined multiple gates for instance U2
-            U2.challenges = vec![ro.squeeze(NUM_CHALLENGE_BITS)];
-        }
 
-        let W2 = td.plonk_witness();
+        let (U2, W2) = td.run_sps_protocol_0(ck);
+        U2.absorb_into(ro);
         U1.absorb_into(ro);
         let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2);
         cross_term_commits
@@ -180,12 +175,13 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         U2: PlonkInstance<C>,
     ) -> RelaxedPlonkInstance<C> {
         S.absorb_into(ro);
-        let mut U2 = U2;
         U2.absorb_into(ro);
-        if S.num_challenges > 1 {
+        /*
+        if S.num_challenges > 0 {
             // the first challenge is used to combined multiple gates for instance U2
             U2.challenges = vec![ro.squeeze(NUM_CHALLENGE_BITS)];
         }
+        */
 
         U1.absorb_into(ro);
         self.cross_term_commits
@@ -285,12 +281,11 @@ mod tests {
         td1: &TableData<F>,
         td2: &TableData<F>,
     ) {
-        // we assume td.assembly() is already called
         let S = td1.plonk_structure(ck);
-        let mut f_U = RelaxedPlonkInstance::new(td1.instance.len(), S.num_challenges);
-        let mut f_W = RelaxedPlonkWitness::new(td1.k, td1.advice.len());
-        let U1 = td1.plonk_instance(ck);
-        let W1 = td1.plonk_witness();
+        let mut f_U =
+            RelaxedPlonkInstance::new(td1.instance.len(), S.num_challenges, S.round_sizes.len());
+        let mut f_W = RelaxedPlonkWitness::new(td1.k, &S.round_sizes);
+        let (U1, W1) = td1.run_sps_protocol_0(ck);
         let res = S.is_sat(ck, &U1, &W1);
         assert!(res.is_ok());
 
@@ -305,8 +300,7 @@ mod tests {
         let perm_res = S.is_sat_perm(&f_U, &f_W);
         assert!(perm_res.is_ok());
 
-        let U1 = td2.plonk_instance(ck);
-        let W1 = td2.plonk_witness();
+        let (U1, W1) = td2.run_sps_protocol_0(ck);
         let res = S.is_sat(ck, &U1, &W1);
         assert!(res.is_ok());
 
@@ -331,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn test_nifs() {
+    fn test_nifs_no_lookup() {
         use crate::poseidon::PoseidonHash;
         use halo2curves::pasta::{EqAffine, Fp, Fq};
         use poseidon::Spec;

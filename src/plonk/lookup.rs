@@ -35,10 +35,12 @@
 
 use ff::PrimeField;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
+use rayon::prelude::*;
 use std::array;
 
 use crate::{
-    plonk::util::compress_expression,
+    plonk::util::compress_halo2_expression,
+    plonk::TableData,
     polynomial::{Expression, Query},
 };
 
@@ -58,11 +60,13 @@ use crate::{
 #[derive(Clone, PartialEq)]
 pub struct Arguments<F: PrimeField> {
     /// vector of the compressed lookup expressions
+    /// L_i(x_1,...,x_{a_i})
     pub(crate) lookup_polys: Vec<Expression<F>>,
     /// vector of the table expressions
+    /// T_i(y_1,...,y_{b_i})
     pub(crate) table_polys: Vec<Expression<F>>,
-    /// return true when maximum length of lookup vector or table vector greater than 1
-    pub(crate) require_challenge: bool,
+    /// has_vector_lookup = true if one of a_i > 1
+    pub(crate) has_vector_lookup: bool,
 }
 
 impl<F: PrimeField> Arguments<F> {
@@ -74,31 +78,23 @@ impl<F: PrimeField> Arguments<F> {
             .map(|arg| arg.input_expressions().len())
             .max()
             .unwrap_or(0);
-        let max_table_len = cs
-            .lookups()
-            .iter()
-            .map(|arg| arg.table_expressions().len())
-            .max()
-            .unwrap_or(0);
-        let max_len = max_lookup_len.max(max_table_len);
-        if max_len == 0 {
+        if max_lookup_len == 0 {
             return None;
         }
 
-        let require_challenge = max_len > 1;
+        let has_vector_lookup = max_lookup_len > 1;
         let num_lookups = cs.lookups().len();
 
-        // suppose we have n polynomial expression: p_1,p_2,...,p_n
-        // we combined them together as one: combined_poly = p_1*y^{n-1}+p_2*y^{n-2}+...+p_n
         let lookup_polys = cs
             .lookups()
             .iter()
             .map(|arg| {
-                compress_expression(
+                compress_halo2_expression(
                     &arg.input_expressions()[..],
                     cs.num_selectors(),
                     cs.num_fixed_columns(),
                     num_lookups,
+                    // compress vector lookups with r1 (cha_index = 0)
                     0,
                 )
             })
@@ -107,11 +103,12 @@ impl<F: PrimeField> Arguments<F> {
             .lookups()
             .iter()
             .map(|arg| {
-                compress_expression(
+                compress_halo2_expression(
                     &arg.table_expressions()[..],
                     cs.num_selectors(),
                     cs.num_fixed_columns(),
                     num_lookups,
+                    // compress vector table items with r1 (cha_index = 0)
                     0,
                 )
             })
@@ -120,24 +117,35 @@ impl<F: PrimeField> Arguments<F> {
         Some(Self {
             lookup_polys,
             table_polys,
-            require_challenge,
+            has_vector_lookup,
         })
     }
 
-    /// each lookup argument introduces 1 extra "fixed" variables, 4 extra "advice" variables and 1 challenge in
-    /// our Expression
-    pub fn log_derivative_exprs(
+    pub fn num_lookups(&self) -> usize {
+        self.lookup_polys.len()
+    }
+
+    /// calculate lhs and rhs of log-derivative relation
+    /// each lookup argument introduces 1 extra "fixed" variables, 4 extra "advice" variables
+    pub fn log_derivative_expr(
+        &self,
         cs: &ConstraintSystem<F>,
-        fixed_offset: usize,
+        lookup_index: usize,
+        cha_index: usize,
     ) -> (Expression<F>, Expression<F>) {
-        let r = Expression::Challenge(0);
+        let r = Expression::Challenge(cha_index);
+        // starting index of lookup variables (l_i, m_i, h_i, g_i)
+        let lookup_offset = cs.num_selectors()
+            + cs.num_fixed_columns()
+            + self.num_lookups()
+            + cs.num_advice_columns();
         let t = Expression::Polynomial(Query {
-            index: cs.num_selectors() + cs.num_fixed_columns(),
+            index: cs.num_selectors() + cs.num_fixed_columns() + lookup_index,
             rotation: Rotation(0),
         });
         let [l, m, h, g] = array::from_fn(|idx| {
             Expression::Polynomial(Query {
-                index: fixed_offset + idx,
+                index: lookup_offset + lookup_index * 4 + idx,
                 rotation: Rotation(0),
             })
         });
@@ -148,9 +156,46 @@ impl<F: PrimeField> Arguments<F> {
         (lhs_rel, rhs_rel)
     }
 
+    /// collect lhs of log-derivative relations from all lookup arguments
+    pub fn log_derivative_lhs(&self, cs: &ConstraintSystem<F>) -> Vec<Expression<F>> {
+        let cha_index = if self.has_vector_lookup { 1 } else { 0 };
+        (0..self.num_lookups())
+            .map(|lookup_index| self.log_derivative_expr(cs, lookup_index, cha_index).0)
+            .collect()
+    }
+
+    /// evaluate the lookup and table expressions to get vector l and t
+    pub fn evaluate_ls_ts(&self, table: &TableData<F>, r: F) -> (Vec<Vec<F>>, Vec<Vec<F>>) {
+        let data = LookupEvalDomain { table, r };
+        let nrow = 2usize.pow(table.k);
+        let ls = self
+            .lookup_polys
+            .iter()
+            .map(|expr| expr.expand())
+            .map(|poly| {
+                (0..nrow)
+                    .into_par_iter()
+                    .map(|row| poly.eval(row, &data))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let ts = self
+            .table_polys
+            .iter()
+            .map(|expr| expr.expand())
+            .map(|poly| {
+                (0..nrow)
+                    .into_par_iter()
+                    .map(|row| poly.eval(row, &data))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        (ls, ts)
+    }
+
     /// calculate the coefficients {m_i} in the log derivative formula
     /// m_i = sum_j \xi(w_j=t_i) assuming {t_i} have no duplicates
-    pub fn log_derivative_coeffs(&self, l: &[F], t: &[F]) -> Vec<F> {
+    pub fn evaluate_m(&self, l: &[F], t: &[F]) -> Vec<F> {
         let mut m: Vec<F> = Vec::new();
         let mut processed_t = Vec::new();
         for t_i in t {
@@ -169,7 +214,7 @@ impl<F: PrimeField> Arguments<F> {
     /// calculate the inverse in log derivative formula
     /// h_i := \frac{1}{l_i+r}
     /// g_i := \frac{m_i}{t_i+r}
-    pub fn calc_inverse_terms(&self, l: &[F], t: &[F], r: F, m: &[F]) -> (Vec<F>, Vec<F>) {
+    pub fn evaluate_h_g(&self, l: &[F], t: &[F], r: F, m: &[F]) -> (Vec<F>, Vec<F>) {
         let h = l
             .iter()
             .map(|&l_i| Option::from((l_i + r).invert()).unwrap_or(F::ZERO))
@@ -186,8 +231,8 @@ impl<F: PrimeField> Arguments<F> {
     /// the remaining check L(x1,...,xa)=l and T(y1,...,ya)=t
     /// are carried in upper level check
     pub fn is_sat(&self, l: &[F], t: &[F], r: F) -> Result<(), String> {
-        let m = self.log_derivative_coeffs(l, t);
-        let (h, g) = self.calc_inverse_terms(l, t, r, &m);
+        let m = self.evaluate_m(l, t);
+        let (h, g) = self.evaluate_h_g(l, t, r, &m);
         // check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
         let c1 = l
             .iter()
@@ -221,4 +266,10 @@ impl<F: PrimeField> Arguments<F> {
             (true, true, false) => Err("sum hi = sum gi not satisfied".to_string()),
         }
     }
+}
+
+/// Used for evaluate lookup relations L_i(x1,...,xn) defined in halo2 lookup arguments
+pub struct LookupEvalDomain<'a, F: PrimeField> {
+    pub(crate) table: &'a TableData<F>,
+    pub(crate) r: F,
 }

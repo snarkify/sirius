@@ -175,6 +175,16 @@ pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>, bit_len: usize) {
     }
 }
 
+pub(crate) fn concatenate_with_padding<F: PrimeField>(vs: &[Vec<F>], pad_size: usize) -> Vec<F> {
+    let mut vs = vs.to_vec();
+    vs.iter_mut()
+        .flat_map(|v_i| {
+            v_i.resize(pad_size, F::ZERO);
+            v_i.drain(..)
+        })
+        .collect::<Vec<_>>()
+}
+
 /// A macro used for MockProver certain circuit by leveraging halo2_proofs.
 #[macro_export]
 macro_rules! run_mock_prover_test {
