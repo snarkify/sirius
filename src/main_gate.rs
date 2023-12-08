@@ -650,6 +650,17 @@ mod tests {
     use crate::polynomial::{Expression, CHALLENGE_TYPE};
     use halo2curves::pasta::Fp;
 
+    #[test]
+    fn main_gate_size_change() {
+        const T: usize = 10;
+        const RATE: usize = 2;
+        let mut cs = ConstraintSystem::<Fp>::default();
+        let config: MainGateConfig<T> = MainGate::configure(&mut cs);
+
+        let _ = config.into_smaller_size::<{ T - 1 }>().unwrap();
+        assert!(config.into_smaller_size::<{ T + 1 }>().is_none());
+    }
+
     fn main_gate_expressions() -> (Vec<Vec<Expression<Fp>>>, (usize, usize, usize)) {
         const T: usize = 2;
         const RATE: usize = 2;
