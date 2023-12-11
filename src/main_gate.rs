@@ -289,13 +289,17 @@ impl<const T: usize> MainGateConfig<T> {
     /// If `N > T` return `None`
     /// If `N <= T` return `Some(MainGateConfig<N>)`
     pub fn into_smaller_size<const N: usize>(&self) -> Option<MainGateConfig<N>> {
-        Some(MainGateConfig {
-            state: self.state.clone().as_slice().try_into().ok()?,
+        if N > T {
+            return None;
+        }
+
+        Some(MainGateConfig::<N> {
+            state: self.state[..N].try_into().ok()?,
             input: self.input,
             out: self.out,
             q_m: self.q_m,
-            q_1: self.q_1.clone().as_slice().try_into().ok()?,
-            q_5: self.q_5.clone().as_slice().try_into().ok()?,
+            q_1: self.q_1[..N].try_into().ok()?,
+            q_5: self.q_5[..N].try_into().ok()?,
             q_i: self.q_i,
             q_o: self.q_o,
             rc: self.rc,
@@ -645,6 +649,17 @@ mod tests {
     use super::*;
     use crate::polynomial::{Expression, CHALLENGE_TYPE};
     use halo2curves::pasta::Fp;
+
+    #[test]
+    fn main_gate_size_change() {
+        const T: usize = 10;
+        const RATE: usize = 2;
+        let mut cs = ConstraintSystem::<Fp>::default();
+        let config: MainGateConfig<T> = MainGate::configure(&mut cs);
+
+        let _ = config.into_smaller_size::<{ T - 1 }>().unwrap();
+        assert!(config.into_smaller_size::<{ T + 1 }>().is_none());
+    }
 
     fn main_gate_expressions() -> (Vec<Vec<Expression<Fp>>>, (usize, usize, usize)) {
         const T: usize = 2;
