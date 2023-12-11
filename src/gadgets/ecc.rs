@@ -54,7 +54,7 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
         p0: &AssignedPoint<C>,
-        scalar_bits: &Vec<AssignedValue<C::Base>>,
+        scalar_bits: &[AssignedValue<C::Base>],
     ) -> Result<AssignedPoint<C>, Error> {
         let split_len = core::cmp::min(scalar_bits.len(), (C::Base::NUM_BITS - 2) as usize);
         let (incomplete_bits, complete_bits) = scalar_bits.split_at(split_len);
