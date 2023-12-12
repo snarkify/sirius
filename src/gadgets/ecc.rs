@@ -7,7 +7,7 @@ use halo2_proofs::{
 };
 
 // assume point is not infinity
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AssignedPoint<C: CurveAffine> {
     pub(crate) x: AssignedValue<C::Base>,
     pub(crate) y: AssignedValue<C::Base>,
