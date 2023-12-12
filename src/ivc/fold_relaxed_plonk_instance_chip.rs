@@ -741,6 +741,8 @@ impl<F: ff::Field> ops::Deref for ValueView<F> {
 
 #[cfg(test)]
 mod tests {
+    use std::iter;
+
     use halo2_proofs::circuit::{
         layouter::{RegionLayouter, RegionShape},
         Region, RegionIndex,
@@ -799,6 +801,72 @@ mod tests {
                 ],
             )
             .unwrap();
+    }
+
+    #[test_log::test]
+    fn fold_W_test() {
+        const T: usize = 6;
+
+        let mut td = TableData::new(10, vec![]);
+        let mut shape: Box<dyn RegionLayouter<_>> =
+            Box::new(RegionShape::new(RegionIndex::from(0)));
+        let shape_mut: &mut dyn RegionLayouter<_> = shape.as_mut();
+
+        let region = Region::from(shape_mut);
+        let config = MainGate::<Base, T>::configure(&mut td.cs);
+
+        let mut ctx = RegionCtx::new(region, 0);
+        let mut rnd = rand::thread_rng();
+        let folded = AssignedPoint::<C1> {
+            x: ctx
+                .assign_advice(
+                    || "folded_x",
+                    config.state[0],
+                    Value::known(Base::random(&mut rnd)),
+                )
+                .unwrap(),
+            y: ctx
+                .assign_advice(
+                    || "folded_y",
+                    config.state[1],
+                    Value::known(Base::random(&mut rnd)),
+                )
+                .unwrap(),
+        };
+
+        let input = AssignedPoint::<C1> {
+            x: ctx
+                .assign_advice(
+                    || "input_x",
+                    config.state[2],
+                    Value::known(Base::random(&mut rnd)),
+                )
+                .unwrap(),
+            y: ctx
+                .assign_advice(
+                    || "input_y",
+                    config.state[2],
+                    Value::known(Base::random(&mut rnd)),
+                )
+                .unwrap(),
+        };
+
+        let r = iter::repeat_with(|| {
+            let val = ctx
+                .assign_advice(|| "r", config.input, Value::known(Base::random(&mut rnd)))
+                .unwrap();
+
+            ctx.next();
+
+            val
+        })
+        .take(10)
+        .collect::<Vec<_>>();
+
+        let _folded_W =
+            FoldRelaxedPlonkInstanceChip::<C1>::fold_W(&mut ctx, &config, &folded, &input, &r);
+
+        // "check folded_W result: {folded_W:?}"
     }
 
     #[test_log::test]
