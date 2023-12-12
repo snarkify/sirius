@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter},
@@ -5,14 +7,21 @@ use halo2_proofs::{
 };
 use halo2curves::CurveAffine;
 
-use crate::{plonk::RelaxedPlonkInstance, poseidon::ROTrait};
+use crate::{
+    ivc::fold_relaxed_plonk_instance_chip::FoldRelaxedPlonkInstanceChip,
+    main_gate,
+    plonk::{PlonkInstance, RelaxedPlonkInstance},
+    poseidon::ROCircuitTrait,
+};
 
-use super::floor_planner::FloorPlanner;
+use super::{floor_planner::FloorPlanner, fold_relaxed_plonk_instance_chip};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SynthesisError {
     #[error(transparent)]
     Halo2(#[from] halo2_proofs::plonk::Error),
+    #[error(transparent)]
+    FoldError(#[from] fold_relaxed_plonk_instance_chip::Error),
 }
 
 /// The `StepCircuit` trait represents a step in incremental computation in
@@ -96,16 +105,21 @@ pub(crate) enum ConfigureError {
 }
 
 // TODO #32 Rename
-pub(crate) struct SynthesizeStepParams<G: CurveAffine, RO: ROTrait<G>> {
-    pub limb_width: usize,
-    pub n_limbs: usize,
+pub(crate) struct SynthesizeStepParams<G: CurveAffine, RO: ROCircuitTrait<G::Base>>
+where
+    G::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+{
+    pub limb_width: NonZeroUsize,
+    pub n_limbs: NonZeroUsize,
     /// A boolean indicating if this is the primary circuit
     pub is_primary_circuit: bool,
-    pub ro_constant: RO::Constants,
+    pub ro_constant: RO::Args,
 }
 
-// TODO #32
-pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROTrait<C>> {
+pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROCircuitTrait<C::Base>>
+where
+    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+{
     public_params: &'link SynthesizeStepParams<C, RO>,
     step: C::Base,
 
@@ -116,19 +130,20 @@ pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROTr
     U: Option<RelaxedPlonkInstance<C>>,
 
     // TODO docs
-    u: Option<RelaxedPlonkInstance<C>>,
+    u: Option<PlonkInstance<C>>,
 
     // TODO docs
-    T_commitment: Option<Vec<C::Scalar>>,
+    T_commitments: Option<Vec<C::Scalar>>,
 }
 
-// TODO #32 Add other
-pub(crate) struct AssignedStepInputs<const ARITY: usize, C: CurveAffine> {
-    public_params_commit: AssignedCell<C::Scalar, C::Scalar>,
-    step: AssignedCell<C::Scalar, C::Scalar>,
-    u: AssignedCell<C::Scalar, C::Scalar>,
-    z0: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
-    zi: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
+// TODO #35 Change to real `T` and move it to IVC module level
+const MAIN_GATE_CONFIG_SIZE: usize = 5;
+type MainGateConfig = main_gate::MainGateConfig<MAIN_GATE_CONFIG_SIZE>;
+
+pub struct StepConfig<const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Scalar>> {
+    step_config: SP::Config,
+    // NOTE: check `T` size
+    main_gate_config: MainGateConfig,
 }
 
 /// Trait extends [`StepCircuit`] to represent the augmented function `F'` in the IVC scheme.
@@ -149,65 +164,108 @@ pub(crate) struct AssignedStepInputs<const ARITY: usize, C: CurveAffine> {
 ///
 /// - For `F'` please look at [`StepCircuitExt`]
 pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
-    StepCircuit<ARITY, C::Scalar>
+    StepCircuit<ARITY, C::Scalar> + Sized
+where
+    <C as CurveAffine>::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
     /// The crate-only expanding trait that checks that no instance columns have
     /// been created during [`StepCircuit::configure`].
-    fn configure_with_instance_check(
+    fn configure(
         cs: &mut ConstraintSystem<C::Scalar>,
-    ) -> Result<<Self as StepCircuit<ARITY, C::Scalar>>::Config, ConfigureError> {
+        main_gate_config: MainGateConfig,
+    ) -> Result<StepConfig<ARITY, C, Self>, ConfigureError> {
         let before = cs.num_instance_columns();
 
-        let config = <Self as StepCircuit<ARITY, C::Scalar>>::configure(cs);
+        let step_config = <Self as StepCircuit<ARITY, C::Scalar>>::configure(cs);
 
         if before == cs.num_instance_columns() {
-            Ok(config)
+            Ok(StepConfig {
+                step_config,
+                main_gate_config,
+            })
         } else {
             Err(ConfigureError::InstanceColumnNotAllowed)
         }
     }
 
-    fn synthesize<RO: ROTrait<C>>(
+    fn synthesize<RO: ROCircuitTrait<C::Base, Config = MainGateConfig>>(
         &self,
-        config: <Self as StepCircuit<ARITY, C::Scalar>>::Config,
-        layouter: &mut impl Layouter<C::Scalar>,
+        config: StepConfig<ARITY, C, Self>,
+        layouter: &mut impl Layouter<C::Base>,
         input: StepInputs<ARITY, C, RO>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
-        let assigned_input = self.alloc_witness(&config, layouter, input)?;
-
         // Synthesize the circuit for the base case and get the new running instance
-        let _U_new_base = self.synthesize_step_base_case(layouter, &assigned_input.u)?;
+        let _U_new_base =
+            self.synthesize_step_base_case(layouter, input.public_params, input.u.as_ref())?;
 
         // Synthesize the circuit for the non-base case and get the new running
         // instance along with a boolean indicating if all checks have passed
-        let _U_non_base = self.synthesize_step_not_base_case(&config, layouter, assigned_input)?;
+        let _U_new_non_base = self.synthesize_step_non_base_case(&config, layouter, input)?;
 
         todo!("#32")
     }
 
-    fn alloc_witness<RO: ROTrait<C>>(
+    fn synthesize_step_base_case<RO: ROCircuitTrait<C::Base, Config = MainGateConfig>>(
         &self,
-        _config: &<Self as StepCircuit<ARITY, C::Scalar>>::Config,
-        _layouter: &mut impl Layouter<C::Scalar>,
-        _input: StepInputs<ARITY, C, RO>,
-    ) -> Result<AssignedStepInputs<ARITY, C>, SynthesisError> {
-        todo!("#32")
+        layouter: &mut impl Layouter<C::Base>,
+        public_params: &SynthesizeStepParams<C, RO>,
+        u: Option<&PlonkInstance<C>>,
+    ) -> Result<FoldRelaxedPlonkInstanceChip<C>, SynthesisError> {
+        let u = u.cloned().unwrap_or_default();
+
+        let Unew_base = layouter.assign_region(
+            || "synthesize_step_base_case",
+            move |_region| {
+                // TODO Move this to diff lvl
+                Ok(if public_params.is_primary_circuit {
+                    Ok(FoldRelaxedPlonkInstanceChip::new_default(
+                        public_params.limb_width,
+                        public_params.n_limbs,
+                        u.challenges.len(),
+                    ))
+                } else {
+                    FoldRelaxedPlonkInstanceChip::from_instance(
+                        u.clone(),
+                        public_params.limb_width,
+                        public_params.n_limbs,
+                    )
+                })
+            },
+        )??;
+
+        Ok(Unew_base)
     }
 
-    fn synthesize_step_base_case(
+    fn synthesize_step_non_base_case<RO: ROCircuitTrait<C::Base, Config = MainGateConfig>>(
         &self,
-        _layouter: &mut impl Layouter<C::Scalar>,
-        _u: &AssignedCell<C::Scalar, C::Scalar>,
-    ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
-        todo!("#32")
-    }
+        config: &StepConfig<ARITY, C, Self>,
+        layouter: &mut impl Layouter<C::Base>,
+        input: StepInputs<ARITY, C, RO>,
+    ) -> Result<FoldRelaxedPlonkInstanceChip<C>, SynthesisError> {
+        // TODO Check hash of params
 
-    fn synthesize_step_not_base_case(
-        &self,
-        _config: &<Self as StepCircuit<ARITY, C::Scalar>>::Config,
-        _layouter: &mut impl Layouter<C::Scalar>,
-        _assigned_input: AssignedStepInputs<ARITY, C>,
-    ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
+        let U = input
+            .U
+            .unwrap_or_else(|| todo!("understand what we should use in that case"));
+
+        let _Unew_base: FoldRelaxedPlonkInstanceChip<C> = layouter.assign_region(
+            || "synthesize_step_non_base_case",
+            move |_region| {
+                let _U = FoldRelaxedPlonkInstanceChip::from_relaxed(
+                    U.clone(),
+                    input.public_params.limb_width,
+                    input.public_params.n_limbs,
+                );
+
+                let _ro_circuit = RO::new(
+                    config.main_gate_config.clone(),
+                    input.public_params.ro_constant.clone(),
+                );
+
+                todo!()
+            },
+        )?;
+
         todo!("#32")
     }
 }
@@ -215,6 +273,8 @@ pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
 // auto-impl for all `StepCircuit` trait `StepCircuitExt`
 impl<'link, const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Scalar>>
     StepCircuitExt<'link, ARITY, C> for SP
+where
+    <C as CurveAffine>::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
 }
 

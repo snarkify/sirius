@@ -1,29 +1,31 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
+use ff::{FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2curves::CurveAffine;
 
 use crate::{
     commitment::CommitmentKey,
     plonk::{PlonkTrace, RelaxedPlonkTrace, TableData},
-    poseidon::ROTrait,
+    poseidon::ROCircuitTrait,
 };
 
-use super::{floor_planner, step_circuit};
-
-pub use floor_planner::{FloorPlanner, SimpleFloorPlanner};
-use step_circuit::SynthesizeStepParams;
-pub use step_circuit::{StepCircuit, SynthesisError};
+use super::step_circuit::SynthesizeStepParams;
+pub use super::{
+    floor_planner::{FloorPlanner, SimpleFloorPlanner},
+    step_circuit::{StepCircuit, SynthesisError},
+};
 
 // TODO #31 docs
 pub struct CircuitPublicParams<C, RO>
 where
     C: CurveAffine,
-    RO: ROTrait<C>,
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    RO: ROCircuitTrait<C::Base>,
 {
     ck: CommitmentKey<C>,
     td: TableData<C::Scalar>,
-    ro_consts: RO::Constants,
+    ro_consts: RO::Args,
     // ro_consts_circuit: ROTrait::Constants, // NOTE: our `ROTraitCircuit` don't have main initializer
     params: SynthesizeStepParams<C, RO>,
 }
@@ -33,8 +35,10 @@ pub struct PublicParams<const A1: usize, const A2: usize, C1, C2, R1, R2>
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
-    R1: ROTrait<C1>,
-    R2: ROTrait<C2>,
+    C1::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C2::Base: PrimeFieldBits + FromUniformBytes<64>,
+    R1: ROCircuitTrait<C1::Base>,
+    R2: ROCircuitTrait<C2::Base>,
 {
     primary: CircuitPublicParams<C1, R1>,
     secondary: CircuitPublicParams<C2, R2>,
@@ -46,16 +50,18 @@ impl<const A1: usize, const A2: usize, C1, C2, R1, R2> PublicParams<A1, A2, C1, 
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
-    R1: ROTrait<C1>,
-    R2: ROTrait<C2>,
+    R1: ROCircuitTrait<C1::Base>,
+    R2: ROCircuitTrait<C2::Base>,
+    C1::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C2::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
     pub fn new<SC1, SC2>(
         _limb_width: NonZeroUsize,
         _limbs_count_limit: NonZeroUsize,
         _primary: &SC1,
-        _primary_ro_constant: R1::Constants,
+        _primary_ro_constant: R1::Args,
         _secondary: &SC2,
-        _secondary_ro_constant: R2::Constants,
+        _secondary_ro_constant: R2::Args,
     ) -> Self
     where
         SC1: StepCircuit<A1, C1::Scalar>,
@@ -106,6 +112,8 @@ where
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
     SC1: StepCircuit<A1, C1::Scalar>,
     SC2: StepCircuit<A2, C2::Scalar>,
+    C1::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C2::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
     pub fn new<RO1, RO2>(
         _pp: &PublicParams<A1, A2, C1, C2, RO1, RO2>,
@@ -115,8 +123,8 @@ where
         _z0_secondary: [C2::Scalar; A2],
     ) -> Result<Self, Error>
     where
-        RO1: ROTrait<C1>,
-        RO2: ROTrait<C2>,
+        RO1: ROCircuitTrait<C1::Base>,
+        RO2: ROCircuitTrait<C2::Base>,
     {
         // TODO #31
         todo!("Logic at `RecursiveSNARK::new`")
@@ -129,8 +137,8 @@ where
         _z0_secondary: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
-        RO1: ROTrait<C1>,
-        RO2: ROTrait<C2>,
+        RO1: ROCircuitTrait<C1::Base>,
+        RO2: ROCircuitTrait<C2::Base>,
     {
         // TODO #31
         todo!("Logic at `RecursiveSNARK::prove_step`")
@@ -144,8 +152,8 @@ where
         _z0_secondary: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
-        RO1: ROTrait<C1>,
-        RO2: ROTrait<C2>,
+        RO1: ROCircuitTrait<C1::Base>,
+        RO2: ROCircuitTrait<C2::Base>,
     {
         // TODO #31
         todo!("Logic at `RecursiveSNARK::verify`")
