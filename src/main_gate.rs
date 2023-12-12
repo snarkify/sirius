@@ -582,7 +582,7 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
     pub fn le_bits_to_num(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        bits: &Vec<AssignedValue<F>>,
+        bits: &[AssignedValue<F>],
     ) -> Result<AssignedValue<F>, Error> {
         let accumulate = |acc: &mut Value<F>, bs: Vec<AssignedValue<F>>, ps: &Vec<F>| {
             for (b, p) in bs.iter().zip(ps) {
