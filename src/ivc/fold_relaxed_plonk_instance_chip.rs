@@ -374,7 +374,7 @@ where
         public_params_commit: &C::Base,
         input_plonk: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Option<Self>, Error> {
         assert!(T >= 4); // TODO remaster, if possible
 
         let AssignedWitness {
@@ -449,29 +449,48 @@ where
         )?;
         debug!("fold: challenges folded: {new_folded_challanges:?}");
 
+        let to_diff_bn = |bn: Vec<AssignedCell<C::Base, C::Base>>| {
+            Some(BigUint::from_limbs(
+                bn.into_iter()
+                    .map(|limb_cell| -> Option<C::Base> { limb_cell.value().unwrap().copied() })
+                    .map(|limb| limb.and_then(|limb| util::fe_to_fe_safe(&limb)))
+                    .collect::<Option<Vec<_>>>()?
+                    .into_iter(),
+                self.limb_width,
+            ))
+        };
+
+        macro_rules! unwrap_result_option {
+            ($input:expr) => {{
+                match $input {
+                    Some(val) => val,
+                    None => {
+                        return Ok(None);
+                    }
+                }
+            }};
+        }
+
         // TODO
         // - Rm all `unwrap`
         // - Unpack todo
         // - Understand how return all ctx from chip
-        todo!(
-            "Ok(Self {{
-            W: {new_folded_W:?}.to_curve().unwrap(),
-            E: {new_folded_E:?}.to_curve().unwrap(),
-            u: util::fe_to_fe_safe(&{new_folded_u:?}.value().unwrap().copied().unwrap()).unwrap(),
-            X0: BigUint::from_assigned_cells(&{new_folded_X0:?}, self.limb_width, self.limbs_count)?
-                .unwrap(),
-            X1: BigUint::from_assigned_cells(&{new_folded_X1:?}, self.limb_width, self.limbs_count)?
-                .unwrap(),
-            challenges: {new_folded_challanges:?}
+        Ok(Some(Self {
+            W: unwrap_result_option!(new_folded_W.to_curve()),
+            E: unwrap_result_option!(new_folded_E.to_curve()),
+            u: unwrap_result_option!(util::fe_to_fe_safe(&unwrap_result_option!(new_folded_u
+                .value()
+                .unwrap()
+                .copied()))),
+            X0: unwrap_result_option!(to_diff_bn(new_folded_X0))?,
+            X1: unwrap_result_option!(to_diff_bn(new_folded_X1))?,
+            challenges: new_folded_challanges
                 .into_iter()
-                .map(|ch| {{
-                    BigUint::from_assigned_cells(&ch, self.limb_width, self.limbs_count)?.unwrap()
-                }})
+                .flat_map(to_diff_bn)
                 .collect::<Result<Vec<_>, _>>()?,
             limb_width: self.limb_width,
             limbs_count: self.limbs_count,
-        }})"
-        )
+        }))
     }
 
     /// Assign all input arguments and generate challenge by random oracle circuit (`ro_circuit`)
