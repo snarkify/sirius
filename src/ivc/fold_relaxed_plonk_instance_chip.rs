@@ -232,6 +232,7 @@ where
         })
     }
 
+    // TODO #32 rustdoc
     fn fold_W<const T: usize>(
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
@@ -244,6 +245,7 @@ where
         Ok(ecc.add(region, folded_W, &rW)?)
     }
 
+    // TODO #32 rustdoc
     fn fold_E<const T: usize>(
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
@@ -282,6 +284,7 @@ where
             .try_fold(folded_E, |folded_E, rT_i| ecc.add(region, &folded_E, &rT_i))?)
     }
 
+    // TODO #32 rustdoc
     /// 1. Multiplies a part of the PLONK instance (`$input`) by a randomized value (`r_as_bn`),
     ///    and then takes the remainder modulo a specified modulus (`m_bn`).
     /// 2. Sums this multiplication result with a pre-assigned part of the instance (`$folded`).
@@ -315,6 +318,7 @@ where
             .remainder)
     }
 
+    // TODO #32 rustdoc
     fn fold_instances(
         bn_chip: &BigUintMulModChip<C::Base>,
         region: &mut RegionCtx<C::Base>,
@@ -340,6 +344,7 @@ where
         Ok([new_folded_X0, new_folded_X1])
     }
 
+    // TODO #32 rustdoc
     fn fold_challenges(
         bn_chip: &BigUintMulModChip<C::Base>,
         region: &mut RegionCtx<C::Base>,
@@ -366,6 +371,7 @@ where
             .collect::<Result<Vec<_>, Error>>()
     }
 
+    // TODO #32 rustdoc
     pub fn fold<const T: usize>(
         self,
         region: &mut RegionCtx<C::Base>,
@@ -886,6 +892,7 @@ mod tests {
             FoldRelaxedPlonkInstanceChip::<C1>::fold_W(&mut ctx, &config, &folded, &input, &r);
 
         // "check folded_W result: {folded_W:?}"
+        // TODO #32 match result with NIFS
     }
 
     #[test_log::test]
@@ -933,5 +940,6 @@ mod tests {
                 ],
             )
             .unwrap();
+        // TODO #32 match result with NIFS
     }
 }
