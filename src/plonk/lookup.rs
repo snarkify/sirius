@@ -77,42 +77,35 @@ impl<F: PrimeField> Arguments<F> {
             .iter()
             .map(|arg| arg.input_expressions().len())
             .max()
-            .unwrap_or(0);
-        if max_lookup_len == 0 {
-            return None;
-        }
+            .filter(|l| *l != 0)?;
 
         let has_vector_lookup = max_lookup_len > 1;
         let num_lookups = cs.lookups().len();
 
-        let lookup_polys = cs
+        let (lookup_polys, table_polys) = cs
             .lookups()
             .iter()
             .map(|arg| {
-                compress_halo2_expression(
-                    &arg.input_expressions()[..],
-                    cs.num_selectors(),
-                    cs.num_fixed_columns(),
-                    num_lookups,
-                    // compress vector lookups with r1 (cha_index = 0)
-                    0,
+                (
+                    compress_halo2_expression(
+                        arg.table_expressions(),
+                        cs.num_selectors(),
+                        cs.num_fixed_columns(),
+                        num_lookups,
+                        // compress vector table items with r1 (cha_index = 0)
+                        0,
+                    ),
+                    compress_halo2_expression(
+                        arg.input_expressions(),
+                        cs.num_selectors(),
+                        cs.num_fixed_columns(),
+                        num_lookups,
+                        // compress vector lookups with r1 (cha_index = 0)
+                        0,
+                    ),
                 )
             })
-            .collect::<Vec<_>>();
-        let table_polys = cs
-            .lookups()
-            .iter()
-            .map(|arg| {
-                compress_halo2_expression(
-                    &arg.table_expressions()[..],
-                    cs.num_selectors(),
-                    cs.num_fixed_columns(),
-                    num_lookups,
-                    // compress vector table items with r1 (cha_index = 0)
-                    0,
-                )
-            })
-            .collect::<Vec<_>>();
+            .unzip();
 
         Some(Self {
             lookup_polys,
@@ -164,12 +157,12 @@ impl<F: PrimeField> Arguments<F> {
             .collect()
     }
 
-    /// evaluate the lookup and table expressions to get vector l and t
-    pub fn evaluate_ls_ts(&self, table: &TableData<F>, r: F) -> (Vec<Vec<F>>, Vec<Vec<F>>) {
+    /// evaluate each of the lookup expressions to get vector l_i
+    /// where l_i = L_i(x_1,...,x_a)
+    pub fn evaluate_ls(&self, table: &TableData<F>, r: F) -> Vec<Vec<F>> {
         let data = LookupEvalDomain { table, r };
         let nrow = 2usize.pow(table.k);
-        let ls = self
-            .lookup_polys
+        self.lookup_polys
             .iter()
             .map(|expr| expr.expand())
             .map(|poly| {
@@ -178,21 +171,25 @@ impl<F: PrimeField> Arguments<F> {
                     .map(|row| poly.eval(row, &data))
                     .collect::<Vec<_>>()
             })
-            .collect::<Vec<_>>();
-        let ts = self
-            .table_polys
-            .iter()
-            .map(|expr| expr.expand())
-            .map(|poly| {
-                (0..nrow)
-                    .into_par_iter()
-                    .map(|row| poly.eval(row, &data))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        (ls, ts)
+            .collect::<Vec<_>>()
     }
 
+    /// evaluate each of the table expressions to get vector t_i
+    /// where t_i = T(y1,...,y_b)
+    pub fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Vec<Vec<F>> {
+        let data = LookupEvalDomain { table, r };
+        let nrow = 2usize.pow(table.k);
+        self.table_polys
+            .iter()
+            .map(|expr| expr.expand())
+            .map(|poly| {
+                (0..nrow)
+                    .into_par_iter()
+                    .map(|row| poly.eval(row, &data))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    }
     /// calculate the coefficients {m_i} in the log derivative formula
     /// m_i = sum_j \xi(w_j=t_i) assuming {t_i} have no duplicates
     pub fn evaluate_m(&self, l: &[F], t: &[F]) -> Vec<F> {
