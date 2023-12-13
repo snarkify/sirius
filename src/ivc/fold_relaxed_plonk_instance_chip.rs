@@ -533,7 +533,7 @@ where
                 region.assign_advice(|| annotation.to_owned(), *column, Value::known(val))
             };
 
-        macro_rules! assign_point {
+        macro_rules! assign_and_absorb_point {
             ($input:expr) => {{
                 let coordinates: Coordinates<C> =
                     Option::from($input.coordinates()).ok_or(Error::CantBuildCoordinates {
@@ -563,7 +563,7 @@ where
             }};
         }
 
-        macro_rules! assign_diff_field {
+        macro_rules! assign_and_absorb_diff_field {
             ($input:expr) => {{
                 let val: C::Base =
                     util::fe_to_fe_safe(&$input).ok_or(Error::WhileScalarToBase {
@@ -586,12 +586,12 @@ where
         )?;
         ro_circuit.absorb_base(WrapValue::Assigned(assigned_public_params_commit.clone()));
 
-        let assigned_W = assign_point!(self.W)?;
-        let assigned_E = assign_point!(self.E)?;
-        let assigned_u = assign_diff_field!(self.u)?;
+        let assigned_W = assign_and_absorb_point!(self.W)?;
+        let assigned_E = assign_and_absorb_point!(self.E)?;
+        let assigned_u = assign_and_absorb_diff_field!(self.u)?;
 
         /// Macro to assign and absorb big integer limbs.
-        macro_rules! assign_biguint {
+        macro_rules! assign_and_absorb_biguint {
             ($biguint:expr, $annotation_prefix:expr) => {{
                 $biguint
                     .limbs()
@@ -617,12 +617,12 @@ where
             }};
         }
 
-        let assigned_X0 = assign_biguint!(self.X0, "X0")?;
-        let assigned_X1 = assign_biguint!(self.X1, "X1")?;
+        let assigned_X0 = assign_and_absorb_biguint!(self.X0, "X0")?;
+        let assigned_X1 = assign_and_absorb_biguint!(self.X1, "X1")?;
         let assigned_challenges = self
             .challenges
             .iter()
-            .map(|challenge| assign_biguint!(challenge, "one of challanges"))
+            .map(|challenge| assign_and_absorb_biguint!(challenge, "one of challanges"))
             .collect::<Result<Vec<_>, _>>()?;
 
         let assigned_challanges_instance = instance
@@ -652,7 +652,8 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let assigned_instance_W_commitment_coordinates = assign_point!(instance.W_commitment)?;
+        let assigned_instance_W_commitment_coordinates =
+            assign_and_absorb_point!(instance.W_commitment)?;
         let assigned_input_instance = instance
             .instance
             .iter()
@@ -682,7 +683,7 @@ where
 
         let assigned_cross_term_commits = cross_term_commits
             .iter()
-            .map(|cross_term_commit| assign_point!(cross_term_commit))
+            .map(|cross_term_commit| assign_and_absorb_point!(cross_term_commit))
             .collect::<Result<Vec<_>, _>>()?;
 
         region.next();
