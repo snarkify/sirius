@@ -73,12 +73,13 @@ pub struct PlonkInstance<C: CurveAffine> {
     pub(crate) W_commitments: Vec<C>,
     /// inst = [X0, X1]
     pub(crate) instance: Vec<C::ScalarExt>,
-    /// challenge is random number generated Fiat-Shamir hash
-    /// more specifically:
-    /// r1 (optional): combine vector lookup
-    /// r2 (optional): challenge to calculate h and g in log-derivative relation
-    /// r3 (optional): combine all relations
-    /// unlike protostar paper, we may add one extra round (r3) to combine all relations
+    /// challenges generated in special soundness protocol
+    /// we will have 0 ~ 3 challenges depending on different cases:
+    /// name them as r1, r2, r3.
+    /// r1: compress vector lookup, e.g. (a_1, a_2, a_3) -> a_1 + r1*a_2 + r1^2*a_3
+    /// r2: challenge to calculate h and g in log-derivative relation
+    /// r3: combine all custom gates (P_i) and lookup relations (L_i), e.g.:
+    /// (P_1, P_2, L_1, L_2) -> P_1 + r3*P_2 + r3^2*L_1 + r3^3*L_2
     pub(crate) challenges: Vec<C::ScalarExt>,
 }
 
@@ -111,6 +112,7 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
 
 #[derive(Clone, Debug)]
 pub struct RelaxedPlonkWitness<F: PrimeField> {
+    /// each vector element in W is a vector folded from an old [`RelaxedPlonkWitness.W`] and [`PlonkWitness.W`]
     pub(crate) W: Vec<Vec<F>>,
     pub(crate) E: Vec<F>,
 }
@@ -507,11 +509,10 @@ impl<F: PrimeField> TableData<F> {
 
     /// indicates whether the original constrain system contains vector lookup
     pub fn has_vector_lookup(&self) -> bool {
-        if self.lookup_arguments.is_some() {
-            self.lookup_arguments.as_ref().unwrap().has_vector_lookup
-        } else {
-            false
-        }
+        self.lookup_arguments
+            .as_ref()
+            .map(|arg| arg.has_vector_lookup)
+            .unwrap_or(false)
     }
 
     pub fn num_lookups(&self) -> usize {
@@ -523,14 +524,12 @@ impl<F: PrimeField> TableData<F> {
     }
 
     pub fn lookup_exprs(&self, cs: &ConstraintSystem<F>) -> Vec<Expression<F>> {
-        if self.lookup_arguments.is_none() {
-            vec![]
-        } else {
-            let lookup_arguments = self.lookup_arguments.clone().unwrap();
-            let mut combined = lookup_arguments.lookup_polys.clone();
+        let mut combined = vec![];
+        if let Some(lookup_arguments) = self.lookup_arguments.as_ref() {
+            combined = lookup_arguments.lookup_polys.clone();
             combined.extend(lookup_arguments.log_derivative_lhs(cs));
-            combined
         }
+        combined
     }
 
     pub fn assembly<ConcreteCircuit: Circuit<F>>(
@@ -713,7 +712,8 @@ impl<F: PrimeField> TableData<F> {
 
         // round 2
         let lookup_arguments = self.lookup_arguments.as_ref().unwrap();
-        let (ls, ts) = lookup_arguments.evaluate_ls_ts(self, r1);
+        let ls = lookup_arguments.evaluate_ls(self, r1);
+        let ts = lookup_arguments.evaluate_ts(self, r1);
         let ms = ls
             .iter()
             .zip(ts.iter())
