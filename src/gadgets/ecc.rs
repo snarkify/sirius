@@ -17,6 +17,11 @@ impl<C: CurveAffine> AssignedPoint<C> {
     pub fn coordinates(&self) -> (&AssignedValue<C::Base>, &AssignedValue<C::Base>) {
         (&self.x, &self.y)
     }
+
+    pub fn to_curve(&self) -> Option<C> {
+        let (x, y) = self.coordinates();
+        C::from_xy(x.value().unwrap().copied()?, y.value().unwrap().copied()?).into()
+    }
 }
 
 pub struct EccChip<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> {
