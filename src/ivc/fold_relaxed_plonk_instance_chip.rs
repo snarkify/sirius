@@ -72,7 +72,7 @@ pub(crate) struct FoldRelaxedPlonkInstanceChip<C: CurveAffine>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    W: C,
+    W: Vec<C>,
     E: C,
     u: C::ScalarExt,
     challenges: Vec<BigUint<C::ScalarExt>>,
@@ -91,7 +91,7 @@ pub(crate) struct AssignedWitness<C: CurveAffine> {
 
     /// Assigned point representing the folded accumulator W.
     /// Derived from [`FoldRelaxedPlonkInstanceChip::W`]
-    folded_W: AssignedPoint<C>,
+    folded_W: Vec<AssignedPoint<C>>,
 
     /// Assigned point representing the folded accumulator E.
     /// Derived from [`FoldRelaxedPlonkInstanceChip::E`]
@@ -114,8 +114,8 @@ pub(crate) struct AssignedWitness<C: CurveAffine> {
     folded_X1: Vec<AssignedValue<C::Base>>,
 
     /// Assigned point representing the commitment to the `W` value of the input PLONK instance.
-    /// Sourced directly from [`PlonkInstance::W_commitment`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
-    input_W_commitment: AssignedPoint<C>,
+    /// Sourced directly from [`PlonkInstance::W_commitments`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
+    input_W_commitments: Vec<AssignedPoint<C>>,
 
     /// Vector of vectors of assigned values for each limb of the input instances.
     /// Sourced directly from [`PlonkInstance::instance`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
@@ -175,9 +175,10 @@ where
         limb_width: NonZeroUsize,
         limbs_count: NonZeroUsize,
         num_challenges: usize,
+        num_witness: usize,
     ) -> Self {
         Self {
-            W: C::default(),
+            W: vec![C::default(); num_witness],
             E: C::default(),
             u: C::Scalar::ZERO,
             challenges: iter::repeat_with(|| BigUint::one(limb_width))
@@ -196,7 +197,7 @@ where
         limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
         Ok(Self {
-            W: plonk_instance.W_commitment,
+            W: plonk_instance.W_commitments.clone(),
             E: C::default(),
             u: C::Scalar::ONE,
             challenges: plonk_instance
@@ -217,7 +218,7 @@ where
         limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
         Ok(Self {
-            W: relaxed.W_commitment,
+            W: relaxed.W_commitments.clone(),
             E: relaxed.E_commitment,
             u: relaxed.u,
             challenges: relaxed
@@ -236,13 +237,20 @@ where
     fn fold_W<const T: usize>(
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
-        folded_W: &AssignedPoint<C>,
-        input_W_commitment: &AssignedPoint<C>,
+        folded_W: &[AssignedPoint<C>],
+        input_W_commitments: &[AssignedPoint<C>],
         r: &[AssignedCell<C::Base, C::Base>],
-    ) -> Result<AssignedPoint<C>, Error> {
+    ) -> Result<Vec<AssignedPoint<C>>, Error> {
         let ecc = EccChip::<C, C::Base, T>::new(config.clone());
-        let rW = ecc.scalar_mul(region, input_W_commitment, r)?;
-        Ok(ecc.add(region, folded_W, &rW)?)
+        let results: Result<Vec<AssignedPoint<C>>, Error> = folded_W
+            .iter()
+            .zip(input_W_commitments)
+            .map(|(W1, W2)| -> Result<AssignedPoint<C>, Error> {
+                let rW = ecc.scalar_mul(region, W2, r)?;
+                Ok(ecc.add(region, W1, &rW)?)
+            })
+            .collect();
+        results
     }
 
     // TODO #32 rustdoc
@@ -390,7 +398,7 @@ where
             folded_u,
             folded_X0,
             folded_X1,
-            input_W_commitment,
+            input_W_commitments,
             input_instances,
             input_challenges,
             folded_challenges,
@@ -415,7 +423,7 @@ where
             bits: r,
         };
 
-        let new_folded_W = Self::fold_W(region, config, &folded_W, &input_W_commitment, &r)?;
+        let new_folded_W = Self::fold_W(region, config, &folded_W, &input_W_commitments, &r)?;
 
         debug!("fold: W folded: {new_folded_W:?}");
 
@@ -482,7 +490,7 @@ where
         // - Unpack todo
         // - Understand how return all ctx from chip
         Ok(Some(Self {
-            W: unwrap_result_option!(new_folded_W.to_curve()),
+            W: vec![unwrap_result_option!(new_folded_W[0].to_curve())],
             E: unwrap_result_option!(new_folded_E.to_curve()),
             u: unwrap_result_option!(util::fe_to_fe_safe(&unwrap_result_option!(new_folded_u
                 .value()
@@ -586,7 +594,15 @@ where
         )?;
         ro_circuit.absorb_base(WrapValue::Assigned(assigned_public_params_hash.clone()));
 
-        let assigned_W = assign_and_absorb_point!(self.W)?;
+        let assigned_W: Result<Vec<AssignedPoint<C>>, Error> = self
+            .W
+            .iter()
+            .map(|W| -> Result<AssignedPoint<C>, Error> {
+                let res = assign_and_absorb_point!(W)?;
+                Ok(res)
+            })
+            .collect();
+        let assigned_W = assigned_W?;
         let assigned_E = assign_and_absorb_point!(self.E)?;
         let assigned_u = assign_and_absorb_diff_field!(self.u)?;
 
@@ -659,7 +675,7 @@ where
             .collect::<Result<Vec<_>, _>>()?;
 
         let assigned_instance_W_commitment_coordinates =
-            assign_and_absorb_point!(instance.W_commitment)?;
+            assign_and_absorb_point!(instance.W_commitments[0])?;
 
         let assigned_input_instance = instance
             .instance
@@ -732,7 +748,7 @@ where
             input_challenges: assigned_challanges_instance,
             folded_X0: assigned_X0,
             folded_X1: assigned_X1,
-            input_W_commitment: assigned_instance_W_commitment_coordinates,
+            input_W_commitments: vec![assigned_instance_W_commitment_coordinates],
             input_instances: assigned_input_instance,
             cross_terms_commits: assigned_cross_term_commits,
             r,
@@ -779,7 +795,7 @@ mod tests {
 
         let chip = FoldRelaxedPlonkInstanceChip::<C1>::from_instance(
             PlonkInstance {
-                W_commitment: C1::random(&mut rnd),
+                W_commitments: vec![C1::random(&mut rnd)],
                 instance: vec![ScalarExt::random(&mut rnd), ScalarExt::random(&mut rnd)],
                 challenges: vec![<C1 as CurveAffine>::ScalarExt::random(&mut rnd)],
             },
@@ -805,7 +821,7 @@ mod tests {
                 PoseidonChip::new(config, spec),
                 &Base::random(&mut rnd),
                 &PlonkInstance {
-                    W_commitment: C1::random(&mut rnd),
+                    W_commitments: vec![C1::random(&mut rnd)],
                     instance: vec![ScalarExt::random(&mut rnd), ScalarExt::random(&mut rnd)],
                     challenges: vec![<C1 as CurveAffine>::ScalarExt::random(&mut rnd)],
                 },
@@ -879,7 +895,7 @@ mod tests {
         .collect::<Vec<_>>();
 
         let _folded_W =
-            FoldRelaxedPlonkInstanceChip::<C1>::fold_W(&mut ctx, &config, &folded, &input, &r);
+            FoldRelaxedPlonkInstanceChip::<C1>::fold_W(&mut ctx, &config, &[folded], &[input], &r);
 
         // "check folded_W result: {folded_W:?}"
         // TODO #32 match result with NIFS
@@ -893,7 +909,7 @@ mod tests {
 
         let chip = FoldRelaxedPlonkInstanceChip::<C1>::from_instance(
             PlonkInstance {
-                W_commitment: C1::random(&mut rnd),
+                W_commitments: vec![C1::random(&mut rnd)],
                 instance: vec![ScalarExt::random(&mut rnd), ScalarExt::random(&mut rnd)],
                 challenges: vec![<C1 as CurveAffine>::ScalarExt::random(&mut rnd)],
             },
@@ -919,7 +935,7 @@ mod tests {
                 PoseidonChip::new(config, spec),
                 &Base::random(&mut rnd),
                 &PlonkInstance {
-                    W_commitment: C1::random(&mut rnd),
+                    W_commitments: vec![C1::random(&mut rnd)],
                     instance: vec![ScalarExt::random(&mut rnd), ScalarExt::random(&mut rnd)],
                     challenges: vec![<C1 as CurveAffine>::ScalarExt::random(&mut rnd)],
                 },

@@ -222,6 +222,7 @@ where
                         public_params.limb_width,
                         public_params.n_limbs,
                         u.challenges.len(),
+                        u.W_commitments.len(),
                     ))
                 } else {
                     FoldRelaxedPlonkInstanceChip::from_instance(
