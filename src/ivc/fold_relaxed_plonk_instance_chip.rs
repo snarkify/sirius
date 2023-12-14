@@ -86,8 +86,8 @@ where
 /// Holds the assigned values and points resulting from the folding process.
 pub(crate) struct AssignedWitness<C: CurveAffine> {
     /// Assigned value of the public parameters commitment.
-    /// Sourced directly from the `public_params_commit` argument of [`FoldRelaxedPlonkInstanceChip::fold`].
-    public_params_commit: AssignedValue<C::Base>,
+    /// Sourced directly from the `public_params_hash` argument of [`FoldRelaxedPlonkInstanceChip::fold`].
+    public_params_hash: AssignedValue<C::Base>,
 
     /// Assigned point representing the folded accumulator W.
     /// Derived from [`FoldRelaxedPlonkInstanceChip::W`]
@@ -377,14 +377,14 @@ where
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
         ro_circuit: impl ROCircuitTrait<C::Base>,
-        public_params_commit: &C::Base,
+        public_params_hash: &C::Base,
         input_plonk: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
     ) -> Result<Option<Self>, Error> {
         assert!(T >= 4); // TODO remaster, if possible
 
         let AssignedWitness {
-            public_params_commit: _, // TODO Check don't use in scheme
+            public_params_hash: _, // TODO Check don't use in scheme
             folded_W,
             folded_E,
             folded_u,
@@ -401,7 +401,7 @@ where
             region,
             config,
             ro_circuit,
-            public_params_commit,
+            public_params_hash,
             input_plonk,
             cross_term_commits,
         )?;
@@ -508,7 +508,7 @@ where
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
         mut ro_circuit: impl ROCircuitTrait<C::Base>,
-        public_params_commit: &C::Base,
+        public_params_hash: &C::Base,
         instance: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
     ) -> Result<AssignedWitness<C>, Error> {
@@ -579,12 +579,12 @@ where
             }};
         }
 
-        let assigned_public_params_commit = assign_next_advice(
+        let assigned_public_params_hash = assign_next_advice(
             "Assigned public params commit for absorb",
             region,
-            *public_params_commit,
+            *public_params_hash,
         )?;
-        ro_circuit.absorb_base(WrapValue::Assigned(assigned_public_params_commit.clone()));
+        ro_circuit.absorb_base(WrapValue::Assigned(assigned_public_params_hash.clone()));
 
         let assigned_W = assign_and_absorb_point!(self.W)?;
         let assigned_E = assign_and_absorb_point!(self.E)?;
@@ -735,7 +735,7 @@ where
         region.next();
 
         Ok(AssignedWitness {
-            public_params_commit: assigned_public_params_commit,
+            public_params_hash: assigned_public_params_hash,
             folded_W: assigned_W,
             folded_E: assigned_E,
             folded_u: assigned_u,
