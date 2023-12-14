@@ -625,59 +625,48 @@ where
             .map(|challenge| assign_and_absorb_biguint!(challenge, "one of challanges"))
             .collect::<Result<Vec<_>, _>>()?;
 
+        macro_rules! assign_and_absorb_diff_field_as_bn {
+            ($input:expr, $annot:expr) => {{
+                let val: C::Base = util::fe_to_fe_safe($input).unwrap();
+                let limbs = BigUint::from_f(&val, self.limb_width, self.limbs_count)?
+                    .limbs()
+                    .iter()
+                    .enumerate()
+                    .map(|(limb_index, limb)| {
+                        let limb_cell = assign_next_advice(
+                            format!("{}, limb {limb_index}", $annot).as_str(),
+                            region,
+                            *limb,
+                        )?;
+
+                        ro_circuit.absorb_base(WrapValue::Assigned(limb_cell.clone()));
+
+                        Result::<_, Error>::Ok(limb_cell)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                Result::<_, Error>::Ok(limbs)
+            }};
+        }
+
         let assigned_challanges_instance = instance
             .challenges
             .iter()
             .enumerate()
             .map(|(index, challenge)| {
-                let val: C::Base = util::fe_to_fe_safe(challenge).unwrap();
-                let limbs = BigUint::from_f(&val, self.limb_width, self.limbs_count)?
-                    .limbs()
-                    .iter()
-                    .enumerate()
-                    .map(|(limb_index, limb)| {
-                        let limb_cell = assign_next_advice(
-                            format!("instance {index} value, limb {limb_index}").as_str(),
-                            region,
-                            *limb,
-                        )?;
-
-                        ro_circuit.absorb_base(WrapValue::Assigned(limb_cell.clone()));
-
-                        Result::<_, Error>::Ok(limb_cell)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                Result::<_, Error>::Ok(limbs)
+                assign_and_absorb_diff_field_as_bn!(challenge, format!("challenge {index} value"))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         let assigned_instance_W_commitment_coordinates =
             assign_and_absorb_point!(instance.W_commitment)?;
+
         let assigned_input_instance = instance
             .instance
             .iter()
             .enumerate()
-            .map(|(index, val)| {
-                let val: C::Base = util::fe_to_fe_safe(val).unwrap();
-                let limbs = BigUint::from_f(&val, self.limb_width, self.limbs_count)?
-                    .limbs()
-                    .iter()
-                    .enumerate()
-                    .map(|(limb_index, limb)| {
-                        let limb_cell = assign_next_advice(
-                            format!("instance {index} value, limb {limb_index}").as_str(),
-                            region,
-                            *limb,
-                        )?;
-
-                        ro_circuit.absorb_base(WrapValue::Assigned(limb_cell.clone()));
-
-                        Result::<_, Error>::Ok(limb_cell)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                Result::<_, Error>::Ok(limbs)
+            .map(|(index, instance)| {
+                assign_and_absorb_diff_field_as_bn!(instance, format!("instance {index} value"))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
