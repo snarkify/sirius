@@ -2,6 +2,7 @@ use ff::{BatchInvert, Field, PrimeField};
 use halo2_proofs::plonk::Assigned;
 use num_bigint::BigUint;
 pub(crate) use rayon::current_num_threads;
+use std::iter;
 
 pub fn bytes_to_bits_le(bytes: Vec<u8>) -> Vec<bool> {
     let mut bits = Vec::new();
@@ -176,13 +177,12 @@ pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>, bit_len: usize) {
 }
 
 pub(crate) fn concatenate_with_padding<F: PrimeField>(vs: &[Vec<F>], pad_size: usize) -> Vec<F> {
-    let mut vs = vs.to_vec();
-    vs.iter_mut()
-        .flat_map(|v_i| {
-            v_i.resize(pad_size, F::ZERO);
-            v_i.drain(..)
+    vs.iter()
+        .fold(Vec::with_capacity(vs.len() * pad_size), |mut result, v| {
+            result.extend_from_slice(v);
+            result.extend(iter::repeat(F::ZERO).take(pad_size.saturating_sub(v.len())));
+            result
         })
-        .collect::<Vec<_>>()
 }
 
 /// A macro used for MockProver certain circuit by leveraging halo2_proofs.

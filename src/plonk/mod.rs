@@ -673,7 +673,7 @@ impl<F: PrimeField> TableData<F> {
             "should call TableData.assembly() first"
         );
 
-        let W1 = concatenate_with_padding(&self.advice_columns[..], 2usize.pow(self.k));
+        let W1 = concatenate_with_padding(&self.advice_columns, 2usize.pow(self.k));
         let C1 = ck.commit(&W1);
 
         (

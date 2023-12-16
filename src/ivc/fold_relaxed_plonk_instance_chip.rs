@@ -594,15 +594,14 @@ where
         )?;
         ro_circuit.absorb_base(WrapValue::Assigned(assigned_public_params_hash.clone()));
 
-        let assigned_W: Result<Vec<AssignedPoint<C>>, Error> = self
+        let assigned_W = self
             .W
             .iter()
             .map(|W| -> Result<AssignedPoint<C>, Error> {
                 let res = assign_and_absorb_point!(W)?;
                 Ok(res)
             })
-            .collect();
-        let assigned_W = assigned_W?;
+            .collect::<Result<Vec<_>, _>>()?;
         let assigned_E = assign_and_absorb_point!(self.E)?;
         let assigned_u = assign_and_absorb_diff_field!(self.u)?;
 
@@ -674,8 +673,11 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let assigned_instance_W_commitment_coordinates =
-            assign_and_absorb_point!(instance.W_commitments[0])?;
+        let assigned_instance_W_commitment_coordinates = instance
+            .W_commitments
+            .iter()
+            .map(|com| assign_and_absorb_point!(com))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let assigned_input_instance = instance
             .instance
@@ -748,7 +750,7 @@ where
             input_challenges: assigned_challanges_instance,
             folded_X0: assigned_X0,
             folded_X1: assigned_X1,
-            input_W_commitments: vec![assigned_instance_W_commitment_coordinates],
+            input_W_commitments: assigned_instance_W_commitment_coordinates,
             input_instances: assigned_input_instance,
             cross_terms_commits: assigned_cross_term_commits,
             r,
