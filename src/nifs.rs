@@ -124,7 +124,8 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
     /// providing cryptographic evidence of this fact.
     pub fn prove(
         ck: &CommitmentKey<C>,
-        ro: &mut RO,
+        ro_nark: &mut RO,
+        ro_acc: &mut RO,
         td: &TableData<C::ScalarExt>,
         U1: &RelaxedPlonkInstance<C>,
         W1: &RelaxedPlonkWitness<C::ScalarExt>,
@@ -134,16 +135,16 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
     ) {
         // TODO: hash gate into ro
         let S = td.plonk_structure(ck);
-        S.absorb_into(ro);
+        S.absorb_into(ro_acc);
 
-        let (U2, W2) = td.run_sps_protocol_0(ck);
-        U2.absorb_into(ro);
-        U1.absorb_into(ro);
+        let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges);
+        U2.absorb_into(ro_acc);
+        U1.absorb_into(ro_acc);
         let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2);
         cross_term_commits
             .iter()
-            .for_each(|cm| ro.absorb_point(*cm));
-        let r = ro.squeeze(NUM_CHALLENGE_BITS);
+            .for_each(|cm| ro_acc.absorb_point(*cm));
+        let r = ro_acc.squeeze(NUM_CHALLENGE_BITS);
         let U = U1.fold(&U2, &cross_term_commits, &r);
         let W = W1.fold(&W2, &cross_terms, &r);
         (
@@ -196,6 +197,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
 mod tests {
     use super::*;
     use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
+    use crate::util::create_ro;
     use ff::PrimeField;
     use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
     use halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Error, Instance};
@@ -274,23 +276,28 @@ mod tests {
     /// copy constrains relation
     /// (3) the second folded witness-instance pair satisfies the relaxed polynomial relation  and
     /// copy constrains relation
-    fn fold_instances<C: CurveAffine<ScalarExt = F>, F: PrimeField, RO: ROTrait<C>>(
+    fn fold_instances<
+        C: CurveAffine<ScalarExt = F1, Base = F2>,
+        F1: PrimeField,
+        F2: PrimeField + FromUniformBytes<64>,
+    >(
         ck: &CommitmentKey<C>,
-        ro1: &mut RO,
-        ro2: &mut RO,
-        td1: &TableData<F>,
-        td2: &TableData<F>,
+        td1: &TableData<F1>,
+        td2: &TableData<F1>,
     ) {
         let S = td1.plonk_structure(ck);
         let mut f_U =
             RelaxedPlonkInstance::new(td1.instance.len(), S.num_challenges, S.round_sizes.len());
         let mut f_W = RelaxedPlonkWitness::new(td1.k, &S.round_sizes);
-        let (U1, W1) = td1.run_sps_protocol_0(ck);
+        let mut ro_nark = create_ro::<C, F2, T, RATE, R_F, R_P>();
+        let (U1, W1) = td1.run_sps_protocol(ck, &mut ro_nark, S.num_challenges);
         let res = S.is_sat(ck, &U1, &W1);
         assert!(res.is_ok());
 
-        let (nifs, (_U, W)) = NIFS::prove(ck, ro1, td1, &f_U, &f_W);
-        let U = nifs.verify(ro2, &S, f_U, U1);
+        let mut ro_acc_prover = create_ro::<C, F2, T, RATE, R_F, R_P>();
+        let mut ro_acc_verifier = create_ro::<C, F2, T, RATE, R_F, R_P>();
+        let (nifs, (_U, W)) = NIFS::prove(ck, &mut ro_nark, &mut ro_acc_prover, td1, &f_U, &f_W);
+        let U = nifs.verify(&mut ro_acc_verifier, &S, f_U, U1);
         assert_eq!(U, _U);
 
         f_U = U;
@@ -300,12 +307,12 @@ mod tests {
         let perm_res = S.is_sat_perm(&f_U, &f_W);
         assert!(perm_res.is_ok());
 
-        let (U1, W1) = td2.run_sps_protocol_0(ck);
+        let (U1, W1) = td2.run_sps_protocol(ck, &mut ro_nark, S.num_challenges);
         let res = S.is_sat(ck, &U1, &W1);
         assert!(res.is_ok());
 
-        let (nifs, (_U, _W)) = NIFS::prove(ck, ro1, td2, &f_U, &f_W);
-        let U = nifs.verify(ro2, &S, f_U, U1);
+        let (nifs, (_U, _W)) = NIFS::prove(ck, &mut ro_nark, &mut ro_acc_prover, td2, &f_U, &f_W);
+        let U = nifs.verify(&mut ro_acc_verifier, &S, f_U, U1);
         assert_eq!(U, _U);
 
         f_U = _U;
@@ -326,9 +333,7 @@ mod tests {
 
     #[test]
     fn test_nifs_no_lookup() {
-        use crate::poseidon::PoseidonHash;
-        use halo2curves::pasta::{EqAffine, Fp, Fq};
-        use poseidon::Spec;
+        use halo2curves::pasta::{EqAffine, Fp};
 
         const K: u32 = 4;
         let mut inputs1 = Vec::new();
@@ -353,10 +358,6 @@ mod tests {
         let p2 = smallest_power(td1.cs.num_selectors() + td1.cs.num_fixed_columns(), K);
         let ck = CommitmentKey::<EqAffine>::setup(p1.max(p2), b"test");
 
-        type PH = PoseidonHash<EqAffine, Fq, T, RATE>;
-        let spec = Spec::<Fq, T, RATE>::new(R_F, R_P);
-        let mut ro1 = PH::new(spec.clone());
-        let mut ro2 = PH::new(spec);
-        fold_instances(&ck, &mut ro1, &mut ro2, &td1, &td2);
+        fold_instances(&ck, &td1, &td2);
     }
 }
