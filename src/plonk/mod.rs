@@ -663,7 +663,7 @@ impl<F: PrimeField> TableData<F> {
     }
 
     /// run 0-round special soundness protocol
-    /// i.e no need to generate challenge
+    /// w.r.t single custom gate + no lookup
     pub fn run_sps_protocol_0<C: CurveAffine<ScalarExt = F>>(
         &self,
         ck: &CommitmentKey<C>,
@@ -683,6 +683,104 @@ impl<F: PrimeField> TableData<F> {
                 challenges: vec![],
             },
             PlonkWitness { W: vec![W1] },
+        )
+    }
+
+    /// run 1-round special soundness protocol to generate witnesses and challenges
+    /// notations: "[C]" absorb C; "]r[" squeeze r;
+    /// sequence of generating challenges:
+    /// [pi.instance] -> [C] -> ]r1[
+    /// w.r.t multiple gates + no lookup
+    pub fn run_sps_protocol_1<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
+        &self,
+        ck: &CommitmentKey<C>,
+        ro_nark: &mut RO,
+    ) -> (PlonkInstance<C>, PlonkWitness<F>) {
+        assert!(
+            !self.advice.is_empty(),
+            "should call TableData.assembly() first"
+        );
+
+        let _ = self.instance.iter().map(|inst| {
+            ro_nark.absorb_base(fe_to_fe(inst).unwrap());
+        });
+
+        // round 1
+        let W1 = concatenate_with_padding(&self.advice_columns[..], 2usize.pow(self.k));
+        let C1 = ck.commit(&W1);
+        ro_nark.absorb_point(C1);
+        let r1 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
+
+        (
+            PlonkInstance {
+                W_commitments: vec![C1],
+                instance: self.instance.clone(),
+                challenges: vec![r1],
+            },
+            PlonkWitness { W: vec![W1] },
+        )
+    }
+
+    /// run 2-round special soundness protocol to generate witnesses and challenges
+    /// notations: "[C]" absorb C; "]r[" squeeze r;
+    /// sequence of generating challenges:
+    /// [pi.instance] -> [C1] -> ]r1[ -> [C2] -> ]r2[
+    /// w.r.t has lookup but no vector lookup
+    pub fn run_sps_protocol_2<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
+        &self,
+        ck: &CommitmentKey<C>,
+        ro_nark: &mut RO,
+    ) -> (PlonkInstance<C>, PlonkWitness<F>) {
+        assert!(
+            !self.advice.is_empty(),
+            "should call TableData.assembly() first"
+        );
+
+        let _ = self.instance.iter().map(|inst| {
+            ro_nark.absorb_base(fe_to_fe(inst).unwrap());
+        });
+
+        // round 1
+        let mut W1 = concatenate_with_padding(&self.advice_columns, 2usize.pow(self.k));
+        let lookup_arguments = self.lookup_arguments.as_ref().unwrap();
+        // random value r is not used in this case, we can use any dummy value
+        let ls = lookup_arguments.evaluate_ls(self, F::ZERO);
+        let ts = lookup_arguments.evaluate_ts(self, F::ZERO);
+        let ms = ls
+            .iter()
+            .zip(ts.iter())
+            .map(|(l, t)| lookup_arguments.evaluate_m(l, t))
+            .collect::<Vec<_>>();
+        let W1_1 = concatenate_with_padding(&ls, 2usize.pow(self.k));
+        let W1_2 = concatenate_with_padding(&ms, 2usize.pow(self.k));
+        W1.extend(W1_1);
+        W1.extend(W1_2);
+        let C1 = ck.commit(&W1);
+        ro_nark.absorb_point(C1);
+        let r1 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
+
+        // round 2
+        let mut hs: Vec<Vec<F>> = Vec::new();
+        let mut gs: Vec<Vec<F>> = Vec::new();
+        for ((l, t), m) in ls.iter().zip(ts.iter()).zip(ms.iter()) {
+            let (h, g) = lookup_arguments.evaluate_h_g(l, t, r1, m);
+            hs.push(h);
+            gs.push(g);
+        }
+        let mut W2 = concatenate_with_padding(&hs, 2usize.pow(self.k));
+        let W2_1 = concatenate_with_padding(&gs, 2usize.pow(self.k));
+        W2.extend(W2_1);
+        let C2 = ck.commit(&W2);
+        ro_nark.absorb_point(C2);
+        let r2 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
+
+        (
+            PlonkInstance {
+                W_commitments: vec![C1, C2],
+                instance: self.instance.clone(),
+                challenges: vec![r1, r2],
+            },
+            PlonkWitness { W: vec![W1, W2] },
         )
     }
 
