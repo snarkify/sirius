@@ -1,6 +1,10 @@
-use ff::{BatchInvert, Field, PrimeField};
+use crate::poseidon::PoseidonHash;
+use crate::poseidon::ROTrait;
+use ff::{BatchInvert, Field, FromUniformBytes, PrimeField};
 use halo2_proofs::plonk::Assigned;
+use halo2curves::CurveAffine;
 use num_bigint::BigUint;
+use poseidon::Spec;
 pub(crate) use rayon::current_num_threads;
 use std::iter;
 
@@ -183,6 +187,18 @@ pub(crate) fn concatenate_with_padding<F: PrimeField>(vs: &[Vec<F>], pad_size: u
             result.extend(iter::repeat(F::ZERO).take(pad_size.saturating_sub(v.len())));
             result
         })
+}
+
+pub(crate) fn create_ro<
+    C: CurveAffine<Base = F>,
+    F: PrimeField + FromUniformBytes<64>,
+    const T: usize,
+    const RATE: usize,
+    const R_F: usize,
+    const R_P: usize,
+>() -> PoseidonHash<C, F, T, RATE> {
+    let spec = Spec::<F, T, RATE>::new(R_F, R_P);
+    PoseidonHash::<C, F, T, RATE>::new(spec)
 }
 
 /// A macro used for MockProver certain circuit by leveraging halo2_proofs.

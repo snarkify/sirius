@@ -664,7 +664,7 @@ impl<F: PrimeField> TableData<F> {
 
     /// run 0-round special soundness protocol
     /// w.r.t single custom gate + no lookup
-    pub fn run_sps_protocol_0<C: CurveAffine<ScalarExt = F>>(
+    fn run_sps_protocol_0<C: CurveAffine<ScalarExt = F>>(
         &self,
         ck: &CommitmentKey<C>,
     ) -> (PlonkInstance<C>, PlonkWitness<F>) {
@@ -691,7 +691,7 @@ impl<F: PrimeField> TableData<F> {
     /// sequence of generating challenges:
     /// [pi.instance] -> [C] -> ]r1[
     /// w.r.t multiple gates + no lookup
-    pub fn run_sps_protocol_1<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
+    fn run_sps_protocol_1<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
@@ -726,7 +726,7 @@ impl<F: PrimeField> TableData<F> {
     /// sequence of generating challenges:
     /// [pi.instance] -> [C1] -> ]r1[ -> [C2] -> ]r2[
     /// w.r.t has lookup but no vector lookup
-    pub fn run_sps_protocol_2<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
+    fn run_sps_protocol_2<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
@@ -788,7 +788,7 @@ impl<F: PrimeField> TableData<F> {
     /// notations: "[C]" absorb C; "]r[" squeeze r;
     /// sequence of generating challenges:
     /// [pi.instance] -> [C1] -> ]r1[ -> [C2] -> ]r2[ -> [C3] -> ]r3[
-    pub fn run_sps_protocol_3<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
+    fn run_sps_protocol_3<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
@@ -849,6 +849,24 @@ impl<F: PrimeField> TableData<F> {
                 W: vec![W1, W2, W3],
             },
         )
+    }
+
+    /// run special soundness protocol to generate witnesses and challenges
+    /// depending on whether we have multiple gates, lookup arguments and whether
+    /// we have vector lookup, we will call different sub-sps protocol
+    pub fn run_sps_protocol<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
+        &self,
+        ck: &CommitmentKey<C>,
+        ro_nark: &mut RO,
+        num_challenges: usize,
+    ) -> (PlonkInstance<C>, PlonkWitness<F>) {
+        match num_challenges {
+            0 => self.run_sps_protocol_0(ck),
+            1 => self.run_sps_protocol_1(ck, ro_nark),
+            2 => self.run_sps_protocol_2(ck, ro_nark),
+            3 => self.run_sps_protocol_3(ck, ro_nark),
+            _ => panic!("invalid number of challenges"),
+        }
     }
 
     /// construct sparse matrix P (size N*N) from copy constraints
