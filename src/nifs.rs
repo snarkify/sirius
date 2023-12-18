@@ -170,26 +170,21 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
     /// The folded relaxed Plonk instance.
     pub fn verify(
         &self,
-        ro: &mut RO,
+        ro_nark: &mut RO,
+        ro_acc: &mut RO,
         S: &PlonkStructure<C>,
         U1: RelaxedPlonkInstance<C>,
         U2: PlonkInstance<C>,
-    ) -> RelaxedPlonkInstance<C> {
-        S.absorb_into(ro);
-        U2.absorb_into(ro);
-        /*
-        if S.num_challenges > 0 {
-            // the first challenge is used to combined multiple gates for instance U2
-            U2.challenges = vec![ro.squeeze(NUM_CHALLENGE_BITS)];
-        }
-        */
-
-        U1.absorb_into(ro);
+    ) -> Result<RelaxedPlonkInstance<C>, String> {
+        S.run_sps_verifier(&U2, ro_nark)?;
+        S.absorb_into(ro_acc);
+        U2.absorb_into(ro_acc);
+        U1.absorb_into(ro_acc);
         self.cross_term_commits
             .iter()
-            .for_each(|cm| ro.absorb_point(*cm));
-        let r = ro.squeeze(NUM_CHALLENGE_BITS);
-        U1.fold(&U2, &self.cross_term_commits, &r)
+            .for_each(|cm| ro_acc.absorb_point(*cm));
+        let r = ro_acc.squeeze(NUM_CHALLENGE_BITS);
+        Ok(U1.fold(&U2, &self.cross_term_commits, &r))
     }
 }
 
@@ -289,15 +284,19 @@ mod tests {
         let mut f_U =
             RelaxedPlonkInstance::new(td1.instance.len(), S.num_challenges, S.round_sizes.len());
         let mut f_W = RelaxedPlonkWitness::new(td1.k, &S.round_sizes);
-        let mut ro_nark = create_ro::<C, F2, T, RATE, R_F, R_P>();
-        let (U1, W1) = td1.run_sps_protocol(ck, &mut ro_nark, S.num_challenges);
+        let mut ro_nark_prover = create_ro::<C, F2, T, RATE, R_F, R_P>();
+        let mut ro_nark_verifier = create_ro::<C, F2, T, RATE, R_F, R_P>();
+        let (U1, W1) = td1.run_sps_protocol(ck, &mut ro_nark_prover, S.num_challenges);
         let res = S.is_sat(ck, &U1, &W1);
         assert!(res.is_ok());
 
         let mut ro_acc_prover = create_ro::<C, F2, T, RATE, R_F, R_P>();
         let mut ro_acc_verifier = create_ro::<C, F2, T, RATE, R_F, R_P>();
-        let (nifs, (_U, W)) = NIFS::prove(ck, &mut ro_nark, &mut ro_acc_prover, td1, &f_U, &f_W);
-        let U = nifs.verify(&mut ro_acc_verifier, &S, f_U, U1);
+        let (nifs, (_U, W)) =
+            NIFS::prove(ck, &mut ro_nark_prover, &mut ro_acc_prover, td1, &f_U, &f_W);
+        let U = nifs
+            .verify(&mut ro_nark_verifier, &mut ro_acc_verifier, &S, f_U, U1)
+            .unwrap();
         assert_eq!(U, _U);
 
         f_U = U;
@@ -307,12 +306,15 @@ mod tests {
         let perm_res = S.is_sat_perm(&f_U, &f_W);
         assert!(perm_res.is_ok());
 
-        let (U1, W1) = td2.run_sps_protocol(ck, &mut ro_nark, S.num_challenges);
+        let (U1, W1) = td2.run_sps_protocol(ck, &mut ro_nark_prover, S.num_challenges);
         let res = S.is_sat(ck, &U1, &W1);
         assert!(res.is_ok());
 
-        let (nifs, (_U, _W)) = NIFS::prove(ck, &mut ro_nark, &mut ro_acc_prover, td2, &f_U, &f_W);
-        let U = nifs.verify(&mut ro_acc_verifier, &S, f_U, U1);
+        let (nifs, (_U, _W)) =
+            NIFS::prove(ck, &mut ro_nark_prover, &mut ro_acc_prover, td2, &f_U, &f_W);
+        let U = nifs
+            .verify(&mut ro_nark_verifier, &mut ro_acc_verifier, &S, f_U, U1)
+            .unwrap();
         assert_eq!(U, _U);
 
         f_U = _U;

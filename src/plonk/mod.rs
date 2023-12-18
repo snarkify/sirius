@@ -195,6 +195,29 @@ impl<C: CurveAffine> PlonkStructure<C> {
         }
     }
 
+    /// run special soundness protocol for verifier
+    pub fn run_sps_verifier<RO: ROTrait<C>>(
+        &self,
+        U: &PlonkInstance<C>,
+        ro_nark: &mut RO,
+    ) -> Result<(), String> {
+        if self.num_challenges == 0 {
+            return Ok(());
+        }
+
+        let _ = U.instance.iter().map(|inst| {
+            ro_nark.absorb_base(fe_to_fe(inst).unwrap());
+        });
+        for i in 0..self.num_challenges {
+            ro_nark.absorb_point(U.W_commitments[i]);
+            let r = ro_nark.squeeze(NUM_CHALLENGE_BITS);
+            if r != U.challenges[i] {
+                return Err(format!("{}-th challenge in PlonkInstance not match", i));
+            }
+        }
+        Ok(())
+    }
+
     pub fn is_sat<F>(
         &self,
         ck: &CommitmentKey<C>,
