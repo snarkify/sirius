@@ -168,7 +168,7 @@ impl<F: PrimeField> Arguments<F> {
 
     /// evaluate each of the lookup expressions to get vector l_i
     /// where l_i = L_i(x_1,...,x_a)
-    pub fn evaluate_ls(&self, table: &TableData<F>, r: F) -> Vec<Vec<F>> {
+    fn evaluate_ls(&self, table: &TableData<F>, r: F) -> Vec<Vec<F>> {
         let data = LookupEvalDomain { table, r };
         let nrow = 2usize.pow(table.k);
         self.lookup_polys
@@ -185,7 +185,7 @@ impl<F: PrimeField> Arguments<F> {
 
     /// evaluate each of the table expressions to get vector t_i
     /// where t_i = T(y1,...,y_b)
-    pub fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Vec<Vec<F>> {
+    fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Vec<Vec<F>> {
         let data = LookupEvalDomain { table, r };
         let nrow = 2usize.pow(table.k);
         self.table_polys
@@ -201,7 +201,7 @@ impl<F: PrimeField> Arguments<F> {
     }
     /// calculate the coefficients {m_i} in the log derivative formula
     /// m_i = sum_j \xi(w_j=t_i) assuming {t_i} have no duplicates
-    pub fn evaluate_m(&self, l: &[F], t: &[F]) -> Vec<F> {
+    fn evaluate_m(&self, l: &[F], t: &[F]) -> Vec<F> {
         let mut processed_t = Vec::new();
 
         t.iter()
@@ -216,10 +216,7 @@ impl<F: PrimeField> Arguments<F> {
             .collect()
     }
 
-    /// calculate the inverse in log derivative formula
-    /// h_i := \frac{1}{l_i+r}
-    /// g_i := \frac{m_i}{t_i+r}
-    pub fn evaluate_h_g(&self, l: &[F], t: &[F], r: F, m: &[F]) -> (Vec<F>, Vec<F>) {
+    fn evaluate_h_g(l: &[F], t: &[F], r: F, m: &[F]) -> (Vec<F>, Vec<F>) {
         let h = l
             .iter()
             .map(|&l_i| Option::from((l_i + r).invert()).unwrap_or(F::ZERO))
@@ -232,12 +229,29 @@ impl<F: PrimeField> Arguments<F> {
         (h, g)
     }
 
+    pub(crate) fn evaluate_coefficient_1(
+        &self,
+        table: &TableData<F>,
+        r: F,
+    ) -> ArgumentCoefficient1<F> {
+        let ls = self.evaluate_ls(table, r);
+        let ts = self.evaluate_ts(table, r);
+
+        let ms = ls
+            .iter()
+            .zip_eq(ts.iter())
+            .map(|(l, t)| self.evaluate_m(l, t))
+            .collect::<Vec<_>>();
+
+        ArgumentCoefficient1 { ls, ts, ms }
+    }
+
     /// check whether the lookup argument is satisfied
     /// the remaining check L(x1,...,xa)=l and T(y1,...,ya)=t
     /// are carried in upper level check
     pub fn is_sat(&self, l: &[F], t: &[F], r: F) -> Result<(), String> {
         let m = self.evaluate_m(l, t);
-        let (h, g) = self.evaluate_h_g(l, t, r, &m);
+        let (h, g) = Self::evaluate_h_g(l, t, r, &m);
         // check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
         let c1 = l
             .iter()
@@ -271,6 +285,31 @@ impl<F: PrimeField> Arguments<F> {
             (true, true, false) => Err("sum hi = sum gi not satisfied".to_string()),
         }
     }
+}
+
+pub(crate) struct ArgumentCoefficient1<F: PrimeField> {
+    pub ls: Vec<Vec<F>>,
+    pub ts: Vec<Vec<F>>,
+    pub ms: Vec<Vec<F>>,
+}
+
+impl<F: PrimeField> ArgumentCoefficient1<F> {
+    /// calculate the inverse in log derivative formula
+    /// h_i := \frac{1}{l_i+r}
+    /// g_i := \frac{m_i}{t_i+r}
+    pub(crate) fn evaluate_coefficient_2(&self, r: F) -> ArgumentCoefficient2<F> {
+        let (hs, gs): (Vec<_>, Vec<_>) =
+            itertools::multizip((self.ls.iter(), self.ts.iter(), self.ms.iter()))
+                .map(|(l, t, m)| Arguments::evaluate_h_g(l, t, r, m))
+                .unzip();
+
+        ArgumentCoefficient2 { hs, gs }
+    }
+}
+
+pub(crate) struct ArgumentCoefficient2<F: PrimeField> {
+    pub hs: Vec<Vec<F>>,
+    pub gs: Vec<Vec<F>>,
 }
 
 /// Used for evaluate lookup relations L_i(x1,...,xn) defined in halo2 lookup arguments
