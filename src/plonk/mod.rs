@@ -141,14 +141,14 @@ pub struct PlonkTrace<C: CurveAffine> {
 impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkStructure<C> {
     // TODO: add hash of other fields including gates
     fn absorb_into(&self, ro: &mut RO) {
-        ro.absorb_point(self.fixed_commitment);
+        ro.absorb_point(&self.fixed_commitment);
     }
 }
 
 impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
         for pt in self.W_commitments.iter() {
-            ro.absorb_point(*pt);
+            ro.absorb_point(pt);
         }
         for inst in self.instance.iter() {
             ro.absorb_base(fe_to_fe(inst).unwrap());
@@ -162,9 +162,9 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkInstance<C> {
 impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
         for pt in self.W_commitments.iter() {
-            ro.absorb_point(*pt);
+            ro.absorb_point(pt);
         }
-        ro.absorb_point(self.E_commitment);
+        ro.absorb_point(&self.E_commitment);
         for inst in self.instance.iter() {
             ro.absorb_base(fe_to_fe(inst).unwrap());
         }
@@ -209,7 +209,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
             ro_nark.absorb_base(fe_to_fe(inst).unwrap());
         });
         for i in 0..self.num_challenges {
-            ro_nark.absorb_point(U.W_commitments[i]);
+            ro_nark.absorb_point(&U.W_commitments[i]);
             let r = ro_nark.squeeze(NUM_CHALLENGE_BITS);
             if r != U.challenges[i] {
                 return Err(format!("{}-th challenge in PlonkInstance not match", i));
