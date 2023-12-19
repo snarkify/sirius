@@ -244,7 +244,7 @@ where
         let ecc = EccChip::<C, C::Base, T>::new(config.clone());
         let results: Result<Vec<AssignedPoint<C>>, Error> = folded_W
             .iter()
-            .zip(input_W_commitments)
+            .zip_eq(input_W_commitments)
             .map(|(W1, W2)| -> Result<AssignedPoint<C>, Error> {
                 let rW = ecc.scalar_mul(region, W2, r)?;
                 Ok(ecc.add(region, W1, &rW)?)
@@ -490,7 +490,7 @@ where
         // - Unpack todo
         // - Understand how return all ctx from chip
         Ok(Some(Self {
-            W: vec![unwrap_result_option!(new_folded_W[0].to_curve())],
+            W: unwrap_result_option!(new_folded_W.iter().map(AssignedPoint::to_curve).collect()),
             E: unwrap_result_option!(new_folded_E.to_curve()),
             u: unwrap_result_option!(util::fe_to_fe_safe(&unwrap_result_option!(new_folded_u
                 .value()
@@ -597,10 +597,7 @@ where
         let assigned_W = self
             .W
             .iter()
-            .map(|W| -> Result<AssignedPoint<C>, Error> {
-                let res = assign_and_absorb_point!(W)?;
-                Ok(res)
-            })
+            .map(|W| assign_and_absorb_point!(W))
             .collect::<Result<Vec<_>, _>>()?;
         let assigned_E = assign_and_absorb_point!(self.E)?;
         let assigned_u = assign_and_absorb_diff_field!(self.u)?;
