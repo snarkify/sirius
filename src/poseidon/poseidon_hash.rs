@@ -118,7 +118,7 @@ where
         self.update(&[base]);
     }
 
-    fn absorb_point(&mut self, point: C) {
+    fn absorb_point(&mut self, point: &C) {
         let encoded = point.coordinates().map(|coordinates| {
             [coordinates.x(), coordinates.y()]
                 .into_iter()
