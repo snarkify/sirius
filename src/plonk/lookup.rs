@@ -32,9 +32,14 @@
 //!
 //! - Lookup argument in [halo2](https://zcash.github.io/halo2/design/proving-system/lookup.html)
 //! - IVC description in Section 4.3 in [Protostar](https://eprint.iacr.org/2023/620)
+//! ## Notations
+//!
+//! Please see (#34)[https://github.com/snarkify/sirius/issues/34] for details on notations.
+//!
 
 use ff::PrimeField;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
+use itertools::Itertools;
 use rayon::prelude::*;
 use std::array;
 
@@ -92,7 +97,7 @@ impl<F: PrimeField> Arguments<F> {
                         cs.num_selectors(),
                         cs.num_fixed_columns(),
                         num_lookups,
-                        // compress vector table items with r1 (cha_index = 0)
+                        // compress vector table items with r1 (challenge_index = 0)
                         0,
                     ),
                     compress_halo2_expression(
@@ -100,7 +105,7 @@ impl<F: PrimeField> Arguments<F> {
                         cs.num_selectors(),
                         cs.num_fixed_columns(),
                         num_lookups,
-                        // compress vector lookups with r1 (cha_index = 0)
+                        // compress vector lookups with r1 (challenge_index = 0)
                         0,
                     ),
                 )
@@ -124,9 +129,9 @@ impl<F: PrimeField> Arguments<F> {
         &self,
         cs: &ConstraintSystem<F>,
         lookup_index: usize,
-        cha_index: usize,
+        challenge_index: usize,
     ) -> (Expression<F>, Expression<F>) {
-        let r = Expression::Challenge(cha_index);
+        let r = Expression::Challenge(challenge_index);
         // starting index of lookup variables (l_i, m_i, h_i, g_i)
         let lookup_offset = cs.num_selectors()
             + cs.num_fixed_columns()
@@ -136,6 +141,7 @@ impl<F: PrimeField> Arguments<F> {
             index: cs.num_selectors() + cs.num_fixed_columns() + lookup_index,
             rotation: Rotation(0),
         });
+        // Please see (#34)[https://github.com/snarkify/sirius/issues/34] for details on notations.
         let [l, m, h, g] = array::from_fn(|idx| {
             Expression::Polynomial(Query {
                 index: lookup_offset + lookup_index * 4 + idx,
@@ -151,9 +157,12 @@ impl<F: PrimeField> Arguments<F> {
 
     /// collect lhs of log-derivative relations from all lookup arguments
     pub fn log_derivative_lhs(&self, cs: &ConstraintSystem<F>) -> Vec<Expression<F>> {
-        let cha_index = if self.has_vector_lookup { 1 } else { 0 };
+        let challenge_index = if self.has_vector_lookup { 1 } else { 0 };
         (0..self.num_lookups())
-            .map(|lookup_index| self.log_derivative_expr(cs, lookup_index, cha_index).0)
+            .map(|lookup_index| {
+                self.log_derivative_expr(cs, lookup_index, challenge_index)
+                    .0
+            })
             .collect()
     }
 
@@ -193,19 +202,18 @@ impl<F: PrimeField> Arguments<F> {
     /// calculate the coefficients {m_i} in the log derivative formula
     /// m_i = sum_j \xi(w_j=t_i) assuming {t_i} have no duplicates
     pub fn evaluate_m(&self, l: &[F], t: &[F]) -> Vec<F> {
-        let mut m: Vec<F> = Vec::new();
         let mut processed_t = Vec::new();
-        for t_i in t {
-            if processed_t.contains(&t_i) {
-                // If the current t_i has already been processed, push 0 to m
-                m.push(F::ZERO);
-            } else {
-                let m_i = l.iter().filter(|l_j| *l_j == t_i).count() as u128;
-                m.push(F::from_u128(m_i));
-                processed_t.push(t_i);
-            }
-        }
-        m
+
+        t.iter()
+            .map(|t_i| {
+                if processed_t.contains(&t_i) {
+                    F::ZERO
+                } else {
+                    processed_t.push(t_i);
+                    F::from_u128(l.iter().filter(|l_j| *l_j == t_i).count() as u128)
+                }
+            })
+            .collect()
     }
 
     /// calculate the inverse in log derivative formula
@@ -218,7 +226,7 @@ impl<F: PrimeField> Arguments<F> {
             .collect::<Vec<F>>();
         let g = t
             .iter()
-            .zip(m)
+            .zip_eq(m)
             .map(|(t_i, m_i)| *m_i * Option::from((*t_i + r).invert()).unwrap_or(F::ZERO))
             .collect::<Vec<F>>();
         (h, g)
