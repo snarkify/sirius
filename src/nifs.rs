@@ -137,7 +137,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         let S = td.plonk_structure(ck);
         S.absorb_into(ro_acc);
 
-        let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges);
+        let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges).unwrap();
         U2.absorb_into(ro_acc);
         U1.absorb_into(ro_acc);
         let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2);
@@ -286,7 +286,9 @@ mod tests {
         let mut f_W = RelaxedPlonkWitness::new(td1.k, &S.round_sizes);
         let mut ro_nark_prover = create_ro::<C, F2, T, RATE, R_F, R_P>();
         let mut ro_nark_verifier = create_ro::<C, F2, T, RATE, R_F, R_P>();
-        let (U1, W1) = td1.run_sps_protocol(ck, &mut ro_nark_prover, S.num_challenges);
+        let (U1, W1) = td1
+            .run_sps_protocol(ck, &mut ro_nark_prover, S.num_challenges)
+            .unwrap();
         let res = S.is_sat(ck, &U1, &W1);
         assert!(res.is_ok());
 
@@ -306,7 +308,9 @@ mod tests {
         let perm_res = S.is_sat_perm(&f_U, &f_W);
         assert!(perm_res.is_ok());
 
-        let (U1, W1) = td2.run_sps_protocol(ck, &mut ro_nark_prover, S.num_challenges);
+        let (U1, W1) = td2
+            .run_sps_protocol(ck, &mut ro_nark_prover, S.num_challenges)
+            .unwrap();
         let res = S.is_sat(ck, &U1, &W1);
         assert!(res.is_ok());
 
