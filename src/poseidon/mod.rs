@@ -29,7 +29,7 @@ pub trait ROTrait<C: CurveAffine> {
     fn absorb_base(&mut self, base: C::Base);
 
     /// Adds a point to the internal state
-    fn absorb_point(&mut self, p: C);
+    fn absorb_point(&mut self, p: &C);
 
     /// Returns a challenge by hashing the internal state
     fn squeeze(&mut self, num_bits: usize) -> C::Scalar;

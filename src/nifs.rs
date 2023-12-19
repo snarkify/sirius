@@ -143,7 +143,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2);
         cross_term_commits
             .iter()
-            .for_each(|cm| ro_acc.absorb_point(*cm));
+            .for_each(|cm| ro_acc.absorb_point(cm));
         let r = ro_acc.squeeze(NUM_CHALLENGE_BITS);
         let U = U1.fold(&U2, &cross_term_commits, &r);
         let W = W1.fold(&W2, &cross_terms, &r);
@@ -182,7 +182,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         U1.absorb_into(ro_acc);
         self.cross_term_commits
             .iter()
-            .for_each(|cm| ro_acc.absorb_point(*cm));
+            .for_each(|cm| ro_acc.absorb_point(cm));
         let r = ro_acc.squeeze(NUM_CHALLENGE_BITS);
         Ok(U1.fold(&U2, &self.cross_term_commits, &r))
     }
