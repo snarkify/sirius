@@ -56,7 +56,7 @@ pub struct PlonkStructure<C: CurveAffine> {
     /// We follow the special soundness protocol(SPS), section 3.1 in [Protostar](https://eprint.iacr.org/2023/620)
     /// let k = num_challenges; when k > 0, we add extra verifier round, this is slightly different
     /// from protostar paper.
-    /// see [`PlonkInstance.challenges`] for detail
+    /// see [`PlonkInstance::challenges`] for detail
     pub(crate) num_challenges: usize,
     /// specify the witness size of each prover round
     pub(crate) round_sizes: Vec<usize>,
