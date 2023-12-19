@@ -205,7 +205,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
             return Ok(());
         }
 
-        let _ = U.instance.iter().map(|inst| {
+        U.instance.iter().for_each(|inst| {
             ro_nark.absorb_base(fe_to_fe(inst).unwrap());
         });
         for i in 0..self.num_challenges {
@@ -690,23 +690,22 @@ impl<F: PrimeField> TableData<F> {
     fn run_sps_protocol_0<C: CurveAffine<ScalarExt = F>>(
         &self,
         ck: &CommitmentKey<C>,
-    ) -> (PlonkInstance<C>, PlonkWitness<F>) {
-        assert!(
-            !self.advice.is_empty(),
-            "should call TableData.assembly() first"
-        );
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+        if self.advice.is_empty() {
+            return Err(SpsError::LackOfAdvices);
+        }
 
         let W1 = concatenate_with_padding(&self.advice_columns, 2usize.pow(self.k));
         let C1 = ck.commit(&W1);
 
-        (
+        Ok((
             PlonkInstance {
                 W_commitments: vec![C1],
                 instance: self.instance.clone(),
                 challenges: vec![],
             },
             PlonkWitness { W: vec![W1] },
-        )
+        ))
     }
 
     /// run 1-round special soundness protocol to generate witnesses and challenges
@@ -718,30 +717,21 @@ impl<F: PrimeField> TableData<F> {
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
-    ) -> (PlonkInstance<C>, PlonkWitness<F>) {
-        assert!(
-            !self.advice.is_empty(),
-            "should call TableData.assembly() first"
-        );
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+        let (mut plonk_instance, plonk_witness) = self.run_sps_protocol_0(ck)?;
 
-        let _ = self.instance.iter().map(|inst| {
+        self.instance.iter().for_each(|inst| {
             ro_nark.absorb_base(fe_to_fe(inst).unwrap());
         });
+        plonk_instance.W_commitments.iter().for_each(|C| {
+            ro_nark.absorb_point(C);
+        });
 
-        // round 1
-        let W1 = concatenate_with_padding(&self.advice_columns[..], 2usize.pow(self.k));
-        let C1 = ck.commit(&W1);
-        ro_nark.absorb_point(C1);
-        let r1 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
+        plonk_instance
+            .challenges
+            .push(ro_nark.squeeze(NUM_CHALLENGE_BITS));
 
-        (
-            PlonkInstance {
-                W_commitments: vec![C1],
-                instance: self.instance.clone(),
-                challenges: vec![r1],
-            },
-            PlonkWitness { W: vec![W1] },
-        )
+        Ok((plonk_instance, plonk_witness))
     }
 
     /// run 2-round special soundness protocol to generate witnesses and challenges
@@ -753,58 +743,56 @@ impl<F: PrimeField> TableData<F> {
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
-    ) -> (PlonkInstance<C>, PlonkWitness<F>) {
-        assert!(
-            !self.advice.is_empty(),
-            "should call TableData.assembly() first"
-        );
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+        if self.advice.is_empty() {
+            return Err(SpsError::LackOfAdvices);
+        }
 
-        let _ = self.instance.iter().map(|inst| {
-            ro_nark.absorb_base(fe_to_fe(inst).unwrap());
-        });
+        let k_power_of_2 = 2usize.pow(self.k);
 
         // round 1
-        let mut W1 = concatenate_with_padding(&self.advice_columns, 2usize.pow(self.k));
-        let lookup_arguments = self.lookup_arguments.as_ref().unwrap();
-        // random value r is not used in this case, we can use any dummy value
-        let ls = lookup_arguments.evaluate_ls(self, F::ZERO);
-        let ts = lookup_arguments.evaluate_ts(self, F::ZERO);
-        let ms = ls
-            .iter()
-            .zip(ts.iter())
-            .map(|(l, t)| lookup_arguments.evaluate_m(l, t))
-            .collect::<Vec<_>>();
-        let W1_1 = concatenate_with_padding(&ls, 2usize.pow(self.k));
-        let W1_2 = concatenate_with_padding(&ms, 2usize.pow(self.k));
-        W1.extend(W1_1);
-        W1.extend(W1_2);
+        let lookup_coeff = self
+            .lookup_arguments
+            .as_ref()
+            .map(|la| la.evaluate_coefficient_1(self, F::ZERO))
+            .ok_or(SpsError::LackOfLookupArguments)?;
+
+        let W1 = [
+            concatenate_with_padding(&self.advice_columns, k_power_of_2),
+            concatenate_with_padding(&lookup_coeff.ls, k_power_of_2),
+            concatenate_with_padding(&lookup_coeff.ms, k_power_of_2),
+        ]
+        .concat();
+
         let C1 = ck.commit(&W1);
-        ro_nark.absorb_point(C1);
+
+        self.instance.iter().for_each(|inst| {
+            ro_nark.absorb_base(fe_to_fe(inst).unwrap());
+        });
+        ro_nark.absorb_point(&C1);
         let r1 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
 
         // round 2
-        let mut hs: Vec<Vec<F>> = Vec::new();
-        let mut gs: Vec<Vec<F>> = Vec::new();
-        for ((l, t), m) in ls.iter().zip(ts.iter()).zip(ms.iter()) {
-            let (h, g) = lookup_arguments.evaluate_h_g(l, t, r1, m);
-            hs.push(h);
-            gs.push(g);
-        }
-        let mut W2 = concatenate_with_padding(&hs, 2usize.pow(self.k));
-        let W2_1 = concatenate_with_padding(&gs, 2usize.pow(self.k));
-        W2.extend(W2_1);
+        let lookup_coeff = lookup_coeff.evaluate_coefficient_2(r1);
+
+        let W2 = [
+            concatenate_with_padding(&lookup_coeff.hs, k_power_of_2),
+            concatenate_with_padding(&lookup_coeff.gs, k_power_of_2),
+        ]
+        .concat();
+
         let C2 = ck.commit(&W2);
-        ro_nark.absorb_point(C2);
+        ro_nark.absorb_point(&C2);
         let r2 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
 
-        (
+        Ok((
             PlonkInstance {
                 W_commitments: vec![C1, C2],
                 instance: self.instance.clone(),
                 challenges: vec![r1, r2],
             },
             PlonkWitness { W: vec![W1, W2] },
-        )
+        ))
     }
 
     /// run 3-round special soundness protocol to generate witnesses and challenges
@@ -815,54 +803,53 @@ impl<F: PrimeField> TableData<F> {
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
-    ) -> (PlonkInstance<C>, PlonkWitness<F>) {
-        assert!(
-            !self.advice.is_empty(),
-            "should call TableData.assembly() first"
-        );
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+        if self.advice.is_empty() {
+            return Err(SpsError::LackOfAdvices);
+        }
 
-        let _ = self.instance.iter().map(|inst| {
+        self.instance.iter().for_each(|inst| {
             ro_nark.absorb_base(fe_to_fe(inst).unwrap());
         });
 
+        let k_power_of_2 = 2usize.pow(self.k);
+
         // round 1
-        let W1 = concatenate_with_padding(&self.advice_columns[..], 2usize.pow(self.k));
+        let W1 = concatenate_with_padding(&self.advice_columns, k_power_of_2);
         let C1 = ck.commit(&W1);
-        ro_nark.absorb_point(C1);
+        ro_nark.absorb_point(&C1);
         let r1 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
 
         // round 2
-        let lookup_arguments = self.lookup_arguments.as_ref().unwrap();
-        let ls = lookup_arguments.evaluate_ls(self, r1);
-        let ts = lookup_arguments.evaluate_ts(self, r1);
-        let ms = ls
-            .iter()
-            .zip(ts.iter())
-            .map(|(l, t)| lookup_arguments.evaluate_m(l, t))
-            .collect::<Vec<_>>();
-        let mut W2 = concatenate_with_padding(&ls, 2usize.pow(self.k));
-        let W2_1 = concatenate_with_padding(&ms, 2usize.pow(self.k));
-        W2.extend(W2_1);
+        let lookup_coeff = self
+            .lookup_arguments
+            .as_ref()
+            .map(|la| la.evaluate_coefficient_1(self, r1))
+            .ok_or(SpsError::LackOfLookupArguments)?;
+
+        let W2 = [
+            concatenate_with_padding(&lookup_coeff.ls, k_power_of_2),
+            concatenate_with_padding(&lookup_coeff.ms, k_power_of_2),
+        ]
+        .concat();
         let C2 = ck.commit(&W2);
-        ro_nark.absorb_point(C2);
+        ro_nark.absorb_point(&C2);
         let r2 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
 
         // round 3
-        let mut hs: Vec<Vec<F>> = Vec::new();
-        let mut gs: Vec<Vec<F>> = Vec::new();
-        for ((l, t), m) in ls.iter().zip(ts.iter()).zip(ms.iter()) {
-            let (h, g) = lookup_arguments.evaluate_h_g(l, t, r2, m);
-            hs.push(h);
-            gs.push(g);
-        }
-        let mut W3 = concatenate_with_padding(&hs, 2usize.pow(self.k));
-        let W3_1 = concatenate_with_padding(&gs, 2usize.pow(self.k));
-        W3.extend(W3_1);
+        let lookup_coef = lookup_coeff.evaluate_coefficient_2(r2);
+
+        let W3 = [
+            concatenate_with_padding(&lookup_coef.hs, k_power_of_2),
+            concatenate_with_padding(&lookup_coef.gs, k_power_of_2),
+        ]
+        .concat();
+
         let C3 = ck.commit(&W3);
-        ro_nark.absorb_point(C3);
+        ro_nark.absorb_point(&C3);
         let r3 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
 
-        (
+        Ok((
             PlonkInstance {
                 W_commitments: vec![C1, C2, C3],
                 instance: self.instance.clone(),
@@ -871,7 +858,7 @@ impl<F: PrimeField> TableData<F> {
             PlonkWitness {
                 W: vec![W1, W2, W3],
             },
-        )
+        ))
     }
 
     /// run special soundness protocol to generate witnesses and challenges
@@ -882,13 +869,17 @@ impl<F: PrimeField> TableData<F> {
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
         num_challenges: usize,
-    ) -> (PlonkInstance<C>, PlonkWitness<F>) {
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+        if self.advice.is_empty() {
+            return Err(SpsError::LackOfAdvices);
+        }
+
         match num_challenges {
             0 => self.run_sps_protocol_0(ck),
             1 => self.run_sps_protocol_1(ck, ro_nark),
             2 => self.run_sps_protocol_2(ck, ro_nark),
             3 => self.run_sps_protocol_3(ck, ro_nark),
-            _ => panic!("invalid number of challenges"),
+            challenges_count => Err(SpsError::UnsupportedChallengesCount { challenges_count }),
         }
     }
 
@@ -1060,6 +1051,16 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
     fn pop_namespace(&mut self, _: Option<String>) {
         // Do nothing; we don't care about namespaces in this context.
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SpsError {
+    #[error("For this challenges count table must have lookup aguments")]
+    LackOfLookupArguments,
+    #[error("Lack of advices, should call `TableData::assembly` first")]
+    LackOfAdvices,
+    #[error("Only 0..=3 num of challenges supported: {challenges_count} not")]
+    UnsupportedChallengesCount { challenges_count: usize },
 }
 
 #[cfg(test)]
