@@ -62,7 +62,7 @@ use crate::{
 /// into a single (i.e. non-vector) Expression:
 /// - lookup_poly = L(x_1,...,x_a) = a_1 + a_2*r + a_3*r^2 + ...
 /// - table_poly  = T(y_1,...,y_b) = t_1 + t_2*r + t_3*r^2 + ...
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Arguments<F: PrimeField> {
     /// vector of the compressed lookup expressions
     /// L_i(x_1,...,x_{a_i})

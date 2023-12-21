@@ -497,6 +497,7 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
     }
 }
 
+#[derive(Debug)]
 pub struct TableData<F: PrimeField> {
     // TODO: without usable_rows still safe?
     pub(crate) k: u32,
