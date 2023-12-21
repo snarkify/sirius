@@ -267,7 +267,7 @@ const ARITY: usize = BLOCK_SIZE / 2;
 
 impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
     type Config = Table16Config;
-    type FloopPlanner = SimpleFloorPlanner;
+    type FloorPlanner = SimpleFloorPlanner;
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         Table16Chip::configure(meta)

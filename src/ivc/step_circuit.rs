@@ -66,7 +66,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     /// TODO improve
     ///
     /// If you don't understand what it is, just use [`super::floor_planner::SimpleStepFloorPlanner`]
-    type FloopPlanner: FloorPlanner;
+    type FloorPlanner: FloorPlanner;
 
     /// Configure the step circuit. This method initializes necessary
     /// fixed columns and advice columns, but does not create any instance
@@ -314,7 +314,7 @@ pub mod trivial {
         /// TODO improve
         ///
         /// If you don't understand what it is, just use [`super::floor_planner::SimpleStepFloorPlanner`]
-        type FloopPlanner = SimpleFloorPlanner;
+        type FloorPlanner = SimpleFloorPlanner;
 
         /// Configure the step circuit. This method initializes necessary
         /// fixed columns and advice columns, but does not create any instance
