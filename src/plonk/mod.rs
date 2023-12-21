@@ -556,11 +556,9 @@ impl<F: PrimeField> TableData<F> {
         combined
     }
 
-    pub fn assembly<ConcreteCircuit: Circuit<F>>(
-        &mut self,
-        circuit: &ConcreteCircuit,
-    ) -> Result<(), Error> {
-        let config = ConcreteCircuit::configure(&mut self.cs);
+    // TODO Change design
+    pub fn prepare<C>(&mut self, configure: impl FnOnce(&mut ConstraintSystem<F>) -> C) -> C {
+        let config = configure(&mut self.cs);
         self.permutation = Some(permutation::Assembly::new(
             1 << self.k,
             &self.cs.permutation,
@@ -572,14 +570,30 @@ impl<F: PrimeField> TableData<F> {
         self.fixed = vec![vec![F::ZERO.into(); n]; self.cs.num_fixed_columns()];
         self.selector = vec![vec![false; n]; self.cs.num_selectors()];
         self.advice = vec![vec![F::ZERO.into(); n]; self.cs.num_advice_columns()];
+        config
+    }
+
+    // TODO Change design
+    pub fn postpone(&mut self) {
+        self.fixed_columns = batch_invert_assigned(&self.fixed);
+        self.advice_columns = batch_invert_assigned(&self.advice);
+    }
+
+    // TODO Change design
+    pub fn assembly<ConcreteCircuit: Circuit<F>>(
+        &mut self,
+        circuit: &ConcreteCircuit,
+    ) -> Result<(), Error> {
+        let config = self.prepare(ConcreteCircuit::configure);
+
         ConcreteCircuit::FloorPlanner::synthesize(
             self,
             circuit,
             config.clone(),
             vec![], // TODO: make sure constants not needed
         )?;
-        self.fixed_columns = batch_invert_assigned(&self.fixed);
-        self.advice_columns = batch_invert_assigned(&self.advice);
+
+        self.postpone();
         Ok(())
     }
 
