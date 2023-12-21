@@ -242,15 +242,14 @@ where
         r: &[AssignedCell<C::Base, C::Base>],
     ) -> Result<Vec<AssignedPoint<C>>, Error> {
         let ecc = EccChip::<C, C::Base, T>::new(config.clone());
-        let results: Result<Vec<AssignedPoint<C>>, Error> = folded_W
+        folded_W
             .iter()
             .zip_eq(input_W_commitments)
             .map(|(W1, W2)| -> Result<AssignedPoint<C>, Error> {
                 let rW = ecc.scalar_mul(region, W2, r)?;
                 Ok(ecc.add(region, W1, &rW)?)
             })
-            .collect();
-        results
+            .collect()
     }
 
     // TODO #32 rustdoc
