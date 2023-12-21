@@ -967,7 +967,7 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
 
     fn assign_advice<V, VR, A, AR>(
         &mut self,
-        _: A,
+        annotation: A,
         column: Column<Advice>,
         row: usize,
         to: V,
@@ -983,14 +983,20 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
             .advice
             .get_mut(column.index())
             .and_then(|v| v.get_mut(row))
-            .ok_or(Error::BoundsFailure)? = to().into_field().assign()?;
+            .ok_or_else(|| {
+                error!(
+                    "Error while assign advice {} in column {column:?} & row {row}",
+                    annotation().into()
+                );
+                Error::BoundsFailure
+            })? = to().into_field().assign()?;
 
         Ok(())
     }
 
     fn assign_fixed<V, VR, A, AR>(
         &mut self,
-        _: A,
+        annotation: A,
         column: Column<Fixed>,
         row: usize,
         to: V,
@@ -1005,7 +1011,13 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
             .fixed
             .get_mut(column.index())
             .and_then(|v| v.get_mut(row))
-            .ok_or(Error::BoundsFailure)? = to().into_field().assign()?;
+            .ok_or_else(|| {
+                error!(
+                    "Error while assign fixed {} in column {column:?} & row {row}",
+                    annotation().into()
+                );
+                Error::BoundsFailure
+            })? = to().into_field().assign()?;
         Ok(())
     }
 
