@@ -770,7 +770,7 @@ impl<F: ff::Field> ops::Deref for ValueView<F> {
 
 #[cfg(test)]
 mod tests {
-    use std::iter;
+    use std::array;
 
     use halo2_proofs::circuit::{
         floor_planner::single_pass::SingleChipLayouter,
@@ -784,7 +784,7 @@ mod tests {
 
     use poseidon::Spec;
 
-    use crate::{plonk::TableData, poseidon::poseidon_circuit::PoseidonChip};
+    use crate::{plonk::TableData, poseidon::poseidon_circuit::PoseidonChip, nifs::NIFS};
 
     use super::*;
 
@@ -837,13 +837,19 @@ mod tests {
     fn fold_W_test() {
         const T: usize = 6;
 
-        let mut td = TableData::new(12, vec![]);
+        let mut td = TableData::new(17, vec![]);
         let _ = td.cs.instance_column();
         let config = td.prepare(MainGate::<Base, T>::configure);
         debug!("Constraint System {td:?}");
 
         let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
         let mut cell = None;
+        let mut rnd = rand::thread_rng();
+
+        let (x, y) = (Base::random(&mut rnd), Base::random(&mut rnd));
+        let r: [Base; NUM_CHALLENGE_BITS] = array::from_fn(|_| Base::random(&mut rnd));
+
+        // Run twice for setup & real run
         for _ in 0..=1 {
             cell = Some(
                 layouter
@@ -852,56 +858,44 @@ mod tests {
                         |region| {
                             debug!("Region {region:?}");
                             let mut ctx = RegionCtx::new(region, 0);
-                            let mut rnd = rand::thread_rng();
                             let folded = AssignedPoint::<C1> {
                                 x: ctx
                                     .assign_advice(
                                         || "folded_x",
                                         config.state[0],
-                                        Value::known(Base::random(&mut rnd)),
+                                        Value::known(0.into()),
                                     )
                                     .unwrap(),
                                 y: ctx
                                     .assign_advice(
                                         || "folded_y",
                                         config.state[1],
-                                        Value::known(Base::random(&mut rnd)),
+                                        Value::known(0.into()),
                                     )
                                     .unwrap(),
                             };
 
                             let input = AssignedPoint::<C1> {
                                 x: ctx
-                                    .assign_advice(
-                                        || "input_x",
-                                        config.state[2],
-                                        Value::known(Base::random(&mut rnd)),
-                                    )
+                                    .assign_advice(|| "input_x", config.state[2], Value::known(x))
                                     .unwrap(),
                                 y: ctx
-                                    .assign_advice(
-                                        || "input_y",
-                                        config.state[2],
-                                        Value::known(Base::random(&mut rnd)),
-                                    )
+                                    .assign_advice(|| "input_y", config.state[3], Value::known(y))
                                     .unwrap(),
                             };
 
-                            let r = iter::repeat_with(|| {
-                                let val = ctx
-                                    .assign_advice(
-                                        || "r",
-                                        config.input,
-                                        Value::known(Base::random(&mut rnd)),
-                                    )
-                                    .unwrap();
+                            let r = r
+                                .iter()
+                                .map(|r_bit| {
+                                    let val = ctx
+                                        .assign_advice(|| "r", config.input, Value::known(*r_bit))
+                                        .unwrap();
 
-                                ctx.next();
+                                    ctx.next();
 
-                                val
-                            })
-                            .take(10)
-                            .collect::<Vec<_>>();
+                                    val
+                                })
+                                .collect::<Vec<_>>();
 
                             Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_W(
                                 &mut ctx,
