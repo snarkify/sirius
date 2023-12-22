@@ -230,6 +230,12 @@ impl<C: CurveAffine> PlonkStructure<C> {
         C: CurveAffine<ScalarExt = F>,
         F: PrimeField,
     {
+        let check_commitments = U
+            .W_commitments
+            .iter()
+            .zip(W.W.iter())
+            .filter(|(Ci, Wi)| **Ci != ck.commit(Wi))
+            .count();
         let nrow = 2usize.pow(self.k as u32);
         let U2 = RelaxedPlonkInstance::new(
             U.instance.len(),
@@ -250,7 +256,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
             .filter(|v| F::ZERO.ne(v))
             .count();
 
-        if U.W_commitments[0] == ck.commit(&W.W[0]) && res == 0 {
+        if check_commitments == 0 && res == 0 {
             Ok(())
         } else {
             Err("plonk relation not satisfied".to_string())
