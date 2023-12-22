@@ -558,8 +558,8 @@ impl<F: PrimeField> TableData<F> {
     pub fn lookup_exprs(&self, cs: &ConstraintSystem<F>) -> Vec<Expression<F>> {
         let mut combined = vec![];
         if let Some(lookup_arguments) = self.lookup_arguments.as_ref() {
-            combined = lookup_arguments.lookup_polys.clone();
-            combined.extend(lookup_arguments.log_derivative_lhs(cs));
+            combined = lookup_arguments.lookup_polys_minus_l(cs);
+            combined.extend(lookup_arguments.log_derivative_lhs_and_rhs(cs));
         }
         combined
     }
@@ -721,12 +721,12 @@ impl<F: PrimeField> TableData<F> {
 
         // we use r3 to combine all custom gates and lookup expressions
         // find the challenge index of r3
-        let cha_index = if num_challenges > 0 {
+        let challenge_index = if num_challenges > 0 {
             num_challenges - 1
         } else {
             0
         };
-        let poly = compress_expression(&exprs[..], cha_index).expand();
+        let poly = compress_expression(&exprs, challenge_index).expand();
         let permutation_matrix = self.permutation_matrix();
 
         PlonkStructure {
