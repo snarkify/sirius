@@ -119,6 +119,26 @@ impl<F: PrimeField> Arguments<F> {
         })
     }
 
+    /// L_i(x1,...,xa) - l_i which evaluates to zero on every row
+    pub fn lookup_polys_minus_l(&self, cs: &ConstraintSystem<F>) -> Vec<Expression<F>> {
+        let lookup_offset = cs.num_selectors()
+            + cs.num_fixed_columns()
+            + cs.lookups().len()
+            + cs.num_advice_columns();
+        let expression_of_l = |lookup_index: usize| -> Expression<F> {
+            Expression::Polynomial(Query {
+                index: lookup_offset + lookup_index * 4,
+                rotation: Rotation(0),
+            })
+        };
+
+        self.lookup_polys
+            .iter()
+            .enumerate()
+            .map(|(i, L_i)| L_i.clone() - expression_of_l(i))
+            .collect::<Vec<_>>()
+    }
+
     pub fn num_lookups(&self) -> usize {
         self.lookup_polys.len()
     }
@@ -155,15 +175,15 @@ impl<F: PrimeField> Arguments<F> {
         (lhs_rel, rhs_rel)
     }
 
-    /// collect lhs of log-derivative relations from all lookup arguments
-    pub fn log_derivative_lhs(&self, cs: &ConstraintSystem<F>) -> Vec<Expression<F>> {
+    /// collect the lhs and rhs of log-derivative relations from all lookup arguments
+    pub fn log_derivative_lhs_and_rhs(&self, cs: &ConstraintSystem<F>) -> Vec<Expression<F>> {
         let challenge_index = if self.has_vector_lookup { 1 } else { 0 };
         (0..self.num_lookups())
-            .map(|lookup_index| {
-                self.log_derivative_expr(cs, lookup_index, challenge_index)
-                    .0
+            .flat_map(|lookup_index| {
+                let (lhs, rhs) = self.log_derivative_expr(cs, lookup_index, challenge_index);
+                vec![lhs, rhs].into_iter()
             })
-            .collect()
+            .collect::<Vec<_>>()
     }
 
     /// evaluate each of the lookup expressions to get vector l_i
