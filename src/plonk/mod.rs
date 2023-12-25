@@ -407,8 +407,15 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             .W_commitments
             .iter()
             .zip(U2.W_commitments.clone())
-            .map(|(W1, W2)| *W1 + best_multiexp(&[*r], &[W2]).into())
-            .map(|W| W.into())
+            .enumerate()
+            .map(|(W_index, (W1, W2))| {
+                let rW = best_multiexp(&[*r], &[W2]).into();
+                let res = *W1 + rW;
+                debug!(
+                    "W1 = {W1:?}; W2 = {W2:?}; rW2[{W_index}] = {rW:?}; rW1 + rW2 * r = {res:?}"
+                );
+                res.into()
+            })
             .collect::<Vec<C>>();
 
         let instance = self

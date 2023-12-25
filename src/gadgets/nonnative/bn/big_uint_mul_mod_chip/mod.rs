@@ -13,7 +13,10 @@ use log::*;
 use num_bigint::BigUint as BigUintRaw;
 use num_traits::{One, ToPrimitive, Zero};
 
-use crate::{util, main_gate::{AssignAdviceFrom, MainGate, MainGateConfig, RegionCtx}};
+use crate::{
+    main_gate::{AssignAdviceFrom, MainGate, MainGateConfig, RegionCtx},
+    util,
+};
 
 use super::big_uint::{self, BigUint};
 
