@@ -770,21 +770,22 @@ impl<F: ff::Field> ops::Deref for ValueView<F> {
 
 #[cfg(test)]
 mod tests {
-    use std::array;
-
     use halo2_proofs::circuit::{
         floor_planner::single_pass::SingleChipLayouter,
         layouter::{RegionLayouter, RegionShape},
         Layouter, Region, RegionIndex,
     };
-    use halo2curves::bn256::G1Affine as C1;
+    use halo2curves::{bn256::G1Affine as C1, CurveAffine};
+    use rand::Rng;
 
     type Base = <C1 as CurveAffine>::Base;
     type ScalarExt = <C1 as CurveAffine>::ScalarExt;
 
     use poseidon::Spec;
 
-    use crate::{plonk::TableData, poseidon::poseidon_circuit::PoseidonChip, nifs::NIFS};
+    use crate::{
+        commitment::CommitmentKey, plonk::TableData, poseidon::poseidon_circuit::PoseidonChip,
+    };
 
     use super::*;
 
@@ -840,62 +841,73 @@ mod tests {
         let mut td = TableData::new(17, vec![]);
         let _ = td.cs.instance_column();
         let config = td.prepare(MainGate::<Base, T>::configure);
-        debug!("Constraint System {td:?}");
 
         let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
-        let mut cell = None;
+        let mut on_circuit_W_cell = None;
         let mut rnd = rand::thread_rng();
 
-        let (x, y) = (Base::random(&mut rnd), Base::random(&mut rnd));
-        let r: [Base; NUM_CHALLENGE_BITS] = array::from_fn(|_| Base::random(&mut rnd));
+        let W = C1::random(&mut rnd);
+        let W_coordinates = W.coordinates().unwrap();
+
+        let r = ScalarExt::from_u128(rnd.gen());
+        let folded_W = CommitmentKey::<C1>::default_value();
+        let folded_W_coordinates = folded_W.coordinates().unwrap();
 
         // Run twice for setup & real run
         for _ in 0..=1 {
-            cell = Some(
+            on_circuit_W_cell = Some(
                 layouter
                     .assign_region(
                         || "fold W test",
                         |region| {
-                            debug!("Region {region:?}");
                             let mut ctx = RegionCtx::new(region, 0);
                             let folded = AssignedPoint::<C1> {
                                 x: ctx
                                     .assign_advice(
                                         || "folded_x",
                                         config.state[0],
-                                        Value::known(0.into()),
+                                        Value::known(*folded_W_coordinates.x()),
                                     )
                                     .unwrap(),
                                 y: ctx
                                     .assign_advice(
                                         || "folded_y",
                                         config.state[1],
-                                        Value::known(0.into()),
+                                        Value::known(*folded_W_coordinates.y()),
                                     )
                                     .unwrap(),
                             };
 
                             let input = AssignedPoint::<C1> {
                                 x: ctx
-                                    .assign_advice(|| "input_x", config.state[2], Value::known(x))
+                                    .assign_advice(
+                                        || "input_x",
+                                        config.state[2],
+                                        Value::known(*W_coordinates.x()),
+                                    )
                                     .unwrap(),
                                 y: ctx
-                                    .assign_advice(|| "input_y", config.state[3], Value::known(y))
+                                    .assign_advice(
+                                        || "input_y",
+                                        config.state[3],
+                                        Value::known(*W_coordinates.y()),
+                                    )
                                     .unwrap(),
                             };
 
-                            let r = r
-                                .iter()
-                                .map(|r_bit| {
-                                    let val = ctx
-                                        .assign_advice(|| "r", config.input, Value::known(*r_bit))
-                                        .unwrap();
+                            let gate = MainGate::new(config.clone());
+                            let r = ctx
+                                .assign_advice(
+                                    || "r",
+                                    config.state[4],
+                                    Value::known(util::fe_to_fe(&r).unwrap()),
+                                )
+                                .unwrap();
+                            let r = gate
+                                .le_num_to_bits(&mut ctx, r, NUM_CHALLENGE_BITS)
+                                .unwrap();
 
-                                    ctx.next();
-
-                                    val
-                                })
-                                .collect::<Vec<_>>();
+                            ctx.next();
 
                             Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_W(
                                 &mut ctx,
@@ -911,9 +923,34 @@ mod tests {
             );
         }
 
-        // "check folded_W result: {folded_W:?}"
-        // TODO #32 match result with NIFS
-        todo!("Add NIFS check for {cell:?} value")
+        let plonk = RelaxedPlonkInstance::<C1>::new(0, 0, 1);
+        assert_eq!(plonk.W_commitments, vec![folded_W]);
+
+        let off_circuit_W = plonk
+            .fold(
+                &PlonkInstance {
+                    W_commitments: vec![W],
+                    instance: vec![],
+                    challenges: vec![],
+                },
+                &[],
+                &r,
+            )
+            .W_commitments
+            .into_iter()
+            .map(|c| {
+                let coordinates = c.coordinates().unwrap();
+                (*coordinates.x(), *coordinates.y())
+            })
+            .collect::<Vec<(Base, Base)>>();
+
+        let on_circuit_W_cell = on_circuit_W_cell
+            .unwrap()
+            .into_iter()
+            .map(|c| c.coordinates_values())
+            .collect::<Vec<_>>();
+
+        assert_eq!(off_circuit_W, on_circuit_W_cell);
     }
 
     #[test_log::test]
