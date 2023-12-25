@@ -14,6 +14,8 @@
 //!
 //! Additionally, it defines a method is_sat on PlonkStructure to determine if
 //! a given Plonk instance and witness satisfy the circuit constraints.
+use std::iter;
+
 use crate::{
     commitment::CommitmentKey,
     constants::NUM_CHALLENGE_BITS,
@@ -427,8 +429,8 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
 
         let comm_E = cross_term_commits
             .iter()
-            .enumerate()
-            .map(|(k, tk)| best_multiexp(&[r.pow([k as u64 + 1, 0, 0, 0])], &[*tk]).into())
+            .zip(iter::successors(Some(*r), |el| Some(*el * *r))) // r^1, r^2, ...
+            .map(|(tk, power_of_r)| best_multiexp(&[power_of_r], &[*tk]).into())
             .fold(self.E_commitment, |acc, x| (acc + x).into());
 
         RelaxedPlonkInstance {
@@ -471,10 +473,10 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
         let W = self
             .W
             .iter()
-            .zip(W2.W.iter())
+            .zip_eq(W2.W.iter())
             .map(|(vec1, vec2)| {
                 vec1.par_iter()
-                    .zip(vec2.par_iter())
+                    .zip_eq(vec2.par_iter())
                     .map(|(w1, w2)| *w1 + *r * *w2)
                     .collect::<Vec<_>>()
             })
@@ -485,11 +487,10 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
             .par_iter()
             .enumerate()
             .map(|(i, ei)| {
-                let mut r_power = F::ONE;
-                cross_terms.iter().fold(*ei, |acc, tk| {
-                    r_power *= *r;
-                    acc + r_power * tk[i]
-                })
+                cross_terms
+                    .iter()
+                    .zip(iter::successors(Some(*r), |el| Some(*el * r))) // r^1, r^2, ...
+                    .fold(*ei, |acc, (tk, power_of_r)| acc + power_of_r * tk[i])
             })
             .collect::<Vec<_>>();
 
