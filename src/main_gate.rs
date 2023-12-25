@@ -1,11 +1,14 @@
-use crate::util::normalize_trailing_zeros;
+use std::{array, marker::PhantomData};
+
 use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Cell, Chip, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance},
     poly::Rotation,
 };
-use std::{array, marker::PhantomData};
+use itertools::Itertools;
+
+use crate::util::{self, normalize_trailing_zeros};
 
 pub type AssignedValue<F> = AssignedCell<F, F>;
 pub type AssignedBit<F> = AssignedCell<F, F>;
@@ -584,37 +587,32 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
         ctx: &mut RegionCtx<'_, F>,
         bits: &[AssignedValue<F>],
     ) -> Result<AssignedValue<F>, Error> {
-        let accumulate = |acc: &mut Value<F>, bs: Vec<AssignedValue<F>>, ps: &Vec<F>| {
-            for (b, p) in bs.iter().zip(ps) {
-                *acc = *acc + b.value().copied() * Value::known(p);
-            }
-        };
-        let length = bits.len();
-        let mut mult = F::ONE;
-        let powers: Vec<F> = (0..length)
-            .map(|_| {
-                let pow = mult;
-                mult = mult + mult;
-                pow
-            })
-            .collect();
-        let mut acc = Value::known(F::ZERO);
-        let mut old_acc = self.assign_value(ctx, acc)?;
-        for (bs, ps) in bits.chunks(T).zip(powers.chunks(T)) {
-            let bvs = bs.to_vec();
-            let pvs = ps.to_vec();
-            accumulate(&mut acc, bvs, &pvs);
-            let state = bs.to_vec().iter().map(|bit| bit.into()).collect::<Vec<_>>();
-            let state_terms = (Some(pvs), None, Some(state));
-            old_acc = self.apply_with_input(
-                ctx,
-                state_terms,
-                (Some(F::ONE), Some(old_acc.into())),
-                (-F::ONE, acc.into()),
-            )?;
-        }
-        Ok(old_acc)
+        bits.iter()
+            .zip(util::get_power_of_two_iter::<F>())
+            .chunks(T)
+            .into_iter()
+            .try_fold(
+                self.assign_value(ctx, Value::known(F::ZERO))?,
+                |acc, chunk| {
+                    let mut acc_value = acc.value().copied();
+
+                    let (bits, shifts) = chunk
+                        .map(|(bit, shift)| {
+                            acc_value = acc_value + (Value::known(shift) * bit.value());
+                            (bit.into(), shift)
+                        })
+                        .unzip();
+
+                    self.apply_with_input(
+                        ctx,
+                        (Some(shifts), None, Some(bits)),
+                        (Some(F::ONE), Some(acc.into())),
+                        (-F::ONE, acc_value.into()),
+                    )
+                },
+            )
     }
+
     pub fn le_num_to_bits(
         &self,
         ctx: &mut RegionCtx<'_, F>,
