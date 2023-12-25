@@ -396,7 +396,7 @@ mod components_tests {
 
                             if let Some(accumulated) = itertools::multizip((
                                 bits_cells.iter(),
-                                get_power_of_two_iter::<F>(),
+                                util::get_power_of_two_iter::<F>(),
                             ))
                             .try_fold(
                                 F::ZERO,

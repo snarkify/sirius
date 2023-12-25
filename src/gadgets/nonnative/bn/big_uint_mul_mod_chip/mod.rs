@@ -13,7 +13,7 @@ use log::*;
 use num_bigint::BigUint as BigUintRaw;
 use num_traits::{One, ToPrimitive, Zero};
 
-use crate::main_gate::{AssignAdviceFrom, MainGate, MainGateConfig, RegionCtx};
+use crate::{util, main_gate::{AssignAdviceFrom, MainGate, MainGateConfig, RegionCtx}};
 
 use super::big_uint::{self, BigUint};
 
@@ -842,7 +842,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         let out_chunk_sum_selector = self.config().q_o;
 
         let bits_with_coeff =
-            itertools::multizip((0.., bits_cells.iter(), get_power_of_two_iter::<F>()));
+            itertools::multizip((0.., bits_cells.iter(), util::get_power_of_two_iter::<F>()));
 
         let state_q1_columns =
             itertools::multizip((self.config().state, self.config().q_1)).collect::<Box<[_]>>();
@@ -1399,10 +1399,6 @@ fn calc_limbs_per_group<F: PrimeField>(
             .expect("Unreachable, because limb_width != 0"),
     )
     .ok_or(Error::ZeroLimbsPerGroup)
-}
-
-fn get_power_of_two_iter<F: ff::PrimeField>() -> impl Iterator<Item = F> {
-    iter::successors(Some(F::ONE), |l| Some(l.double()))
 }
 
 #[cfg(test)]

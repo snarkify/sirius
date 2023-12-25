@@ -276,3 +276,7 @@ macro_rules! create_and_verify_proof {
         proof
     }};
 }
+
+pub(crate) fn get_power_of_two_iter<F: ff::PrimeField>() -> impl Iterator<Item = F> {
+    iter::successors(Some(F::ONE), |l| Some(l.double()))
+}
