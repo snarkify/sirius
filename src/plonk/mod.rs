@@ -565,7 +565,7 @@ impl<F: PrimeField> TableData<F> {
     }
 
     // TODO Change design
-    pub fn prepare<C>(&mut self, configure: impl FnOnce(&mut ConstraintSystem<F>) -> C) -> C {
+    pub(crate) fn prepare<C>(&mut self, configure: impl FnOnce(&mut ConstraintSystem<F>) -> C) -> C {
         let config = configure(&mut self.cs);
         self.permutation = Some(permutation::Assembly::new(
             1 << self.k,
@@ -582,7 +582,7 @@ impl<F: PrimeField> TableData<F> {
     }
 
     // TODO Change design
-    pub fn postpone(&mut self) {
+    pub(crate) fn postpone(&mut self) {
         self.fixed_columns = batch_invert_assigned(&self.fixed);
         self.advice_columns = batch_invert_assigned(&self.advice);
     }
