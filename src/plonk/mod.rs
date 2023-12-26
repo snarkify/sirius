@@ -564,8 +564,43 @@ impl<F: PrimeField> TableData<F> {
         combined
     }
 
-    // TODO Change design
-    pub(crate) fn prepare<C>(&mut self, configure: impl FnOnce(&mut ConstraintSystem<F>) -> C) -> C {
+    /// Prepares the constraint system for a new configuration.
+    ///
+    /// This function initializes various components of the constraint system
+    /// such as the permutation assembly, lookup arguments, and column vectors
+    /// for fixed, selector, and advice columns based on the provided configuration.
+    /// It must be called before using the constraint system for any computations.
+    ///
+    /// # Arguments
+    ///
+    /// * `configure` - A closure that takes a mutable reference to the `ConstraintSystem`
+    ///   and returns a configuration object `C`. This allows for flexible and customized
+    ///   setup of the constraint system.
+    ///
+    /// # Returns
+    ///
+    /// Returns the configuration object `C` as determined by the `configure` closure.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the number of instance columns is not equal to 1.
+    /// This is a temporary restriction and support for user-defined instance columns
+    /// should be added in the future.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // Assuming `cs` is a mutable reference to a ConstraintSystem object
+    /// let config = cs.prepare(|cs| {
+    ///     // Configure the constraint system
+    ///     // ...
+    ///     ConcreteCircuit::configure(cs)
+    /// });
+    /// ```
+    pub(crate) fn prepare_assembly<C>(
+        &mut self,
+        configure: impl FnOnce(&mut ConstraintSystem<F>) -> C,
+    ) -> C {
         let config = configure(&mut self.cs);
         self.permutation = Some(permutation::Assembly::new(
             1 << self.k,
@@ -582,17 +617,16 @@ impl<F: PrimeField> TableData<F> {
     }
 
     // TODO Change design
-    pub(crate) fn postpone(&mut self) {
+    pub(crate) fn postpone_assembly(&mut self) {
         self.fixed_columns = batch_invert_assigned(&self.fixed);
         self.advice_columns = batch_invert_assigned(&self.advice);
     }
 
-    // TODO Change design
     pub fn assembly<ConcreteCircuit: Circuit<F>>(
         &mut self,
         circuit: &ConcreteCircuit,
     ) -> Result<(), Error> {
-        let config = self.prepare(ConcreteCircuit::configure);
+        let config = self.prepare_assembly(ConcreteCircuit::configure);
 
         ConcreteCircuit::FloorPlanner::synthesize(
             self,
@@ -601,7 +635,8 @@ impl<F: PrimeField> TableData<F> {
             vec![], // TODO: make sure constants not needed
         )?;
 
-        self.postpone();
+        self.postpone_assembly();
+
         Ok(())
     }
 
