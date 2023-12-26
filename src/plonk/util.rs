@@ -56,9 +56,9 @@ pub(crate) fn compress_halo2_expression<F: PrimeField>(
     num_selectors: usize,
     num_fixed: usize,
     offset_pad: usize,
-    cha_index: usize,
+    challenge_index: usize,
 ) -> Expression<F> {
-    let y = Expression::Challenge(cha_index);
+    let y = Expression::Challenge(challenge_index);
     if exprs.len() > 1 {
         exprs
             .iter()
@@ -77,9 +77,9 @@ pub(crate) fn compress_halo2_expression<F: PrimeField>(
 /// compress a vector of [`Expression`] into one by random linear combine a challenge
 pub(crate) fn compress_expression<F: PrimeField>(
     exprs: &[Expression<F>],
-    cha_index: usize,
+    challenge_index: usize,
 ) -> Expression<F> {
-    let y = Expression::Challenge(cha_index);
+    let y = Expression::Challenge(challenge_index);
     if exprs.len() > 1 {
         exprs
             .iter()

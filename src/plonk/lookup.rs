@@ -37,6 +37,7 @@
 //! Please see (#34)[https://github.com/snarkify/sirius/issues/34] for details on notations.
 //!
 
+use crate::plonk::eval::EvalError;
 use ff::PrimeField;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
 use itertools::Itertools;
@@ -44,6 +45,7 @@ use rayon::prelude::*;
 use std::array;
 
 use crate::{
+    plonk::eval::{Eval, PlonkEvalDomain},
     plonk::util::compress_halo2_expression,
     plonk::TableData,
     polynomial::{Expression, Query},
@@ -188,8 +190,8 @@ impl<F: PrimeField> Arguments<F> {
 
     /// evaluate each of the lookup expressions to get vector l_i
     /// where l_i = L_i(x_1,...,x_a)
-    fn evaluate_ls(&self, table: &TableData<F>, r: F) -> Vec<Vec<F>> {
-        let data = LookupEvalDomain { table, r };
+    fn evaluate_ls(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, EvalError> {
+        let data = PlonkEvalDomain::new();
         let nrow = 2usize.pow(table.k);
         self.lookup_polys
             .iter()
@@ -197,16 +199,16 @@ impl<F: PrimeField> Arguments<F> {
             .map(|poly| {
                 (0..nrow)
                     .into_par_iter()
-                    .map(|row| poly.eval(row, &data))
-                    .collect::<Vec<_>>()
+                    .map(|row| data.eval(&poly, row))
+                    .collect::<Result<Vec<F>, EvalError>>()
             })
-            .collect::<Vec<_>>()
+            .collect()
     }
 
     /// evaluate each of the table expressions to get vector t_i
     /// where t_i = T(y1,...,y_b)
-    fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Vec<Vec<F>> {
-        let data = LookupEvalDomain { table, r };
+    fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, EvalError> {
+        let data = PlonkEvalDomain::new();
         let nrow = 2usize.pow(table.k);
         self.table_polys
             .iter()
@@ -214,10 +216,10 @@ impl<F: PrimeField> Arguments<F> {
             .map(|poly| {
                 (0..nrow)
                     .into_par_iter()
-                    .map(|row| poly.eval(row, &data))
-                    .collect::<Vec<_>>()
+                    .map(|row| data.eval(&poly, row))
+                    .collect::<Result<Vec<_>, EvalError>>()
             })
-            .collect::<Vec<_>>()
+            .collect()
     }
     /// calculate the coefficients {m_i} in the log derivative formula
     /// m_i = sum_j \xi(w_j=t_i) assuming {t_i} have no duplicates
@@ -253,9 +255,9 @@ impl<F: PrimeField> Arguments<F> {
         &self,
         table: &TableData<F>,
         r: F,
-    ) -> ArgumentCoefficient1<F> {
-        let ls = self.evaluate_ls(table, r);
-        let ts = self.evaluate_ts(table, r);
+    ) -> Result<ArgumentCoefficient1<F>, EvalError> {
+        let ls = self.evaluate_ls(table, r)?;
+        let ts = self.evaluate_ts(table, r)?;
 
         let ms = ls
             .iter()
@@ -263,7 +265,7 @@ impl<F: PrimeField> Arguments<F> {
             .map(|(l, t)| self.evaluate_m(l, t))
             .collect::<Vec<_>>();
 
-        ArgumentCoefficient1 { ls, ts, ms }
+        Ok(ArgumentCoefficient1 { ls, ts, ms })
     }
 
     /// check whether the lookup argument is satisfied
@@ -330,10 +332,4 @@ impl<F: PrimeField> ArgumentCoefficient1<F> {
 pub(crate) struct ArgumentCoefficient2<F: PrimeField> {
     pub hs: Vec<Vec<F>>,
     pub gs: Vec<Vec<F>>,
-}
-
-/// Used for evaluate lookup relations L_i(x1,...,xn) defined in halo2 lookup arguments
-pub struct LookupEvalDomain<'a, F: PrimeField> {
-    pub(crate) table: &'a TableData<F>,
-    pub(crate) r: F,
 }
