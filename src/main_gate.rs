@@ -616,28 +616,27 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
     pub fn le_num_to_bits(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        a: AssignedValue<F>,
+        input: AssignedValue<F>,
         bit_len: usize,
     ) -> Result<Vec<AssignedValue<F>>, Error> {
         // TODO: ensure a is less than F.size() - 1
-        let mut length = 0;
-        let bits: Vec<Value<bool>> = a
+
+        let mut bits: Vec<bool> = input
             .value()
-            .map(|a| {
-                let bits = a.to_le_bits();
-                length = bits.len();
-                bits
-            })
-            .transpose_vec(length);
-        let mut bits = bits
-            .iter()
-            .map(|bit| bit.unwrap().unwrap())
-            .collect::<Vec<_>>();
+            .unwrap()
+            .map(|a| a.to_le_bits().into_iter().collect())
+            .unwrap_or_else(|| vec![false; F::ZERO.to_le_bits().len()]);
+
+        // TODO Wouldn't that change the constraints?
         normalize_trailing_zeros(&mut bits, bit_len);
+
         let bits = self.assign_bits(ctx, &bits)?;
         let num = self.le_bits_to_num(ctx, &bits)?;
-        assert_eq!(num.value().unwrap(), a.value().unwrap());
-        ctx.constrain_equal(a.cell(), num.cell())?;
+
+        assert_eq!(num.value().unwrap(), input.value().unwrap());
+
+        ctx.constrain_equal(input.cell(), num.cell())?;
+
         Ok(bits)
     }
 }
