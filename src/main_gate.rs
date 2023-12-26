@@ -569,17 +569,9 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
         ctx: &mut RegionCtx<'_, F>,
         bits: &[bool],
     ) -> Result<Vec<AssignedValue<F>>, Error> {
-        let mut res = vec![];
-        for bit in bits.iter() {
-            if *bit {
-                let tmp = self.assign_bit(ctx, Value::known(F::ONE))?;
-                res.push(tmp);
-            } else {
-                let tmp = self.assign_bit(ctx, Value::known(F::ZERO))?;
-                res.push(tmp);
-            }
-        }
-        Ok(res)
+        bits.iter()
+            .map(|bit| self.assign_bit(ctx, Value::known(if *bit { F::ONE } else { F::ZERO })))
+            .collect()
     }
 
     pub fn le_bits_to_num(
@@ -625,9 +617,8 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
             .value()
             .unwrap()
             .map(|a| a.to_le_bits().into_iter().collect())
-            .unwrap_or_else(|| vec![false; F::ZERO.to_le_bits().len()]);
+            .unwrap_or_default();
 
-        // TODO Wouldn't that change the constraints?
         normalize_trailing_zeros(&mut bits, bit_len);
 
         let bits = self.assign_bits(ctx, &bits)?;
