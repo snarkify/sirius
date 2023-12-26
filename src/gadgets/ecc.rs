@@ -18,11 +18,11 @@ impl<C: CurveAffine> AssignedPoint<C> {
         (&self.x, &self.y)
     }
 
-    pub fn coordinates_values(&self) -> (C::Base, C::Base) {
-        (
-            self.x.value().copied().unwrap().unwrap(),
-            self.y.value().copied().unwrap().unwrap(),
-        )
+    pub fn coordinates_values(&self) -> Option<(C::Base, C::Base)> {
+        let x = *self.x.value().copied().unwrap();
+        let y = *self.y.value().copied().unwrap();
+
+        Some((x?, y?))
     }
 
     pub fn to_curve(&self) -> Option<C> {
