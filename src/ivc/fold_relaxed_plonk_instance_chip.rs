@@ -846,7 +846,7 @@ mod tests {
 
         let mut td = TableData::new(17, vec![]);
         let _ = td.cs.instance_column();
-        let config = td.prepare(MainGate::<Base, T>::configure);
+        let config = td.prepare_assembly(MainGate::<Base, T>::configure);
 
         let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
         let mut on_circuit_W_cell = None;
