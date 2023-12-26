@@ -947,7 +947,7 @@ mod tests {
         let on_circuit_W_cell = on_circuit_W_cell
             .unwrap()
             .into_iter()
-            .map(|c| c.coordinates_values())
+            .map(|c| c.coordinates_values().unwrap())
             .collect::<Vec<_>>();
 
         assert_eq!(off_circuit_W, on_circuit_W_cell);
