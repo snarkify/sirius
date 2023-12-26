@@ -10,15 +10,24 @@
 //! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
 use crate::commitment::CommitmentKey;
 use crate::constants::NUM_CHALLENGE_BITS;
+use crate::plonk::eval::{CrossTermEvalDomain, Eval, EvalError};
 use crate::plonk::{
-    PlonkEvalDomain, PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance,
-    RelaxedPlonkWitness, TableData,
+    PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
+    SpsError, TableData,
 };
 use crate::polynomial::CHALLENGE_TYPE;
 use crate::poseidon::{AbsorbInRO, ROTrait};
 use halo2_proofs::arithmetic::CurveAffine;
 use rayon::prelude::*;
 use std::marker::PhantomData;
+
+#[derive(thiserror::Error, Debug)]
+pub enum NIFSError {
+    #[error(transparent)]
+    Eval(#[from] EvalError),
+    #[error(transparent)]
+    Sps(#[from] SpsError),
+}
 
 /// Represent intermediate polynomial terms that arise when folding
 /// two polynomial relations into one.
@@ -77,30 +86,24 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         W1: &RelaxedPlonkWitness<C::ScalarExt>,
         U2: &PlonkInstance<C>,
         W2: &PlonkWitness<C::ScalarExt>,
-    ) -> (CrossTerms<C>, CrossTermCommits<C>) {
+    ) -> Result<(CrossTerms<C>, CrossTermCommits<C>), NIFSError> {
         let offset = S.fixed_offset();
         let num_row = S.fixed_columns[0].len();
         let normalized = S.poly.fold_transform(offset, S.num_fold_vars());
         let r_index = normalized.num_challenges() - 1;
         let degree = S.poly.degree_for_folding(offset);
-        let data = PlonkEvalDomain {
-            S,
-            U1,
-            W1,
-            U2: &U2.to_relax(),
-            W2: &W2.to_relax(S.k),
-        };
+        let data: CrossTermEvalDomain<C::ScalarExt> = CrossTermEvalDomain::new();
         let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
             .map(|k| normalized.coeff_of((0, r_index, CHALLENGE_TYPE), k))
             .map(|multipoly| {
                 (0..num_row)
                     .into_par_iter()
-                    .map(|row| multipoly.eval(row, &data))
-                    .collect()
+                    .map(|row| data.eval(&multipoly, row))
+                    .collect::<Result<Vec<C::ScalarExt>, EvalError>>()
             })
-            .collect();
+            .collect::<Result<Vec<Vec<C::ScalarExt>>, EvalError>>()?;
         let cross_term_commits: Vec<C> = cross_terms.iter().map(|v| ck.commit(v)).collect();
-        (cross_terms, cross_term_commits)
+        Ok((cross_terms, cross_term_commits))
     }
 
     /// Generates a proof of correct folding using the NIFS protocol.
@@ -129,10 +132,13 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         td: &TableData<C::ScalarExt>,
         U1: &RelaxedPlonkInstance<C>,
         W1: &RelaxedPlonkWitness<C::ScalarExt>,
-    ) -> (
-        Self,
-        (RelaxedPlonkInstance<C>, RelaxedPlonkWitness<C::ScalarExt>),
-    ) {
+    ) -> Result<
+        (
+            Self,
+            (RelaxedPlonkInstance<C>, RelaxedPlonkWitness<C::ScalarExt>),
+        ),
+        NIFSError,
+    > {
         // TODO: hash gate into ro
         let S = td.plonk_structure(ck);
         S.absorb_into(ro_acc);
@@ -140,20 +146,20 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges).unwrap();
         U2.absorb_into(ro_acc);
         U1.absorb_into(ro_acc);
-        let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2);
+        let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2)?;
         cross_term_commits
             .iter()
             .for_each(|cm| ro_acc.absorb_point(cm));
         let r = ro_acc.squeeze(NUM_CHALLENGE_BITS);
         let U = U1.fold(&U2, &cross_term_commits, &r);
         let W = W1.fold(&W2, &cross_terms, &r);
-        (
+        Ok((
             Self {
                 cross_term_commits,
                 _marker: PhantomData,
             },
             (U, W),
-        )
+        ))
     }
 
     /// Verifies the correctness of the folding using the NIFS protocol.
@@ -175,7 +181,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         S: &PlonkStructure<C>,
         U1: RelaxedPlonkInstance<C>,
         U2: PlonkInstance<C>,
-    ) -> Result<RelaxedPlonkInstance<C>, String> {
+    ) -> Result<RelaxedPlonkInstance<C>, NIFSError> {
         S.run_sps_verifier(&U2, ro_nark)?;
         S.absorb_into(ro_acc);
         U2.absorb_into(ro_acc);
@@ -279,23 +285,24 @@ mod tests {
         ck: &CommitmentKey<C>,
         td1: &TableData<F1>,
         td2: &TableData<F1>,
-    ) {
+    ) -> Result<(), NIFSError> {
         let S = td1.plonk_structure(ck);
         let mut f_U =
             RelaxedPlonkInstance::new(td1.instance.len(), S.num_challenges, S.round_sizes.len());
         let mut f_W = RelaxedPlonkWitness::new(td1.k, &S.round_sizes);
         let mut ro_nark_prover = create_ro::<C, F2, T, RATE, R_F, R_P>();
         let mut ro_nark_verifier = create_ro::<C, F2, T, RATE, R_F, R_P>();
+        let mut ro_nark_decider = create_ro::<C, F2, T, RATE, R_F, R_P>();
         let (U1, W1) = td1
             .run_sps_protocol(ck, &mut ro_nark_prover, S.num_challenges)
             .unwrap();
-        let res = S.is_sat(ck, &U1, &W1);
+        let res = S.is_sat(ck, &mut ro_nark_decider, &U1, &W1);
         assert!(res.is_ok());
 
         let mut ro_acc_prover = create_ro::<C, F2, T, RATE, R_F, R_P>();
         let mut ro_acc_verifier = create_ro::<C, F2, T, RATE, R_F, R_P>();
         let (nifs, (_U, W)) =
-            NIFS::prove(ck, &mut ro_nark_prover, &mut ro_acc_prover, td1, &f_U, &f_W);
+            NIFS::prove(ck, &mut ro_nark_prover, &mut ro_acc_prover, td1, &f_U, &f_W)?;
         let U = nifs
             .verify(&mut ro_nark_verifier, &mut ro_acc_verifier, &S, f_U, U1)
             .unwrap();
@@ -311,11 +318,11 @@ mod tests {
         let (U1, W1) = td2
             .run_sps_protocol(ck, &mut ro_nark_prover, S.num_challenges)
             .unwrap();
-        let res = S.is_sat(ck, &U1, &W1);
+        let res = S.is_sat(ck, &mut ro_nark_decider, &U1, &W1);
         assert!(res.is_ok());
 
         let (nifs, (_U, _W)) =
-            NIFS::prove(ck, &mut ro_nark_prover, &mut ro_acc_prover, td2, &f_U, &f_W);
+            NIFS::prove(ck, &mut ro_nark_prover, &mut ro_acc_prover, td2, &f_U, &f_W)?;
         let U = nifs
             .verify(&mut ro_nark_verifier, &mut ro_acc_verifier, &S, f_U, U1)
             .unwrap();
@@ -327,6 +334,7 @@ mod tests {
         assert!(res.is_ok());
         let perm_res = S.is_sat_perm(&f_U, &f_W);
         assert!(perm_res.is_ok());
+        Ok(())
     }
 
     /// calculate smallest w such that 2^w >= n*(2^K)
@@ -338,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn test_nifs_no_lookup() {
+    fn test_nifs_no_lookup() -> Result<(), NIFSError> {
         use halo2curves::pasta::{EqAffine, Fp};
 
         const K: u32 = 4;
@@ -364,6 +372,6 @@ mod tests {
         let p2 = smallest_power(td1.cs.num_selectors() + td1.cs.num_fixed_columns(), K);
         let ck = CommitmentKey::<EqAffine>::setup(p1.max(p2), b"test");
 
-        fold_instances(&ck, &td1, &td2);
+        fold_instances(&ck, &td1, &td2)
     }
 }

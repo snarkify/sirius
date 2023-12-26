@@ -7,12 +7,9 @@ use std::{
 };
 
 use ff::PrimeField;
-use halo2_proofs::{arithmetic::CurveAffine, plonk::Expression as PE, poly::Rotation};
+use halo2_proofs::{plonk::Expression as PE, poly::Rotation};
 
-use crate::{
-    plonk::{lookup::LookupEvalDomain, PlonkEvalDomain},
-    util::trim_leading_zeros,
-};
+use crate::util::trim_leading_zeros;
 
 pub mod sparse;
 
@@ -317,14 +314,14 @@ impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
 /// type has value either CHALLENGE_TYPE or POLYNOMIAL_TYPE
 #[derive(Clone)]
 pub struct Monomial<F: PrimeField> {
-    pub arity: usize,
+    pub(crate) arity: usize,
     // poly or challenge: (rotation, column_index, type)
-    pub index_to_poly: Vec<(i32, usize, usize)>,
+    pub(crate) index_to_poly: Vec<(i32, usize, usize)>,
     // (rotation, column_index, var_type) -> index
     // when type = CHALLENGE_TYPE as a challenge, we always set rotation = 0
-    pub poly_to_index: HashMap<(i32, usize, usize), usize>,
-    pub coeff: F,
-    pub exponents: Vec<usize>,
+    pub(crate) poly_to_index: HashMap<(i32, usize, usize), usize>,
+    pub(crate) coeff: F,
+    pub(crate) exponents: Vec<usize>,
 }
 
 impl<F: PrimeField> Display for Monomial<F> {
@@ -529,157 +526,10 @@ impl<F: PrimeField> Ord for Monomial<F> {
     }
 }
 
-pub trait Eval<T, F> {
-    fn eval(&self, row: usize, data: &T) -> F;
-}
-
-impl<'a, F: PrimeField> Eval<LookupEvalDomain<'a, F>, F> for Monomial<F> {
-    fn eval(&self, row: usize, data: &LookupEvalDomain<F>) -> F {
-        let LookupEvalDomain { table, r } = data;
-        let selector_offset = table.selector.len();
-        let fixed_offset = table.fixed.len() + selector_offset;
-        let max_offset = fixed_offset + table.advice.len();
-        let row_size = 2usize.pow(table.k);
-
-        let vars: Vec<F> = (0..self.arity)
-            .map(|i| {
-                let (rot, col, var_type) = self.index_to_poly[i];
-
-                match var_type {
-                    // evaluation for challenges
-                    // layout of challenges:
-                    // |num_challenges1|u1||num_challenges2|u2|
-                    CHALLENGE_TYPE => match col {
-                        0 => *r,
-                        _ => panic!("challenge index out of boundary"),
-                    },
-                    POLYNOMIAL_TYPE => {
-                        // evaluation for polynomial query
-                        // layout of the poly index is:
-                        // |num_selectors|num_fixed|num_advice1|num_advice2|
-                        let row1 = if (rot + row as i32) >= 0 {
-                            rot as usize + row
-                        } else {
-                            // TODO: check how halo2 handle
-                            // (1): row+rot<0
-                            // (2): row+rot>=2^K
-                            row_size - (-rot as usize) + row
-                        };
-                        match col {
-                            // selector column
-                            col if col < selector_offset => {
-                                if table.selector[col][row1] {
-                                    F::ONE
-                                } else {
-                                    F::ZERO
-                                }
-                            }
-                            // fixed column
-                            col if col < fixed_offset => {
-                                table.fixed_columns[col - selector_offset][row1]
-                            }
-                            // advice column
-                            col if col < max_offset => {
-                                table.advice_columns[col - fixed_offset][row1]
-                            }
-                            col => panic!("polynomial index out of boundary: {col}"),
-                        }
-                    }
-                    _ => unimplemented!("other variable type is not supported"),
-                }
-            })
-            .collect();
-
-        vars.into_iter()
-            .zip(self.exponents.iter())
-            .map(|(x, exp)| x.pow([*exp as u64, 0, 0, 0]))
-            .fold(self.coeff, |acc, v| acc * v)
-    }
-}
-
-impl<'a, C, F> Eval<PlonkEvalDomain<'a, C, F>, F> for Monomial<F>
-where
-    F: PrimeField,
-    C: CurveAffine<ScalarExt = F>,
-{
-    /// evaluate monomial over {x_1,...,x_n}, n = self.arity
-    /// first get the value of x_i according to its (row, col) in the plonk table
-    /// then calculate the evaluation of monomial: c*x_1^{d_1}*...*x_n^{d_n}
-    fn eval(&self, row: usize, data: &PlonkEvalDomain<C, F>) -> F {
-        let PlonkEvalDomain { S, U1, W1, U2, W2 } = data;
-        let selector_offset = S.selectors.len();
-        let fixed_offset = S.fixed_offset();
-        let U2_offset = fixed_offset + S.num_advice_columns;
-        let total_len = U2_offset + S.num_advice_columns;
-        let row_size = 2usize.pow(S.k as u32);
-
-        let vars: Vec<F> = (0..self.arity)
-            .map(|i| {
-                let (rot, col, var_type) = self.index_to_poly[i];
-
-                match var_type {
-                    // evaluation for challenges
-                    // layout of challenges:
-                    // |num_challenges1|u1||num_challenges2|u2|
-                    CHALLENGE_TYPE => match col {
-                        col if col < S.num_challenges => U1.challenges[col],
-                        col if col == S.num_challenges => U1.u,
-                        col if col < 2 * S.num_challenges + 1 => {
-                            U2.challenges[col - S.num_challenges - 1]
-                        }
-                        col if col == 2 * S.num_challenges + 1 => U2.u,
-                        col => panic!("challenges index out of boundary: {col}"),
-                    },
-                    POLYNOMIAL_TYPE => {
-                        // evaluation for polynomial query
-                        // layout of the poly index is:
-                        // |num_selectors|num_fixed|num_advice1|num_advice2|
-                        let row1 = if (rot + row as i32) >= 0 {
-                            rot as usize + row
-                        } else {
-                            // TODO: check how halo2 handle
-                            // (1): row+rot<0
-                            // (2): row+rot>=2^K
-                            row_size - (-rot as usize) + row
-                        };
-                        match col {
-                            // selector column
-                            col if col < selector_offset => {
-                                if S.selectors[col][row1] {
-                                    F::ONE
-                                } else {
-                                    F::ZERO
-                                }
-                            }
-                            // fixed column
-                            col if col < fixed_offset => {
-                                S.fixed_columns[col - selector_offset][row1]
-                            }
-                            // advice column for (U1, W1)
-                            col if col < U2_offset => {
-                                W1.W[0][(col - fixed_offset) * row_size + row1]
-                            }
-                            // advice column for (U2, W2)
-                            col if col < total_len => W2.W[0][(col - U2_offset) * row_size + row1],
-                            col => panic!("polynomial index out of boundary: {col}"),
-                        }
-                    }
-                    _ => unimplemented!("other variable type is not supported"),
-                }
-            })
-            .collect();
-
-        vars.into_iter()
-            .zip(self.exponents.iter())
-            .map(|(x, exp)| x.pow([*exp as u64, 0, 0, 0]))
-            .fold(self.coeff, |acc, v| acc * v)
-    }
-}
-
 #[derive(Clone, PartialEq)]
 pub struct MultiPolynomial<F: PrimeField> {
-    pub arity: usize,
-    pub monomials: Vec<Monomial<F>>,
+    pub(crate) arity: usize,
+    pub(crate) monomials: Vec<Monomial<F>>,
 }
 
 impl<F: PrimeField> Display for MultiPolynomial<F> {
@@ -805,17 +655,6 @@ impl<F: PrimeField> MultiPolynomial<F> {
             }
         }
         self.monomials = reduced;
-    }
-
-    // evaluate the multipoly
-    pub fn eval<T>(&self, row: usize, data: &T) -> F
-    where
-        Monomial<F>: Eval<T, F>,
-    {
-        self.monomials
-            .iter()
-            .map(|mono| mono.eval(row, data))
-            .fold(F::ZERO, |acc, x| acc + x)
     }
 }
 
