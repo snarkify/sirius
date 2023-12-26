@@ -19,7 +19,10 @@ use std::iter;
 use crate::{
     commitment::CommitmentKey,
     constants::NUM_CHALLENGE_BITS,
-    plonk::util::{cell_to_z_idx, column_index, compress_expression, fill_sparse_matrix},
+    plonk::{
+        eval::{Eval, PlonkEvalDomain},
+        util::{cell_to_z_idx, column_index, compress_expression, fill_sparse_matrix},
+    },
     polynomial::{
         sparse::{matrix_multiply, SparseMatrix},
         Expression, MultiPolynomial,
@@ -40,6 +43,10 @@ use itertools::Itertools;
 use log::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
+
+use self::eval::EvalError;
+
+pub mod eval;
 pub mod lookup;
 pub mod permutation;
 pub mod util;
@@ -119,15 +126,6 @@ pub struct RelaxedPlonkWitness<F: PrimeField> {
     pub(crate) E: Vec<F>,
 }
 
-/// Used for evaluate plonk custom gates
-pub struct PlonkEvalDomain<'a, C: CurveAffine, F: PrimeField> {
-    pub(crate) S: &'a PlonkStructure<C>,
-    pub(crate) U1: &'a RelaxedPlonkInstance<C>,
-    pub(crate) W1: &'a RelaxedPlonkWitness<F>,
-    pub(crate) U2: &'a RelaxedPlonkInstance<C>,
-    pub(crate) W2: &'a RelaxedPlonkWitness<F>,
-}
-
 // TODO #31 docs
 pub struct RelaxedPlonkTrace<C: CurveAffine> {
     U: RelaxedPlonkInstance<C>,
@@ -202,7 +200,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
         &self,
         U: &PlonkInstance<C>,
         ro_nark: &mut RO,
-    ) -> Result<(), String> {
+    ) -> Result<(), SpsError> {
         if self.num_challenges == 0 {
             return Ok(());
         }
@@ -214,52 +212,45 @@ impl<C: CurveAffine> PlonkStructure<C> {
             ro_nark.absorb_point(&U.W_commitments[i]);
             let r = ro_nark.squeeze(NUM_CHALLENGE_BITS);
             if r != U.challenges[i] {
-                return Err(format!("{}-th challenge in PlonkInstance not match", i));
+                return Err(SpsError::ChallengeNotMatch { challenge_index: i });
             }
         }
         Ok(())
     }
 
-    pub fn is_sat<F>(
+    pub fn is_sat<F, RO: ROTrait<C>>(
         &self,
         ck: &CommitmentKey<C>,
+        ro_nark: &mut RO,
         U: &PlonkInstance<C>,
         W: &PlonkWitness<F>,
-    ) -> Result<(), String>
+    ) -> Result<(), DeciderError>
     where
         C: CurveAffine<ScalarExt = F>,
         F: PrimeField,
     {
+        self.run_sps_verifier(U, ro_nark)?;
         let check_commitments = U
             .W_commitments
             .iter()
             .zip(W.W.iter())
-            .filter(|(Ci, Wi)| **Ci != ck.commit(Wi))
+            .filter_map(|(Ci, Wi)| ck.commit(Wi).ne(Ci).then_some(()))
             .count();
         let nrow = 2usize.pow(self.k as u32);
-        let U2 = RelaxedPlonkInstance::new(
-            U.instance.len(),
-            self.num_challenges,
-            self.round_sizes.len(),
-        );
-        let W2 = RelaxedPlonkWitness::new(self.k as u32, &self.round_sizes);
-        let data = PlonkEvalDomain {
-            S: self,
-            U1: &U.to_relax(),
-            W1: &W.to_relax(self.k),
-            U2: &U2,
-            W2: &W2,
-        };
+        let data = PlonkEvalDomain::new();
         let res: usize = (0..nrow)
             .into_par_iter()
-            .map(|row| self.poly.eval(row, &data))
-            .filter(|v| F::ZERO.ne(v))
-            .count();
+            .map(|row| data.eval(&self.poly, row))
+            .collect::<Result<Vec<F>, _>>()
+            .map(|v| v.into_iter().filter(|v| F::ZERO.ne(v)).count())?;
 
-        if check_commitments == 0 && res == 0 {
-            Ok(())
-        } else {
-            Err("plonk relation not satisfied".to_string())
+        match (res == 0, check_commitments == 0) {
+            (true, true) => Ok(()),
+            (false, _) => Err(DeciderError::EvaluationMismatch {
+                mismatch_count: res,
+                total_row: nrow,
+            }),
+            _ => Err(DeciderError::CommitmentMismatch),
         }
     }
 
@@ -268,32 +259,24 @@ impl<C: CurveAffine> PlonkStructure<C> {
         ck: &CommitmentKey<C>,
         U: &RelaxedPlonkInstance<C>,
         W: &RelaxedPlonkWitness<F>,
-    ) -> Result<(), String>
+    ) -> Result<(), DeciderError>
     where
         C: CurveAffine<ScalarExt = F>,
         F: PrimeField,
     {
         let nrow = 2usize.pow(self.k as u32);
-        let U2 = RelaxedPlonkInstance::new(
-            U.instance.len(),
-            self.num_challenges,
-            self.round_sizes.len(),
-        );
-        let W2 = RelaxedPlonkWitness::new(self.k as u32, &self.round_sizes);
         let poly = self.poly.homogeneous(self.fixed_offset());
-        let data = PlonkEvalDomain {
-            S: self,
-            U1: U,
-            W1: W,
-            U2: &U2,
-            W2: &W2,
-        };
+        let data = PlonkEvalDomain::new();
         let res: usize = (0..nrow)
             .into_par_iter()
-            .map(|row| poly.eval(row, &data))
-            .enumerate()
-            .filter(|(i, v)| W.E[*i].ne(v))
-            .count();
+            .map(|row| data.eval(&poly, row))
+            .collect::<Result<Vec<F>, _>>()
+            .map(|v| {
+                v.into_iter()
+                    .enumerate()
+                    .filter(|(i, v)| W.E[*i].ne(v))
+                    .count()
+            })?;
 
         let actual_W_commit = ck.commit(&W.W[0]);
         let actual_E_commit = ck.commit(&W.E);
@@ -304,24 +287,11 @@ impl<C: CurveAffine> PlonkStructure<C> {
             U.E_commitment.eq(&actual_E_commit),
         ) {
             (true, true, true) => Ok(()),
-            (false, _, _) => Err(format!(
-                "relaxed plonk relation not satisfied on {} out of {} rows",
-                res, nrow
-            )),
-            (true, false, false) => Err(format!(
-                "both commitment of witnesses W & E is not match:
-                    W: Expected: {:?}, Actual: {:?},
-                    E: Expected: {:?}, Actual: {:?}",
-                U.W_commitments[0], actual_W_commit, U.E_commitment, actual_E_commit
-            )),
-            (true, false, true) => Err(format!(
-                "commitment of witness W is not match: Expected: {:?}, Actual: {:?}",
-                U.W_commitments[0], actual_W_commit
-            )),
-            (true, true, false) => Err(format!(
-                "commitment of witness E is not match: Expected: {:?}, Actual: {:?}",
-                U.E_commitment, actual_E_commit
-            )),
+            (false, _, _) => Err(DeciderError::EvaluationMismatch {
+                mismatch_count: res,
+                total_row: nrow,
+            }),
+            _ => Err(DeciderError::CommitmentMismatch),
         }
     }
 
@@ -819,6 +789,7 @@ impl<F: PrimeField> TableData<F> {
             .lookup_arguments
             .as_ref()
             .map(|la| la.evaluate_coefficient_1(self, F::ZERO))
+            .transpose()?
             .ok_or(SpsError::LackOfLookupArguments)?;
 
         let W1 = [
@@ -889,6 +860,7 @@ impl<F: PrimeField> TableData<F> {
             .lookup_arguments
             .as_ref()
             .map(|la| la.evaluate_coefficient_1(self, r1))
+            .transpose()?
             .ok_or(SpsError::LackOfLookupArguments)?;
 
         let W2 = [
@@ -1131,12 +1103,31 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SpsError {
+    #[error(transparent)]
+    Eval(#[from] EvalError),
+    #[error("Sps verification fail: challenge not match")]
+    ChallengeNotMatch { challenge_index: usize },
     #[error("For this challenges count table must have lookup aguments")]
     LackOfLookupArguments,
     #[error("Lack of advices, should call `TableData::assembly` first")]
     LackOfAdvices,
     #[error("Only 0..=3 num of challenges supported: {challenges_count} not")]
     UnsupportedChallengesCount { challenges_count: usize },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DeciderError {
+    #[error(transparent)]
+    Sps(#[from] SpsError),
+    #[error(transparent)]
+    Eval(#[from] EvalError),
+    #[error("(Relaxed) plonk relation not satisfied: commitment mismatch")]
+    CommitmentMismatch,
+    #[error("(Relaxed) plonk relation not satisfied: commitment mismatch")]
+    EvaluationMismatch {
+        mismatch_count: usize,
+        total_row: usize,
+    },
 }
 
 #[cfg(test)]
