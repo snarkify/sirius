@@ -242,12 +242,18 @@ where
         r: &[AssignedCell<C::Base, C::Base>],
     ) -> Result<Vec<AssignedPoint<C>>, Error> {
         let ecc = EccChip::<C, C::Base, T>::new(config.clone());
+
         folded_W
             .iter()
             .zip_eq(input_W_commitments)
-            .map(|(W1, W2)| -> Result<AssignedPoint<C>, Error> {
+            .enumerate()
+            .map(|(W_index, (W1, W2))| -> Result<AssignedPoint<C>, Error> {
                 let rW = ecc.scalar_mul(region, W2, r)?;
-                Ok(ecc.add(region, W1, &rW)?)
+                let res = ecc.add(region, W1, &rW)?;
+                debug!(
+                    "W1 = {W1:?}; W2 = {W2:?}; rW2[{W_index}] = {rW:?}; rW1 + rW2 * r = {res:?}"
+                );
+                Ok(res)
             })
             .collect()
     }
