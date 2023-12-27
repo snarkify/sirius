@@ -1,4 +1,3 @@
-use crate::plonk::RelaxedPlonkWitness;
 use crate::polynomial::{MultiPolynomial, CHALLENGE_TYPE, POLYNOMIAL_TYPE};
 use ff::PrimeField;
 
@@ -8,6 +7,13 @@ pub enum EvalError {
     ChallengeIndexOutOfBoundary { challenge_index: usize },
     #[error("column variable index out of boundary")]
     ColumnVariableIndexOutOfBoundary { column_index: usize },
+    #[error("Invalid witness index")]
+    InvalidWitnessIndex {
+        num_witness: usize,
+        num_advice: usize,
+        num_lookup: usize,
+        index: usize,
+    },
     #[error("unsupported variable type")]
     UnsupportedVariableType { var_type: usize },
 }
@@ -111,22 +117,18 @@ pub struct LookupEvalDomain<'a, F: PrimeField> {
     pub(crate) advice: &'a Vec<Vec<F>>,
 }
 
-/// Used for evaluate plonk custom gates
-pub struct PlonkEvalDomain<'a, F: PrimeField> {
-    pub(crate) challenges: Vec<F>,
-    pub(crate) selectors: &'a Vec<Vec<bool>>,
-    pub(crate) fixed: &'a Vec<Vec<F>>,
-    pub(crate) W: &'a RelaxedPlonkWitness<F>,
-}
-
 /// Used for evaluate cross terms T[i]
-pub struct CrossTermEvalDomain<'a, F: PrimeField> {
+pub struct PlonkEvalDomain<'a, F: PrimeField> {
+    pub(crate) num_advice: usize,
+    pub(crate) num_lookup: usize,
     // concatenation of challenges from two RelaxedPlonkInstance
     pub(crate) challenges: Vec<F>,
     pub(crate) selectors: &'a Vec<Vec<bool>>,
     pub(crate) fixed: &'a Vec<Vec<F>>,
-    pub(crate) W1: &'a RelaxedPlonkWitness<F>,
-    pub(crate) W2: &'a RelaxedPlonkWitness<F>,
+    // [`RelaxedPlonkWitness::W`] for first instance
+    pub(crate) W1s: &'a Vec<Vec<F>>,
+    // [`RelaxedPlonkWitness::W`] for second instance
+    pub(crate) W2s: &'a Vec<Vec<F>>,
 }
 
 impl<'a, F: PrimeField> Eval<F> for LookupEvalDomain<'a, F> {
@@ -181,31 +183,65 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
     }
 
     fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
-        todo!()
-    }
-}
+        let row_size = self.row_size();
+        let num_witness = self.W1s.len();
+        let num_advice = self.num_advice;
+        let num_lookup = self.num_lookup;
+        // maximum index for one instance
+        let max_width = num_advice + self.num_lookup * 4;
+        let is_first_instance = index >= max_width;
+        let index = if index < max_width {
+            index
+        } else {
+            index - max_width
+        };
 
-impl<'a, F: PrimeField> Eval<F> for CrossTermEvalDomain<'a, F> {
-    type Challenges = Vec<F>;
-    type Selectors = Vec<Vec<bool>>;
-    type Fixed = Vec<Vec<F>>;
-    fn new() -> Self {
-        todo!()
-    }
+        // TODO: simplify or put it in a better place ?
+        let index_map = |index: usize| -> Result<(usize, usize), EvalError> {
+            if index < self.num_advice {
+                return Ok((0, index));
+            }
 
-    fn get_challenges(&self) -> &Self::Challenges {
-        &self.challenges
-    }
+            let lookup_index = (index - num_advice) / 4;
+            let is_l_or_m = (index - num_advice) % 4 < 2;
+            // 0 => l or h; 1 => m or g
+            let lookup_sub_index = (index - num_advice) % 2;
+            match num_witness {
+                2 => {
+                    if is_l_or_m {
+                        Ok((0, num_advice + lookup_index * 2 + lookup_sub_index))
+                    } else {
+                        Ok((1, lookup_index * 2 + lookup_sub_index))
+                    }
+                }
+                3 => {
+                    if is_l_or_m {
+                        Ok((1, lookup_index * 2 + lookup_sub_index))
+                    } else {
+                        Ok((2, lookup_index * 2 + lookup_sub_index))
+                    }
+                }
+                num_witness => Err(EvalError::InvalidWitnessIndex {
+                    num_witness,
+                    num_advice,
+                    num_lookup,
+                    index,
+                }),
+            }
+        };
 
-    fn get_selectors(&self) -> &Self::Selectors {
-        self.selectors
-    }
-
-    fn get_fixed(&self) -> &Self::Fixed {
-        self.fixed
-    }
-
-    fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
-        todo!()
+        let (i, j) = index_map(index)?;
+        if i >= self.W1s.len() || j >= self.W1s[i].len() {
+            Err(EvalError::InvalidWitnessIndex {
+                num_witness,
+                num_advice,
+                num_lookup,
+                index,
+            })
+        } else if is_first_instance {
+            Ok(self.W1s[i][j * row_size + row])
+        } else {
+            Ok(self.W2s[i][j * row_size + row])
+        }
     }
 }

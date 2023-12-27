@@ -10,7 +10,7 @@
 //! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
 use crate::commitment::CommitmentKey;
 use crate::constants::NUM_CHALLENGE_BITS;
-use crate::plonk::eval::{CrossTermEvalDomain, Eval, EvalError};
+use crate::plonk::eval::{Eval, EvalError, PlonkEvalDomain};
 use crate::plonk::{
     PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
     SpsError, TableData,
@@ -92,7 +92,20 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         let normalized = S.poly.fold_transform(offset, S.num_fold_vars());
         let r_index = normalized.num_challenges() - 1;
         let degree = S.poly.degree_for_folding(offset);
-        let data: CrossTermEvalDomain<C::ScalarExt> = CrossTermEvalDomain::new();
+
+        let mut challenges = U1.challenges.clone();
+        challenges.push(U1.u);
+        challenges.extend(U1.challenges.clone());
+        challenges.push(U2.to_relax().u);
+        let data = PlonkEvalDomain {
+            num_advice: S.num_advice_columns,
+            num_lookup: S.num_lookups(),
+            challenges,
+            selectors: &S.selectors,
+            fixed: &S.fixed_columns,
+            W1s: &W1.W,
+            W2s: &W2.W,
+        };
         let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
             .map(|k| normalized.coeff_of((0, r_index, CHALLENGE_TYPE), k))
             .map(|multipoly| {
