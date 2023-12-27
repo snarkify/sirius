@@ -233,7 +233,24 @@ where
         })
     }
 
-    // TODO #32 rustdoc
+    /// Fold with proof [`RelaxedPlonkInstance::W_commitments`] & [`PlonkInstance::W_commitments`]
+    ///
+    /// # Description
+    ///
+    /// This function is responsible for combining the current `folded_W` accumulator with `input_W_commitments`.
+    /// This is achieved through a scalar multiplication followed by an elliptic curve addition.
+    /// The scalar multiplication is defined by a random scalar `r`.
+    ///
+    /// # Implementation Details
+    ///
+    /// 1. **Scalar Multiplication**: Each `W` component from `input_W_commitments` is multiplied
+    ///    by random the scalar `r` (challenge). This is executed using the [`EccChip`] for elliptic curve operations.
+    /// 2. **Accumulation**: The result of the scalar multiplication is then added to the corresponding component in
+    ///    the current `folded_W` accumulator.
+    ///
+    /// ```markdown
+    /// new_folded_W[i] = folded_W[i] + input_W[i] * r
+    /// ```
     fn fold_W<const T: usize>(
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
