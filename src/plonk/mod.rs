@@ -236,9 +236,18 @@ impl<C: CurveAffine> PlonkStructure<C> {
             .zip(W.W.iter())
             .filter_map(|(Ci, Wi)| ck.commit(Wi).ne(Ci).then_some(()))
             .count();
+
+        let data = PlonkEvalDomain {
+            num_advice: self.num_advice_columns,
+            num_lookup: self.num_lookups(),
+            challenges: U.challenges.clone(),
+            selectors: &self.selectors,
+            fixed: &self.fixed_columns,
+            W1s: &W.W,
+            W2s: &vec![],
+        };
         let nrow = 2usize.pow(self.k as u32);
-        let data = PlonkEvalDomain::new();
-        let res: usize = (0..nrow)
+        let res = (0..nrow)
             .into_par_iter()
             .map(|row| data.eval(&self.poly, row))
             .collect::<Result<Vec<F>, _>>()
@@ -264,10 +273,27 @@ impl<C: CurveAffine> PlonkStructure<C> {
         C: CurveAffine<ScalarExt = F>,
         F: PrimeField,
     {
+        let check_W_commitments = U
+            .W_commitments
+            .iter()
+            .zip(W.W.iter())
+            .filter_map(|(Ci, Wi)| ck.commit(Wi).ne(Ci).then_some(()))
+            .count();
+
         let nrow = 2usize.pow(self.k as u32);
         let poly = self.poly.homogeneous(self.fixed_offset());
-        let data = PlonkEvalDomain::new();
-        let res: usize = (0..nrow)
+        let mut challenges = U.challenges.clone();
+        challenges.push(U.u);
+        let data = PlonkEvalDomain {
+            num_advice: self.num_advice_columns,
+            num_lookup: self.num_lookups(),
+            challenges,
+            selectors: &self.selectors,
+            fixed: &self.fixed_columns,
+            W1s: &W.W,
+            W2s: &vec![],
+        };
+        let res = (0..nrow)
             .into_par_iter()
             .map(|row| data.eval(&poly, row))
             .collect::<Result<Vec<F>, _>>()
@@ -277,15 +303,9 @@ impl<C: CurveAffine> PlonkStructure<C> {
                     .filter(|(i, v)| W.E[*i].ne(v))
                     .count()
             })?;
+        let is_E_equal = ck.commit(&W.E).eq(&U.E_commitment);
 
-        let actual_W_commit = ck.commit(&W.W[0]);
-        let actual_E_commit = ck.commit(&W.E);
-
-        match (
-            res == 0,
-            U.W_commitments[0].eq(&actual_W_commit),
-            U.E_commitment.eq(&actual_E_commit),
-        ) {
+        match (res == 0, check_W_commitments == 0, is_E_equal) {
             (true, true, true) => Ok(()),
             (false, _, _) => Err(DeciderError::EvaluationMismatch {
                 mismatch_count: res,
