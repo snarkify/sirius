@@ -95,7 +95,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
 
         let mut challenges = U1.challenges.clone();
         challenges.push(U1.u);
-        challenges.extend(U1.challenges.clone());
+        challenges.extend(U2.challenges.clone());
         challenges.push(U2.to_relax().u);
         let data = PlonkEvalDomain {
             num_advice: S.num_advice_columns,
