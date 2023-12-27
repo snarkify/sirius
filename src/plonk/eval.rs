@@ -30,7 +30,7 @@ pub trait Eval<F: PrimeField> {
     fn get_fixed(&self) -> &Self::Fixed;
     /// total row size of the evaluation domain
     fn row_size(&self) -> usize {
-        self.get_fixed().as_ref().len()
+        self.get_fixed().as_ref()[0].len()
     }
     fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, EvalError>;
     /// evaluate a single column variable on specific row
@@ -51,12 +51,12 @@ pub trait Eval<F: PrimeField> {
             // fixed column
             index if index < fixed_offset => Ok(fixed.as_ref()[index - selector_offset][row]),
             // advice column
-            index => self.eval_advice_var(row, index - fixed_offset), // index if index < max_offset => Ok(self.table.advice_columns[index - fixed_offset][row]),
+            index => self.eval_advice_var(row, index - fixed_offset),
         }
     }
 
     fn eval_challenge(&self, index: usize) -> Result<F, EvalError> {
-        if self.get_challenges().as_ref().len() >= index {
+        if self.get_challenges().as_ref().len() <= index {
             Err(EvalError::ChallengeIndexOutOfBoundary {
                 challenge_index: index,
             })
@@ -77,8 +77,8 @@ pub trait Eval<F: PrimeField> {
                         match var_type {
                             // evaluation for challenge variable
                             CHALLENGE_TYPE => self.eval_challenge(col),
+                            // evaluation for column polynomial variable
                             POLYNOMIAL_TYPE => {
-                                // evaluation for column polynomial variable
                                 let tmp = rot + (row as i32);
                                 // TODO: double check how halo2 handle
                                 // (1): row+rot < 0
@@ -184,19 +184,21 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
 
     fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
         let row_size = self.row_size();
-        let num_witness = self.W1s.len();
         let num_advice = self.num_advice;
         let num_lookup = self.num_lookup;
         // maximum index for one instance
         let max_width = num_advice + self.num_lookup * 4;
-        let is_first_instance = index >= max_width;
-        let index = if index < max_width {
-            index
+        let (is_first_instance, index) = if index < max_width {
+            (true, index)
         } else {
-            index - max_width
+            (false, index - max_width)
+        };
+        let num_witness = if is_first_instance {
+            self.W1s.len()
+        } else {
+            self.W2s.len()
         };
 
-        // TODO: simplify or put it in a better place ?
         let index_map = |index: usize| -> Result<(usize, usize), EvalError> {
             if index < self.num_advice {
                 return Ok((0, index));
@@ -231,15 +233,24 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
         };
 
         let (i, j) = index_map(index)?;
-        if i >= self.W1s.len() || j >= self.W1s[i].len() {
+        if is_first_instance {
+            if i >= self.W1s.len() || j >= self.W1s[i].len() {
+                Err(EvalError::InvalidWitnessIndex {
+                    num_witness,
+                    num_advice,
+                    num_lookup,
+                    index,
+                })
+            } else {
+                Ok(self.W1s[i][j * row_size + row])
+            }
+        } else if i >= self.W2s.len() || j >= self.W2s[i].len() {
             Err(EvalError::InvalidWitnessIndex {
                 num_witness,
                 num_advice,
                 num_lookup,
                 index,
             })
-        } else if is_first_instance {
-            Ok(self.W1s[i][j * row_size + row])
         } else {
             Ok(self.W2s[i][j * row_size + row])
         }
