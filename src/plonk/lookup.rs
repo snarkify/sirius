@@ -45,7 +45,7 @@ use rayon::prelude::*;
 use std::array;
 
 use crate::{
-    plonk::eval::{Eval, PlonkEvalDomain},
+    plonk::eval::{Eval, LookupEvalDomain},
     plonk::util::compress_halo2_expression,
     plonk::TableData,
     polynomial::{Expression, Query},
@@ -191,7 +191,12 @@ impl<F: PrimeField> Arguments<F> {
     /// evaluate each of the lookup expressions to get vector l_i
     /// where l_i = L_i(x_1,...,x_a)
     fn evaluate_ls(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, EvalError> {
-        let data = PlonkEvalDomain::new();
+        let data = LookupEvalDomain {
+            challenges: vec![r],
+            selectors: &table.selector,
+            fixed: &table.fixed_columns,
+            advice: &table.advice_columns,
+        };
         let nrow = 2usize.pow(table.k);
         self.lookup_polys
             .iter()
@@ -208,7 +213,12 @@ impl<F: PrimeField> Arguments<F> {
     /// evaluate each of the table expressions to get vector t_i
     /// where t_i = T(y1,...,y_b)
     fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, EvalError> {
-        let data = PlonkEvalDomain::new();
+        let data = LookupEvalDomain {
+            challenges: vec![r],
+            selectors: &table.selector,
+            fixed: &table.fixed_columns,
+            advice: &table.advice_columns,
+        };
         let nrow = 2usize.pow(table.k);
         self.table_polys
             .iter()
