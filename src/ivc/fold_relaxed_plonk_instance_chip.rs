@@ -782,18 +782,18 @@ mod tests {
         Layouter, Region, RegionIndex,
     };
     use halo2curves::{bn256::G1Affine as C1, CurveAffine};
-    use rand::Rng;
-
-    type Base = <C1 as CurveAffine>::Base;
-    type ScalarExt = <C1 as CurveAffine>::ScalarExt;
-
     use poseidon::Spec;
+    use rand::Rng;
 
     use crate::{
         commitment::CommitmentKey, plonk::TableData, poseidon::poseidon_circuit::PoseidonChip,
     };
 
     use super::*;
+
+    type Base = <C1 as CurveAffine>::Base;
+    type ScalarExt = <C1 as CurveAffine>::ScalarExt;
+    const T: usize = 6;
 
     #[test]
     fn generate_challenge() {
@@ -840,25 +840,34 @@ mod tests {
             .unwrap();
     }
 
-    #[test_log::test]
-    fn fold_W_test() {
-        const T: usize = 6;
-
+    fn get_table_data() -> (TableData<Base>, MainGateConfig<T>) {
         let mut td = TableData::new(17, vec![]);
         let _ = td.cs.instance_column();
         let config = td.prepare_assembly(MainGate::<Base, T>::configure);
 
-        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
-        let mut on_circuit_W_cell = None;
-        let mut rnd = rand::thread_rng();
+        (td, config)
+    }
 
-        let W = C1::random(&mut rnd);
-        let W_coordinates = W.coordinates().unwrap();
+    #[test_log::test]
+    fn fold_W_test() {
+        const LENGHT: usize = 5;
+
+        let (mut td, config) = get_table_data();
+
+        let mut rnd = rand::thread_rng();
+        let input_W = iter::repeat_with(|| C1::random(&mut rnd))
+            .take(LENGHT)
+            .collect::<Vec<_>>();
 
         let r = ScalarExt::from_u128(rnd.gen());
-        let folded_W = CommitmentKey::<C1>::default_value();
-        let folded_W_coordinates = folded_W.coordinates().unwrap();
 
+        let folded_W = vec![CommitmentKey::<C1>::default_value(); LENGHT];
+
+        let ecc = EccChip::<C1, Base, T>::new(config.clone());
+        let gate = MainGate::new(config.clone());
+
+        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+        let mut on_circuit_W_cell = None;
         // Run twice for setup & real run
         for _ in 0..=1 {
             on_circuit_W_cell = Some(
@@ -867,60 +876,42 @@ mod tests {
                         || "fold W test",
                         |region| {
                             let mut ctx = RegionCtx::new(region, 0);
-                            let folded = AssignedPoint::<C1> {
-                                x: ctx
-                                    .assign_advice(
-                                        || "folded_x",
-                                        config.state[0],
-                                        Value::known(*folded_W_coordinates.x()),
-                                    )
-                                    .unwrap(),
-                                y: ctx
-                                    .assign_advice(
-                                        || "folded_y",
-                                        config.state[1],
-                                        Value::known(*folded_W_coordinates.y()),
-                                    )
-                                    .unwrap(),
-                            };
 
-                            let input = AssignedPoint::<C1> {
-                                x: ctx
-                                    .assign_advice(
-                                        || "input_x",
-                                        config.state[2],
-                                        Value::known(*W_coordinates.x()),
+                            let folded = folded_W
+                                .iter()
+                                .enumerate()
+                                .map(|(i, folded_Wi)| {
+                                    ecc.assign_from_curve(
+                                        &mut ctx,
+                                        || format!("folded_W[{i}]"),
+                                        folded_Wi,
                                     )
-                                    .unwrap(),
-                                y: ctx
-                                    .assign_advice(
-                                        || "input_y",
-                                        config.state[3],
-                                        Value::known(*W_coordinates.y()),
+                                })
+                                .collect::<Result<Vec<_>, _>>()?;
+
+                            let input = input_W
+                                .iter()
+                                .enumerate()
+                                .map(|(i, input_Wi)| {
+                                    ecc.assign_from_curve(
+                                        &mut ctx,
+                                        || format!("input_W[{i}]"),
+                                        input_Wi,
                                     )
-                                    .unwrap(),
-                            };
+                                })
+                                .collect::<Result<Vec<_>, _>>()?;
 
-                            let gate = MainGate::new(config.clone());
-                            let r = ctx
-                                .assign_advice(
-                                    || "r",
-                                    config.state[4],
-                                    Value::known(util::fe_to_fe(&r).unwrap()),
-                                )
-                                .unwrap();
-                            let r = gate
-                                .le_num_to_bits(&mut ctx, r, NUM_CHALLENGE_BITS)
-                                .unwrap();
+                            let assigned_r = ctx.assign_advice(
+                                || "r",
+                                config.state[0],
+                                Value::known(util::fe_to_fe(&r).unwrap()),
+                            )?;
 
-                            ctx.next();
+                            let r =
+                                gate.le_num_to_bits(&mut ctx, assigned_r, NUM_CHALLENGE_BITS)?;
 
                             Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_W(
-                                &mut ctx,
-                                &config,
-                                &[folded],
-                                &[input],
-                                &r,
+                                &mut ctx, &config, &folded, &input, &r,
                             )
                             .unwrap())
                         },
@@ -929,13 +920,13 @@ mod tests {
             );
         }
 
-        let plonk = RelaxedPlonkInstance::<C1>::new(0, 0, 1);
-        assert_eq!(plonk.W_commitments, vec![folded_W]);
+        let plonk = RelaxedPlonkInstance::<C1>::new(0, 0, LENGHT);
+        assert_eq!(plonk.W_commitments, folded_W);
 
         let off_circuit_W = plonk
             .fold(
                 &PlonkInstance {
-                    W_commitments: vec![W],
+                    W_commitments: input_W,
                     instance: vec![],
                     challenges: vec![],
                 },
@@ -948,7 +939,7 @@ mod tests {
                 let coordinates = c.coordinates().unwrap();
                 (*coordinates.x(), *coordinates.y())
             })
-            .collect::<Vec<(Base, Base)>>();
+            .collect::<Vec<_>>();
 
         let on_circuit_W_cell = on_circuit_W_cell
             .unwrap()
