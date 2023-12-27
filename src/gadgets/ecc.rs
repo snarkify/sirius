@@ -41,18 +41,32 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
         Self { main_gate }
     }
 
-    pub fn assign_point(
+    pub fn assign_from_curve<AN: Into<String>>(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
+        annotation: impl Fn() -> AN,
+        value: &C,
+    ) -> Result<AssignedPoint<C>, Error> {
+        let coordinates: Option<_> = value
+            .coordinates()
+            .map(|coordinates| (*coordinates.x(), *coordinates.y()))
+            .into();
+        self.assign_point(ctx, annotation, coordinates)
+    }
+
+    pub fn assign_point<AN: Into<String>>(
+        &self,
+        ctx: &mut RegionCtx<'_, C::Base>,
+        annotation: impl Fn() -> AN,
         coords: Option<(C::Base, C::Base)>,
     ) -> Result<AssignedPoint<C>, Error> {
         let x = ctx.assign_advice(
-            || "x",
+            || format!("{}.x", annotation().into()),
             self.main_gate.config().state[0],
             Value::known(coords.map_or(C::Base::ZERO, |c| c.0)),
         )?;
         let y = ctx.assign_advice(
-            || "y",
+            || format!("{}.y", annotation().into()),
             self.main_gate.config().state[1],
             Value::known(coords.map_or(C::Base::ZERO, |c| c.1)),
         )?;
@@ -113,7 +127,7 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
         };
 
         // (2) modify acc and p if p0 is infinity
-        let infp = self.assign_point(ctx, None)?;
+        let infp = self.assign_point(ctx, || "infp", None)?;
         let is_p_iden = self.main_gate.is_infinity_point(ctx, &p0.x, &p0.y)?;
         let x = self
             .main_gate
@@ -174,7 +188,7 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
         let is_equal_x = self.main_gate.is_equal_term(ctx, &p.x, &q.x)?;
         let is_equal_y = self.main_gate.is_equal_term(ctx, &p.y, &q.y)?;
 
-        let inf = self.assign_point(ctx, None)?;
+        let inf = self.assign_point(ctx, || "inf", None)?;
         let r = self._add_unsafe(ctx, p, q)?;
         let p2 = self.double(ctx, p)?;
 
@@ -230,7 +244,7 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
         p: &AssignedPoint<C>,
     ) -> Result<AssignedPoint<C>, Error> {
         let is_inf = self.main_gate.is_infinity_point(ctx, &p.x, &p.y)?;
-        let inf = self.assign_point(ctx, None)?;
+        let inf = self.assign_point(ctx, || "inf", None)?;
         let p2 = self._double_unsafe(ctx, p)?;
 
         let x = self
