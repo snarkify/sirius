@@ -202,6 +202,18 @@ pub(crate) fn create_ro<
     PoseidonHash::<C, F, T, RATE>::new(spec)
 }
 
+/// Concatenate N vectors
+#[macro_export]
+macro_rules! concat {
+    ($($x:expr),*) => {{
+        let mut new_vec = Vec::new();
+        $(
+            new_vec.extend_from_slice($x);
+        )*
+        new_vec
+    }};
+}
+
 /// A macro used for MockProver certain circuit by leveraging halo2_proofs.
 #[macro_export]
 macro_rules! run_mock_prover_test {
