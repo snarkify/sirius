@@ -88,7 +88,11 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         W2: &PlonkWitness<C::ScalarExt>,
     ) -> Result<(CrossTerms<C>, CrossTermCommits<C>), NIFSError> {
         let offset = S.fixed_offset();
-        let num_row = S.fixed_columns[0].len();
+        let num_row = if !S.fixed_columns.is_empty() {
+            S.fixed_columns[0].len()
+        } else {
+            S.selectors[0].len()
+        };
         let normalized = S.poly.fold_transform(offset, S.num_fold_vars());
         let r_index = normalized.num_challenges() - 1;
         let degree = S.poly.degree_for_folding(offset);
@@ -156,9 +160,9 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         let S = td.plonk_structure(ck);
         S.absorb_into(ro_acc);
 
-        let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges).unwrap();
-        U2.absorb_into(ro_acc);
+        let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges)?;
         U1.absorb_into(ro_acc);
+        U2.absorb_into(ro_acc);
         let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2)?;
         cross_term_commits
             .iter()
@@ -197,8 +201,9 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
     ) -> Result<RelaxedPlonkInstance<C>, NIFSError> {
         S.run_sps_verifier(&U2, ro_nark)?;
         S.absorb_into(ro_acc);
-        U2.absorb_into(ro_acc);
         U1.absorb_into(ro_acc);
+        U2.absorb_into(ro_acc);
+
         self.cross_term_commits
             .iter()
             .for_each(|cm| ro_acc.absorb_point(cm));
