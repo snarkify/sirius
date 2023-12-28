@@ -18,9 +18,11 @@ use std::iter;
 
 use crate::{
     commitment::CommitmentKey,
+    concat,
     constants::NUM_CHALLENGE_BITS,
     plonk::{
         eval::{Eval, PlonkEvalDomain},
+        lookup::TableValues,
         util::{cell_to_z_idx, column_index, compress_expression, fill_sparse_matrix},
     },
     polynomial::{
@@ -177,7 +179,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<
 
 impl<C: CurveAffine> PlonkStructure<C> {
     /// return the index offset of fixed variables(i.e. not folded)
-    pub fn fixed_offset(&self) -> usize {
+    pub fn num_non_fold_vars(&self) -> usize {
         self.fixed_columns.len() + self.selectors.len() + self.num_lookups()
     }
 
@@ -224,6 +226,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
         ro_nark: &mut RO,
         U: &PlonkInstance<C>,
         W: &PlonkWitness<F>,
+        table_values: &TableValues<F>,
     ) -> Result<(), DeciderError>
     where
         C: CurveAffine<ScalarExt = F>,
@@ -243,6 +246,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
             challenges: U.challenges.clone(),
             selectors: &self.selectors,
             fixed: &self.fixed_columns,
+            table_values,
             W1s: &W.W,
             W2s: &vec![],
         };
@@ -268,6 +272,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
         ck: &CommitmentKey<C>,
         U: &RelaxedPlonkInstance<C>,
         W: &RelaxedPlonkWitness<F>,
+        table_values: &TableValues<F>,
     ) -> Result<(), DeciderError>
     where
         C: CurveAffine<ScalarExt = F>,
@@ -281,15 +286,14 @@ impl<C: CurveAffine> PlonkStructure<C> {
             .count();
 
         let nrow = 2usize.pow(self.k as u32);
-        let poly = self.poly.homogeneous(self.fixed_offset());
-        let mut challenges = U.challenges.clone();
-        challenges.push(U.u);
+        let poly = self.poly.homogeneous(self.num_non_fold_vars());
         let data = PlonkEvalDomain {
             num_advice: self.num_advice_columns,
             num_lookup: self.num_lookups(),
-            challenges,
+            challenges: concat!(&U.challenges, &[U.u]),
             selectors: &self.selectors,
             fixed: &self.fixed_columns,
+            table_values,
             W1s: &W.W,
             W2s: &vec![],
         };
@@ -378,8 +382,8 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             W_commitments: vec![CommitmentKey::<C>::default_value(); num_witness],
             E_commitment: CommitmentKey::<C>::default_value(),
             instance: vec![C::ScalarExt::ZERO; num_io],
-            challenges: vec![C::ScalarExt::ONE; num_challenges],
-            u: C::ScalarExt::ONE,
+            challenges: vec![C::ScalarExt::ZERO; num_challenges],
+            u: C::ScalarExt::ZERO,
         }
     }
 
@@ -744,7 +748,7 @@ impl<F: PrimeField> TableData<F> {
     fn run_sps_protocol_0<C: CurveAffine<ScalarExt = F>>(
         &self,
         ck: &CommitmentKey<C>,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>, TableValues<F>), SpsError> {
         if self.advice.is_empty() {
             return Err(SpsError::LackOfAdvices);
         }
@@ -759,6 +763,7 @@ impl<F: PrimeField> TableData<F> {
                 challenges: vec![],
             },
             PlonkWitness { W: vec![W1] },
+            vec![],
         ))
     }
 
@@ -771,8 +776,8 @@ impl<F: PrimeField> TableData<F> {
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
-        let (mut plonk_instance, plonk_witness) = self.run_sps_protocol_0(ck)?;
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>, TableValues<F>), SpsError> {
+        let (mut plonk_instance, plonk_witness, _) = self.run_sps_protocol_0(ck)?;
 
         self.instance.iter().for_each(|inst| {
             ro_nark.absorb_base(fe_to_fe(inst).unwrap());
@@ -785,7 +790,7 @@ impl<F: PrimeField> TableData<F> {
             .challenges
             .push(ro_nark.squeeze(NUM_CHALLENGE_BITS));
 
-        Ok((plonk_instance, plonk_witness))
+        Ok((plonk_instance, plonk_witness, vec![]))
     }
 
     /// run 2-round special soundness protocol to generate witnesses and challenges
@@ -797,7 +802,7 @@ impl<F: PrimeField> TableData<F> {
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>, TableValues<F>), SpsError> {
         if self.advice.is_empty() {
             return Err(SpsError::LackOfAdvices);
         }
@@ -811,6 +816,7 @@ impl<F: PrimeField> TableData<F> {
             .map(|la| la.evaluate_coefficient_1(self, F::ZERO))
             .transpose()?
             .ok_or(SpsError::LackOfLookupArguments)?;
+        let table_values = lookup_coeff.ts.clone();
 
         let W1 = [
             concatenate_with_padding(&self.advice_columns, k_power_of_2),
@@ -847,6 +853,7 @@ impl<F: PrimeField> TableData<F> {
                 challenges: vec![r1, r2],
             },
             PlonkWitness { W: vec![W1, W2] },
+            table_values,
         ))
     }
 
@@ -858,7 +865,7 @@ impl<F: PrimeField> TableData<F> {
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>, TableValues<F>), SpsError> {
         if self.advice.is_empty() {
             return Err(SpsError::LackOfAdvices);
         }
@@ -882,6 +889,7 @@ impl<F: PrimeField> TableData<F> {
             .map(|la| la.evaluate_coefficient_1(self, r1))
             .transpose()?
             .ok_or(SpsError::LackOfLookupArguments)?;
+        let table_values = lookup_coeff.ts.clone();
 
         let W2 = [
             concatenate_with_padding(&lookup_coeff.ls, k_power_of_2),
@@ -914,6 +922,7 @@ impl<F: PrimeField> TableData<F> {
             PlonkWitness {
                 W: vec![W1, W2, W3],
             },
+            table_values,
         ))
     }
 
@@ -925,7 +934,7 @@ impl<F: PrimeField> TableData<F> {
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
         num_challenges: usize,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>, TableValues<F>), SpsError> {
         if self.advice.is_empty() {
             return Err(SpsError::LackOfAdvices);
         }
@@ -1218,7 +1227,6 @@ mod tests {
 
     #[test]
     fn test_assembly() {
-        use ff::Field;
         use halo2curves::pasta::Fp;
 
         const K: u32 = 4;

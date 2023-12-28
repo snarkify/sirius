@@ -45,10 +45,10 @@ fn fold_instances<
     let mut ro_nark_prepare = create_ro::<C, F2, T, RATE, R_F, R_P>();
     let mut ro_nark_verifier = create_ro::<C, F2, T, RATE, R_F, R_P>();
     let mut ro_nark_decider = create_ro::<C, F2, T, RATE, R_F, R_P>();
-    let (U1, W1) = td1
+    let (U1, W1, tvs1) = td1
         .run_sps_protocol(ck, &mut ro_nark_prepare, S.num_challenges)
         .unwrap();
-    let res = S.is_sat(ck, &mut ro_nark_decider, &U1, &W1);
+    let res = S.is_sat(ck, &mut ro_nark_decider, &U1, &W1, &tvs1);
     assert!(res.is_ok());
 
     let mut ro_acc_prover = create_ro::<C, F2, T, RATE, R_F, R_P>();
@@ -62,15 +62,15 @@ fn fold_instances<
 
     f_U = U;
     f_W = W;
-    let res = S.is_sat_relaxed(ck, &f_U, &f_W);
+    let res = S.is_sat_relaxed(ck, &f_U, &f_W, &tvs1);
     assert!(res.is_ok());
     //    let perm_res = S.is_sat_perm(&f_U, &f_W);
     //    assert!(perm_res.is_ok());
 
-    let (U1, W1) = td2
+    let (U1, W1, tvs2) = td2
         .run_sps_protocol(ck, &mut ro_nark_prepare, S.num_challenges)
         .unwrap();
-    let res = S.is_sat(ck, &mut ro_nark_decider, &U1, &W1);
+    let res = S.is_sat(ck, &mut ro_nark_decider, &U1, &W1, &tvs2);
     assert!(res.is_ok());
 
     let (nifs, (_U, _W)) =
@@ -82,7 +82,7 @@ fn fold_instances<
 
     f_U = _U;
     f_W = _W;
-    let res = S.is_sat_relaxed(ck, &f_U, &f_W);
+    let res = S.is_sat_relaxed(ck, &f_U, &f_W, &tvs2);
     assert!(res.is_ok());
     //    let perm_res = S.is_sat_perm(&f_U, &f_W);
     //    assert!(perm_res.is_ok());
@@ -570,8 +570,8 @@ mod three_rounds_test {
                 || "xor",
                 |mut table| {
                     let mut idx = 0;
-                    for lhs in 0..32 {
-                        for rhs in 0..32 {
+                    for lhs in 0..5 {
+                        for rhs in 0..5 {
                             table.assign_cell(
                                 || "lhs",
                                 self.config.xor_table[0],
@@ -658,11 +658,12 @@ mod three_rounds_test {
 
     #[test]
     fn test_nifs() -> Result<(), NIFSError> {
-        const K: u32 = 11;
-        let num = 14;
+        const K: u32 = 5;
+        let num = 7;
 
         // circuit 1
         let seq = get_sequence(1, 3, 2, num);
+        // println!("seq={:?}", &seq);
         let circuit1 = FiboCircuit {
             a: Fr::from(seq[0]),
             b: Fr::from(seq[1]),
@@ -673,7 +674,8 @@ mod three_rounds_test {
         let _ = td1.assembly(&circuit1);
 
         // circuit 2
-        let seq = get_sequence(1, 3, 2, num);
+        let seq = get_sequence(3, 2, 2, num);
+        // println!("seq={:?}", &seq);
         let circuit2 = FiboCircuit {
             a: Fr::from(seq[0]),
             b: Fr::from(seq[1]),
