@@ -605,7 +605,7 @@ impl<F: PrimeField> TableData<F> {
         self.lookup_arguments = lookup::Arguments::compress_from(&self.cs);
         let n = 1 << self.k;
         // TODO: add support for user defined instance columns
-        assert!(self.cs.num_instance_columns() == 1);
+        assert!(self.cs.num_instance_columns() <= 1);
         self.fixed = vec![vec![F::ZERO.into(); n]; self.cs.num_fixed_columns()];
         self.selector = vec![vec![false; n]; self.cs.num_selectors()];
         self.advice = vec![vec![F::ZERO.into(); n]; self.cs.num_advice_columns()];
