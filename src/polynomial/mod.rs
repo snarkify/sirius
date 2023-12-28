@@ -188,7 +188,7 @@ impl<F: PrimeField> Expression<F> {
     // and output P(f_1,...,f_m, x_1+r*y_1,...,x_n+r*y_n)
     // here mm = num_fixed+num_selectors+offset_pad
     // nn = num_advice
-    pub fn fold_transform(&self, mm: usize, nn: usize) -> Self {
+    fn fold_transform(&self, mm: usize, nn: usize) -> Self {
         let num_challenges = self.num_challenges();
         let r = Expression::Challenge(2 * num_challenges);
         self.evaluate(
@@ -602,7 +602,7 @@ impl<F: PrimeField> MultiPolynomial<F> {
     // p(f_1,...,f_m,x_1,...,x_n) -> p'(f_1,...,f_m,x_1,...,x_n,u)
     // (2) fold variable x_i while keep variable f_i unchanged
     // p' -> p'(f_1,...,f_m, x_1+r*y_1,x_2+r*y_2,...,x_n+r*y_n)
-    // mm = num_fixed + num_selectors + offset_pad, nn = num_advice
+    // mm = num_fixed + num_selectors + num_lookup , nn = num_advice + 4*num_lookup
     pub fn fold_transform(&self, mm: usize, nn: usize) -> Self {
         self.homogeneous(mm)
             .to_expression()

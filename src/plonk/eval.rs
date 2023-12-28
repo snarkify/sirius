@@ -7,6 +7,10 @@ pub enum EvalError {
     ChallengeIndexOutOfBoundary { challenge_index: usize },
     #[error("column variable index out of boundary")]
     ColumnVariableIndexOutOfBoundary { column_index: usize },
+    #[error("column variable row index out of boundary")]
+    RowIndexOutOfBoundary { row_index: usize },
+    #[error("InvalidExpression")]
+    InvalidExpression,
     #[error("Invalid witness index")]
     InvalidWitnessIndex {
         num_witness: usize,
@@ -23,11 +27,10 @@ pub trait Eval<F: PrimeField> {
     type Selectors: AsRef<[Vec<bool>]>;
     type Fixed: AsRef<[Vec<F>]>;
 
-    /// construct evaluation domain
-    fn new() -> Self;
     fn get_challenges(&self) -> &Self::Challenges;
     fn get_selectors(&self) -> &Self::Selectors;
     fn get_fixed(&self) -> &Self::Fixed;
+    fn num_lookup(&self) -> usize;
     /// total row size of the evaluation domain
     fn row_size(&self) -> usize {
         // at least one of them is non-empty
@@ -37,6 +40,7 @@ pub trait Eval<F: PrimeField> {
             return self.get_selectors().as_ref()[0].len();
         }
     }
+    fn eval_table_var(&self, row: usize, col: usize) -> Result<F, EvalError>;
     fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, EvalError>;
     /// evaluate a single column variable on specific row
     fn eval_column_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
@@ -44,6 +48,7 @@ pub trait Eval<F: PrimeField> {
         let fixed = self.get_fixed();
         let selector_offset = selectors.as_ref().len();
         let fixed_offset = fixed.as_ref().len() + selector_offset;
+        let pre_advice_offset = fixed_offset + self.num_lookup();
         match index {
             // selector column
             index if index < selector_offset => {
@@ -55,8 +60,10 @@ pub trait Eval<F: PrimeField> {
             }
             // fixed column
             index if index < fixed_offset => Ok(fixed.as_ref()[index - selector_offset][row]),
+            // values from table expressions {t_i},
+            index if index < pre_advice_offset => self.eval_table_var(row, index - fixed_offset),
             // advice column
-            index => self.eval_advice_var(row, index - fixed_offset),
+            index => self.eval_advice_var(row, index - pre_advice_offset),
         }
     }
 
@@ -116,6 +123,7 @@ pub trait Eval<F: PrimeField> {
 
 /// Used for evaluate compressed lookup expressions L_i(x1,...,xa) = l_i
 pub struct LookupEvalDomain<'a, F: PrimeField> {
+    pub(crate) num_lookup: usize,
     pub(crate) challenges: Vec<F>,
     pub(crate) selectors: &'a Vec<Vec<bool>>,
     pub(crate) fixed: &'a Vec<Vec<F>>,
@@ -130,6 +138,7 @@ pub struct PlonkEvalDomain<'a, F: PrimeField> {
     pub(crate) challenges: Vec<F>,
     pub(crate) selectors: &'a Vec<Vec<bool>>,
     pub(crate) fixed: &'a Vec<Vec<F>>,
+    pub(crate) table_values: &'a Vec<Vec<F>>,
     // [`RelaxedPlonkWitness::W`] for first instance
     pub(crate) W1s: &'a Vec<Vec<F>>,
     // [`RelaxedPlonkWitness::W`] for second instance
@@ -140,8 +149,9 @@ impl<'a, F: PrimeField> Eval<F> for LookupEvalDomain<'a, F> {
     type Challenges = Vec<F>;
     type Selectors = Vec<Vec<bool>>;
     type Fixed = Vec<Vec<F>>;
-    fn new() -> Self {
-        todo!()
+
+    fn num_lookup(&self) -> usize {
+        self.num_lookup
     }
 
     fn get_challenges(&self) -> &Self::Challenges {
@@ -156,11 +166,17 @@ impl<'a, F: PrimeField> Eval<F> for LookupEvalDomain<'a, F> {
         self.fixed
     }
 
+    fn eval_table_var(&self, _row: usize, _index: usize) -> Result<F, EvalError> {
+        Err(EvalError::InvalidExpression)
+    }
+
     fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
         if index >= self.advice.len() {
             Err(EvalError::ColumnVariableIndexOutOfBoundary {
                 column_index: index,
             })
+        } else if row >= self.advice[index].len() {
+            Err(EvalError::RowIndexOutOfBoundary { row_index: row })
         } else {
             Ok(self.advice[index][row])
         }
@@ -171,8 +187,9 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
     type Challenges = Vec<F>;
     type Selectors = Vec<Vec<bool>>;
     type Fixed = Vec<Vec<F>>;
-    fn new() -> Self {
-        todo!()
+
+    fn num_lookup(&self) -> usize {
+        self.num_lookup
     }
 
     fn get_challenges(&self) -> &Self::Challenges {
@@ -187,12 +204,20 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
         self.fixed
     }
 
+    fn eval_table_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
+        if self.table_values.is_empty() {
+            Err(EvalError::InvalidExpression)
+        } else {
+            Ok(self.table_values[index][row])
+        }
+    }
+
     fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
         let row_size = self.row_size();
         let num_advice = self.num_advice;
-        let num_lookup = self.num_lookup;
+        let num_lookup = self.num_lookup();
         // maximum index for one instance
-        let max_width = num_advice + self.num_lookup * 4;
+        let max_width = num_advice + self.num_lookup() * 4;
         let (is_first_instance, index) = if index < max_width {
             (true, index)
         } else {
@@ -205,7 +230,7 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
         };
 
         let index_map = |index: usize| -> Result<(usize, usize), EvalError> {
-            if index < self.num_advice {
+            if index < num_advice {
                 return Ok((0, index));
             }
 

@@ -181,7 +181,7 @@ where
             W: vec![C::default(); num_witness],
             E: C::default(),
             u: C::Scalar::ZERO,
-            challenges: iter::repeat_with(|| BigUint::one(limb_width))
+            challenges: iter::repeat_with(|| BigUint::zero(limb_width))
                 .take(num_challenges)
                 .collect(),
             X0: BigUint::zero(limb_width),
