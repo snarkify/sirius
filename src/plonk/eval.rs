@@ -30,7 +30,12 @@ pub trait Eval<F: PrimeField> {
     fn get_fixed(&self) -> &Self::Fixed;
     /// total row size of the evaluation domain
     fn row_size(&self) -> usize {
-        self.get_fixed().as_ref()[0].len()
+        // at least one of them is non-empty
+        if !self.get_fixed().as_ref().is_empty() {
+            return self.get_fixed().as_ref()[0].len();
+        } else {
+            return self.get_selectors().as_ref()[0].len();
+        }
     }
     fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, EvalError>;
     /// evaluate a single column variable on specific row
