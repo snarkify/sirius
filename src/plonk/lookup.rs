@@ -76,6 +76,8 @@ pub struct Arguments<F: PrimeField> {
     pub(crate) has_vector_lookup: bool,
 }
 
+pub(crate) type TableValues<F> = Vec<Vec<F>>;
+
 impl<F: PrimeField> Arguments<F> {
     /// Compresses a potentially vector Lookup Argument from a constraint system into non-vector expression.
     pub fn compress_from(cs: &ConstraintSystem<F>) -> Option<Self> {
@@ -95,7 +97,7 @@ impl<F: PrimeField> Arguments<F> {
             .map(|arg| {
                 (
                     compress_halo2_expression(
-                        arg.table_expressions(),
+                        arg.input_expressions(),
                         cs.num_selectors(),
                         cs.num_fixed_columns(),
                         num_lookups,
@@ -103,7 +105,7 @@ impl<F: PrimeField> Arguments<F> {
                         0,
                     ),
                     compress_halo2_expression(
-                        arg.input_expressions(),
+                        arg.table_expressions(),
                         cs.num_selectors(),
                         cs.num_fixed_columns(),
                         num_lookups,
@@ -192,6 +194,7 @@ impl<F: PrimeField> Arguments<F> {
     /// where l_i = L_i(x_1,...,x_a)
     fn evaluate_ls(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, EvalError> {
         let data = LookupEvalDomain {
+            num_lookup: table.num_lookups(),
             challenges: vec![r],
             selectors: &table.selector,
             fixed: &table.fixed_columns,
@@ -212,8 +215,9 @@ impl<F: PrimeField> Arguments<F> {
 
     /// evaluate each of the table expressions to get vector t_i
     /// where t_i = T(y1,...,y_b)
-    fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, EvalError> {
+    fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Result<TableValues<F>, EvalError> {
         let data = LookupEvalDomain {
+            num_lookup: table.num_lookups(),
             challenges: vec![r],
             selectors: &table.selector,
             fixed: &table.fixed_columns,
