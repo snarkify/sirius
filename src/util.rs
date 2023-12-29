@@ -204,7 +204,7 @@ pub(crate) fn create_ro<
 
 /// Concatenate N vectors
 #[macro_export]
-macro_rules! concat {
+macro_rules! concat_vec {
     ($($x:expr),*) => {{
         let mut new_vec = Vec::new();
         $(

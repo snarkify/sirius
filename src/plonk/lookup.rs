@@ -37,6 +37,7 @@
 //! Please see (#34)[https://github.com/snarkify/sirius/issues/34] for details on notations.
 //!
 
+use crate::concat_vec;
 use crate::plonk::eval::EvalError;
 use ff::PrimeField;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
@@ -76,8 +77,6 @@ pub struct Arguments<F: PrimeField> {
     pub(crate) has_vector_lookup: bool,
 }
 
-pub(crate) type TableValues<F> = Vec<Vec<F>>;
-
 impl<F: PrimeField> Arguments<F> {
     /// Compresses a potentially vector Lookup Argument from a constraint system into non-vector expression.
     pub fn compress_from(cs: &ConstraintSystem<F>) -> Option<Self> {
@@ -89,7 +88,6 @@ impl<F: PrimeField> Arguments<F> {
             .filter(|l| *l != 0)?;
 
         let has_vector_lookup = max_lookup_len > 1;
-        let num_lookups = cs.lookups().len();
 
         let (lookup_polys, table_polys) = cs
             .lookups()
@@ -100,7 +98,6 @@ impl<F: PrimeField> Arguments<F> {
                         arg.input_expressions(),
                         cs.num_selectors(),
                         cs.num_fixed_columns(),
-                        num_lookups,
                         // compress vector table items with r1 (challenge_index = 0)
                         0,
                     ),
@@ -108,7 +105,6 @@ impl<F: PrimeField> Arguments<F> {
                         arg.table_expressions(),
                         cs.num_selectors(),
                         cs.num_fixed_columns(),
-                        num_lookups,
                         // compress vector lookups with r1 (challenge_index = 0)
                         0,
                     ),
@@ -124,23 +120,36 @@ impl<F: PrimeField> Arguments<F> {
     }
 
     /// L_i(x1,...,xa) - l_i which evaluates to zero on every row
-    pub fn lookup_polys_minus_l(&self, cs: &ConstraintSystem<F>) -> Vec<Expression<F>> {
-        let lookup_offset = cs.num_selectors()
-            + cs.num_fixed_columns()
-            + cs.lookups().len()
-            + cs.num_advice_columns();
+    /// T_i(y1,...,yb) - t_i which evaluates to zero on every row
+    pub fn vanishing_lookup_polys(&self, cs: &ConstraintSystem<F>) -> Vec<Expression<F>> {
+        let lookup_offset = cs.num_selectors() + cs.num_fixed_columns() + cs.num_advice_columns();
         let expression_of_l = |lookup_index: usize| -> Expression<F> {
             Expression::Polynomial(Query {
-                index: lookup_offset + lookup_index * 4,
+                index: lookup_offset + lookup_index * 5,
+                rotation: Rotation(0),
+            })
+        };
+        let expression_of_t = |lookup_index: usize| -> Expression<F> {
+            Expression::Polynomial(Query {
+                index: lookup_offset + lookup_index * 5 + 1,
                 rotation: Rotation(0),
             })
         };
 
-        self.lookup_polys
+        let ls = self
+            .lookup_polys
             .iter()
             .enumerate()
             .map(|(i, L_i)| L_i.clone() - expression_of_l(i))
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+
+        let ts = self
+            .table_polys
+            .iter()
+            .enumerate()
+            .map(|(i, T_i)| T_i.clone() - expression_of_t(i))
+            .collect::<Vec<_>>();
+        concat_vec!(&ls, &ts)
     }
 
     pub fn num_lookups(&self) -> usize {
@@ -156,19 +165,12 @@ impl<F: PrimeField> Arguments<F> {
         challenge_index: usize,
     ) -> (Expression<F>, Expression<F>) {
         let r = Expression::Challenge(challenge_index);
-        // starting index of lookup variables (l_i, m_i, h_i, g_i)
-        let lookup_offset = cs.num_selectors()
-            + cs.num_fixed_columns()
-            + self.num_lookups()
-            + cs.num_advice_columns();
-        let t = Expression::Polynomial(Query {
-            index: cs.num_selectors() + cs.num_fixed_columns() + lookup_index,
-            rotation: Rotation(0),
-        });
+        // starting index of lookup variables (l_i, t_i, m_i, h_i, g_i)
+        let lookup_offset = cs.num_selectors() + cs.num_fixed_columns() + cs.num_advice_columns();
         // Please see (#34)[https://github.com/snarkify/sirius/issues/34] for details on notations.
-        let [l, m, h, g] = array::from_fn(|idx| {
+        let [l, t, m, h, g] = array::from_fn(|idx| {
             Expression::Polynomial(Query {
-                index: lookup_offset + lookup_index * 4 + idx,
+                index: lookup_offset + lookup_index * 5 + idx,
                 rotation: Rotation(0),
             })
         });
@@ -215,7 +217,7 @@ impl<F: PrimeField> Arguments<F> {
 
     /// evaluate each of the table expressions to get vector t_i
     /// where t_i = T(y1,...,y_b)
-    fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Result<TableValues<F>, EvalError> {
+    fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, EvalError> {
         let data = LookupEvalDomain {
             num_lookup: table.num_lookups(),
             challenges: vec![r],

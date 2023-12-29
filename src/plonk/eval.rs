@@ -40,7 +40,6 @@ pub trait Eval<F: PrimeField> {
             return self.get_selectors().as_ref()[0].len();
         }
     }
-    fn eval_table_var(&self, row: usize, col: usize) -> Result<F, EvalError>;
     fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, EvalError>;
     /// evaluate a single column variable on specific row
     fn eval_column_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
@@ -48,7 +47,6 @@ pub trait Eval<F: PrimeField> {
         let fixed = self.get_fixed();
         let selector_offset = selectors.as_ref().len();
         let fixed_offset = fixed.as_ref().len() + selector_offset;
-        let pre_advice_offset = fixed_offset + self.num_lookup();
         match index {
             // selector column
             index if index < selector_offset => {
@@ -60,10 +58,8 @@ pub trait Eval<F: PrimeField> {
             }
             // fixed column
             index if index < fixed_offset => Ok(fixed.as_ref()[index - selector_offset][row]),
-            // values from table expressions {t_i},
-            index if index < pre_advice_offset => self.eval_table_var(row, index - fixed_offset),
             // advice column
-            index => self.eval_advice_var(row, index - pre_advice_offset),
+            index => self.eval_advice_var(row, index - fixed_offset),
         }
     }
 
@@ -138,7 +134,6 @@ pub struct PlonkEvalDomain<'a, F: PrimeField> {
     pub(crate) challenges: Vec<F>,
     pub(crate) selectors: &'a Vec<Vec<bool>>,
     pub(crate) fixed: &'a Vec<Vec<F>>,
-    pub(crate) table_values: &'a Vec<Vec<F>>,
     // [`RelaxedPlonkWitness::W`] for first instance
     pub(crate) W1s: &'a Vec<Vec<F>>,
     // [`RelaxedPlonkWitness::W`] for second instance
@@ -164,10 +159,6 @@ impl<'a, F: PrimeField> Eval<F> for LookupEvalDomain<'a, F> {
 
     fn get_fixed(&self) -> &Self::Fixed {
         self.fixed
-    }
-
-    fn eval_table_var(&self, _row: usize, _index: usize) -> Result<F, EvalError> {
-        Err(EvalError::InvalidExpression)
     }
 
     fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
@@ -204,20 +195,12 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
         self.fixed
     }
 
-    fn eval_table_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
-        if self.table_values.is_empty() {
-            Err(EvalError::InvalidExpression)
-        } else {
-            Ok(self.table_values[index][row])
-        }
-    }
-
     fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
         let row_size = self.row_size();
         let num_advice = self.num_advice;
         let num_lookup = self.num_lookup();
         // maximum index for one instance
-        let max_width = num_advice + self.num_lookup() * 4;
+        let max_width = num_advice + num_lookup * 5;
         let (is_first_instance, index) = if index < max_width {
             (true, index)
         } else {
@@ -234,21 +217,24 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
                 return Ok((0, index));
             }
 
-            let lookup_index = (index - num_advice) / 4;
-            let is_l_or_m = (index - num_advice) % 4 < 2;
-            // 0 => l or h; 1 => m or g
-            let lookup_sub_index = (index - num_advice) % 2;
+            let lookup_index = (index - num_advice) / 5;
+            let lookup_sub_index = (index - num_advice) % 5;
+            let (is_first_round, lookup_sub_index) = if lookup_sub_index < 3 {
+                (true, lookup_sub_index)
+            } else {
+                (false, lookup_sub_index - 3)
+            };
             match num_witness {
                 2 => {
-                    if is_l_or_m {
-                        Ok((0, num_advice + lookup_index * 2 + lookup_sub_index))
+                    if is_first_round {
+                        Ok((0, num_advice + lookup_index * 3 + lookup_sub_index))
                     } else {
                         Ok((1, lookup_index * 2 + lookup_sub_index))
                     }
                 }
                 3 => {
-                    if is_l_or_m {
-                        Ok((1, lookup_index * 2 + lookup_sub_index))
+                    if is_first_round {
+                        Ok((1, lookup_index * 3 + lookup_sub_index))
                     } else {
                         Ok((2, lookup_index * 2 + lookup_sub_index))
                     }
@@ -264,7 +250,7 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
 
         let (i, j) = index_map(index)?;
         if is_first_instance {
-            if i >= self.W1s.len() || j >= self.W1s[i].len() {
+            if self.W1s.len() <= i || self.W1s[i].len() <= j * row_size + row {
                 Err(EvalError::InvalidWitnessIndex {
                     num_witness,
                     num_advice,
@@ -274,7 +260,7 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
             } else {
                 Ok(self.W1s[i][j * row_size + row])
             }
-        } else if i >= self.W2s.len() || j >= self.W2s[i].len() {
+        } else if self.W2s.len() <= i || self.W2s[i].len() <= j * row_size + row {
             Err(EvalError::InvalidWitnessIndex {
                 num_witness,
                 num_advice,
