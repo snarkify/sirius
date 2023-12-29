@@ -9,10 +9,9 @@
 //! - Paragraph '3. Folding scheme' at [Nova whitepaper](https://eprint.iacr.org/2021/370)
 //! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
 use crate::commitment::CommitmentKey;
-use crate::concat;
+use crate::concat_vec;
 use crate::constants::NUM_CHALLENGE_BITS;
 use crate::plonk::eval::{Eval, EvalError, PlonkEvalDomain};
-use crate::plonk::lookup::TableValues;
 use crate::plonk::{
     PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
     SpsError, TableData,
@@ -88,7 +87,6 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         W1: &RelaxedPlonkWitness<C::ScalarExt>,
         U2: &PlonkInstance<C>,
         W2: &PlonkWitness<C::ScalarExt>,
-        table_values: &TableValues<C::ScalarExt>,
     ) -> Result<(CrossTerms<C>, CrossTermCommits<C>), NIFSError> {
         let offset = S.num_non_fold_vars();
         let num_row = if !S.fixed_columns.is_empty() {
@@ -99,10 +97,9 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         let data = PlonkEvalDomain {
             num_advice: S.num_advice_columns,
             num_lookup: S.num_lookups(),
-            challenges: concat!(&U1.challenges, &[U1.u], &U2.challenges, &[U2.to_relax().u]),
+            challenges: concat_vec!(&U1.challenges, &[U1.u], &U2.challenges, &[U2.to_relax().u]),
             selectors: &S.selectors,
             fixed: &S.fixed_columns,
-            table_values,
             W1s: &W1.W,
             W2s: &W2.W,
         };
@@ -160,11 +157,10 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         let S = td.plonk_structure(ck);
         S.absorb_into(ro_acc);
 
-        let (U2, W2, tvs) = td.run_sps_protocol(ck, ro_nark, S.num_challenges)?;
+        let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges)?;
         U1.absorb_into(ro_acc);
         U2.absorb_into(ro_acc);
-        let (cross_terms, cross_term_commits) =
-            Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2, &tvs)?;
+        let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2)?;
         cross_term_commits
             .iter()
             .for_each(|cm| ro_acc.absorb_point(cm));

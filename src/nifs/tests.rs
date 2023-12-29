@@ -45,10 +45,10 @@ fn fold_instances<
     let mut ro_nark_prepare = create_ro::<C, F2, T, RATE, R_F, R_P>();
     let mut ro_nark_verifier = create_ro::<C, F2, T, RATE, R_F, R_P>();
     let mut ro_nark_decider = create_ro::<C, F2, T, RATE, R_F, R_P>();
-    let (U1, W1, tvs1) = td1
+    let (U1, W1) = td1
         .run_sps_protocol(ck, &mut ro_nark_prepare, S.num_challenges)
         .unwrap();
-    let res = S.is_sat(ck, &mut ro_nark_decider, &U1, &W1, &tvs1);
+    let res = S.is_sat(ck, &mut ro_nark_decider, &U1, &W1);
     assert!(res.is_ok());
 
     let mut ro_acc_prover = create_ro::<C, F2, T, RATE, R_F, R_P>();
@@ -62,15 +62,15 @@ fn fold_instances<
 
     f_U = U;
     f_W = W;
-    let res = S.is_sat_relaxed(ck, &f_U, &f_W, &tvs1);
+    let res = S.is_sat_relaxed(ck, &f_U, &f_W);
     assert!(res.is_ok());
     //    let perm_res = S.is_sat_perm(&f_U, &f_W);
     //    assert!(perm_res.is_ok());
 
-    let (U1, W1, tvs2) = td2
+    let (U1, W1) = td2
         .run_sps_protocol(ck, &mut ro_nark_prepare, S.num_challenges)
         .unwrap();
-    let res = S.is_sat(ck, &mut ro_nark_decider, &U1, &W1, &tvs2);
+    let res = S.is_sat(ck, &mut ro_nark_decider, &U1, &W1);
     assert!(res.is_ok());
 
     let (nifs, (_U, _W)) =
@@ -82,7 +82,7 @@ fn fold_instances<
 
     f_U = _U;
     f_W = _W;
-    let res = S.is_sat_relaxed(ck, &f_U, &f_W, &tvs2);
+    let res = S.is_sat_relaxed(ck, &f_U, &f_W);
     assert!(res.is_ok());
     //    let perm_res = S.is_sat_perm(&f_U, &f_W);
     //    assert!(perm_res.is_ok());
@@ -686,11 +686,8 @@ mod three_rounds_test {
         let _ = td2.assembly(&circuit2);
 
         let num_lookup = td1.cs.lookups().len();
-        let p1 = smallest_power(td1.cs.num_advice_columns() + 4 * num_lookup, K);
-        let p2 = smallest_power(
-            td1.cs.num_selectors() + td1.cs.num_fixed_columns() + num_lookup,
-            K,
-        );
+        let p1 = smallest_power(td1.cs.num_advice_columns() + 5 * num_lookup, K);
+        let p2 = smallest_power(td1.cs.num_selectors() + td1.cs.num_fixed_columns(), K);
         let ck = CommitmentKey::<G1Affine>::setup(p1.max(p2), b"three_rounds_test");
 
         fold_instances(&ck, &td1, &td2)
