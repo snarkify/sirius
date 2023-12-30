@@ -248,7 +248,7 @@ impl<F: PrimeField> Arguments<F> {
                     F::ZERO
                 } else {
                     processed_t.push(t_i);
-                    F::from_u128(l.iter().filter(|l_j| *l_j == t_i).count() as u128)
+                    F::from_u128(l.iter().filter(|l_j| l_j.eq(&t_i)).count() as u128)
                 }
             })
             .collect()
@@ -282,46 +282,6 @@ impl<F: PrimeField> Arguments<F> {
             .collect::<Vec<_>>();
 
         Ok(ArgumentCoefficient1 { ls, ts, ms })
-    }
-
-    /// check whether the lookup argument is satisfied
-    /// the remaining check L(x1,...,xa)=l and T(y1,...,ya)=t
-    /// are carried in upper level check
-    pub fn is_sat(&self, l: &[F], t: &[F], r: F) -> Result<(), String> {
-        let m = self.evaluate_m(l, t);
-        let (h, g) = Self::evaluate_h_g(l, t, r, &m);
-        // check hi(li+r)-1=0 or check (li+r)*(hi(li+r)-1)=0 for perfect completeness
-        let c1 = l
-            .iter()
-            .zip(h.iter())
-            .map(|(li, hi)| *hi * (*li + r) - F::ONE)
-            .filter(|d| F::ZERO.ne(d))
-            .count();
-
-        // check gi(ti+r)-mi=0 or check (ti+r)*(gi(ti+r)-mi)=0 for perfect completeness
-        let c2 = t
-            .iter()
-            .zip(g.iter())
-            .zip(m)
-            .map(|((ti, gi), mi)| *gi * (*ti + r) - mi)
-            .filter(|d| F::ZERO.ne(d))
-            .count();
-
-        // check sum_i h_i = sum_i g_i
-        let sum = h
-            .into_iter()
-            .zip(g)
-            .map(|(hi, gi)| hi - gi)
-            .fold(F::ZERO, |acc, d| acc + d);
-        let c3 = F::ZERO.ne(&sum);
-        match (c1 == 0, c2 == 0, c3) {
-            (true, true, true) => Ok(()),
-            (false, _, _) => Err(format!("hi(li+r)-1=0 not satisfied on {} rows", c1,).to_string()),
-            (true, false, _) => {
-                Err(format!("gi(ti+r)-mi=0 not satisfied on {} rows", c2,).to_string())
-            }
-            (true, true, false) => Err("sum hi = sum gi not satisfied".to_string()),
-        }
     }
 }
 
