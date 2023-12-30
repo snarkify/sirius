@@ -196,6 +196,14 @@ impl<C: CurveAffine> PlonkStructure<C> {
         }
     }
 
+    /// indicates whether the original constrain system contains vector lookup
+    pub fn has_vector_lookup(&self) -> bool {
+        self.lookup_arguments
+            .as_ref()
+            .map(|arg| arg.has_vector_lookup)
+            .unwrap_or(false)
+    }
+
     /// run special soundness protocol for verifier
     pub fn run_sps_verifier<RO: ROTrait<C>>(
         &self,
@@ -254,12 +262,15 @@ impl<C: CurveAffine> PlonkStructure<C> {
             .collect::<Result<Vec<F>, _>>()
             .map(|v| v.into_iter().filter(|v| F::ZERO.ne(v)).count())?;
 
-        match (res == 0, check_commitments == 0) {
-            (true, true) => Ok(()),
-            (false, _) => Err(DeciderError::EvaluationMismatch {
+        let is_h_equal_g = self.is_sat_log_derivative(&W.W);
+
+        match (res == 0, check_commitments == 0, is_h_equal_g) {
+            (true, true, true) => Ok(()),
+            (false, _, _) => Err(DeciderError::EvaluationMismatch {
                 mismatch_count: res,
                 total_row: nrow,
             }),
+            (_, _, false) => Err(DeciderError::LogDerivativeNotSat),
             _ => Err(DeciderError::CommitmentMismatch),
         }
     }
@@ -303,13 +314,15 @@ impl<C: CurveAffine> PlonkStructure<C> {
                     .count()
             })?;
         let is_E_equal = ck.commit(&W.E).eq(&U.E_commitment);
+        let is_h_equal_g = self.is_sat_log_derivative(&W.W);
 
-        match (res == 0, check_W_commitments == 0, is_E_equal) {
-            (true, true, true) => Ok(()),
-            (false, _, _) => Err(DeciderError::EvaluationMismatch {
+        match (res == 0, check_W_commitments == 0, is_E_equal, is_h_equal_g) {
+            (true, true, true, true) => Ok(()),
+            (false, _, _, _) => Err(DeciderError::EvaluationMismatch {
                 mismatch_count: res,
                 total_row: nrow,
             }),
+            (_, _, _, false) => Err(DeciderError::LogDerivativeNotSat),
             _ => Err(DeciderError::CommitmentMismatch),
         }
     }
@@ -345,17 +358,43 @@ impl<C: CurveAffine> PlonkStructure<C> {
         }
     }
 
-    pub fn is_sat_lookup<F>(
-        &self,
-        _ck: &CommitmentKey<C>,
-        _U: &RelaxedPlonkInstance<C>,
-        _W: &RelaxedPlonkWitness<F>,
-    ) -> Result<(), String>
-    where
-        C: CurveAffine<ScalarExt = F>,
-        F: PrimeField,
-    {
-        todo!()
+    /// check whether the log-derivative equation is satisfied
+    pub fn is_sat_log_derivative(&self, W: &[Vec<C::ScalarExt>]) -> bool {
+        let nrow = 2usize.pow(self.k as u32);
+        let check_is_zero = |hs: &[Vec<C::ScalarExt>], gs: &[Vec<C::ScalarExt>]| -> bool {
+            hs.iter()
+                .zip(gs)
+                .map(|(h, g)| {
+                    // check sum_i h_i = sum_i g_i for each lookup
+                    h.iter()
+                        .zip_eq(g)
+                        .map(|(hi, gi)| *hi - *gi)
+                        .fold(C::ScalarExt::ZERO, |acc, d| acc + d)
+                })
+                .filter(|v| C::ScalarExt::ZERO.ne(v))
+                .count()
+                == 0
+        };
+        let gather_vectors =
+            |W: &Vec<C::ScalarExt>, start_index: usize| -> Vec<Vec<C::ScalarExt>> {
+                let indexes = iter::successors(Some(start_index), |idx| Some(idx + 2));
+                (0..self.num_lookups())
+                    .zip(indexes)
+                    .map(|(_, idx)| W[idx * nrow..(idx * nrow + nrow)].to_vec())
+                    .collect::<Vec<_>>()
+            };
+
+        if self.has_vector_lookup() {
+            let hs = gather_vectors(&W[2], 0);
+            let gs = gather_vectors(&W[2], 1);
+            check_is_zero(&hs, &gs)
+        } else if self.num_lookups() > 0 {
+            let hs = gather_vectors(&W[1], 0);
+            let gs = gather_vectors(&W[1], 1);
+            check_is_zero(&hs, &gs)
+        } else {
+            true
+        }
     }
 }
 
@@ -551,12 +590,14 @@ impl<F: PrimeField> TableData<F> {
     }
 
     pub fn lookup_exprs(&self, cs: &ConstraintSystem<F>) -> Vec<Expression<F>> {
-        let mut combined = vec![];
         if let Some(lookup_arguments) = self.lookup_arguments.as_ref() {
-            combined = lookup_arguments.vanishing_lookup_polys(cs);
-            combined.extend(lookup_arguments.log_derivative_lhs_and_rhs(cs));
+            concat_vec!(
+                &lookup_arguments.vanishing_lookup_polys(cs),
+                &lookup_arguments.log_derivative_lhs_and_rhs(cs)
+            )
+        } else {
+            vec![]
         }
-        combined
     }
 
     /// Prepares the constraint system for a new configuration.
@@ -1140,6 +1181,8 @@ pub enum DeciderError {
     Eval(#[from] EvalError),
     #[error("(Relaxed) plonk relation not satisfied: commitment mismatch")]
     CommitmentMismatch,
+    #[error("log derivative relation not satisfied")]
+    LogDerivativeNotSat,
     #[error("(Relaxed) plonk relation not satisfied: commitment mismatch")]
     EvaluationMismatch {
         mismatch_count: usize,
