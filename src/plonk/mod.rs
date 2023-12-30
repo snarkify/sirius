@@ -812,9 +812,10 @@ impl<F: PrimeField> TableData<F> {
 
         let W1 = [
             concatenate_with_padding(&self.advice_columns, k_power_of_2),
-            concatenate_with_padding(&lookup_coeff.ls, k_power_of_2),
-            concatenate_with_padding(&lookup_coeff.ts, k_power_of_2),
-            concatenate_with_padding(&lookup_coeff.ms, k_power_of_2),
+            concatenate_with_padding(
+                &concat_vec!(&lookup_coeff.ls, &lookup_coeff.ts, &lookup_coeff.ms),
+                k_power_of_2,
+            ),
         ]
         .concat();
 
@@ -829,11 +830,10 @@ impl<F: PrimeField> TableData<F> {
         // round 2
         let lookup_coeff = lookup_coeff.evaluate_coefficient_2(r1);
 
-        let W2 = [
-            concatenate_with_padding(&lookup_coeff.hs, k_power_of_2),
-            concatenate_with_padding(&lookup_coeff.gs, k_power_of_2),
-        ]
-        .concat();
+        let W2 = concatenate_with_padding(
+            &concat_vec!(&lookup_coeff.hs, &lookup_coeff.gs),
+            k_power_of_2,
+        );
 
         let C2 = ck.commit(&W2);
         ro_nark.absorb_point(&C2);
@@ -882,24 +882,21 @@ impl<F: PrimeField> TableData<F> {
             .transpose()?
             .ok_or(SpsError::LackOfLookupArguments)?;
 
-        let W2 = [
-            concatenate_with_padding(&lookup_coeff.ls, k_power_of_2),
-            concatenate_with_padding(&lookup_coeff.ts, k_power_of_2),
-            concatenate_with_padding(&lookup_coeff.ms, k_power_of_2),
-        ]
-        .concat();
+        let W2 = concatenate_with_padding(
+            &concat_vec!(&lookup_coeff.ls, &lookup_coeff.ts, &lookup_coeff.ms),
+            k_power_of_2,
+        );
         let C2 = ck.commit(&W2);
         ro_nark.absorb_point(&C2);
         let r2 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
 
         // round 3
-        let lookup_coef = lookup_coeff.evaluate_coefficient_2(r2);
+        let lookup_coeff = lookup_coeff.evaluate_coefficient_2(r2);
 
-        let W3 = [
-            concatenate_with_padding(&lookup_coef.hs, k_power_of_2),
-            concatenate_with_padding(&lookup_coef.gs, k_power_of_2),
-        ]
-        .concat();
+        let W3 = concatenate_with_padding(
+            &concat_vec!(&lookup_coeff.hs, &lookup_coeff.gs),
+            k_power_of_2,
+        );
 
         let C3 = ck.commit(&W3);
         ro_nark.absorb_point(&C3);
