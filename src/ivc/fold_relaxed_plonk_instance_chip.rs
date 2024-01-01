@@ -819,7 +819,7 @@ mod tests {
     };
     use halo2curves::{bn256::G1Affine as C1, CurveAffine};
     use poseidon::Spec;
-    use rand::Rng;
+    use rand::{rngs::ThreadRng, Rng};
 
     use crate::{
         commitment::CommitmentKey, plonk::TableData, poseidon::poseidon_circuit::PoseidonChip,
@@ -911,22 +911,48 @@ mod tests {
             .collect()
     }
 
+    struct Fixture {
+        td: TableData<Base>,
+        config: MainGateConfig<T>,
+        rnd: ThreadRng,
+        ecc: EccChip<C1, Base, T>,
+        gate: MainGate<Base, T>,
+        r: ScalarExt,
+    }
+
+    impl Default for Fixture {
+        fn default() -> Self {
+            let (td, config) = get_table_data();
+            let mut rnd = rand::thread_rng();
+
+            Self {
+                td,
+                r: ScalarExt::from_u128(rnd.gen()),
+                ecc: EccChip::<C1, Base, T>::new(config.clone()),
+                gate: MainGate::new(config.clone()),
+                config,
+                rnd,
+            }
+        }
+    }
+
     #[test_log::test]
     fn fold_W_test() {
-        let (mut td, config) = get_table_data();
-
-        let mut rnd = rand::thread_rng();
-
-        let r = ScalarExt::from_u128(rnd.gen());
+        let Fixture {
+            mut td,
+            config,
+            mut rnd,
+            ecc,
+            gate,
+            r,
+        } = Fixture::default();
 
         let mut folded_W = vec![CommitmentKey::<C1>::default_value(); LENGHT];
-
-        let ecc = EccChip::<C1, Base, T>::new(config.clone());
-        let gate = MainGate::new(config.clone());
 
         let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
 
         let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, LENGHT);
+
         for _round in 0..=TEST_FOLD_ROUND {
             let mut on_circuit_W_cell = None;
             let input_W = generate_random_input(&mut rnd);
