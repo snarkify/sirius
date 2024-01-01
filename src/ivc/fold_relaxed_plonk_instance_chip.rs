@@ -53,7 +53,7 @@ use log::*;
 use num_traits::Num;
 
 use crate::{
-    constants::NUM_CHALLENGE_BITS,
+    constants::{MAX_BITS, NUM_CHALLENGE_BITS},
     gadgets::{
         ecc::{AssignedPoint, EccChip},
         nonnative::bn::{
@@ -310,8 +310,7 @@ where
                 let ValueView { value, bits: _ } = r_pow_i;
 
                 let current = gate.mul(region, value, &r.value)?;
-                let current_bits =
-                    gate.le_num_to_bits(region, current.clone(), NUM_CHALLENGE_BITS)?;
+                let current_bits = gate.le_num_to_bits(region, current.clone(), MAX_BITS)?;
 
                 Result::<_, Error>::Ok(ValueView {
                     value: current,
@@ -826,7 +825,8 @@ mod fold_tests {
     use rand::{rngs::ThreadRng, Rng};
 
     use crate::{
-        commitment::CommitmentKey, plonk::TableData, poseidon::poseidon_circuit::PoseidonChip,
+        commitment::CommitmentKey, constants::MAX_BITS, plonk::TableData,
+        poseidon::poseidon_circuit::PoseidonChip,
     };
 
     use super::*;
@@ -983,8 +983,7 @@ mod fold_tests {
 
                                 ctx.next();
 
-                                let r =
-                                    gate.le_num_to_bits(&mut ctx, assigned_r, NUM_CHALLENGE_BITS)?;
+                                let r = gate.le_num_to_bits(&mut ctx, assigned_r, MAX_BITS)?;
 
                                 Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_W(
                                     &mut ctx, &config, &folded, &input, &r,
@@ -1046,7 +1045,7 @@ mod fold_tests {
 
         let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, LENGHT);
 
-        for _round in 0..=TEST_FOLD_ROUND {
+        for round in 0..=TEST_FOLD_ROUND {
             let mut on_circuit_E_cell = None;
             let cross_terms_commits = generate_random_input(&mut rnd);
 
@@ -1076,11 +1075,8 @@ mod fold_tests {
 
                                 ctx.next();
 
-                                let r = gate.le_num_to_bits(
-                                    &mut ctx,
-                                    assigned_r.clone(),
-                                    NUM_CHALLENGE_BITS,
-                                )?;
+                                let r =
+                                    gate.le_num_to_bits(&mut ctx, assigned_r.clone(), MAX_BITS)?;
 
                                 Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_E(
                                     &mut ctx,
@@ -1116,8 +1112,16 @@ mod fold_tests {
             let (on_circuit_E_x, on_circuit_E_y) =
                 on_circuit_E_cell.as_ref().unwrap().coordinates();
 
-            assert_eq!(off_circuit_E.x(), on_circuit_E_x.value().unwrap().unwrap());
-            assert_eq!(off_circuit_E.y(), on_circuit_E_y.value().unwrap().unwrap());
+            assert_eq!(
+                off_circuit_E.x(),
+                on_circuit_E_x.value().unwrap().unwrap(),
+                "E.x != E.x at {round}"
+            );
+            assert_eq!(
+                off_circuit_E.y(),
+                on_circuit_E_y.value().unwrap().unwrap(),
+                "E.y != E.y at {round}"
+            );
 
             folded_E = plonk.E_commitment;
         }
