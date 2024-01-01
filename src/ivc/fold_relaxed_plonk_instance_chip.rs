@@ -800,6 +800,8 @@ mod tests {
     };
     use halo2curves::{bn256::G1Affine as C1, CurveAffine};
     use poseidon::Spec;
+    use rand::rngs::ThreadRng;
+    use rand::Rng;
 
     use crate::{
         commitment::CommitmentKey, plonk::TableData, poseidon::poseidon_circuit::PoseidonChip,
@@ -829,15 +831,14 @@ mod tests {
         )
         .unwrap();
 
-        let mut td = TableData::new(19, vec![]);
+        let (_td, config) = get_table_data();
         let mut shape: Box<dyn RegionLayouter<_>> =
             Box::new(RegionShape::new(RegionIndex::from(0)));
         let shape_mut: &mut dyn RegionLayouter<_> = shape.as_mut();
 
         let region = Region::from(shape_mut);
 
-        let config = MainGate::<Base, 5>::configure(&mut td.cs);
-        let spec = Spec::<Base, 5, 4>::new(10, 10);
+        let spec = Spec::<Base, T, 5>::new(10, 10);
 
         let _assigned_challenge = chip
             .assign_witness_with_challenge(
@@ -859,113 +860,157 @@ mod tests {
             .unwrap();
     }
 
+    const NUM_WITNESS: usize = 5;
+    /// When the number of fold rounds increases, `K` must be increased too
+    /// as the number of required rows in the table grows.
+    const NUM_OF_FOLD_ROUNDS: usize = 3;
+    /// 2 ^ K is count of table rows in [`TableData`]
+    const K: u32 = 19;
+
     fn get_table_data() -> (TableData<Base>, MainGateConfig<T>) {
-        let mut td = TableData::new(17, vec![]);
+        let mut td = TableData::new(K, vec![]);
         let _ = td.cs.instance_column();
         let config = td.prepare_assembly(MainGate::<Base, T>::configure);
 
         (td, config)
     }
 
+    fn generate_random_input(mut rnd: impl Rng) -> Vec<C1> {
+        iter::repeat_with(|| C1::random(&mut rnd))
+            .take(NUM_WITNESS)
+            .collect::<Vec<_>>()
+    }
+
+    fn assign_curve_points<C, const T: usize>(
+        ctx: &mut RegionCtx<C::Base>,
+        ecc: &EccChip<C, C::Base, T>,
+        points: &[C],
+        var_prefix: &str,
+    ) -> Result<Vec<AssignedPoint<C>>, halo2_proofs::plonk::Error>
+    where
+        C: CurveAffine,
+        C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    {
+        points
+            .iter()
+            .enumerate()
+            .map(|(i, point)| ecc.assign_from_curve(ctx, || format!("{var_prefix}[{i}]"), point))
+            .collect()
+    }
+
+    /// The test utility struct
+    /// It provides a convenient setup for testing the functionality of `FoldRelaxedPlonkInstanceChip`.
+    /// Includes configured table data, a main gate config, random number generator, ECC and gate chips, and a random scalar.
+    /// Used for setting up test scenarios, generating random inputs, and initializing necessary components for testing etc
+    struct Fixture {
+        td: TableData<Base>,
+        config: MainGateConfig<T>,
+        rnd: ThreadRng,
+        ecc: EccChip<C1, Base, T>,
+        gate: MainGate<Base, T>,
+        r: ScalarExt,
+    }
+
+    impl Default for Fixture {
+        fn default() -> Self {
+            let (td, config) = get_table_data();
+            let mut rnd = rand::thread_rng();
+
+            Self {
+                td,
+                r: ScalarExt::from_u128(rnd.gen()),
+                ecc: EccChip::<C1, Base, T>::new(config.clone()),
+                gate: MainGate::new(config.clone()),
+                config,
+                rnd,
+            }
+        }
+    }
+
     #[test_log::test]
     fn fold_W_test() {
-        const LENGHT: usize = 5;
+        let Fixture {
+            mut td,
+            config,
+            mut rnd,
+            ecc,
+            gate,
+            r,
+        } = Fixture::default();
 
-        let (mut td, config) = get_table_data();
-
-        let mut rnd = rand::thread_rng();
-        let input_W = iter::repeat_with(|| C1::random(&mut rnd))
-            .take(LENGHT)
-            .collect::<Vec<_>>();
-
-        let r = ScalarExt::random(rnd);
-
-        let folded_W = vec![CommitmentKey::<C1>::default_value(); LENGHT];
-
-        let ecc = EccChip::<C1, Base, T>::new(config.clone());
-        let gate = MainGate::new(config.clone());
+        let mut folded_W = vec![CommitmentKey::<C1>::default_value(); NUM_WITNESS];
 
         let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
-        let mut on_circuit_W_cell = None;
-        // Run twice for setup & real run
-        for _ in 0..=1 {
-            on_circuit_W_cell = Some(
-                layouter
-                    .assign_region(
-                        || "fold W test",
-                        |region| {
-                            let mut ctx = RegionCtx::new(region, 0);
 
-                            let folded = folded_W
-                                .iter()
-                                .enumerate()
-                                .map(|(i, folded_Wi)| {
-                                    ecc.assign_from_curve(
-                                        &mut ctx,
-                                        || format!("folded_W[{i}]"),
-                                        folded_Wi,
-                                    )
-                                })
-                                .collect::<Result<Vec<_>, _>>()?;
+        let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, NUM_WITNESS);
 
-                            let input = input_W
-                                .iter()
-                                .enumerate()
-                                .map(|(i, input_Wi)| {
-                                    ecc.assign_from_curve(
-                                        &mut ctx,
-                                        || format!("input_W[{i}]"),
-                                        input_Wi,
-                                    )
-                                })
-                                .collect::<Result<Vec<_>, _>>()?;
+        for _round in 0..=NUM_OF_FOLD_ROUNDS {
+            let mut on_circuit_W_cell = None;
+            let input_W = generate_random_input(&mut rnd);
 
-                            let assigned_r = ctx.assign_advice(
-                                || "r",
-                                config.state[0],
-                                Value::known(util::fe_to_fe(&r).unwrap()),
-                            )?;
+            // Run twice for setup & real run
+            for _ in 0..=1 {
+                on_circuit_W_cell = Some(
+                    layouter
+                        .assign_region(
+                            || "fold W test",
+                            |region| {
+                                let mut ctx = RegionCtx::new(region, 0);
 
-                            let r = gate.le_num_to_bits(&mut ctx, assigned_r, MAX_BITS)?;
+                                let folded =
+                                    assign_curve_points(&mut ctx, &ecc, &folded_W, "folded_W")?;
+                                let input =
+                                    assign_curve_points(&mut ctx, &ecc, &input_W, "input_W")?;
 
-                            Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_W(
-                                &mut ctx, &config, &folded, &input, &r,
-                            )
-                            .unwrap())
-                        },
-                    )
-                    .unwrap(),
-            );
-        }
+                                let assigned_r = ctx.assign_advice(
+                                    || "r",
+                                    config.state[0],
+                                    Value::known(util::fe_to_fe(&r).unwrap()),
+                                )?;
 
-        let plonk = RelaxedPlonkInstance::<C1>::new(0, 0, LENGHT);
-        assert_eq!(plonk.W_commitments, folded_W);
+                                let r = gate.le_num_to_bits(&mut ctx, assigned_r, MAX_BITS)?;
 
-        let off_circuit_W = plonk
-            .fold(
+                                Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_W(
+                                    &mut ctx, &config, &folded, &input, &r,
+                                )
+                                .unwrap())
+                            },
+                        )
+                        .unwrap(),
+                );
+            }
+
+            assert_eq!(plonk.W_commitments, folded_W);
+
+            plonk = plonk.fold(
                 &PlonkInstance {
-                    W_commitments: input_W,
+                    W_commitments: input_W.clone(),
                     instance: vec![],
                     challenges: vec![],
                 },
                 &[],
                 &r,
-            )
-            .W_commitments
-            .into_iter()
-            .map(|c| {
-                let coordinates = c.coordinates().unwrap();
-                (*coordinates.x(), *coordinates.y())
-            })
-            .collect::<Vec<_>>();
+            );
 
-        let on_circuit_W_cell = on_circuit_W_cell
-            .unwrap()
-            .into_iter()
-            .map(|c| c.coordinates_values().unwrap())
-            .collect::<Vec<_>>();
+            let off_circuit_W = plonk
+                .W_commitments
+                .iter()
+                .map(|c| {
+                    let coordinates = c.coordinates().unwrap();
+                    (*coordinates.x(), *coordinates.y())
+                })
+                .collect::<Vec<_>>();
 
-        assert_eq!(off_circuit_W, on_circuit_W_cell);
+            let on_circuit_W_cell = on_circuit_W_cell
+                .unwrap()
+                .into_iter()
+                .map(|c| c.coordinates_values().unwrap())
+                .collect::<Vec<_>>();
+
+            assert_eq!(off_circuit_W, on_circuit_W_cell);
+
+            folded_W = plonk.W_commitments.clone();
+        }
     }
 
     #[test_log::test]
