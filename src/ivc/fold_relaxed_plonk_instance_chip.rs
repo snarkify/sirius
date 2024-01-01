@@ -298,7 +298,7 @@ where
     fn fold_E<const T: usize>(
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
-        folded_E: AssignedPoint<C>,
+        folded_E: &AssignedPoint<C>,
         cross_term_commits: &[AssignedPoint<C>],
         r: ValueView<C::Base>,
     ) -> Result<AssignedPoint<C>, Error> {
@@ -330,7 +330,9 @@ where
 
         Ok(rT
             .into_iter()
-            .try_fold(folded_E, |folded_E, rT_i| ecc.add(region, &folded_E, &rT_i))?)
+            .try_fold(folded_E.clone(), |folded_E, rT_i| {
+                ecc.add(region, &folded_E, &rT_i)
+            })?)
     }
 
     // TODO #32 rustdoc
@@ -468,7 +470,8 @@ where
 
         debug!("fold: W folded: {new_folded_W:?}");
 
-        let new_folded_E = Self::fold_E(region, config, folded_E, &cross_terms_commits, r.clone())?;
+        let new_folded_E =
+            Self::fold_E(region, config, &folded_E, &cross_terms_commits, r.clone())?;
         debug!("fold: E folded: {new_folded_W:?}");
 
         let new_folded_u = gate.add(region, &folded_u, &r.value)?;
@@ -811,7 +814,7 @@ impl<F: ff::Field> ops::Deref for ValueView<F> {
 }
 
 #[cfg(test)]
-mod tests {
+mod fold_tests {
     use halo2_proofs::circuit::{
         floor_planner::single_pass::SingleChipLayouter,
         layouter::{RegionLayouter, RegionShape},
@@ -977,6 +980,8 @@ mod tests {
                                     Value::known(util::fe_to_fe(&r).unwrap()),
                                 )?;
 
+                                ctx.next();
+
                                 let r =
                                     gate.le_num_to_bits(&mut ctx, assigned_r, NUM_CHALLENGE_BITS)?;
 
@@ -1020,6 +1025,100 @@ mod tests {
             assert_eq!(off_circuit_W, on_circuit_W_cell);
 
             folded_W = plonk.W_commitments.clone();
+        }
+    }
+
+    #[test_log::test]
+    fn fold_E_test() {
+        let Fixture {
+            mut td,
+            config,
+            mut rnd,
+            ecc,
+            gate,
+            r,
+        } = Fixture::default();
+
+        let mut folded_E = C1::default();
+
+        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+
+        let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, LENGHT);
+
+        for _round in 0..=TEST_FOLD_ROUND {
+            let mut on_circuit_E_cell = None;
+            let cross_terms_commits = generate_random_input(&mut rnd);
+
+            // Run twice for setup & real run
+            for _ in 0..=1 {
+                on_circuit_E_cell = Some(
+                    layouter
+                        .assign_region(
+                            || "fold W test",
+                            |region| {
+                                let mut ctx = RegionCtx::new(region, 0);
+
+                                let folded =
+                                    ecc.assign_from_curve(&mut ctx, || "folded_E", &folded_E)?;
+                                let cross_terms_commits = assign_curve_points(
+                                    &mut ctx,
+                                    &ecc,
+                                    &cross_terms_commits,
+                                    "cross_terms_commits",
+                                )?;
+
+                                let assigned_r = ctx.assign_advice(
+                                    || "r",
+                                    config.state[0],
+                                    Value::known(util::fe_to_fe(&r).unwrap()),
+                                )?;
+
+                                ctx.next();
+
+                                let r = gate.le_num_to_bits(
+                                    &mut ctx,
+                                    assigned_r.clone(),
+                                    NUM_CHALLENGE_BITS,
+                                )?;
+
+                                Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_E(
+                                    &mut ctx,
+                                    &config,
+                                    &folded,
+                                    &cross_terms_commits,
+                                    ValueView {
+                                        value: assigned_r,
+                                        bits: r,
+                                    },
+                                )
+                                .unwrap())
+                            },
+                        )
+                        .unwrap(),
+                );
+            }
+
+            assert_eq!(plonk.E_commitment, folded_E);
+
+            plonk = plonk.fold(
+                &PlonkInstance {
+                    W_commitments: vec![],
+                    instance: vec![],
+                    challenges: vec![],
+                },
+                &cross_terms_commits,
+                &r,
+            );
+
+            let off_circuit_E = plonk.E_commitment.coordinates().unwrap();
+
+            let (on_circuit_E_x, on_circuit_E_y) =
+                on_circuit_E_cell.as_ref().unwrap().coordinates();
+
+            assert_eq!(off_circuit_E.x(), on_circuit_E_x.value().unwrap().unwrap());
+            assert_eq!(off_circuit_E.y(), on_circuit_E_y.value().unwrap().unwrap());
+
+            folded_E = plonk.E_commitment;
         }
     }
 
