@@ -793,6 +793,8 @@ impl<F: ff::Field> ops::Deref for ValueView<F> {
 
 #[cfg(test)]
 mod tests {
+    use std::array;
+
     use halo2_proofs::circuit::{
         floor_planner::single_pass::SingleChipLayouter,
         layouter::{RegionLayouter, RegionShape},
@@ -857,6 +859,8 @@ mod tests {
             .unwrap();
     }
 
+    const LENGHT: usize = 5;
+
     fn get_table_data() -> (TableData<Base>, MainGateConfig<T>) {
         let mut td = TableData::new(17, vec![]);
         let _ = td.cs.instance_column();
@@ -865,20 +869,39 @@ mod tests {
         (td, config)
     }
 
+    fn generate_random_input(mut rnd: impl Rng) -> Vec<C1> {
+        iter::repeat_with(|| C1::random(&mut rnd))
+            .take(LENGHT)
+            .collect::<Vec<_>>()
+    }
+
+    fn assign_curve_points<C, const T: usize>(
+        ctx: &mut RegionCtx<C::Base>,
+        ecc: &EccChip<C, C::Base, T>,
+        points: &[C],
+        var_prefix: &str,
+    ) -> Result<Vec<AssignedPoint<C>>, halo2_proofs::plonk::Error>
+    where
+        C: CurveAffine,
+        C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    {
+        points
+            .iter()
+            .enumerate()
+            .map(|(i, point)| ecc.assign_from_curve(ctx, || format!("{var_prefix}[{i}]"), point))
+            .collect()
+    }
+
     #[test_log::test]
     fn fold_W_test() {
-        const LENGHT: usize = 5;
-
         let (mut td, config) = get_table_data();
 
         let mut rnd = rand::thread_rng();
-        let input_W = iter::repeat_with(|| C1::random(&mut rnd))
-            .take(LENGHT)
-            .collect::<Vec<_>>();
+        let input_W = generate_random_input(&mut rnd);
 
         let r = ScalarExt::from_u128(rnd.gen());
 
-        let folded_W = vec![CommitmentKey::<C1>::default_value(); LENGHT];
+        let folded_W: [C1; LENGHT] = array::from_fn(|_| CommitmentKey::<C1>::default_value());
 
         let ecc = EccChip::<C1, Base, T>::new(config.clone());
         let gate = MainGate::new(config.clone());
@@ -894,29 +917,9 @@ mod tests {
                         |region| {
                             let mut ctx = RegionCtx::new(region, 0);
 
-                            let folded = folded_W
-                                .iter()
-                                .enumerate()
-                                .map(|(i, folded_Wi)| {
-                                    ecc.assign_from_curve(
-                                        &mut ctx,
-                                        || format!("folded_W[{i}]"),
-                                        folded_Wi,
-                                    )
-                                })
-                                .collect::<Result<Vec<_>, _>>()?;
-
-                            let input = input_W
-                                .iter()
-                                .enumerate()
-                                .map(|(i, input_Wi)| {
-                                    ecc.assign_from_curve(
-                                        &mut ctx,
-                                        || format!("input_W[{i}]"),
-                                        input_Wi,
-                                    )
-                                })
-                                .collect::<Result<Vec<_>, _>>()?;
+                            let folded =
+                                assign_curve_points(&mut ctx, &ecc, &folded_W, "folded_W")?;
+                            let input = assign_curve_points(&mut ctx, &ecc, &input_W, "input_W")?;
 
                             let assigned_r = ctx.assign_advice(
                                 || "r",
