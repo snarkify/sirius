@@ -307,10 +307,11 @@ where
 
         let powers_of_r = iter::successors(Some(Ok(r.clone())), |val| {
             Some(Ok(val.as_ref().ok()?).and_then(|r_pow_i| {
-                let ValueView { value, bits } = r_pow_i;
+                let ValueView { value, bits: _ } = r_pow_i;
 
                 let current = gate.mul(region, value, &r.value)?;
-                let current_bits = gate.le_num_to_bits(region, current.clone(), bits.len())?;
+                let current_bits =
+                    gate.le_num_to_bits(region, current.clone(), NUM_CHALLENGE_BITS)?;
 
                 Result::<_, Error>::Ok(ValueView {
                     value: current,
