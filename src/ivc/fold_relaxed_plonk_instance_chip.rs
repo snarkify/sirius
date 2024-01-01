@@ -246,7 +246,7 @@ where
     /// 1. **Scalar Multiplication**: Each `W` component from `input_W_commitments` is multiplied
     ///    by random the scalar `r` (challenge). This is executed using the [`EccChip`] for elliptic curve operations.
     /// 2. **Accumulation**: The result of the scalar multiplication is then added to the corresponding component in
-    ///    the current `folded_W` accumulator.
+    ///    the current `folded_W` accumulator. This is executed using the [`EccChip`] for elliptic curve operations.
     ///
     /// ```markdown
     /// new_folded_W[i] = folded_W[i] + input_W[i] * r
@@ -275,7 +275,26 @@ where
             .collect()
     }
 
-    // TODO #32 rustdoc
+    /// Fold with proof [`RelaxedPlonkInstance::E_commitments`] & [`CrossTermCommits`]
+    ///
+    /// # Description
+    ///
+    /// This function is responsible for combining the current `folded_W` accumulator with
+    /// `cross_term_commits`. This is achieved through a scalar multiplication followed by
+    /// an elliptic curve addition. The scalar multiplication is defined by a random
+    /// scalar `r` in power of cross term commit index.
+    ///
+    /// # Implementation Details
+    ///
+    /// 1. **Multiplication & Conversion to bits**: Form a vector of degrees `r` and their representations as bits
+    /// 2. **Scalar Multiplication**: Each element of `cross_term_commits` is multiplied by power of random scalar
+    ///    `r` (challenge) in bits representation. This is executed using the [`EccChip`] for elliptic curve operations.
+    /// 3. **Accumulation**: The result of the scalar multiplication is then added to the corresponding component in
+    ///    the current `folded_E` accumulator. This is executed using the [`EccChip`] for elliptic curve operations.
+    ///
+    /// ```markdown
+    /// new_folded_E = folded_E + Sum [ cross_term_commits[i] * (r ^ i) ]
+    /// ```
     fn fold_E<const T: usize>(
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
