@@ -546,8 +546,8 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         let target_base: F = big_uint::nat_to_f(&target_base_bn).expect("TODO");
 
         let mut accumulated_extra = BigUintRaw::zero();
-        let carry_bits = calc_carry_bits(&max_word_bn, self.limb_width)?;
-        debug!("carry_bits {carry_bits}");
+        let carry_bits_len = calc_carry_bits(&max_word_bn, self.limb_width)?;
+        debug!("carry_bits {carry_bits_len}");
 
         let lhs_column = &self.config().state[0];
         let lhs_selector = &self.config().q_1[0];
@@ -700,7 +700,9 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
                 if limb_index != max_cells_len - 1 {
                     prev_carry_cell = Some({
                         ctx.next();
-                        self.check_fits_in_bits(ctx, carry_cell, carry_bits)?
+                        self.decompose_in_bits(ctx, carry_cell.clone(), carry_bits_len)?;
+
+                        carry_cell
                     });
                 } else {
                     prev_carry_cell = Some(carry_cell);
@@ -822,12 +824,12 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
     /// ```
     ///
     /// At the end, a constraint is made that the incoming cell is equal to the new counted cell.
-    fn check_fits_in_bits(
+    pub fn decompose_in_bits(
         &self,
         ctx: &mut RegionCtx<'_, F>,
         cell: AssignedCell<F, F>,
         expected_bits_count: NonZeroUsize,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         let value_repr = cell
             .value()
             .map(|v| v.to_repr())
@@ -906,7 +908,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
 
         ctx.constrain_equal(final_sum_cell.cell(), cell.cell())?;
 
-        Ok(final_sum_cell)
+        Ok(bits_cells)
     }
 }
 
