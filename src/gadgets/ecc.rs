@@ -5,6 +5,7 @@ use halo2_proofs::{
     circuit::{Chip, Value},
     plonk::Error,
 };
+use std::cmp;
 
 // assume point is not infinity
 #[derive(Clone, Debug)]
@@ -82,7 +83,7 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
         p0: &AssignedPoint<C>,
         scalar_bits: &[AssignedValue<C::Base>],
     ) -> Result<AssignedPoint<C>, Error> {
-        let split_len = core::cmp::min(scalar_bits.len(), (C::Base::NUM_BITS - 2) as usize);
+        let split_len = cmp::min(scalar_bits.len(), (C::Base::NUM_BITS - 2) as usize);
         let (incomplete_bits, complete_bits) = scalar_bits.split_at(split_len);
 
         // (1) assume p0 is not infinity
@@ -145,7 +146,7 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
         p = AssignedPoint { x, y };
 
         // (3) finish the rest bits
-        for bit in complete_bits.iter() {
+        for bit in complete_bits {
             let tmp = self.add(ctx, &acc, &p)?;
             let x = self
                 .main_gate
@@ -154,6 +155,84 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
                 .main_gate
                 .conditional_select(ctx, &tmp.y, &acc.y, bit)?;
             acc = AssignedPoint { x, y };
+            p = self.double(ctx, &p)?;
+        }
+
+        Ok(acc)
+    }
+
+    // optimization version for scalar_mul
+    // we assume the point p0 is not infinity here
+    pub fn scalar_mul_opt(
+        &self,
+        ctx: &mut RegionCtx<'_, C::Base>,
+        p0: &AssignedPoint<C>,
+        scalar_bits: &[AssignedValue<C::Base>],
+    ) -> Result<AssignedPoint<C>, Error> {
+        if let Some((x, y)) = p0.coordinates_values() {
+            if x == C::Base::ZERO && y == C::Base::ZERO {
+                return Err(Error::Synthesis);
+            }
+        }
+
+        let split_len = cmp::min(scalar_bits.len(), (C::Base::NUM_BITS - 2) as usize);
+        let (incomplete_bits, complete_bits) = scalar_bits.split_at(split_len);
+
+        // (1) assume p0 is not infinity
+
+        // assume first bit of scalar_bits is 1 for now
+        // so we can use unsafe_add later
+        let mut acc = p0.clone();
+        let mut p = self._double_unsafe(ctx, p0)?;
+
+        // the size of incomplete_bits ensures a + b != 0
+        for bit in incomplete_bits.iter().skip(1) {
+            let sum = self._add_unsafe(ctx, &acc, &p)?;
+            acc = AssignedPoint {
+                x: self
+                    .main_gate
+                    .conditional_select(ctx, &sum.x, &acc.x, bit)?,
+                y: self
+                    .main_gate
+                    .conditional_select(ctx, &sum.y, &acc.y, bit)?,
+            };
+            p = self._double_unsafe(ctx, &p)?;
+        }
+
+        // make correction if first bit is 0
+        // make correction if first bit is 0
+        acc = {
+            let acc_minus_initial = {
+                let neg = self.negate(ctx, p0)?;
+                self.add(ctx, &acc, &neg)?
+            };
+            AssignedPoint {
+                x: self.main_gate.conditional_select(
+                    ctx,
+                    &acc.x,
+                    &acc_minus_initial.x,
+                    &scalar_bits[0],
+                )?,
+                y: self.main_gate.conditional_select(
+                    ctx,
+                    &acc.y,
+                    &acc_minus_initial.y,
+                    &scalar_bits[0],
+                )?,
+            }
+        };
+
+        // (2) finish the rest bits
+        for bit in complete_bits {
+            let sum = self.add(ctx, &acc, &p)?;
+            acc = AssignedPoint {
+                x: self
+                    .main_gate
+                    .conditional_select(ctx, &sum.x, &acc.x, bit)?,
+                y: self
+                    .main_gate
+                    .conditional_select(ctx, &sum.y, &acc.y, bit)?,
+            };
             p = self.double(ctx, &p)?;
         }
 
@@ -482,7 +561,7 @@ mod tests {
                         )?;
                         ctx.next();
                         let bits = ecc_chip.main_gate.le_num_to_bits(ctx, lambda, bit_len)?;
-                        ecc_chip.scalar_mul(ctx, &a, &bits)
+                        ecc_chip.scalar_mul_opt(ctx, &a, &bits)
                     }
                 },
             )?;
@@ -493,7 +572,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "cause it takes a few minutes to run"]
     fn test_ecc_op() {
         println!("-----running ECC Circuit-----");
         let p: Point<pallas::Affine> = Point::random_vartime();
@@ -503,12 +581,7 @@ mod tests {
             is_inf: true,
         };
         //let q: Point<pallas::Affine> = Point { x: p.x, y: -p.y, is_inf: false };
-        let lambda = Fq::from_raw([
-            11037532056220336128,
-            2469829653914515739,
-            0,
-            4611686018427387904,
-        ]);
+        let lambda = Fq::random(&mut OsRng);
         let r = p.scalar_mul(&lambda);
         let circuit = TestCircuit::new(p, q, lambda, 1);
         let public_inputs: &[&[Fp]] = &[&[r.x, r.y]];
