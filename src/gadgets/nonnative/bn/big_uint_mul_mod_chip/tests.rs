@@ -421,7 +421,7 @@ mod components_tests {
                             )
                             .unwrap();
 
-                        chip.check_fits_in_bits(
+                        chip.decompose_in_bits(
                             &mut region,
                             number,
                             NonZeroUsize::new(mem::size_of::<u32>() * 8).unwrap(),
