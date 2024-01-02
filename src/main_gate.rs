@@ -227,12 +227,14 @@ impl<F: PrimeField> From<&AssignedValue<F>> for WrapValue<F> {
     }
 }
 
+const MULTIPLICATION_COUNT: usize = 2;
+
 #[derive(Clone, Debug)]
 pub struct MainGateConfig<const T: usize> {
     pub(crate) state: [Column<Advice>; T],
     pub(crate) input: Column<Advice>,
     pub(crate) out: Column<Advice>,
-    pub(crate) q_m: Column<Fixed>,
+    pub(crate) q_m: [Column<Fixed>; MULTIPLICATION_COUNT],
     // for linear term
     pub(crate) q_1: [Column<Fixed>; T],
     // for quintic term
@@ -270,7 +272,11 @@ impl<const T: usize> MainGateConfig<T> {
         name_column!(out);
         name_column!(q_i);
         name_column!(q_o);
-        name_column!(q_m);
+
+        for i in 0..MULTIPLICATION_COUNT {
+            name_column!(q_m[i]);
+        }
+
         name_column!(rc);
     }
 
@@ -344,7 +350,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         let out = meta.advice_column();
         let q_1 = array::from_fn(|_| meta.fixed_column());
         let q_5 = array::from_fn(|_| meta.fixed_column());
-        let q_m = meta.fixed_column();
+        let q_m = array::from_fn(|_| meta.fixed_column());
         let q_i = meta.fixed_column();
         let q_o = meta.fixed_column();
         let rc = meta.fixed_column();
@@ -360,31 +366,31 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
             v2.clone() * v2 * v
         };
 
-        meta.create_gate("q_m*s[0]*s[1] + sum_i(q_1[i]*s[i]) + sum_i(q_5[i]*s[i]^5) + rc + q_i*input + q_o*out=0", |meta|{
+        meta.create_gate("q_m[0]*s[0]*s[1] + q_m[1]*s[2]*s[3] + sum_i(q_1[i]*s[i]) + sum_i(q_5[i]*s[i]^5) + rc + q_i*input + q_o*out=0", |meta|{
             let state = state.into_iter().map(|s| meta.query_advice(s, Rotation::cur())).collect::<Vec<_>>();
             let input = meta.query_advice(input, Rotation::cur());
             let out = meta.query_advice(out, Rotation::cur());
             let q_1 = q_1.into_iter().map(|q| meta.query_fixed(q, Rotation::cur())).collect::<Vec<_>>();
             let q_5 = q_5.into_iter().map(|q| meta.query_fixed(q, Rotation::cur())).collect::<Vec<_>>();
-            let q_m = meta.query_fixed(q_m, Rotation::cur());
+            let q_m = q_m.into_iter().map(|q| meta.query_fixed(q, Rotation::cur())).collect::<Vec<_>>();
             let q_i = meta.query_fixed(q_i, Rotation::cur());
             let q_o = meta.query_fixed(q_o, Rotation::cur());
             let rc = meta.query_fixed(rc, Rotation::cur());
 
-            let init_term = q_m * state[0].clone() * state[1].clone() + q_i * input + rc + q_o * out;
+            let mut init_term = q_m[0].clone() * state[0].clone() * state[1].clone() + q_i * input + rc + q_o * out;
 
-            let res = state
-                .into_iter()
-                .zip(q_1)
-                .zip(q_5)
-                .map(|((s, q1), q5)| {
+            if T >= 4 {
+                init_term = q_m[1].clone() * state[2].clone() * state[3].clone() + init_term;
+            }
+
+            vec![itertools::multizip((state, q_1, q_5))
+                .map(|(s, q1, q5)| {
                     q1 * s.clone()  +  q5 * pow_5(s)
                 })
                 .fold(init_term, |acc, item| {
                     acc + item
-                });
-
-            vec![res]
+                })
+            ]
         });
 
         MainGateConfig {
@@ -415,7 +421,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
             }
         }
         if let Some(q_m_val) = state.1 {
-            ctx.assign_fixed(|| "q_m", self.config.q_m, q_m_val)?;
+            ctx.assign_fixed(|| "q_m", self.config.q_m[0], q_m_val)?;
         }
         if let Some(state) = state.2 {
             for (i, val) in state.iter().enumerate() {
@@ -470,7 +476,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
             }
         }
         if let Some(q_m_val) = state.1 {
-            ctx.assign_fixed(|| "q_m", self.config.q_m, q_m_val)?;
+            ctx.assign_fixed(|| "q_m", self.config.q_m[0], q_m_val)?;
         }
         if let Some(state) = state.2 {
             for (i, val) in state.iter().enumerate() {
@@ -555,7 +561,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
             )?);
 
             ctx.assign_fixed(|| "q_i", self.config.q_i, F::ONE)?;
-            ctx.assign_fixed(|| "q_m", self.config.q_m, F::ONE)?;
+            ctx.assign_fixed(|| "q_m", self.config.q_m[0], F::ONE)?;
             ctx.assign_fixed(|| "q_o", self.config.q_o, -F::ONE)?;
             ctx.next();
         }
@@ -679,7 +685,10 @@ mod tests {
                 if i == 0 && j == 0 {
                     // i.e. qm * s1_0 * s1_1 + qi * in1 + rc + qo * out1 + q1_0 * s1_0 + q5_0 * s1_0^5
                     // + q1_1 * s1_1 + q5_1 * s1_1^5
-                    assert_eq!(format!("{}", poly), "(((((((Z_4 * Z_8) * Z_9) + (Z_5 * Z_10)) + Z_7) + (Z_6 * Z_11)) + ((Z_0 * Z_8) + (Z_2 * (((Z_8 * Z_8) * (Z_8 * Z_8)) * Z_8)))) + ((Z_1 * Z_9) + (Z_3 * (((Z_9 * Z_9) * (Z_9 * Z_9)) * Z_9))))");
+                    assert_eq!(
+                         poly.to_string(),
+                        "(((((((Z_4 * Z_9) * Z_10) + (Z_6 * Z_11)) + Z_8) + (Z_7 * Z_12)) + ((Z_0 * Z_9) + (Z_2 * (((Z_9 * Z_9) * (Z_9 * Z_9)) * Z_9)))) + ((Z_1 * Z_10) + (Z_3 * (((Z_10 * Z_10) * (Z_10 * Z_10)) * Z_10))))"
+                    );
                 }
             }
         }
@@ -697,9 +706,15 @@ mod tests {
         let e1 = res.coeff_of((0, r_index, CHALLENGE_TYPE), 0);
         let e2 = res.coeff_of((0, r_index, CHALLENGE_TYPE), 5);
         // E1: "(u1^5)(rc) + (q1_0)(u1^4)(s1_0) + (q5_0)(s1_0^5) + (u1^4)(q1_1)(s1_1) + (u1^3)(qm)(s1_0)(s1_1) + (q5_1)(s1_1^5) + (u1^4)(qi)(in1) + (u1^4)(qo)(out1)"
-        assert_eq!(format!("{}", e1), "(r_0^5)(Z_7) + (Z_0)(r_0^4)(Z_8) + (Z_2)(Z_8^5) + (r_0^4)(Z_1)(Z_9) + (r_0^3)(Z_4)(Z_8)(Z_9) + (Z_3)(Z_9^5) + (r_0^4)(Z_5)(Z_10) + (r_0^4)(Z_6)(Z_11)");
+        assert_eq!(
+            e1.to_string(),
+            "(r_0^5)(Z_8) + (Z_0)(r_0^4)(Z_9) + (Z_2)(Z_9^5) + (r_0^4)(Z_1)(Z_10) + (r_0^3)(Z_4)(Z_9)(Z_10) + (Z_3)(Z_10^5) + (r_0^4)(Z_6)(Z_11) + (r_0^4)(Z_7)(Z_12)"
+        );
 
         // E2: "(u2^5)(rc) + (q1_0)(u2^4)(s2_0) + (q5_0)(s2_0^5) + (q1_1)(u2^4)(s2_1) + (u2^3)(qm)(s2_0)(s2_1) + (q5_1)(s2_1^5) + (u2^4)(qi)(in2) + (u2^4)(qo)(out2)"
-        assert_eq!(format!("{}", e2), "(r_1^5)(Z_7) + (Z_0)(r_1^4)(Z_12) + (Z_2)(Z_12^5) + (Z_1)(r_1^4)(Z_13) + (r_1^3)(Z_4)(Z_12)(Z_13) + (Z_3)(Z_13^5) + (r_1^4)(Z_5)(Z_14) + (r_1^4)(Z_6)(Z_15)");
+        assert_eq!(
+            e2.to_string(),
+            "(r_1^5)(Z_8) + (Z_0)(r_1^4)(Z_13) + (Z_2)(Z_13^5) + (Z_1)(r_1^4)(Z_14) + (r_1^3)(Z_4)(Z_13)(Z_14) + (Z_3)(Z_14^5) + (r_1^4)(Z_6)(Z_15) + (r_1^4)(Z_7)(Z_16)"
+        );
     }
 }
