@@ -28,8 +28,8 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         ctx.constrain_equal(s0.cell(), out.cell())?;
         ctx.constrain_equal(s1.cell(), out.cell())?;
 
-        ctx.assign_fixed(|| "q_m", self.config().q_m, F::ONE)?;
-        ctx.assign_fixed(|| "q_o", self.config().q_m, -F::ONE)?;
+        ctx.assign_fixed(|| "q_m", self.config().q_m[0], F::ONE)?;
+        ctx.assign_fixed(|| "q_o", self.config().q_m[0], -F::ONE)?;
         ctx.next();
         Ok(out)
     }

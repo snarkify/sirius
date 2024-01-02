@@ -219,7 +219,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         let prev_part_column = &self.config().input;
         let prev_part_selector = &self.config().q_i;
 
-        let mult_selector = &self.config().q_m;
+        let mult_selector = &self.config().q_m[0];
         let out_selector = &self.config().q_o;
 
         let prod_column = &self.config().out;
@@ -760,7 +760,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         let bit_selector = self.config().q_i;
 
         let bit_square_multipliers_columns = self.config().state;
-        let square_multipliers_coeff = self.config().q_m;
+        let square_multipliers_coeff = self.config().q_m[0];
 
         // TODO Check BigEngian || LittleEndian
         let mut bits_repr = LittleEndianReader::new(buffer);

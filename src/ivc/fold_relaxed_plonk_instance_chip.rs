@@ -720,7 +720,7 @@ where
             .q_1
             .iter()
             .chain(config.q_5.iter())
-            .chain(iter::once(&config.q_m))
+            .chain(config.q_m.iter())
             .chain(iter::once(&config.q_i))
             .chain(iter::once(&config.q_o))
             .chain(iter::once(&config.rc))
