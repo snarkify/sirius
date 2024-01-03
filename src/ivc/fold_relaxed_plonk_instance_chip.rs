@@ -829,7 +829,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut td = TableData::new(10, vec![]);
+        let mut td = TableData::new(19, vec![]);
         let mut shape: Box<dyn RegionLayouter<_>> =
             Box::new(RegionShape::new(RegionIndex::from(0)));
         let shape_mut: &mut dyn RegionLayouter<_> = shape.as_mut();
