@@ -1,4 +1,4 @@
-use std::{array, marker::PhantomData};
+use std::{array, marker::PhantomData, num::NonZeroUsize};
 
 use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
@@ -609,7 +609,7 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
         &self,
         ctx: &mut RegionCtx<'_, F>,
         input: AssignedValue<F>,
-        bit_len: usize,
+        bit_len: NonZeroUsize,
     ) -> Result<Vec<AssignedValue<F>>, Error> {
         // TODO: ensure a is less than F.size() - 1
 

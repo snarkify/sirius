@@ -7,6 +7,7 @@ use num_bigint::BigUint;
 use poseidon::Spec;
 pub(crate) use rayon::current_num_threads;
 use std::iter;
+use std::num::NonZeroUsize;
 
 pub fn bytes_to_bits_le(bytes: Vec<u8>) -> Vec<bool> {
     let mut bits = Vec::new();
@@ -159,7 +160,7 @@ pub(crate) fn trim_leading_zeros(hex: String) -> String {
     format!("0x{}", trimmed)
 }
 
-pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>, bit_len: usize) {
+pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>, bit_len: NonZeroUsize) {
     let last_one_position = bits
         .iter()
         .enumerate()
@@ -173,9 +174,9 @@ pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>, bit_len: usize) {
     }
 
     let length = bits.len();
-    assert!(bit_len >= length, "bit length exceed maximum value");
+    assert!(bit_len.get() >= length, "bit length exceed maximum value");
 
-    for _ in 0..(bit_len - length) {
+    for _ in 0..(bit_len.get() - length) {
         bits.push(false);
     }
 }

@@ -811,6 +811,9 @@ mod tests {
     type ScalarExt = <C1 as CurveAffine>::ScalarExt;
     const T: usize = 6;
 
+    const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(64) };
+    const LIMB_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(255) };
+
     #[test]
     fn generate_challenge() {
         let mut rnd = rand::thread_rng();
@@ -821,8 +824,8 @@ mod tests {
                 instance: vec![ScalarExt::random(&mut rnd), ScalarExt::random(&mut rnd)],
                 challenges: vec![<C1 as CurveAffine>::ScalarExt::random(&mut rnd)],
             },
-            NonZeroUsize::new(64).unwrap(),
-            NonZeroUsize::new(4).unwrap(),
+            LIMB_WIDTH,
+            LIMB_LIMIT,
         )
         .unwrap();
 
