@@ -8,7 +8,7 @@ use halo2_proofs::{
     plonk::Error,
 };
 use poseidon::{self, Spec};
-use std::convert::TryInto;
+use std::{convert::TryInto, num::NonZeroUsize};
 
 use super::ROCircuitTrait;
 
@@ -44,12 +44,12 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
     fn squeeze_n_bits(
         &mut self,
         ctx: &mut RegionCtx<'_, F>,
-        num_bits: usize,
+        num_bits: NonZeroUsize,
     ) -> Result<Vec<AssignedBit<F>>, Error> {
         let val = self.squeeze(ctx)?;
         let res = self.main_gate.le_num_to_bits(ctx, val, MAX_BITS)?;
-        if res.len() >= num_bits {
-            Ok(res[..num_bits].to_vec())
+        if res.len() >= num_bits.get() {
+            Ok(res[..num_bits.get()].to_vec())
         } else {
             Ok(res)
         }
@@ -415,11 +415,11 @@ mod tests {
 
     struct TestCircuit<F: PrimeField + PrimeFieldBits> {
         inputs: Vec<WrapValue<F>>,
-        num_bits: usize,
+        num_bits: NonZeroUsize,
     }
 
     impl<F: PrimeField + PrimeFieldBits> TestCircuit<F> {
-        fn new(inputs: Vec<F>, num_bits: usize) -> Self {
+        fn new(inputs: Vec<F>, num_bits: NonZeroUsize) -> Self {
             Self {
                 inputs: inputs
                     .into_iter()
@@ -437,7 +437,7 @@ mod tests {
         fn without_witnesses(&self) -> Self {
             Self {
                 inputs: Vec::new(),
-                num_bits: 0,
+                num_bits: NonZeroUsize::new(1).unwrap(),
             }
         }
 
@@ -473,7 +473,7 @@ mod tests {
     fn test_poseidon_circuit() {
         println!("-----running Poseidon Circuit-----");
         let mut inputs = Vec::new();
-        let num_bits = 128;
+        let num_bits = NonZeroUsize::new(128).unwrap();
         for i in 0..5 {
             inputs.push(Fp::from(i as u64));
         }
@@ -492,7 +492,7 @@ mod tests {
     fn test_mock() {
         const K: u32 = 10;
         let mut inputs = Vec::new();
-        let num_bits = 128;
+        let num_bits = NonZeroUsize::new(128).unwrap();
         for i in 0..5 {
             inputs.push(Fp::from(i as u64));
         }

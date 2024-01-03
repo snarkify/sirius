@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use crate::main_gate::{AssignedBit, RegionCtx, WrapValue};
 use ff::{FromUniformBytes, PrimeFieldBits};
 use halo2_proofs::{arithmetic::CurveAffine, plonk::Error};
@@ -32,7 +34,7 @@ pub trait ROTrait<C: CurveAffine> {
     fn absorb_point(&mut self, p: &C);
 
     /// Returns a challenge by hashing the internal state
-    fn squeeze(&mut self, num_bits: usize) -> C::Scalar;
+    fn squeeze(&mut self, num_bits: NonZeroUsize) -> C::Scalar;
 }
 
 /// A helper trait that defines the behavior of a hash function used as a Random Oracle (RO)
@@ -61,6 +63,6 @@ pub trait ROCircuitTrait<F: PrimeFieldBits + FromUniformBytes<64>> {
     fn squeeze_n_bits(
         &mut self,
         ctx: &mut RegionCtx<'_, F>,
-        num_bits: usize,
+        num_bits: NonZeroUsize,
     ) -> Result<Vec<AssignedBit<F>>, Error>;
 }

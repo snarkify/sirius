@@ -3,6 +3,7 @@ use crate::util::{bits_to_fe_le, fe_to_bits_le};
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2curves::group::ff::{FromUniformBytes, PrimeField};
 use poseidon::{self, SparseMDSMatrix, Spec};
+use std::num::NonZeroUsize;
 use std::{iter, marker::PhantomData, mem};
 
 // adapted from: https://github.com/privacy-scaling-explorations/snark-verifier
@@ -132,7 +133,7 @@ where
         }
     }
 
-    fn squeeze(&mut self, num_bits: usize) -> C::Scalar {
+    fn squeeze(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
         self.output(num_bits)
     }
 }
@@ -161,7 +162,7 @@ impl<
         self.buf.extend_from_slice(elements);
     }
 
-    fn output(&mut self, num_bits: usize) -> C::Scalar {
+    fn output(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
         let buf = mem::take(&mut self.buf);
         let exact = buf.len() % RATE == 0;
 
@@ -173,7 +174,7 @@ impl<
         }
 
         let output = self.state.inner[1];
-        let bits = fe_to_bits_le(&output)[..num_bits].to_vec();
+        let bits = fe_to_bits_le(&output)[..num_bits.get()].to_vec();
         bits_to_fe_le(bits)
     }
 
@@ -228,7 +229,7 @@ mod tests {
         for i in 0..5 {
             poseidon.absorb_base(Fp::from(i as u64));
         }
-        let output = poseidon.squeeze(128);
+        let output = poseidon.squeeze(NonZeroUsize::new(128).unwrap());
         // let out_hash = Fq::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();
         let out_hash = Fq::from_str_vartime("277726250230731218669330566268314254439").unwrap();
         assert_eq!(output, out_hash);

@@ -279,6 +279,8 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use super::*;
     use crate::util::fe_to_fe_safe;
     use crate::{create_and_verify_proof, run_mock_prover_test};
@@ -471,7 +473,8 @@ mod tests {
                         ecc_chip.add(ctx, &a, &b)
                     } else {
                         let lambda: C::Base = fe_to_fe_safe(&self.lambda).unwrap();
-                        let bit_len = lambda.to_le_bits().len();
+                        let bit_len =
+                            NonZeroUsize::new(lambda.to_le_bits().len()).expect("Non Zero");
                         let lambda = ctx.assign_advice(
                             || "lambda",
                             ecc_chip.main_gate.config().state[2],
