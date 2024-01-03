@@ -53,7 +53,7 @@ use log::*;
 use num_traits::Num;
 
 use crate::{
-    constants::NUM_CHALLENGE_BITS,
+    constants::{MAX_BITS, NUM_CHALLENGE_BITS},
     gadgets::{
         ecc::{AssignedPoint, EccChip},
         nonnative::bn::{
@@ -288,10 +288,10 @@ where
 
         let powers_of_r = iter::successors(Some(Ok(r.clone())), |val| {
             Some(Ok(val.as_ref().ok()?).and_then(|r_pow_i| {
-                let ValueView { value, bits } = r_pow_i;
+                let ValueView { value, bits: _ } = r_pow_i;
 
                 let current = gate.mul(region, value, &r.value)?;
-                let current_bits = gate.le_num_to_bits(region, current.clone(), bits.len())?;
+                let current_bits = gate.le_num_to_bits(region, current.clone(), MAX_BITS)?;
 
                 Result::<_, Error>::Ok(ValueView {
                     value: current,
@@ -800,7 +800,6 @@ mod tests {
     };
     use halo2curves::{bn256::G1Affine as C1, CurveAffine};
     use poseidon::Spec;
-    use rand::Rng;
 
     use crate::{
         commitment::CommitmentKey, plonk::TableData, poseidon::poseidon_circuit::PoseidonChip,
@@ -876,7 +875,7 @@ mod tests {
             .take(LENGHT)
             .collect::<Vec<_>>();
 
-        let r = ScalarExt::from_u128(rnd.gen());
+        let r = ScalarExt::random(rnd);
 
         let folded_W = vec![CommitmentKey::<C1>::default_value(); LENGHT];
 
@@ -924,8 +923,7 @@ mod tests {
                                 Value::known(util::fe_to_fe(&r).unwrap()),
                             )?;
 
-                            let r =
-                                gate.le_num_to_bits(&mut ctx, assigned_r, NUM_CHALLENGE_BITS)?;
+                            let r = gate.le_num_to_bits(&mut ctx, assigned_r, MAX_BITS)?;
 
                             Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_W(
                                 &mut ctx, &config, &folded, &input, &r,
