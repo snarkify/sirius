@@ -811,61 +811,17 @@ mod tests {
 
     type Base = <C1 as CurveAffine>::Base;
     type ScalarExt = <C1 as CurveAffine>::ScalarExt;
+
     const T: usize = 6;
-
-    const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(64) };
-    const LIMB_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(255) };
-
-    #[test]
-    fn generate_challenge() {
-        let mut rnd = rand::thread_rng();
-
-        let chip = FoldRelaxedPlonkInstanceChip::<C1>::from_instance(
-            PlonkInstance {
-                W_commitments: vec![C1::random(&mut rnd)],
-                instance: vec![ScalarExt::random(&mut rnd), ScalarExt::random(&mut rnd)],
-                challenges: vec![<C1 as CurveAffine>::ScalarExt::random(&mut rnd)],
-            },
-            LIMB_WIDTH,
-            LIMB_LIMIT,
-        )
-        .unwrap();
-
-        let (_td, config) = get_table_data();
-        let mut shape: Box<dyn RegionLayouter<_>> =
-            Box::new(RegionShape::new(RegionIndex::from(0)));
-        let shape_mut: &mut dyn RegionLayouter<_> = shape.as_mut();
-
-        let region = Region::from(shape_mut);
-
-        let spec = Spec::<Base, T, 5>::new(10, 10);
-
-        let _assigned_challenge = chip
-            .assign_witness_with_challenge(
-                &mut RegionCtx::new(region, 0),
-                &config.clone(),
-                PoseidonChip::new(config, spec),
-                &Base::random(&mut rnd),
-                &PlonkInstance {
-                    W_commitments: vec![C1::random(&mut rnd)],
-                    instance: vec![ScalarExt::random(&mut rnd), ScalarExt::random(&mut rnd)],
-                    challenges: vec![<C1 as CurveAffine>::ScalarExt::random(&mut rnd)],
-                },
-                &vec![
-                    C1::random(&mut rnd),
-                    C1::random(&mut rnd),
-                    C1::random(&mut rnd),
-                ],
-            )
-            .unwrap();
-    }
-
     const NUM_WITNESS: usize = 5;
     /// When the number of fold rounds increases, `K` must be increased too
     /// as the number of required rows in the table grows.
     const NUM_OF_FOLD_ROUNDS: usize = 3;
     /// 2 ^ K is count of table rows in [`TableData`]
     const K: u32 = 19;
+
+    const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(64) };
+    const LIMB_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(255) };
 
     fn get_table_data() -> (TableData<Base>, MainGateConfig<T>) {
         let mut td = TableData::new(K, vec![]);
@@ -924,6 +880,60 @@ mod tests {
                 config,
                 rnd,
             }
+        }
+    }
+
+    #[test]
+    fn generate_challenge() {
+        let mut rnd = rand::thread_rng();
+
+        let chip = FoldRelaxedPlonkInstanceChip::<C1>::from_instance(
+            PlonkInstance {
+                W_commitments: vec![C1::random(&mut rnd)],
+                instance: vec![ScalarExt::random(&mut rnd), ScalarExt::random(&mut rnd)],
+                challenges: vec![<C1 as CurveAffine>::ScalarExt::random(&mut rnd)],
+            },
+            LIMB_WIDTH,
+            LIMB_LIMIT,
+        )
+        .unwrap();
+
+        let (mut td, config) = get_table_data();
+
+        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+
+        let spec = Spec::<Base, T, 5>::new(10, 10);
+
+        let plonk = PlonkInstance {
+            W_commitments: vec![C1::random(&mut rnd)],
+            instance: vec![ScalarExt::random(&mut rnd), ScalarExt::random(&mut rnd)],
+            challenges: vec![<C1 as CurveAffine>::ScalarExt::random(&mut rnd)],
+        };
+        let cross_term_commits = vec![
+            C1::random(&mut rnd),
+            C1::random(&mut rnd),
+            C1::random(&mut rnd),
+        ];
+        let pp_hash = Base::random(&mut rnd);
+        for _ in 0..=1 {
+            layouter
+                .assign_region(
+                    || "assign_witness_with_challenge",
+                    |region| {
+                        let _assigned_challenge = chip
+                            .assign_witness_with_challenge(
+                                &mut RegionCtx::new(region, 0),
+                                &config.clone(),
+                                PoseidonChip::new(config.clone(), spec.clone()),
+                                &pp_hash,
+                                &plonk,
+                                &cross_term_commits,
+                            )
+                            .unwrap();
+                        Ok(())
+                    },
+                )
+                .unwrap();
         }
     }
 
