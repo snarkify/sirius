@@ -818,7 +818,7 @@ mod tests {
     /// as the number of required rows in the table grows.
     const NUM_OF_FOLD_ROUNDS: usize = 3;
     /// 2 ^ K is count of table rows in [`TableData`]
-    const K: u32 = 19;
+    const K: u32 = 20;
 
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(64) };
     const LIMB_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(255) };
@@ -831,7 +831,7 @@ mod tests {
         (td, config)
     }
 
-    fn generate_random_input(mut rnd: impl Rng) -> Vec<C1> {
+    fn random_curve_vec(mut rnd: impl Rng) -> Vec<C1> {
         iter::repeat_with(|| C1::random(&mut rnd))
             .take(NUM_WITNESS)
             .collect::<Vec<_>>()
@@ -956,7 +956,7 @@ mod tests {
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
             let mut on_circuit_W_cell = None;
-            let input_W = generate_random_input(&mut rnd);
+            let input_W = random_curve_vec(&mut rnd);
 
             // Run twice for setup & real run
             for _ in 0..=1 {
@@ -1020,6 +1020,101 @@ mod tests {
             assert_eq!(off_circuit_W, on_circuit_W_cell);
 
             folded_W = plonk.W_commitments.clone();
+        }
+    }
+
+    #[test_log::test]
+    fn fold_E_test() {
+        let Fixture {
+            mut td,
+            config,
+            mut rnd,
+            ecc,
+            gate,
+            r,
+        } = Fixture::default();
+
+        let mut folded_E = C1::default();
+
+        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+
+        let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, 0);
+
+        for _round in 0..=NUM_OF_FOLD_ROUNDS {
+            let mut on_circuit_E_cell = None;
+            let cross_term_commits = random_curve_vec(&mut rnd);
+
+            // Run twice for setup & real run
+            for _ in 0..=1 {
+                on_circuit_E_cell = Some(
+                    layouter
+                        .assign_region(
+                            || "fold E test",
+                            |region| {
+                                let mut ctx = RegionCtx::new(region, 0);
+
+                                let folded_E =
+                                    ecc.assign_from_curve(&mut ctx, || "folded_E", &folded_E)?;
+                                let cross_term_commits = assign_curve_points(
+                                    &mut ctx,
+                                    &ecc,
+                                    &cross_term_commits,
+                                    "input_W",
+                                )?;
+
+                                let assigned_r = ctx.assign_advice(
+                                    || "r",
+                                    config.state[0],
+                                    Value::known(util::fe_to_fe(&r).unwrap()),
+                                )?;
+
+                                let r = gate.le_num_to_bits(
+                                    &mut ctx,
+                                    assigned_r.clone(),
+                                    NUM_CHALLENGE_BITS,
+                                )?;
+                                let r_vv = ValueView {
+                                    value: assigned_r,
+                                    bits: r,
+                                };
+
+                                Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_E(
+                                    &mut ctx,
+                                    &config,
+                                    folded_E,
+                                    &cross_term_commits,
+                                    r_vv,
+                                )
+                                .unwrap())
+                            },
+                        )
+                        .unwrap(),
+                );
+            }
+
+            assert_eq!(plonk.E_commitment, folded_E);
+
+            plonk = plonk.fold(
+                &PlonkInstance {
+                    W_commitments: vec![],
+                    instance: vec![],
+                    challenges: vec![],
+                },
+                &cross_term_commits,
+                &r,
+            );
+
+            let off_circuit_E_coordinates = plonk.E_commitment.coordinates().unwrap();
+            let off_circuit_E_x = *off_circuit_E_coordinates.x();
+            let off_circuit_E_y = *off_circuit_E_coordinates.y();
+
+            let (on_circuit_E_cell_x, on_circuit_E_cell_y) =
+                on_circuit_E_cell.unwrap().coordinates_values().unwrap();
+
+            assert_eq!(off_circuit_E_x, on_circuit_E_cell_x);
+            assert_eq!(off_circuit_E_y, on_circuit_E_cell_y);
+
+            folded_E = plonk.E_commitment;
         }
     }
 
