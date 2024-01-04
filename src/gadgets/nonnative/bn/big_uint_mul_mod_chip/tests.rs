@@ -1,16 +1,21 @@
+use std::{marker::PhantomData, mem};
+
+use ff::Field;
+use halo2_proofs::{
+    circuit::SimpleFloorPlanner,
+    plonk::{Advice, Circuit, Column, Instance},
+};
+use halo2curves::pasta::Fp;
+use num_traits::FromPrimitive;
+
+use crate::run_mock_prover_test;
+
 use super::*;
 
+const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(Fp::S as usize) };
+const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
+
 mod mult_mod_tests {
-    use std::marker::PhantomData;
-
-    use crate::run_mock_prover_test;
-    use halo2_proofs::{
-        circuit::SimpleFloorPlanner,
-        plonk::{Advice, Circuit, Column, Instance},
-    };
-    use halo2curves::pasta::Fp;
-    use num_traits::FromPrimitive;
-
     use super::*;
 
     #[derive(Clone)]
@@ -26,9 +31,6 @@ mod mult_mod_tests {
         formal_rhs: Column<Advice>,
         formal_mod: Column<Advice>,
     }
-
-    const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(Fp::S as usize) };
-    const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
     #[derive(Debug, Default)]
     struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits>(PhantomData<F>);
@@ -226,16 +228,6 @@ mod mult_mod_tests {
 }
 
 mod components_tests {
-    use std::{marker::PhantomData, mem};
-
-    use crate::run_mock_prover_test;
-    use halo2_proofs::{
-        circuit::SimpleFloorPlanner,
-        plonk::{Advice, Circuit, Column, Instance},
-    };
-    use halo2curves::pasta::Fp;
-    use num_traits::FromPrimitive;
-
     use super::*;
 
     #[derive(Clone)]
@@ -798,16 +790,6 @@ mod red_mod_tests {
 }
 
 mod decompose_tests {
-    use std::marker::PhantomData;
-
-    use crate::run_mock_prover_test;
-    use ff::Field;
-    use halo2_proofs::{
-        circuit::SimpleFloorPlanner,
-        plonk::{Advice, Circuit, Column, Instance},
-    };
-    use halo2curves::pasta::Fp;
-
     use super::*;
 
     #[derive(Clone)]
@@ -940,6 +922,131 @@ mod decompose_tests {
             limbs.resize(LIMBS_COUNT_LIMIT.get(), Fp::ZERO);
 
             run_mock_prover_test!(K, ts, vec![vec![Fp::from_u128(val)], limbs]);
+        }
+    }
+}
+
+mod to_le_bits {
+    use rand::Rng;
+
+    use super::*;
+
+    #[derive(Clone)]
+    struct Config {
+        main_gate_config: MainGateConfig<MAIN_GATE_T>,
+        input: Column<Instance>,
+        expected_output: Column<Instance>,
+    }
+
+    #[derive(Debug, Default)]
+    struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits> {
+        _m: PhantomData<F>,
+    }
+
+    impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
+        type Config = Config;
+        type FloorPlanner = SimpleFloorPlanner;
+
+        fn without_witnesses(&self) -> Self {
+            todo!()
+        }
+
+        fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
+            let input = meta.instance_column();
+            meta.enable_equality(input);
+
+            let expected_output = meta.instance_column();
+            meta.enable_equality(expected_output);
+            Config {
+                input,
+                expected_output,
+                main_gate_config: MainGate::<F, MAIN_GATE_T>::configure(meta),
+            }
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl halo2_proofs::circuit::Layouter<F>,
+        ) -> Result<(), halo2_proofs::plonk::Error> {
+            trace!("Start synthesize");
+
+            let config_clone = config.clone();
+
+            let chip = BigUintMulModChip::<F>::new(
+                config.main_gate_config.clone(),
+                LIMB_WIDTH,
+                LIMBS_COUNT_LIMIT,
+            );
+
+            let bits: Vec<_> = layouter
+                .assign_region(
+                    || "to_le_bits",
+                    |mut region| {
+                        config_clone.main_gate_config.name_columns(&mut region);
+
+                        let mut region = RegionCtx::new(region, 0);
+
+                        let assigned_limbs = (0..LIMBS_COUNT_LIMIT.get())
+                            .zip(config.main_gate_config.state.iter().enumerate().cycle())
+                            .map(|(limb_index, (column_index, column))| {
+                                if column_index == 0 {
+                                    region.next();
+                                }
+
+                                region.assign_advice_from_instance(
+                                    || format!("limb {limb_index}"),
+                                    *column,
+                                    config.input,
+                                    limb_index,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+
+                        region.next();
+
+                        Ok(chip.to_le_bits(&mut region, &assigned_limbs).unwrap())
+                    },
+                )
+                .unwrap();
+
+            for (offset, limb) in bits.into_iter().enumerate() {
+                if let Some(bit) = limb.value().unwrap().copied() {
+                    debug!("on-circuit bits[{offset}] = {bit:?}");
+                }
+
+                layouter.constrain_instance(limb.cell(), config.expected_output, offset)?;
+            }
+
+            Ok(())
+        }
+    }
+
+    #[test_log::test]
+    fn to_le_bits() {
+        const K: u32 = 15;
+        let ts = TestCircuit::<Fp>::default();
+
+        for val in [0, u128::MAX, rand::thread_rng().gen()] {
+            let mut input_limbs = BigUint::from_u128(val, LIMB_WIDTH, LIMBS_COUNT_LIMIT)
+                .unwrap()
+                .limbs()
+                .to_vec();
+            input_limbs.resize(LIMBS_COUNT_LIMIT.get(), Fp::ZERO);
+
+            let val = val.to_le_bytes();
+            let mut bits_repr = LittleEndianReader::new(&val);
+            let expected_bits = iter::repeat_with(|| bits_repr.read_bit())
+                .map(|b| b.unwrap_or(false))
+                .take(LIMB_WIDTH.get() * LIMBS_COUNT_LIMIT.get())
+                .enumerate()
+                .map(|(i, bit)| {
+                    debug!("off-circuit bits[{i}] = {bit:?}");
+                    Fp::from(bit)
+                })
+                .collect::<Vec<_>>();
+
+            run_mock_prover_test!(K, ts, vec![input_limbs, expected_bits]);
         }
     }
 }
