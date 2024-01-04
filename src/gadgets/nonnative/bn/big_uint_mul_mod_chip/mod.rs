@@ -1346,6 +1346,28 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
     }
 }
 
+impl<F: ff::PrimeFieldBits> BigUintMulModChip<F> {
+    /// Converts a big uint number in assigned limbs form to bits, where each limb occupies transmitted bits.
+    ///
+    /// Use [`MainGate::le_num_to_bits`] per each limb and concat all results
+    pub fn to_le_bits(
+        &self,
+        ctx: &mut RegionCtx<'_, F>,
+        limbs: &[AssignedCell<F, F>],
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        limbs.iter().try_fold(
+            Vec::with_capacity(limbs.len() * self.limb_width.get()),
+            |mut bits, limb| {
+                bits.extend(
+                    self.main_gate
+                        .le_num_to_bits(ctx, limb.clone(), self.limb_width)?,
+                );
+                Ok(bits)
+            },
+        )
+    }
+}
+
 impl<F: ff::PrimeField> Chip<F> for BigUintMulModChip<F> {
     type Config = MainGateConfig<MAIN_GATE_T>;
     type Loaded = ();
