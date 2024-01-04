@@ -21,7 +21,7 @@ use crate::{
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
     plonk::{
-        eval::{Eval, PlonkEvalDomain},
+        eval::{Error as EvalError, Eval, PlonkEvalDomain},
         util::{cell_to_z_idx, column_index, compress_expression, fill_sparse_matrix},
     },
     polynomial::{
@@ -44,8 +44,6 @@ use itertools::Itertools;
 use log::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
-
-use self::eval::EvalError;
 
 pub mod eval;
 pub mod lookup;
@@ -1159,11 +1157,11 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum SpsError {
     #[error(transparent)]
     Eval(#[from] EvalError),
-    #[error("Sps verification fail: challenge not match")]
+    #[error("Sps verification fail challenge not match at index {challenge_index}")]
     ChallengeNotMatch { challenge_index: usize },
     #[error("For this challenges count table must have lookup aguments")]
     LackOfLookupArguments,
@@ -1173,7 +1171,7 @@ pub enum SpsError {
     UnsupportedChallengesCount { challenges_count: usize },
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum DeciderError {
     #[error(transparent)]
     Sps(#[from] SpsError),
@@ -1183,7 +1181,7 @@ pub enum DeciderError {
     CommitmentMismatch,
     #[error("log derivative relation not satisfied")]
     LogDerivativeNotSat,
-    #[error("(Relaxed) plonk relation not satisfied: commitment mismatch")]
+    #[error("(Relaxed) plonk relation not satisfied: mismatch_count {mismatch_count}, total_row {total_row}")]
     EvaluationMismatch {
         mismatch_count: usize,
         total_row: usize,

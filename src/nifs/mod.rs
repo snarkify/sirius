@@ -11,7 +11,7 @@
 use crate::commitment::CommitmentKey;
 use crate::concat_vec;
 use crate::constants::NUM_CHALLENGE_BITS;
-use crate::plonk::eval::{Eval, EvalError, PlonkEvalDomain};
+use crate::plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain};
 use crate::plonk::{
     PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
     SpsError, TableData,
@@ -23,7 +23,7 @@ use rayon::prelude::*;
 use std::marker::PhantomData;
 
 #[derive(thiserror::Error, Debug)]
-pub enum NIFSError {
+pub enum Error {
     #[error(transparent)]
     Eval(#[from] EvalError),
     #[error(transparent)]
@@ -87,7 +87,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         W1: &RelaxedPlonkWitness<C::ScalarExt>,
         U2: &PlonkInstance<C>,
         W2: &PlonkWitness<C::ScalarExt>,
-    ) -> Result<(CrossTerms<C>, CrossTermCommits<C>), NIFSError> {
+    ) -> Result<(CrossTerms<C>, CrossTermCommits<C>), Error> {
         let offset = S.num_non_fold_vars();
         let num_row = if !S.fixed_columns.is_empty() {
             S.fixed_columns[0].len()
@@ -151,9 +151,9 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
             Self,
             (RelaxedPlonkInstance<C>, RelaxedPlonkWitness<C::ScalarExt>),
         ),
-        NIFSError,
+        Error,
     > {
-        // TODO: hash gate into ro
+        // TODO: hash gate into ro (#85)
         let S = td.plonk_structure(ck);
         S.absorb_into(ro_acc);
 
@@ -195,7 +195,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         S: &PlonkStructure<C>,
         U1: RelaxedPlonkInstance<C>,
         U2: PlonkInstance<C>,
-    ) -> Result<RelaxedPlonkInstance<C>, NIFSError> {
+    ) -> Result<RelaxedPlonkInstance<C>, Error> {
         S.run_sps_verifier(&U2, ro_nark)?;
         S.absorb_into(ro_acc);
         U1.absorb_into(ro_acc);

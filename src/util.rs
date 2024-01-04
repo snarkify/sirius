@@ -206,7 +206,11 @@ pub(crate) fn create_ro<
 #[macro_export]
 macro_rules! concat_vec {
     ($($x:expr),*) => {{
-        let mut new_vec = Vec::new();
+        let mut total_capacity = 0;
+        $(
+            total_capacity += $x.len();
+        )*
+        let mut new_vec = Vec::with_capacity(total_capacity);
         $(
             new_vec.extend_from_slice($x);
         )*
