@@ -1,24 +1,24 @@
 use crate::polynomial::{MultiPolynomial, CHALLENGE_TYPE, POLYNOMIAL_TYPE};
 use ff::PrimeField;
 
-#[derive(Debug, thiserror::Error)]
-pub enum EvalError {
-    #[error("challenge index out of boundary")]
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum Error {
+    #[error("challenge index out of boundary: {challenge_index}")]
     ChallengeIndexOutOfBoundary { challenge_index: usize },
-    #[error("column variable index out of boundary")]
+    #[error("column variable index out of boundary: {column_index}")]
     ColumnVariableIndexOutOfBoundary { column_index: usize },
-    #[error("column variable row index out of boundary")]
+    #[error("column variable row index out of boundary: {row_index}")]
     RowIndexOutOfBoundary { row_index: usize },
     #[error("InvalidExpression")]
     InvalidExpression,
-    #[error("Invalid witness index")]
+    #[error("Invalid witness index. num_witness: {num_witness}, num_advice: {num_advice}, num_lookup: {num_lookup}, index: {index}")]
     InvalidWitnessIndex {
         num_witness: usize,
         num_advice: usize,
         num_lookup: usize,
         index: usize,
     },
-    #[error("unsupported variable type")]
+    #[error("unsupported variable type: {var_type}")]
     UnsupportedVariableType { var_type: usize },
 }
 
@@ -40,46 +40,38 @@ pub trait Eval<F: PrimeField> {
             return self.get_selectors().as_ref()[0].len();
         }
     }
-    fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, EvalError>;
+    fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, Error>;
+
     /// evaluate a single column variable on specific row
-    fn eval_column_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
-        let selectors = self.get_selectors();
-        let fixed = self.get_fixed();
-        let selector_offset = selectors.as_ref().len();
-        let fixed_offset = fixed.as_ref().len() + selector_offset;
-        match index {
-            // selector column
-            index if index < selector_offset => {
-                if selectors.as_ref()[index][row] {
-                    Ok(F::ONE)
-                } else {
-                    Ok(F::ZERO)
-                }
-            }
-            // fixed column
-            index if index < fixed_offset => Ok(fixed.as_ref()[index - selector_offset][row]),
-            // advice column
-            index => self.eval_advice_var(row, index - fixed_offset),
-        }
+    fn eval_column_var(&self, row: usize, index: usize) -> Result<F, Error> {
+        let selectors = self.get_selectors().as_ref();
+        let fixed = self.get_fixed().as_ref();
+
+        selectors
+            .get(index)
+            .map(|selector| if selector[row] { F::ONE } else { F::ZERO })
+            .or_else(|| fixed.get(index - selectors.len()).map(|fixed| fixed[row]))
+            .map_or_else(
+                || self.eval_advice_var(row, index - selectors.len() - fixed.len()),
+                Ok,
+            )
     }
 
-    fn eval_challenge(&self, index: usize) -> Result<F, EvalError> {
-        if self.get_challenges().as_ref().len() <= index {
-            Err(EvalError::ChallengeIndexOutOfBoundary {
+    fn eval_challenge(&self, index: usize) -> Result<F, Error> {
+        self.get_challenges().as_ref().get(index).copied().ok_or(
+            Error::ChallengeIndexOutOfBoundary {
                 challenge_index: index,
-            })
-        } else {
-            Ok(self.get_challenges().as_ref()[index])
-        }
+            },
+        )
     }
 
     /// evaluate polynomial relation on specific row
-    fn eval(&self, poly: &MultiPolynomial<F>, row: usize) -> Result<F, EvalError> {
+    fn eval(&self, poly: &MultiPolynomial<F>, row: usize) -> Result<F, Error> {
         let row_size = self.row_size();
         poly.monomials
             .iter()
             .map(|mono| {
-                let vars: Vec<F> = (0..mono.arity)
+                (0..mono.arity)
                     .map(|i| {
                         let (rot, col, var_type) = mono.index_to_poly[i];
                         match var_type {
@@ -100,15 +92,13 @@ pub trait Eval<F: PrimeField> {
                                 } as usize;
                                 self.eval_column_var(row1, col)
                             }
-                            var_type => Err(EvalError::UnsupportedVariableType { var_type }),
+                            var_type => Err(Error::UnsupportedVariableType { var_type }),
                         }
                     })
-                    .collect::<Result<Vec<F>, EvalError>>()?;
-                Ok(vars
-                    .into_iter()
                     .zip(mono.exponents.iter())
-                    .map(|(x, exp)| x.pow([*exp as u64, 0, 0, 0]))
-                    .fold(mono.coeff, |acc, v| acc * v))
+                    .try_fold(mono.coeff, |acc, (result_with_var, exp)| {
+                        Ok(acc * result_with_var?.pow([*exp as u64, 0, 0, 0]))
+                    })
             })
             .try_fold(F::ZERO, |acc, value| match value {
                 Ok(value) => Ok(acc + value),
@@ -161,13 +151,13 @@ impl<'a, F: PrimeField> Eval<F> for LookupEvalDomain<'a, F> {
         self.fixed
     }
 
-    fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
+    fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, Error> {
         if index >= self.advice.len() {
-            Err(EvalError::ColumnVariableIndexOutOfBoundary {
+            Err(Error::ColumnVariableIndexOutOfBoundary {
                 column_index: index,
             })
         } else if row >= self.advice[index].len() {
-            Err(EvalError::RowIndexOutOfBoundary { row_index: row })
+            Err(Error::RowIndexOutOfBoundary { row_index: row })
         } else {
             Ok(self.advice[index][row])
         }
@@ -195,7 +185,7 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
         self.fixed
     }
 
-    fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, EvalError> {
+    fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, Error> {
         let row_size = self.row_size();
         let num_advice = self.num_advice;
         let num_lookup = self.num_lookup();
@@ -212,7 +202,7 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
             self.W2s.len()
         };
 
-        let index_map = |index: usize| -> Result<(usize, usize), EvalError> {
+        let index_map = |index: usize| -> Result<(usize, usize), Error> {
             if index < num_advice {
                 return Ok((0, index));
             }
@@ -239,7 +229,7 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
                         Ok((2, lookup_index * 2 + lookup_sub_index))
                     }
                 }
-                num_witness => Err(EvalError::InvalidWitnessIndex {
+                num_witness => Err(Error::InvalidWitnessIndex {
                     num_witness,
                     num_advice,
                     num_lookup,
@@ -251,7 +241,7 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
         let (i, j) = index_map(index)?;
         if is_first_instance {
             if self.W1s.len() <= i || self.W1s[i].len() <= j * row_size + row {
-                Err(EvalError::InvalidWitnessIndex {
+                Err(Error::InvalidWitnessIndex {
                     num_witness,
                     num_advice,
                     num_lookup,
@@ -261,7 +251,7 @@ impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
                 Ok(self.W1s[i][j * row_size + row])
             }
         } else if self.W2s.len() <= i || self.W2s[i].len() <= j * row_size + row {
-            Err(EvalError::InvalidWitnessIndex {
+            Err(Error::InvalidWitnessIndex {
                 num_witness,
                 num_advice,
                 num_lookup,

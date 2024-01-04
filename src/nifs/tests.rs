@@ -1,4 +1,5 @@
 use super::*;
+use crate::nifs::Error as NIFSError;
 use crate::util::create_ro;
 use ff::PrimeField;
 use halo2_proofs::{
@@ -23,15 +24,16 @@ use std::marker::PhantomData;
 /// copy constrains relation
 /// (3) the second folded witness-instance pair satisfies the relaxed polynomial relation  and
 /// copy constrains relation
-fn fold_instances<
-    C: CurveAffine<ScalarExt = F1, Base = F2>,
-    F1: PrimeField,
-    F2: PrimeField + FromUniformBytes<64>,
->(
+fn fold_instances<C, F1, F2>(
     ck: &CommitmentKey<C>,
     td1: &TableData<F1>,
     td2: &TableData<F1>,
-) -> Result<(), NIFSError> {
+) -> Result<(), NIFSError>
+where
+    C: CurveAffine<ScalarExt = F1, Base = F2>,
+    F1: PrimeField,
+    F2: PrimeField + FromUniformBytes<64>,
+{
     const T: usize = 3;
     const RATE: usize = 2;
     const R_F: usize = 4;
@@ -48,42 +50,41 @@ fn fold_instances<
     let (U1, W1) = td1
         .run_sps_protocol(ck, &mut ro_nark_prepare, S.num_challenges)
         .unwrap();
-    let res = S.is_sat(ck, &mut ro_nark_decider, &U1, &W1);
-    assert!(res.is_ok());
+    assert_eq!(S.is_sat(ck, &mut ro_nark_decider, &U1, &W1).err(), None);
 
     let mut ro_acc_prover = create_ro::<C, F2, T, RATE, R_F, R_P>();
     let mut ro_acc_verifier = create_ro::<C, F2, T, RATE, R_F, R_P>();
-    let (nifs, (_U, W)) =
+    let (nifs, (U_from_prove, W)) =
         NIFS::prove(ck, &mut ro_nark_prover, &mut ro_acc_prover, td1, &f_U, &f_W)?;
-    let U = nifs
+    let U_from_verify = nifs
         .verify(&mut ro_nark_verifier, &mut ro_acc_verifier, &S, f_U, U1)
         .unwrap();
-    assert_eq!(U, _U);
+    assert_eq!(U_from_prove, U_from_verify);
 
-    f_U = U;
+    f_U = U_from_verify;
     f_W = W;
     let res = S.is_sat_relaxed(ck, &f_U, &f_W);
     assert!(res.is_ok());
+    // TODO: fix #91
     //    let perm_res = S.is_sat_perm(&f_U, &f_W);
     //    assert!(perm_res.is_ok());
 
     let (U1, W1) = td2
         .run_sps_protocol(ck, &mut ro_nark_prepare, S.num_challenges)
         .unwrap();
-    let res = S.is_sat(ck, &mut ro_nark_decider, &U1, &W1);
-    assert!(res.is_ok());
+    assert_eq!(S.is_sat(ck, &mut ro_nark_decider, &U1, &W1).err(), None);
 
-    let (nifs, (_U, _W)) =
+    let (nifs, (U_from_prove, _W)) =
         NIFS::prove(ck, &mut ro_nark_prover, &mut ro_acc_prover, td2, &f_U, &f_W)?;
-    let U = nifs
+    let U_from_verify = nifs
         .verify(&mut ro_nark_verifier, &mut ro_acc_verifier, &S, f_U, U1)
         .unwrap();
-    assert_eq!(U, _U);
+    assert_eq!(U_from_prove, U_from_verify);
 
-    f_U = _U;
+    f_U = U_from_verify;
     f_W = _W;
-    let res = S.is_sat_relaxed(ck, &f_U, &f_W);
-    assert!(res.is_ok());
+    assert_eq!(S.is_sat_relaxed(ck, &f_U, &f_W).err(), None);
+    // TODO: fix #91
     //    let perm_res = S.is_sat_perm(&f_U, &f_W);
     //    assert!(perm_res.is_ok());
     Ok(())
@@ -101,8 +102,6 @@ fn smallest_power(n: usize, K: u32) -> usize {
 mod zero_round_test {
     use super::*;
     use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
-    use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
-    use halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Error, Instance};
 
     const T: usize = 3;
 
@@ -164,12 +163,8 @@ mod zero_round_test {
     #[test]
     fn test_nifs() -> Result<(), NIFSError> {
         const K: u32 = 4;
-        let mut inputs1 = Vec::new();
-        let mut inputs2 = Vec::new();
-        for i in 1..10 {
-            inputs1.push(Fr::from(i));
-            inputs2.push(Fr::from(i + 1));
-        }
+        let inputs1 = (1..10).map(Fr::from).collect();
+        let inputs2 = (2..11).map(Fr::from).collect();
         let circuit1 = TestCircuit::new(inputs1, Fr::from_str_vartime("2").unwrap());
         let output1 = Fr::from_str_vartime("4097").unwrap();
         let public_inputs1 = vec![output1];
@@ -269,7 +264,6 @@ mod one_round_test {
                     let mut b = region
                         .assign_advice(|| "b", self.config.b, 0, || Value::known(b))
                         .map(Number)?;
-                    // println!("[0] a = {:?} b = {:?}", a.0, b.0);
 
                     for idx in 1..nrows {
                         self.config.selector.enable(&mut region, idx)?;
@@ -283,7 +277,6 @@ mod one_round_test {
                         b = region
                             .assign_advice(|| "b", self.config.b, idx, || b2)
                             .map(Number)?;
-                        // println!("[{}] a = {:?} b = {:?}", idx, a.0, b.0);
                     }
 
                     Ok((a, b))
@@ -352,7 +345,6 @@ mod one_round_test {
         let num = 16;
         // circuit 1
         let seq = get_fibo_seq(1, 1, num);
-        // println!("{:?}", seq);
         let circuit1 = FiboCircuit {
             a: Fr::from(seq[0]),
             b: Fr::from(seq[1]),
@@ -525,7 +517,6 @@ mod three_rounds_test {
                     b.0.copy_advice(|| "rhs", &mut region, config.advice[1], 0)?;
 
                     let value = a.0.value().and_then(|a| b.0.value().map(|b| *a + *b));
-                    // println!("add row: {:?}, {:?}, {:?}", a.0.value(), b.0.value(), value);
 
                     region
                         .assign_advice(|| "out", config.advice[2], 0, || value)
@@ -556,7 +547,6 @@ mod three_rounds_test {
                             F::from(a_val ^ b_val)
                         })
                     });
-                    // println!("xor row: {:?}, {:?}, {:?}", a.0.value(), b.0.value(), value);
 
                     region
                         .assign_advice(|| "out", config.advice[2], 0, || value)
@@ -663,7 +653,6 @@ mod three_rounds_test {
 
         // circuit 1
         let seq = get_sequence(1, 3, 2, num);
-        // println!("seq={:?}", &seq);
         let circuit1 = FiboCircuit {
             a: Fr::from(seq[0]),
             b: Fr::from(seq[1]),
@@ -675,7 +664,6 @@ mod three_rounds_test {
 
         // circuit 2
         let seq = get_sequence(3, 2, 2, num);
-        // println!("seq={:?}", &seq);
         let circuit2 = FiboCircuit {
             a: Fr::from(seq[0]),
             b: Fr::from(seq[1]),
