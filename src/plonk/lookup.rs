@@ -38,7 +38,7 @@
 //!
 
 use crate::concat_vec;
-use crate::plonk::eval::EvalError;
+use crate::plonk::eval::Error;
 use ff::PrimeField;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
 use itertools::Itertools;
@@ -194,7 +194,7 @@ impl<F: PrimeField> Arguments<F> {
 
     /// evaluate each of the lookup expressions to get vector l_i
     /// where l_i = L_i(x_1,...,x_a)
-    fn evaluate_ls(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, EvalError> {
+    fn evaluate_ls(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, Error> {
         let data = LookupEvalDomain {
             num_lookup: table.num_lookups(),
             challenges: vec![r],
@@ -210,14 +210,14 @@ impl<F: PrimeField> Arguments<F> {
                 (0..nrow)
                     .into_par_iter()
                     .map(|row| data.eval(&poly, row))
-                    .collect::<Result<Vec<F>, EvalError>>()
+                    .collect::<Result<Vec<F>, Error>>()
             })
             .collect()
     }
 
     /// evaluate each of the table expressions to get vector t_i
     /// where t_i = T(y1,...,y_b)
-    fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, EvalError> {
+    fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, Error> {
         let data = LookupEvalDomain {
             num_lookup: table.num_lookups(),
             challenges: vec![r],
@@ -233,7 +233,7 @@ impl<F: PrimeField> Arguments<F> {
                 (0..nrow)
                     .into_par_iter()
                     .map(|row| data.eval(&poly, row))
-                    .collect::<Result<Vec<_>, EvalError>>()
+                    .collect::<Result<Vec<_>, Error>>()
             })
             .collect()
     }
@@ -271,7 +271,7 @@ impl<F: PrimeField> Arguments<F> {
         &self,
         table: &TableData<F>,
         r: F,
-    ) -> Result<ArgumentCoefficient1<F>, EvalError> {
+    ) -> Result<ArgumentCoefficient1<F>, Error> {
         let ls = self.evaluate_ls(table, r)?;
         let ts = self.evaluate_ts(table, r)?;
 
