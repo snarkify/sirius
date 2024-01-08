@@ -5,6 +5,7 @@ use halo2_proofs::{
     circuit::{Chip, Value},
     plonk::Error,
 };
+use log::*;
 use std::cmp;
 
 // assume point is not infinity
@@ -161,9 +162,9 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
         Ok(acc)
     }
 
-    // optimization version for scalar_mul
+    // scalar_mul for non_zero point
     // we assume the point p0 is not infinity here
-    pub fn scalar_mul_opt(
+    pub fn scalar_mul_non_zero(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
         p0: &AssignedPoint<C>,
@@ -171,6 +172,7 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
     ) -> Result<AssignedPoint<C>, Error> {
         if let Some((x, y)) = p0.coordinates_values() {
             if x == C::Base::ZERO && y == C::Base::ZERO {
+                error!("point cannot be zero");
                 return Err(Error::Synthesis);
             }
         }
@@ -561,7 +563,7 @@ mod tests {
                         )?;
                         ctx.next();
                         let bits = ecc_chip.main_gate.le_num_to_bits(ctx, lambda, bit_len)?;
-                        ecc_chip.scalar_mul_opt(ctx, &a, &bits)
+                        ecc_chip.scalar_mul_non_zero(ctx, &a, &bits)
                     }
                 },
             )?;
