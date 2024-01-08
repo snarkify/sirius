@@ -16,7 +16,7 @@ use crate::plonk::{
     PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
     SpsError, TableData,
 };
-use crate::polynomial::CHALLENGE_TYPE;
+use crate::polynomial::ColumnIndex;
 use crate::poseidon::{AbsorbInRO, ROTrait};
 use halo2_proofs::arithmetic::CurveAffine;
 use rayon::prelude::*;
@@ -108,7 +108,14 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         let r_index = normalized.num_challenges() - 1;
         let degree = S.poly.degree_for_folding(offset);
         let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
-            .map(|k| normalized.coeff_of((0, r_index, CHALLENGE_TYPE), k))
+            .map(|k| {
+                normalized.coeff_of(
+                    ColumnIndex::Challenge {
+                        column_index: r_index,
+                    },
+                    k,
+                )
+            })
             .map(|multipoly| {
                 (0..num_row)
                     .into_par_iter()
