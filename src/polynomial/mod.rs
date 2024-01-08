@@ -13,17 +13,36 @@ use crate::util::trim_leading_zeros;
 
 pub mod sparse;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ColumnIndex {
+    Challenge { column_index: usize },
+    Polynominal { rotation: i32, column_index: usize },
+}
+
+impl PartialOrd for ColumnIndex {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for ColumnIndex {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let to_tuple = |s: &Self| match s {
+            Self::Polynominal {
+                rotation,
+                column_index,
+            } => (*rotation, *column_index, 0),
+            Self::Challenge { column_index } => (0, *column_index, 1),
+        };
+
+        to_tuple(self).cmp(&to_tuple(other))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Query {
     pub index: usize,
     pub rotation: Rotation,
 }
-
-/// There are two types of variables in Expression:
-/// polynomial query ([`Expression::Polynomial`]) and challenge ([`Expression::Challenge`])
-/// we identify them by two global consts. It is used to identify the type of variable
-pub(crate) const POLYNOMIAL_TYPE: usize = 0;
-pub(crate) const CHALLENGE_TYPE: usize = 1;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expression<F> {
@@ -43,14 +62,19 @@ impl<F: PrimeField> Display for Expression<F> {
 }
 impl<F: PrimeField> Expression<F> {
     // uniquely determined by (rotation, index, var_type)
-    pub fn poly_set(&self, set: &mut HashSet<(i32, usize, usize)>) {
+    pub fn poly_set(&self, set: &mut HashSet<ColumnIndex>) {
         match self {
             Expression::Constant(_) => (),
             Expression::Polynomial(poly) => {
-                set.insert((poly.rotation.0, poly.index, POLYNOMIAL_TYPE));
+                set.insert(ColumnIndex::Polynominal {
+                    rotation: poly.rotation.0,
+                    column_index: poly.index,
+                });
             }
             Expression::Challenge(index) => {
-                set.insert((0, *index, CHALLENGE_TYPE));
+                set.insert(ColumnIndex::Challenge {
+                    column_index: *index,
+                });
             }
             Expression::Negated(a) => a.poly_set(set),
             Expression::Sum(a, b) => {
@@ -67,17 +91,19 @@ impl<F: PrimeField> Expression<F> {
 
     // return the number of challenges in expression
     pub fn num_challenges(&self) -> usize {
-        let mut set = HashSet::<(i32, usize, usize)>::new();
+        let mut set = HashSet::new();
         self.collect_challenges(&mut set);
         set.len()
     }
 
-    fn collect_challenges(&self, set: &mut HashSet<(i32, usize, usize)>) {
+    fn collect_challenges(&self, set: &mut HashSet<ColumnIndex>) {
         match self {
             Expression::Constant(_) => (),
             Expression::Polynomial(_) => (),
             Expression::Challenge(index) => {
-                set.insert((0, *index, CHALLENGE_TYPE));
+                set.insert(ColumnIndex::Challenge {
+                    column_index: *index,
+                });
             }
             Expression::Negated(a) => a.collect_challenges(set),
             Expression::Sum(a, b) => {
@@ -132,7 +158,7 @@ impl<F: PrimeField> Expression<F> {
     }
 
     /// index_to_poly is mapping from i to (rotation, column_index, type), see [`Monomial`]
-    fn _expand(&self, index_to_poly: &[(i32, usize, usize)]) -> MultiPolynomial<F> {
+    fn _expand(&self, index_to_poly: &[ColumnIndex]) -> MultiPolynomial<F> {
         self.evaluate(
             &|c| {
                 let arity = index_to_poly.len();
@@ -144,10 +170,14 @@ impl<F: PrimeField> Expression<F> {
             &|poly| {
                 let arity = index_to_poly.len();
                 let mut exponents = vec![0; arity];
+
                 let index = index_to_poly
                     .iter()
-                    .position(|&(a, b, t)| {
-                        a == poly.rotation.0 && b == poly.index && t == POLYNOMIAL_TYPE
+                    .position(|indexes| {
+                        indexes.eq(&ColumnIndex::Polynominal {
+                            rotation: poly.rotation.0,
+                            column_index: poly.index,
+                        })
                     })
                     .unwrap();
                 exponents[index] = 1;
@@ -156,12 +186,16 @@ impl<F: PrimeField> Expression<F> {
                     monomials: vec![Monomial::new(index_to_poly.to_vec(), F::ONE, exponents)],
                 }
             },
-            &|cha_index| {
+            &|challenge_index| {
                 let arity = index_to_poly.len();
                 let mut exponents = vec![0; arity];
                 let index = index_to_poly
                     .iter()
-                    .position(|&(a, b, t)| a == 0 && b == cha_index && t == CHALLENGE_TYPE)
+                    .position(|indexes| {
+                        indexes.eq(&ColumnIndex::Challenge {
+                            column_index: challenge_index,
+                        })
+                    })
                     .unwrap();
                 exponents[index] = 1;
                 MultiPolynomial {
@@ -179,7 +213,7 @@ impl<F: PrimeField> Expression<F> {
     pub fn expand(&self) -> MultiPolynomial<F> {
         let mut set = HashSet::new();
         self.poly_set(&mut set);
-        let mut index_to_poly: Vec<(i32, usize, usize)> = set.into_iter().collect();
+        let mut index_to_poly: Vec<ColumnIndex> = set.into_iter().collect();
         index_to_poly.sort();
         self._expand(&index_to_poly[..])
     }
@@ -307,14 +341,14 @@ impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
 /// index_to_poly is mapping from i to (rotation, column_index, type)
 /// poly_to_index is mapping from (rotation, column_index, type) to i \in [0,..,n-1]
 /// type has value either CHALLENGE_TYPE or POLYNOMIAL_TYPE
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Monomial<F: PrimeField> {
     pub(crate) arity: usize,
     // poly or challenge: (rotation, column_index, type)
-    pub(crate) index_to_poly: Vec<(i32, usize, usize)>,
+    pub(crate) index_to_poly: Vec<ColumnIndex>,
     // (rotation, column_index, var_type) -> index
     // when type = CHALLENGE_TYPE as a challenge, we always set rotation = 0
-    pub(crate) poly_to_index: HashMap<(i32, usize, usize), usize>,
+    pub(crate) poly_to_index: HashMap<ColumnIndex, usize>,
     pub(crate) coeff: F,
     pub(crate) exponents: Vec<usize>,
 }
@@ -332,42 +366,45 @@ impl<F: PrimeField> Display for Monomial<F> {
             if *exp == 0 {
                 continue;
             }
-            let (rid, cid, var_type) = self.index_to_poly[i];
-            let shift = match rid.cmp(&0) {
-                Ordering::Equal => "".to_owned(),
-                Ordering::Greater => format!("[+{rid}]"),
-                Ordering::Less => format!("[{rid}]"),
-            };
 
-            match var_type {
-                POLYNOMIAL_TYPE => {
+            match self.index_to_poly[i] {
+                ColumnIndex::Challenge { column_index } => {
                     if *exp == 1 {
-                        write!(f, "(Z_{}{})", cid, shift)?;
+                        write!(f, "(r_{column_index})")?;
                     } else {
-                        write!(f, "(Z_{}{}^{})", cid, shift, exp)?;
+                        write!(f, "(r_{column_index}^{exp})")?;
                     }
                 }
-                CHALLENGE_TYPE => {
+                ColumnIndex::Polynominal {
+                    rotation,
+                    column_index,
+                } => {
+                    let shift = match rotation.cmp(&0) {
+                        Ordering::Equal => "".to_owned(),
+                        Ordering::Greater => format!("[+{rotation}]"),
+                        Ordering::Less => format!("[{rotation}]"),
+                    };
+
                     if *exp == 1 {
-                        write!(f, "(r_{})", cid)?;
+                        write!(f, "(Z_{column_index}{shift})")?;
                     } else {
-                        write!(f, "(r_{}^{})", cid, exp)?;
+                        write!(f, "(Z_{column_index}{shift}^{exp})")?;
                     }
                 }
-                _ => unimplemented!("other variable type not supported"),
             }
         }
-        write!(f, "")
+        Ok(())
     }
 }
 
 impl<F: PrimeField> Monomial<F> {
-    pub fn new(index_to_poly: Vec<(i32, usize, usize)>, coeff: F, exponents: Vec<usize>) -> Self {
+    pub fn new(index_to_poly: Vec<ColumnIndex>, coeff: F, exponents: Vec<usize>) -> Self {
         let arity = index_to_poly.len();
         assert!(arity == exponents.len());
-        let mut poly_to_index: HashMap<(i32, usize, usize), usize> = HashMap::new();
+
+        let mut poly_to_index = HashMap::new();
         for (i, key) in index_to_poly.iter().enumerate() {
-            poly_to_index.insert(*key, i);
+            poly_to_index.insert(key.clone(), i);
         }
 
         Self {
@@ -385,33 +422,40 @@ impl<F: PrimeField> Monomial<F> {
         mono.arity += 1;
         mono.exponents
             .push(degree - self.degree_for_folding(offset));
-        mono.index_to_poly.push((0, u_index, CHALLENGE_TYPE));
-        mono.poly_to_index
-            .insert((0, u_index, CHALLENGE_TYPE), mono.arity);
+        mono.index_to_poly.push(ColumnIndex::Challenge {
+            column_index: u_index,
+        });
+        mono.poly_to_index.insert(
+            ColumnIndex::Challenge {
+                column_index: u_index,
+            },
+            mono.arity,
+        );
         mono
     }
 
     pub fn to_expression(&self) -> Expression<F> {
         let mut expr = Expression::Constant(self.coeff);
         for (i, exp) in self.exponents.iter().enumerate() {
-            let (rot, idx, var_type) = self.index_to_poly[i];
-            match var_type {
-                POLYNOMIAL_TYPE => {
+            match self.index_to_poly[i] {
+                ColumnIndex::Polynominal {
+                    rotation,
+                    column_index,
+                } => {
                     for _ in 0..(*exp) {
                         let x0 = Expression::<F>::Polynomial(Query {
-                            index: idx,
-                            rotation: Rotation(rot),
+                            index: column_index,
+                            rotation: Rotation(rotation),
                         });
                         expr = Expression::Product(Box::new(expr), Box::new(x0));
                     }
                 }
-                CHALLENGE_TYPE => {
+                ColumnIndex::Challenge { column_index } => {
                     for _ in 0..(*exp) {
-                        let r = Expression::<F>::Challenge(idx);
+                        let r = Expression::<F>::Challenge(column_index);
                         expr = Expression::Product(Box::new(expr), Box::new(r));
                     }
                 }
-                _ => unimplemented!("variable type not supported"),
             }
         }
         expr
@@ -437,10 +481,12 @@ impl<F: PrimeField> Monomial<F> {
         self.exponents
             .iter()
             .zip(self.index_to_poly.iter())
-            .filter_map(|(exp, (_, col_index, var_type))| {
-                ((*var_type == POLYNOMIAL_TYPE && *col_index >= offset)
-                    || *var_type == CHALLENGE_TYPE)
-                    .then_some(exp)
+            .filter_map(|(exp, indexes)| match indexes {
+                ColumnIndex::Polynominal { column_index, .. } if column_index >= &offset => {
+                    Some(exp)
+                }
+                ColumnIndex::Challenge { .. } => Some(exp),
+                _other => None,
             })
             .sum()
     }
@@ -606,7 +652,7 @@ impl<F: PrimeField> MultiPolynomial<F> {
     }
 
     // get coefficient of X^k, where X identified by (ratation, index, var_type) in 0..arity, k=degree
-    pub fn coeff_of(&self, var: (i32, usize, usize), degree: usize) -> Self {
+    pub fn coeff_of(&self, var: ColumnIndex, degree: usize) -> Self {
         assert!(!self.monomials.is_empty());
         assert!(self.monomials[0].poly_to_index.contains_key(&var));
 
