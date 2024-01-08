@@ -1,4 +1,4 @@
-use crate::polynomial::{MultiPolynomial, CHALLENGE_TYPE, POLYNOMIAL_TYPE};
+use crate::polynomial::{ColumnIndex, MultiPolynomial};
 use ff::PrimeField;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -18,8 +18,8 @@ pub enum Error {
         num_lookup: usize,
         index: usize,
     },
-    #[error("unsupported variable type: {var_type}")]
-    UnsupportedVariableType { var_type: usize },
+    #[error("unsupported variable type: {var_type:?}")]
+    UnsupportedVariableType { var_type: ColumnIndex },
 }
 
 pub trait Eval<F: PrimeField> {
@@ -67,32 +67,36 @@ pub trait Eval<F: PrimeField> {
 
     /// evaluate polynomial relation on specific row
     fn eval(&self, poly: &MultiPolynomial<F>, row: usize) -> Result<F, Error> {
-        let row_size = self.row_size();
+        let row_size = self.row_size() as i32;
         poly.monomials
             .iter()
             .map(|mono| {
                 (0..mono.arity)
                     .map(|i| {
-                        let (rot, col, var_type) = mono.index_to_poly[i];
-                        match var_type {
+                        match mono.index_to_poly[i] {
                             // evaluation for challenge variable
-                            CHALLENGE_TYPE => self.eval_challenge(col),
+                            ColumnIndex::Challenge { column_index } => {
+                                self.eval_challenge(column_index)
+                            }
                             // evaluation for column polynomial variable
-                            POLYNOMIAL_TYPE => {
-                                let tmp = rot + (row as i32);
+                            ColumnIndex::Polynominal {
+                                rotation,
+                                column_index,
+                            } => {
+                                let rotation_plus_row = rotation + (row as i32);
                                 // TODO: double check how halo2 handle
                                 // (1): row+rot < 0
                                 // (2): row+rot >= row_size = 2^K
-                                let row1 = if tmp < 0 {
-                                    row_size as i32 + tmp
-                                } else if tmp >= row_size as i32 {
-                                    tmp - row_size as i32
+                                let row = if rotation_plus_row < 0 {
+                                    rotation_plus_row + row_size
+                                } else if rotation_plus_row >= row_size {
+                                    rotation_plus_row - row_size
                                 } else {
-                                    tmp
-                                } as usize;
-                                self.eval_column_var(row1, col)
+                                    rotation_plus_row
+                                };
+
+                                self.eval_column_var(row as usize, column_index)
                             }
-                            var_type => Err(Error::UnsupportedVariableType { var_type }),
                         }
                     })
                     .zip(mono.exponents.iter())
