@@ -53,7 +53,7 @@ use log::*;
 use num_traits::Num;
 
 use crate::{
-    constants::{MAX_BITS, NUM_CHALLENGE_BITS},
+    constants::NUM_CHALLENGE_BITS,
     gadgets::{
         ecc::{AssignedPoint, EccChip},
         nonnative::bn::{
@@ -298,29 +298,37 @@ where
     fn fold_E<const T: usize>(
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
+        bn_chip: &BigUintMulModChip<C::Base>,
         folded_E: AssignedPoint<C>,
         cross_term_commits: &[AssignedPoint<C>],
-        r: ValueView<C::Base>,
+        r: BigUintView<C::Base>,
+        m_bn: &[AssignedValue<C::Base>],
     ) -> Result<AssignedPoint<C>, Error> {
-        let ecc = EccChip::<C, C::Base, T>::new(config.clone());
-        let gate = MainGate::new(config.clone());
+        debug!("Start calculate r^i from {r:?}");
 
         let powers_of_r = iter::successors(Some(Ok(r.clone())), |val| {
             Some(Ok(val.as_ref().ok()?).and_then(|r_pow_i| {
-                let ValueView { value, bits: _ } = r_pow_i;
+                let BigUintView {
+                    as_bn_limbs,
+                    as_bits: _,
+                } = r_pow_i;
 
-                let current = gate.mul(region, value, &r.value)?;
-                let current_bits = gate.le_num_to_bits(region, current.clone(), MAX_BITS)?;
+                let next = bn_chip
+                    .mult_mod(region, as_bn_limbs, &r.as_bn_limbs, m_bn)?
+                    .remainder;
 
-                Result::<_, Error>::Ok(ValueView {
-                    value: current,
-                    bits: current_bits,
+                debug!("Next r^i from {next:?}");
+
+                Result::<_, Error>::Ok(BigUintView {
+                    as_bits: bn_chip.to_le_bits(region, &next)?,
+                    as_bn_limbs: next,
                 })
             }))
         })
         .take(cross_term_commits.len())
         .collect::<Result<Vec<_>, _>>()?;
 
+        let ecc = EccChip::<C, C::Base, T>::new(config.clone());
         // TODO Check what with all commits
         let rT = cross_term_commits
             .iter()
@@ -459,21 +467,6 @@ where
 
         let gate = MainGate::new(config.clone());
 
-        let r = ValueView {
-            value: gate.le_bits_to_num(region, &r)?,
-            bits: r,
-        };
-
-        let new_folded_W = Self::fold_W(region, config, &folded_W, &input_W_commitments, &r)?;
-
-        debug!("fold: W folded: {new_folded_W:?}");
-
-        let new_folded_E = Self::fold_E(region, config, folded_E, &cross_terms_commits, r.clone())?;
-        debug!("fold: E folded: {new_folded_W:?}");
-
-        let new_folded_u = gate.add(region, &folded_u, &r.value)?;
-        debug!("fold: u folded: {new_folded_u:?}");
-
         let bn_chip = BigUintMulModChip::<C::Base>::new(
             config
                 .into_smaller_size::<{ big_uint_mul_mod_chip::MAIN_GATE_T }>()
@@ -482,7 +475,30 @@ where
             self.limbs_count,
         );
 
-        let r_as_bn = bn_chip.from_assigned_cell_to_limbs(region, &r.value)?;
+        let r_value = gate.le_bits_to_num(region, &r)?;
+        let r = BigUintView {
+            as_bn_limbs: bn_chip.from_assigned_cell_to_limbs(region, &r_value)?,
+            as_bits: r,
+        };
+
+        let new_folded_W = Self::fold_W(region, config, &folded_W, &input_W_commitments, &r)?;
+
+        debug!("fold: W folded: {new_folded_W:?}");
+
+        let new_folded_E = Self::fold_E(
+            region,
+            config,
+            &bn_chip,
+            folded_E,
+            &cross_terms_commits,
+            r.clone(),
+            &m_bn,
+        )?;
+        debug!("fold: E folded: {new_folded_W:?}");
+
+        let new_folded_u = gate.add(region, &folded_u, &r_value)?;
+        debug!("fold: u folded: {new_folded_u:?}");
+
         let [new_folded_X0, new_folded_X1] = Self::fold_instances(
             &bn_chip,
             region,
@@ -498,7 +514,7 @@ where
             region,
             folded_challenges,
             input_challenges,
-            &r_as_bn,
+            &r.as_bn_limbs,
             &m_bn,
             self.limb_width,
         )?;
@@ -798,15 +814,15 @@ where
 }
 
 #[derive(Debug, Clone)]
-struct ValueView<F: ff::Field> {
-    value: AssignedValue<F>,
-    bits: Vec<AssignedValue<F>>,
+struct BigUintView<F: ff::Field> {
+    as_bn_limbs: Vec<AssignedValue<F>>,
+    as_bits: Vec<AssignedValue<F>>,
 }
-impl<F: ff::Field> ops::Deref for ValueView<F> {
+impl<F: ff::Field> ops::Deref for BigUintView<F> {
     type Target = [AssignedValue<F>];
 
     fn deref(&self) -> &Self::Target {
-        &self.bits
+        &self.as_bits
     }
 }
 
@@ -823,7 +839,8 @@ mod tests {
     use rand::Rng;
 
     use crate::{
-        commitment::CommitmentKey, plonk::TableData, poseidon::poseidon_circuit::PoseidonChip,
+        commitment::CommitmentKey, constants::MAX_BITS, plonk::TableData,
+        poseidon::poseidon_circuit::PoseidonChip,
     };
 
     use super::*;
@@ -835,12 +852,12 @@ mod tests {
     const NUM_WITNESS: usize = 5;
     /// When the number of fold rounds increases, `K` must be increased too
     /// as the number of required rows in the table grows.
-    const NUM_OF_FOLD_ROUNDS: usize = 3;
+    const NUM_OF_FOLD_ROUNDS: usize = 1;
     /// 2 ^ K is count of table rows in [`TableData`]
     const K: u32 = 20;
 
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(64) };
-    const LIMB_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(255) };
+    const LIMB_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
     fn get_table_data() -> (TableData<Base>, MainGateConfig<T>) {
         let mut td = TableData::new(K, vec![]);
@@ -1059,6 +1076,14 @@ mod tests {
 
         let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, 0);
 
+        let bn_chip = BigUintMulModChip::<Base>::new(
+            config
+                .into_smaller_size::<{ big_uint_mul_mod_chip::MAIN_GATE_T }>()
+                .unwrap(),
+            LIMB_WIDTH,
+            LIMB_LIMIT,
+        );
+
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
             let mut on_circuit_E_cell = None;
             let cross_term_commits = random_curve_vec(&mut rnd);
@@ -1092,17 +1117,68 @@ mod tests {
                                     assigned_r.clone(),
                                     NUM_CHALLENGE_BITS,
                                 )?;
-                                let r_vv = ValueView {
-                                    value: assigned_r,
-                                    bits: r,
+                                let r_vv = BigUintView {
+                                    as_bn_limbs: bn_chip
+                                        .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
+                                        .unwrap(),
+                                    as_bits: r,
                                 };
+
+                                let mut fixed_columns = config
+                                    .q_1
+                                    .iter()
+                                    .chain(config.q_5.iter())
+                                    .chain(config.q_m.iter())
+                                    .chain(iter::once(&config.q_i))
+                                    .chain(iter::once(&config.q_o))
+                                    .chain(iter::once(&config.rc))
+                                    .enumerate()
+                                    .cycle();
+
+                                let mut assign_next_fixed =
+                                    move |annotation: &str, region: &mut RegionCtx<Base>, val| {
+                                        let (index, column) = fixed_columns
+                                            .by_ref()
+                                            .next()
+                                            .expect("Safe because cycle");
+
+                                        if index == 0 {
+                                            region.next();
+                                        }
+
+                                        region.assign_fixed(|| annotation.to_owned(), *column, val)
+                                    };
+
+                                let m_bn = BigUint::<Base>::from_biguint(
+                                    &num_bigint::BigUint::from_str_radix(
+                                        <ScalarExt as PrimeField>::MODULUS.trim_start_matches("0x"),
+                                        16,
+                                    )
+                                    .unwrap(),
+                                    LIMB_WIDTH,
+                                    LIMB_LIMIT,
+                                )
+                                .unwrap()
+                                .limbs()
+                                .iter()
+                                .enumerate()
+                                .map(|(limb_index, limb)| {
+                                    assign_next_fixed(
+                                        &format!("m_bn [{limb_index}"),
+                                        &mut ctx,
+                                        *limb,
+                                    )
+                                })
+                                .collect::<Result<Vec<_>, _>>()?;
 
                                 Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_E(
                                     &mut ctx,
                                     &config,
+                                    &bn_chip,
                                     folded_E,
                                     &cross_term_commits,
                                     r_vv,
+                                    &m_bn,
                                 )
                                 .unwrap())
                             },
