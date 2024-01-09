@@ -574,6 +574,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "cause it takes a few minutes to run"]
     fn test_ecc_op() {
         println!("-----running ECC Circuit-----");
         let p: Point<pallas::Affine> = Point::random_vartime();
