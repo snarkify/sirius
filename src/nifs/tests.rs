@@ -163,22 +163,26 @@ mod zero_round_test {
     #[test]
     fn test_nifs() -> Result<(), NIFSError> {
         const K: u32 = 4;
-        let inputs1 = (1..10).map(Fr::from).collect();
-        let inputs2 = (2..11).map(Fr::from).collect();
-        let circuit1 = TestCircuit::new(inputs1, Fr::from_u128(2));
-        let output1 = Fr::from_u128(4097);
-        let public_inputs1 = vec![output1];
-        let mut td1 = TableData::<Fr>::new(K, public_inputs1);
-        let _ = td1.assembly(&circuit1);
 
-        let circuit2 = TestCircuit::new(inputs2, Fr::from_u128(3));
-        let output2 = Fr::from_u128(93494);
-        let public_inputs2 = vec![output2];
-        let mut td2 = TableData::<Fr>::new(K, public_inputs2);
-        let _ = td2.assembly(&circuit2);
+        const EXPECTED_1: u128 = 4097;
+        let mut td1 = TableData::<Fr>::new(K, vec![Fr::from_u128(EXPECTED_1)]);
+        td1.assembly(&TestCircuit {
+            inputs: (1..10).map(Fr::from).collect(),
+            r: Fr::from_u128(2),
+        })
+        .unwrap();
+
+        const EXPECTED_2: u128 = 93494;
+        let mut td2 = TableData::<Fr>::new(K, vec![Fr::from_u128(EXPECTED_2)]);
+        td2.assembly(&TestCircuit {
+            inputs: (2..11).map(Fr::from).collect(),
+            r: Fr::from_u128(3),
+        })
+        .unwrap();
 
         let p1 = smallest_power(td1.cs.num_advice_columns(), K);
         let p2 = smallest_power(td1.cs.num_selectors() + td1.cs.num_fixed_columns(), K);
+
         let ck = CommitmentKey::<G1Affine>::setup(p1.max(p2), b"zero_round_test");
 
         fold_instances(&ck, &td1, &td2)
@@ -188,6 +192,8 @@ mod zero_round_test {
 // test multiple gates without lookup
 // test example adapted from https://github.com/icemelon/halo2-tutorial
 mod one_round_test {
+    use std::mem;
+
     use super::*;
 
     #[derive(Clone)]
@@ -296,8 +302,8 @@ mod one_round_test {
 
     #[derive(Default)]
     struct FiboCircuit<F> {
-        a: F,
-        b: F,
+        prev: F,
+        curr: F,
         num: usize,
     }
 
@@ -323,50 +329,76 @@ mod one_round_test {
         ) -> Result<(), Error> {
             let chip = FiboChip::construct(config);
             let nrows = (self.num + 1) / 2;
-            let (_, b) = chip.load(layouter.namespace(|| "block"), self.a, self.b, nrows)?;
+            let (_, b) = chip.load(layouter.namespace(|| "block"), self.prev, self.curr, nrows)?;
             chip.expose_public(layouter.namespace(|| "expose b"), b, 0)?;
             Ok(())
         }
     }
 
-    fn get_fibo_seq(a: u64, b: u64, num: usize) -> Vec<u64> {
-        let mut seq = vec![0; num];
-        seq[0] = a;
-        seq[1] = b;
-        for i in 2..num {
-            seq[i] = seq[i - 1] + seq[i - 2];
+    pub struct FibonacciSequence {
+        prev: Fr,
+        curr: Fr,
+    }
+
+    impl FibonacciSequence {
+        fn new(a: u64, b: u64) -> Self {
+            Self {
+                prev: Fr::from(a),
+                curr: Fr::from(b),
+            }
         }
-        seq
+
+        /// Return first, second and size - 1 element from iterator
+        fn collect_sample(mut self, size: usize) -> (Fr, Fr, Fr) {
+            (
+                self.next().unwrap(),
+                self.next().unwrap(),
+                self.nth(size - 3).unwrap(),
+            )
+        }
+    }
+
+    impl Iterator for FibonacciSequence {
+        type Item = Fr;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let next = self.prev;
+            let new_curr = self.prev + self.curr;
+
+            self.prev = mem::replace(&mut self.curr, new_curr);
+
+            Some(next)
+        }
     }
 
     #[test]
     fn test_nifs() -> Result<(), NIFSError> {
         const K: u32 = 4;
         const SIZE: usize = 16;
+
         // circuit 1
-        let seq = get_fibo_seq(1, 1, SIZE);
-        let circuit1 = FiboCircuit {
-            a: Fr::from(seq[0]),
-            b: Fr::from(seq[1]),
+        let (prev, curr, expect) = FibonacciSequence::new(1, 1).collect_sample(SIZE);
+        let mut td1 = TableData::<Fr>::new(K, vec![expect]);
+        td1.assembly(&FiboCircuit {
+            prev,
+            curr,
             num: SIZE,
-        };
-        let public_inputs1 = vec![Fr::from(seq[SIZE - 1])];
-        let mut td1 = TableData::<Fr>::new(K, public_inputs1);
-        let _ = td1.assembly(&circuit1);
+        })
+        .unwrap();
 
         // circuit 2
-        let seq = get_fibo_seq(2, 3, SIZE);
-        let circuit2 = FiboCircuit {
-            a: Fr::from(seq[0]),
-            b: Fr::from(seq[1]),
+        let (prev, curr, expect) = FibonacciSequence::new(2, 3).collect_sample(SIZE);
+        let mut td2 = TableData::<Fr>::new(K, vec![expect]);
+        td2.assembly(&FiboCircuit {
+            prev,
+            curr,
             num: SIZE,
-        };
-        let public_inputs2 = vec![Fr::from(seq[SIZE - 1])];
-        let mut td2 = TableData::<Fr>::new(K, public_inputs2);
-        let _ = td2.assembly(&circuit2);
+        })
+        .unwrap();
 
         let p1 = smallest_power(td1.cs.num_advice_columns(), K);
         let p2 = smallest_power(td1.cs.num_selectors() + td1.cs.num_fixed_columns(), K);
+
         let ck = CommitmentKey::<G1Affine>::setup(p1.max(p2), b"one_round_test");
 
         fold_instances(&ck, &td1, &td2)
@@ -376,6 +408,8 @@ mod one_round_test {
 // test vector lookup
 // test example adapted from https://github.com/icemelon/halo2-tutorial
 mod three_rounds_test {
+    use std::array;
+
     use super::*;
     use halo2_proofs::circuit::Chip;
     use halo2_proofs::plonk::TableColumn;
@@ -635,43 +669,50 @@ mod three_rounds_test {
         }
     }
 
-    fn get_sequence(a: u64, b: u64, c: u64, num: usize) -> Vec<u64> {
-        let mut seq = vec![0; num];
-        seq[0] = a;
-        seq[1] = b;
-        seq[2] = c;
-        for i in 3..num {
-            seq[i] = seq[i - 3] + (seq[i - 2] ^ seq[i - 1]);
+    pub struct Sequence {
+        elements: [u64; 3],
+    }
+    impl Sequence {
+        fn new(a: u64, b: u64, c: u64) -> Self {
+            Self {
+                elements: [a, b, c],
+            }
         }
-        seq
+        fn collect_array<const N: usize>(mut self) -> [Fr; N] {
+            array::from_fn(|_| {
+                self.next()
+                    .expect("Safe enough: the iterator is limited only by the `u64` size")
+            })
+        }
+    }
+    impl Iterator for Sequence {
+        type Item = Fr;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let [e1, e2, e3] = &self.elements;
+
+            let next = *e1;
+
+            self.elements = [*e2, *e3, e1 + (e2 ^ e3)];
+
+            Some(Fr::from(next))
+        }
     }
 
     #[test]
     fn test_nifs() -> Result<(), NIFSError> {
         const K: u32 = 5;
-        let num = 7;
+        const NUM: usize = 7;
 
         // circuit 1
-        let seq = get_sequence(1, 3, 2, num);
-        let circuit1 = FiboCircuit {
-            a: Fr::from(seq[0]),
-            b: Fr::from(seq[1]),
-            c: Fr::from(seq[2]),
-            num,
-        };
+        let [a, b, c] = Sequence::new(1, 3, 2).collect_array();
         let mut td1 = TableData::<Fr>::new(K, vec![]);
-        let _ = td1.assembly(&circuit1);
+        td1.assembly(&FiboCircuit { a, b, c, num: NUM }).unwrap();
 
         // circuit 2
-        let seq = get_sequence(3, 2, 2, num);
-        let circuit2 = FiboCircuit {
-            a: Fr::from(seq[0]),
-            b: Fr::from(seq[1]),
-            c: Fr::from(seq[2]),
-            num,
-        };
+        let [a, b, c] = Sequence::new(1, 3, 2).collect_array();
         let mut td2 = TableData::<Fr>::new(K, vec![]);
-        let _ = td2.assembly(&circuit2);
+        td2.assembly(&FiboCircuit { a, b, c, num: NUM }).unwrap();
 
         let num_lookup = td1.cs.lookups().len();
         let p1 = smallest_power(td1.cs.num_advice_columns() + 5 * num_lookup, K);
