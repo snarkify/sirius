@@ -1,4 +1,4 @@
-use std::{array, marker::PhantomData, num::NonZeroUsize};
+use std::{array, iter, marker::PhantomData, num::NonZeroUsize};
 
 use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
@@ -313,6 +313,25 @@ impl<const T: usize> MainGateConfig<T> {
             q_o: self.q_o,
             rc: self.rc,
         })
+    }
+
+    /// Iterated over all fixed columns in config
+    pub fn iter_fixed_columns(&self) -> impl Clone + Iterator<Item = &Column<Fixed>> {
+        self.q_1
+            .iter()
+            .chain(self.q_5.iter())
+            .chain(self.q_m.iter())
+            .chain(iter::once(&self.q_i))
+            .chain(iter::once(&self.q_o))
+            .chain(iter::once(&self.rc))
+    }
+
+    /// Iterated over all advice columns in config
+    pub fn iter_advice_columns(&self) -> impl Clone + Iterator<Item = &Column<Advice>> {
+        self.state
+            .iter()
+            .chain(iter::once(&self.input))
+            .chain(iter::once(&self.out))
     }
 }
 

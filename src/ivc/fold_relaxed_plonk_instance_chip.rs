@@ -578,13 +578,7 @@ where
         instance: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
     ) -> Result<AssignedWitness<C>, Error> {
-        let mut advice_columns = config
-            .state
-            .iter()
-            .chain(iter::once(&config.input))
-            .chain(iter::once(&config.out))
-            .enumerate()
-            .cycle();
+        let mut advice_columns = config.iter_advice_columns().enumerate().cycle();
 
         // A closure using a cyclic iterator that allows you to take available advice columns
         // regardless of `T`, making as few row offsets as possible
@@ -752,16 +746,7 @@ where
 
         let r = ro_circuit.squeeze_n_bits(region, NUM_CHALLENGE_BITS)?;
 
-        let mut fixed_columns = config
-            .q_1
-            .iter()
-            .chain(config.q_5.iter())
-            .chain(config.q_m.iter())
-            .chain(iter::once(&config.q_i))
-            .chain(iter::once(&config.q_o))
-            .chain(iter::once(&config.rc))
-            .enumerate()
-            .cycle();
+        let mut fixed_columns = config.iter_fixed_columns().enumerate().cycle();
 
         // A closure using a cyclic iterator that allows you to take available advice columns
         // regardless of `T`, making as few row offsets as possible
@@ -1125,16 +1110,8 @@ mod tests {
                                     as_bits: r,
                                 };
 
-                                let mut fixed_columns = config
-                                    .q_1
-                                    .iter()
-                                    .chain(config.q_5.iter())
-                                    .chain(config.q_m.iter())
-                                    .chain(iter::once(&config.q_i))
-                                    .chain(iter::once(&config.q_o))
-                                    .chain(iter::once(&config.rc))
-                                    .enumerate()
-                                    .cycle();
+                                let mut fixed_columns =
+                                    config.iter_fixed_columns().enumerate().cycle();
 
                                 let mut assign_next_fixed =
                                     move |annotation: &str, region: &mut RegionCtx<Base>, val| {
