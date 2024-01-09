@@ -22,24 +22,29 @@ pub enum Error {
     UnsupportedVariableType { var_type: ColumnIndex },
 }
 
+/// The `Eval` trait is used to evaluate multi-variable polynomials in a Evaluation Domain defined
+/// over a prime field `F`
+///
+/// This trait encapsulates the necessary functionality to evaluate polynomials
+/// It allows you to retrieve challenges, selectors,
+/// fixed values and also includes methods to evaluate advice, column and challenge
+/// variables for specific rows.
 pub trait Eval<F: PrimeField> {
-    type Challenges: AsRef<[F]>;
-    type Selectors: AsRef<[Vec<bool>]>;
-    type Fixed: AsRef<[Vec<F>]>;
-
-    fn get_challenges(&self) -> &Self::Challenges;
-    fn get_selectors(&self) -> &Self::Selectors;
-    fn get_fixed(&self) -> &Self::Fixed;
+    fn get_challenges(&self) -> &impl AsRef<[F]>;
+    fn get_selectors(&self) -> &impl AsRef<[Vec<bool>]>;
+    fn get_fixed(&self) -> &impl AsRef<[Vec<F>]>;
     fn num_lookup(&self) -> usize;
+
     /// total row size of the evaluation domain
     fn row_size(&self) -> usize {
-        // at least one of them is non-empty
-        if !self.get_fixed().as_ref().is_empty() {
-            return self.get_fixed().as_ref()[0].len();
-        } else {
-            return self.get_selectors().as_ref()[0].len();
-        }
+        self.get_fixed()
+            .as_ref()
+            .first()
+            .map(Vec::len)
+            .or_else(|| self.get_selectors().as_ref().first().map(Vec::len))
+            .expect("Fixed & Selectors can't be empty in one time")
     }
+
     fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, Error>;
 
     /// evaluate a single column variable on specific row
@@ -104,10 +109,7 @@ pub trait Eval<F: PrimeField> {
                         Ok(acc * result_with_var?.pow([*exp as u64, 0, 0, 0]))
                     })
             })
-            .try_fold(F::ZERO, |acc, value| match value {
-                Ok(value) => Ok(acc + value),
-                Err(err) => Err(err),
-            })
+            .try_fold(F::ZERO, |acc, value| Ok(acc + value?))
     }
 }
 
@@ -135,23 +137,19 @@ pub struct PlonkEvalDomain<'a, F: PrimeField> {
 }
 
 impl<'a, F: PrimeField> Eval<F> for LookupEvalDomain<'a, F> {
-    type Challenges = Vec<F>;
-    type Selectors = Vec<Vec<bool>>;
-    type Fixed = Vec<Vec<F>>;
-
     fn num_lookup(&self) -> usize {
         self.num_lookup
     }
 
-    fn get_challenges(&self) -> &Self::Challenges {
+    fn get_challenges(&self) -> &impl AsRef<[F]> {
         &self.challenges
     }
 
-    fn get_selectors(&self) -> &Self::Selectors {
+    fn get_selectors(&self) -> &impl AsRef<[Vec<bool>]> {
         self.selectors
     }
 
-    fn get_fixed(&self) -> &Self::Fixed {
+    fn get_fixed(&self) -> &impl AsRef<[Vec<F>]> {
         self.fixed
     }
 
@@ -169,23 +167,19 @@ impl<'a, F: PrimeField> Eval<F> for LookupEvalDomain<'a, F> {
 }
 
 impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
-    type Challenges = Vec<F>;
-    type Selectors = Vec<Vec<bool>>;
-    type Fixed = Vec<Vec<F>>;
-
     fn num_lookup(&self) -> usize {
         self.num_lookup
     }
 
-    fn get_challenges(&self) -> &Self::Challenges {
+    fn get_challenges(&self) -> &impl AsRef<[F]> {
         &self.challenges
     }
 
-    fn get_selectors(&self) -> &Self::Selectors {
+    fn get_selectors(&self) -> &impl AsRef<[Vec<bool>]> {
         self.selectors
     }
 
-    fn get_fixed(&self) -> &Self::Fixed {
+    fn get_fixed(&self) -> &impl AsRef<[Vec<F>]> {
         self.fixed
     }
 
