@@ -22,7 +22,10 @@ use crate::{
     constants::NUM_CHALLENGE_BITS,
     plonk::{
         eval::{Error as EvalError, Eval, PlonkEvalDomain},
-        util::{cell_to_z_idx, column_index, compress_expression, fill_sparse_matrix},
+        util::{
+            cell_to_z_idx, column_index, compress_expression, fill_sparse_matrix,
+            instance_column_index,
+        },
     },
     polynomial::{
         sparse::{matrix_multiply, SparseMatrix},
@@ -330,7 +333,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
         &self,
         U: &RelaxedPlonkInstance<C>,
         W: &RelaxedPlonkWitness<F>,
-    ) -> Result<(), String>
+    ) -> Result<(), DeciderError>
     where
         C: CurveAffine<ScalarExt = F>,
         F: PrimeField,
@@ -339,20 +342,19 @@ impl<C: CurveAffine> PlonkStructure<C> {
             .instance
             .clone()
             .into_iter()
-            // TODO(chao): fix the case when W = advice||(l_i,m_i)
-            .chain(W.W[0].clone())
+            .chain(W.W[0][..2usize.pow(self.k as u32) * self.num_advice_columns].to_vec())
             .collect::<Vec<_>>();
         let y = matrix_multiply(&self.permutation_matrix, &Z[..]);
-        let diff = y
+        let mismatch_count = y
             .into_iter()
             .zip(Z)
             .map(|(y, z)| y - z)
             .filter(|d| F::ZERO.ne(d))
             .count();
-        if diff == 0 {
+        if mismatch_count == 0 {
             Ok(())
         } else {
-            Err("permutation check failed".to_string())
+            Err(DeciderError::PermCheckFail { mismatch_count })
         }
     }
 
@@ -991,6 +993,7 @@ impl<F: PrimeField> TableData<F> {
         let num_rows = self.advice[0].len();
         let num_io = self.instance.len();
         let columns = &self.cs.permutation.columns;
+        let instance_column_idx = instance_column_index(columns);
 
         for (left_col, vec) in self
             .permutation
@@ -1001,9 +1004,11 @@ impl<F: PrimeField> TableData<F> {
             .enumerate()
         {
             for (left_row, cycle) in vec.iter().enumerate() {
-                // skip because we don't account for row that beyond the num_io in instance column
-                if left_col == 0 && left_row >= num_io {
-                    continue;
+                // skip rows that beyond the num_io in instance column
+                if let Some(idx) = instance_column_idx {
+                    if left_col == idx && left_row >= num_io {
+                        continue;
+                    }
                 }
                 let left_col = column_index(left_col, columns);
                 let right_col = column_index(cycle.0, columns);
@@ -1181,6 +1186,8 @@ pub enum DeciderError {
     CommitmentMismatch,
     #[error("log derivative relation not satisfied")]
     LogDerivativeNotSat,
+    #[error("Permutation check fail: mismatch_count {mismatch_count}")]
+    PermCheckFail { mismatch_count: usize },
     #[error("(Relaxed) plonk relation not satisfied: mismatch_count {mismatch_count}, total_row {total_row}")]
     EvaluationMismatch {
         mismatch_count: usize,
