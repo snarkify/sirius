@@ -165,14 +165,14 @@ mod zero_round_test {
         const K: u32 = 4;
         let inputs1 = (1..10).map(Fr::from).collect();
         let inputs2 = (2..11).map(Fr::from).collect();
-        let circuit1 = TestCircuit::new(inputs1, Fr::from_str_vartime("2").unwrap());
-        let output1 = Fr::from_str_vartime("4097").unwrap();
+        let circuit1 = TestCircuit::new(inputs1, Fr::from_u128(2));
+        let output1 = Fr::from_u128(4097);
         let public_inputs1 = vec![output1];
         let mut td1 = TableData::<Fr>::new(K, public_inputs1);
         let _ = td1.assembly(&circuit1);
 
-        let circuit2 = TestCircuit::new(inputs2, Fr::from_str_vartime("3").unwrap());
-        let output2 = Fr::from_str_vartime("93494").unwrap();
+        let circuit2 = TestCircuit::new(inputs2, Fr::from_u128(3));
+        let output2 = Fr::from_u128(93494);
         let public_inputs2 = vec![output2];
         let mut td2 = TableData::<Fr>::new(K, public_inputs2);
         let _ = td2.assembly(&circuit2);
@@ -342,26 +342,26 @@ mod one_round_test {
     #[test]
     fn test_nifs() -> Result<(), NIFSError> {
         const K: u32 = 4;
-        let num = 16;
+        const SIZE: usize = 16;
         // circuit 1
-        let seq = get_fibo_seq(1, 1, num);
+        let seq = get_fibo_seq(1, 1, SIZE);
         let circuit1 = FiboCircuit {
             a: Fr::from(seq[0]),
             b: Fr::from(seq[1]),
-            num,
+            num: SIZE,
         };
-        let public_inputs1 = vec![Fr::from(seq[num - 1])];
+        let public_inputs1 = vec![Fr::from(seq[SIZE - 1])];
         let mut td1 = TableData::<Fr>::new(K, public_inputs1);
         let _ = td1.assembly(&circuit1);
 
         // circuit 2
-        let seq = get_fibo_seq(2, 3, num);
+        let seq = get_fibo_seq(2, 3, SIZE);
         let circuit2 = FiboCircuit {
             a: Fr::from(seq[0]),
             b: Fr::from(seq[1]),
-            num,
+            num: SIZE,
         };
-        let public_inputs2 = vec![Fr::from(seq[num - 1])];
+        let public_inputs2 = vec![Fr::from(seq[SIZE - 1])];
         let mut td2 = TableData::<Fr>::new(K, public_inputs2);
         let _ = td2.assembly(&circuit2);
 
