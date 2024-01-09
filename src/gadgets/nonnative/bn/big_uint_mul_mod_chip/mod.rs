@@ -105,7 +105,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         let sum_column = &self.config().out;
         let sum_selector = &self.config().q_o;
 
-        let (sum_cells, rhs_cells) = itertools::process_results(
+        let (sum_cells, mut rhs_cells) = itertools::process_results(
             lhs.iter()
                 .zip_longest(rhs.iter())
                 .enumerate()
@@ -150,20 +150,24 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             big_uint::nat_to_f::<F>(&big_uint::get_big_int_with_n_ones(self.limb_width.get()))
                 .unwrap_or_default();
 
-        let (rhs_cells, rhs_tail) = rhs_cells.split_at(self.limbs_count_limit.get());
+        if rhs_cells.len() > self.limbs_count_limit.get() {
+            let (rhs_head, rhs_tail) = rhs_cells.split_at(self.limbs_count_limit.get());
 
-        if rhs_tail.iter().any(|cell| {
-            bool::from(cell.value().unwrap().copied().unwrap_or_default().is_zero()).not()
-        }) {
-            return Err(big_uint::Error::LimbLimitReached {
-                limit: self.limbs_count_limit,
-                actual: rhs_cells.len() + rhs_tail.len(),
+            if rhs_tail.iter().any(|cell| {
+                bool::from(cell.value().unwrap().copied().unwrap_or_default().is_zero()).not()
+            }) {
+                return Err(big_uint::Error::LimbLimitReached {
+                    limit: self.limbs_count_limit,
+                    actual: rhs_cells.len() + rhs_tail.len(),
+                }
+                .into());
             }
-            .into());
+
+            rhs_cells = rhs_head.to_vec();
         }
 
         Ok(SumContext {
-            rhs: rhs_cells.to_vec(),
+            rhs: rhs_cells,
             res: OverflowingBigUint {
                 cells: sum_cells,
                 max_word: lhs.max_word + rhs_max_word,
