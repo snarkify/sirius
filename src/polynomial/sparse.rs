@@ -1,7 +1,7 @@
 use ff::PrimeField;
 
 // represent a sparse matrix M = {(i, j, v)}, i.e. M[i,j] = v
-// the size of matrix is N*N with N = num_fixed_columns + num_instance_columns + num_advice_columns
+// the size of matrix is N*N with N = num_io + num_advice_columns * num_rows
 pub(crate) type SparseMatrix<Scalar> = Vec<(usize, usize, Scalar)>;
 
 pub(crate) fn matrix_multiply<F: PrimeField>(P: &SparseMatrix<F>, Z: &[F]) -> Vec<F> {

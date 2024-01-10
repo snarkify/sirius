@@ -63,11 +63,8 @@ where
 
     f_U = U_from_verify;
     f_W = W;
-    let res = S.is_sat_relaxed(ck, &f_U, &f_W);
-    assert!(res.is_ok());
-    // TODO: fix #91
-    //    let perm_res = S.is_sat_perm(&f_U, &f_W);
-    //    assert!(perm_res.is_ok());
+    assert_eq!(S.is_sat_relaxed(ck, &f_U, &f_W).err(), None);
+    assert_eq!(S.is_sat_perm(&f_U, &f_W).err(), None);
 
     let (U1, W1) = td2
         .run_sps_protocol(ck, &mut ro_nark_prepare, S.num_challenges)
@@ -84,9 +81,7 @@ where
     f_U = U_from_verify;
     f_W = _W;
     assert_eq!(S.is_sat_relaxed(ck, &f_U, &f_W).err(), None);
-    // TODO: fix #91
-    //    let perm_res = S.is_sat_perm(&f_U, &f_W);
-    //    assert!(perm_res.is_ok());
+    assert_eq!(S.is_sat_perm(&f_U, &f_W).err(), None);
     Ok(())
 }
 

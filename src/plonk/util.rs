@@ -7,12 +7,18 @@ use std::collections::HashSet;
 
 // Helper function to convert cell indices (column, row) to index in Z vector
 pub(crate) fn cell_to_z_idx(column: usize, row: usize, num_rows: usize, num_io: usize) -> usize {
-    match column {
-        // instance column
-        column if column < 1 => row + column * num_rows, // instance column
-        // advice columns
-        column => num_io + (column - 1) * num_rows + row,
+    if num_io > 0 && column >= 1 {
+        num_io + (column - 1) * num_rows + row
+    } else {
+        row + column * num_rows
     }
+}
+
+/// return the index of instance column from columns
+pub(crate) fn instance_column_index(columns: &[Column<Any>]) -> Option<usize> {
+    columns
+        .iter()
+        .position(|&column| *column.column_type() == Any::Instance)
 }
 
 pub fn column_index(idx: usize, columns: &[Column<Any>]) -> usize {
@@ -24,7 +30,11 @@ pub fn column_index(idx: usize, columns: &[Column<Any>]) -> usize {
             "fixed column is not allowed in the copy constraint, it will break during folding"
         ),
     };
-    column.index() + offset
+    if instance_column_index(columns).is_some() {
+        column.index() + offset
+    } else {
+        column.index()
+    }
 }
 
 pub(crate) fn fill_sparse_matrix<F: PrimeField>(
@@ -34,7 +44,11 @@ pub(crate) fn fill_sparse_matrix<F: PrimeField>(
     num_io: usize,
     columns: &[Column<Any>],
 ) {
-    let num_columns = num_advice + 1; // 1 is the number of instance column
+    let num_columns = if num_io > 0 {
+        num_advice + 1
+    } else {
+        num_advice
+    }; // 1 is the number of instance column
     let all_columns: HashSet<usize> = (0..num_columns).collect();
     let set_a: HashSet<usize> = columns
         .iter()
