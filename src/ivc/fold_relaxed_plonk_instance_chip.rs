@@ -344,11 +344,22 @@ where
             .try_fold(folded_E, |folded_E, rT_i| ecc.add(region, &folded_E, &rT_i))?)
     }
 
-    // TODO #32 rustdoc
+    /// Fold `input` with `folded` in bn form with proof
+    ///
+    /// # Implementation Details
+    ///
     /// 1. Multiplies a part of the PLONK instance (`$input`) by a randomized value (`r_as_bn`),
     ///    and then takes the remainder modulo a specified modulus (`m_bn`).
     /// 2. Sums this multiplication result with a pre-assigned part of the instance (`$folded`).
     /// 3. Reduces the sum modulo the modulus (`m_bn`) to get the final folded value.
+    ///
+    /// ```markdown
+    /// new_folded = folded + (input * r mod m) mod m
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// We call this function in the chip if we need to perform the fold on a `Scalar` field.
     fn fold_via_biguint(
         region: &mut RegionCtx<C::Base>,
         bn_chip: &BigUintMulModChip<C::Base>,
@@ -392,7 +403,19 @@ where
             .remainder)
     }
 
-    // TODO #32 rustdoc
+    /// Fold with proof [`RelaxedPlonkInstance::instance`] & [`PlonkInstance::instance`]
+    ///
+    /// # Description
+    ///
+    /// This function is responsible for combining the current `folded_instances` accumulator with
+    /// `input_instance`. This is achieved through a [`FoldRelaxedPlonkInstanceChip::fold_via_biguint`]
+    /// fn call.
+    ///
+    /// ```markdown
+    /// new_folded_instances[i] = fold_via_biguin(folded_instances[i], input_istances[i], m, r)
+    /// ```
+    ///
+    /// Please check [`FoldRelaxedPlonkInstanceChip::fold_via_biguint`] for more details
     fn fold_instances(
         region: &mut RegionCtx<C::Base>,
         bn_chip: &BigUintMulModChip<C::Base>,
@@ -597,7 +620,7 @@ where
         config: &MainGateConfig<T>,
         mut ro_circuit: impl ROCircuitTrait<C::Base>,
         public_params_hash: &C::Base,
-        instance: &PlonkInstance<C>,
+        input_plonk: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
     ) -> Result<AssignedWitness<C>, Error> {
         let mut advice_columns_assigner = config.advice_cycle_assigner();
@@ -726,7 +749,7 @@ where
             }};
         }
 
-        let assigned_challanges_instance = instance
+        let assigned_challanges_instance = input_plonk
             .challenges
             .iter()
             .enumerate()
@@ -735,13 +758,13 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let assigned_instance_W_commitment_coordinates = instance
+        let assigned_instance_W_commitment_coordinates = input_plonk
             .W_commitments
             .iter()
             .map(|com| assign_and_absorb_point!(com))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let assigned_input_instance = instance
+        let assigned_input_instance = input_plonk
             .instance
             .iter()
             .enumerate()
