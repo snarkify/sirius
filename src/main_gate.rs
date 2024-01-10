@@ -333,7 +333,86 @@ impl<const T: usize> MainGateConfig<T> {
             .chain(iter::once(&self.input))
             .chain(iter::once(&self.out))
     }
+
+    /// Return an auxiliary struct that allow to cyclically assign values to any [`Advice`] column,
+    /// inrement rows via [`RegionCtx::next`] when run out of columns.
+    pub fn advice_cycle_assigner<'s, F: PrimeField>(&'s self) -> impl 's + AdviceCyclicAssignor<F> {
+        AdviceCyclicAssignorIter::<'s, _> {
+            iter: self.iter_advice_columns().enumerate().cycle(),
+            first_pass: true,
+        }
+    }
+
+    /// Return an auxiliary struct that allow to cyclically assign values to any [`Fixed`] column,
+    /// inrement rows via [`RegionCtx::next`] when run out of columns.
+    pub fn fixed_cycle_assigner<'s, F: PrimeField>(&'s self) -> impl 's + FixedCyclicAssignor<F> {
+        FixedCyclicAssignorIter::<'s, _> {
+            iter: self.iter_fixed_columns().enumerate().cycle(),
+            first_pass: true,
+        }
+    }
 }
+
+// Macro to create structs and impl for both fixed and advice columns
+macro_rules! create_column_cycle {
+    ($struct_name:ident, $trait_name:ident, $column_type:ty, $assign_next_fn_name:ident, $region_assign_fn:ident, $value_wrapper:expr) => {
+        struct $struct_name<'a, I: Iterator<Item = (usize, &'a Column<$column_type>)>> {
+            iter: I,
+            first_pass: bool,
+        }
+
+        pub trait $trait_name<F: PrimeField> {
+            fn $assign_next_fn_name<AR: Into<String>>(
+                &mut self,
+                region: &mut RegionCtx<'_, F>,
+                annotation: impl Fn() -> AR,
+                value: F,
+            ) -> Result<AssignedCell<F, F>, halo2_proofs::plonk::Error>;
+        }
+
+        impl<'a, I, F> $trait_name<F> for $struct_name<'a, I>
+        where
+            I: Iterator<Item = (usize, &'a Column<$column_type>)>,
+            F: PrimeField,
+        {
+            fn $assign_next_fn_name<AR: Into<String>>(
+                &mut self,
+                region: &mut RegionCtx<'_, F>,
+                annotation: impl Fn() -> AR,
+                value: F,
+            ) -> Result<AssignedCell<F, F>, halo2_proofs::plonk::Error> {
+                let (index, column) = self.iter.by_ref().next().expect("Safe because cycle");
+
+                if !self.first_pass && index == 0 {
+                    region.next();
+                }
+
+                self.first_pass = false;
+
+                let wrapper = $value_wrapper;
+                region.$region_assign_fn(annotation, *column, wrapper(value))
+            }
+        }
+    };
+}
+
+create_column_cycle!(
+    FixedCyclicAssignorIter,
+    FixedCyclicAssignor,
+    Fixed,
+    assign_next_fixed,
+    assign_fixed,
+    |value| value
+);
+
+create_column_cycle!(
+    AdviceCyclicAssignorIter,
+    AdviceCyclicAssignor,
+    Advice,
+    assign_next_advice,
+    assign_advice,
+    |value| Value::known(value)
+);
 
 #[derive(Debug)]
 pub struct MainGate<F: PrimeField, const T: usize> {
