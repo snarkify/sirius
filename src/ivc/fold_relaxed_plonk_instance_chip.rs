@@ -936,26 +936,24 @@ mod tests {
             C1::random(&mut rnd),
         ];
         let pp_hash = Base::random(&mut rnd);
-        for _ in 0..=1 {
-            layouter
-                .assign_region(
-                    || "assign_witness_with_challenge",
-                    |region| {
-                        let _assigned_challenge = chip
-                            .assign_witness_with_challenge(
-                                &mut RegionCtx::new(region, 0),
-                                &config.clone(),
-                                PoseidonChip::new(config.clone(), spec.clone()),
-                                &pp_hash,
-                                &plonk,
-                                &cross_term_commits,
-                            )
-                            .unwrap();
-                        Ok(())
-                    },
-                )
-                .unwrap();
-        }
+        layouter
+            .assign_region(
+                || "assign_witness_with_challenge",
+                |region| {
+                    let _assigned_challenge = chip
+                        .assign_witness_with_challenge(
+                            &mut RegionCtx::new(region, 0),
+                            &config.clone(),
+                            PoseidonChip::new(config.clone(), spec.clone()),
+                            &pp_hash,
+                            &plonk,
+                            &cross_term_commits,
+                        )
+                        .unwrap();
+                    Ok(())
+                },
+            )
+            .unwrap();
     }
 
     #[test_log::test]
@@ -976,40 +974,30 @@ mod tests {
         let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, NUM_WITNESS);
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
-            let mut on_circuit_W_cell = None;
             let input_W = random_curve_vec(&mut rnd);
 
-            // Run twice for setup & real run
-            for _ in 0..=1 {
-                on_circuit_W_cell = Some(
-                    layouter
-                        .assign_region(
-                            || "fold W test",
-                            |region| {
-                                let mut ctx = RegionCtx::new(region, 0);
+            let on_circuit_W_cell = layouter.assign_region(
+                || "fold W test",
+                |region| {
+                    let mut ctx = RegionCtx::new(region, 0);
 
-                                let folded =
-                                    assign_curve_points(&mut ctx, &ecc, &folded_W, "folded_W")?;
-                                let input =
-                                    assign_curve_points(&mut ctx, &ecc, &input_W, "input_W")?;
+                    let folded = assign_curve_points(&mut ctx, &ecc, &folded_W, "folded_W")?;
+                    let input = assign_curve_points(&mut ctx, &ecc, &input_W, "input_W")?;
 
-                                let assigned_r = ctx.assign_advice(
-                                    || "r",
-                                    config.state[0],
-                                    Value::known(util::fe_to_fe(&r).unwrap()),
-                                )?;
+                    let assigned_r = ctx.assign_advice(
+                        || "r",
+                        config.state[0],
+                        Value::known(util::fe_to_fe(&r).unwrap()),
+                    )?;
 
-                                let r = gate.le_num_to_bits(&mut ctx, assigned_r, MAX_BITS)?;
+                    let r = gate.le_num_to_bits(&mut ctx, assigned_r, MAX_BITS)?;
 
-                                Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_W(
-                                    &mut ctx, &config, &folded, &input, &r,
-                                )
-                                .unwrap())
-                            },
-                        )
-                        .unwrap(),
-                );
-            }
+                    Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_W(
+                        &mut ctx, &config, &folded, &input, &r,
+                    )
+                    .unwrap())
+                },
+            );
 
             assert_eq!(plonk.W_commitments, folded_W);
 
@@ -1070,99 +1058,76 @@ mod tests {
         );
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
-            let mut on_circuit_E_cell = None;
             let cross_term_commits = random_curve_vec(&mut rnd);
 
-            // Run twice for setup & real run
-            for _ in 0..=1 {
-                on_circuit_E_cell = Some(
-                    layouter
-                        .assign_region(
-                            || "fold E test",
-                            |region| {
-                                let mut ctx = RegionCtx::new(region, 0);
+            let on_circuit_E_cell = layouter.assign_region(
+                || "fold E test",
+                |region| {
+                    let mut ctx = RegionCtx::new(region, 0);
 
-                                let folded_E =
-                                    ecc.assign_from_curve(&mut ctx, || "folded_E", &folded_E)?;
-                                let cross_term_commits = assign_curve_points(
-                                    &mut ctx,
-                                    &ecc,
-                                    &cross_term_commits,
-                                    "input_W",
-                                )?;
+                    let folded_E = ecc.assign_from_curve(&mut ctx, || "folded_E", &folded_E)?;
+                    let cross_term_commits =
+                        assign_curve_points(&mut ctx, &ecc, &cross_term_commits, "input_W")?;
 
-                                let assigned_r = ctx.assign_advice(
-                                    || "r",
-                                    config.state[0],
-                                    Value::known(util::fe_to_fe(&r).unwrap()),
-                                )?;
+                    let assigned_r = ctx.assign_advice(
+                        || "r",
+                        config.state[0],
+                        Value::known(util::fe_to_fe(&r).unwrap()),
+                    )?;
 
-                                let r = gate.le_num_to_bits(
-                                    &mut ctx,
-                                    assigned_r.clone(),
-                                    NUM_CHALLENGE_BITS,
-                                )?;
-                                let r_vv = BigUintView {
-                                    as_bn_limbs: bn_chip
-                                        .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
-                                        .unwrap(),
-                                    as_bits: r,
-                                };
+                    let r =
+                        gate.le_num_to_bits(&mut ctx, assigned_r.clone(), NUM_CHALLENGE_BITS)?;
+                    let r_vv = BigUintView {
+                        as_bn_limbs: bn_chip
+                            .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
+                            .unwrap(),
+                        as_bits: r,
+                    };
 
-                                let mut fixed_columns =
-                                    config.iter_fixed_columns().enumerate().cycle();
+                    let mut fixed_columns = config.iter_fixed_columns().enumerate().cycle();
 
-                                let mut assign_next_fixed =
-                                    move |annotation: &str, region: &mut RegionCtx<Base>, val| {
-                                        let (index, column) = fixed_columns
-                                            .by_ref()
-                                            .next()
-                                            .expect("Safe because cycle");
+                    let mut assign_next_fixed =
+                        move |annotation: &str, region: &mut RegionCtx<Base>, val| {
+                            let (index, column) =
+                                fixed_columns.by_ref().next().expect("Safe because cycle");
 
-                                        if index == 0 {
-                                            region.next();
-                                        }
+                            if index == 0 {
+                                region.next();
+                            }
 
-                                        region.assign_fixed(|| annotation.to_owned(), *column, val)
-                                    };
+                            region.assign_fixed(|| annotation.to_owned(), *column, val)
+                        };
 
-                                let m_bn = BigUint::<Base>::from_biguint(
-                                    &num_bigint::BigUint::from_str_radix(
-                                        <ScalarExt as PrimeField>::MODULUS.trim_start_matches("0x"),
-                                        16,
-                                    )
-                                    .unwrap(),
-                                    LIMB_WIDTH,
-                                    LIMB_LIMIT,
-                                )
-                                .unwrap()
-                                .limbs()
-                                .iter()
-                                .enumerate()
-                                .map(|(limb_index, limb)| {
-                                    assign_next_fixed(
-                                        &format!("m_bn [{limb_index}"),
-                                        &mut ctx,
-                                        *limb,
-                                    )
-                                })
-                                .collect::<Result<Vec<_>, _>>()?;
-
-                                Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_E(
-                                    &mut ctx,
-                                    &config,
-                                    &bn_chip,
-                                    folded_E,
-                                    &cross_term_commits,
-                                    r_vv,
-                                    &m_bn,
-                                )
-                                .unwrap())
-                            },
+                    let m_bn = BigUint::<Base>::from_biguint(
+                        &num_bigint::BigUint::from_str_radix(
+                            <ScalarExt as PrimeField>::MODULUS.trim_start_matches("0x"),
+                            16,
                         )
                         .unwrap(),
-                );
-            }
+                        LIMB_WIDTH,
+                        LIMB_LIMIT,
+                    )
+                    .unwrap()
+                    .limbs()
+                    .iter()
+                    .enumerate()
+                    .map(|(limb_index, limb)| {
+                        assign_next_fixed(&format!("m_bn [{limb_index}"), &mut ctx, *limb)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                    Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_E(
+                        &mut ctx,
+                        &config,
+                        &bn_chip,
+                        folded_E,
+                        &cross_term_commits,
+                        r_vv,
+                        &m_bn,
+                    )
+                    .unwrap())
+                },
+            );
 
             assert_eq!(plonk.E_commitment, folded_E);
 
