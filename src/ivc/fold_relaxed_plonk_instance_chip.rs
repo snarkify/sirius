@@ -51,6 +51,7 @@ use halo2curves::{Coordinates, CurveAffine};
 use itertools::Itertools;
 use log::*;
 use num_traits::Num;
+use result_inspect::*;
 
 use crate::{
     constants::NUM_CHALLENGE_BITS,
@@ -377,7 +378,10 @@ where
             CellsValuesView::from(r_as_bn)
         );
         // Multiply the part of the instance by the randomized value
-        let part_mult_r = bn_chip.mult_mod(region, input, r_as_bn, m_bn)?.remainder;
+        let part_mult_r = bn_chip
+            .mult_mod(region, input, r_as_bn, m_bn)
+            .inspect_err(|err| error!("while mult: input * r mod m: {err:?}"))?
+            .remainder;
         debug!(
             "fold: mult mod: {:?}",
             CellsValuesView::from(part_mult_r.as_slice())
@@ -430,7 +434,9 @@ where
 
         let new_folded_X0 = Self::fold_via_biguint(
             region, bn_chip, &input_X0, folded_X0, m_bn, r_as_bn, limb_width,
-        )?;
+        )
+        .inspect_err(|err| error!("Error while fold X0: {err:?}"))?;
+
         debug!(
             "fold: X0 folded: {:?}",
             CellsValuesView::from(new_folded_X0.as_slice())
@@ -438,7 +444,9 @@ where
 
         let new_folded_X1 = Self::fold_via_biguint(
             region, bn_chip, &input_X1, folded_X1, m_bn, r_as_bn, limb_width,
-        )?;
+        )
+        .inspect_err(|err| error!("Error while fold X1: {err:?}"))?;
+
         debug!(
             "fold: X1 folded: {:?}",
             CellsValuesView::from(new_folded_X1.as_slice())
@@ -565,7 +573,8 @@ where
             &r,
             &m_bn,
             self.limb_width,
-        )?;
+        )
+        .inspect_err(|err| error!("while fold instances: {err:?}"))?;
 
         let new_folded_challanges = Self::fold_challenges(
             region,
@@ -575,7 +584,8 @@ where
             &r.as_bn_limbs,
             &m_bn,
             self.limb_width,
-        )?;
+        )
+        .inspect_err(|err| error!("while fold challenges: {err:?}"))?;
         debug!("fold: challenges folded: {new_folded_challanges:?}");
 
         let to_diff_bn = |bn: Vec<AssignedCell<C::Base, C::Base>>| {

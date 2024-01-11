@@ -5,6 +5,7 @@ use halo2_proofs::{
     circuit::{AssignedCell, Value},
     plonk::{Advice, Column},
 };
+use log::*;
 use num_bigint::BigUint as BigUintRaw;
 use num_traits::{identities::One, Zero};
 
@@ -115,10 +116,12 @@ impl<F: ff::PrimeField> BigUint<F> {
         limbs_count_limit: NonZeroUsize,
     ) -> Result<Option<Self>, Error> {
         if input.len() > limbs_count_limit.get() {
-            return Err(Error::LimbLimitReached {
+            let err = Error::LimbLimitReached {
                 actual: input.len(),
                 limit: limbs_count_limit,
-            });
+            };
+            error!("while `from_assigned_cells` limbs limit reached: {err:?}");
+            return Err(err);
         }
 
         let limbs = input
@@ -126,9 +129,13 @@ impl<F: ff::PrimeField> BigUint<F> {
             .map(|cell| *cell.value().map(|v| *v).unwrap())
             .map(|fv| {
                 if let Some(fv) = fv {
-                    if fv.to_repr().as_ref().len() <= limb_width.get() {
+                    let repr_len = fv.to_repr().as_ref().len();
+
+                    if repr_len <= limb_width.get() {
                         Ok(Some(fv))
                     } else {
+                        error!("Too big big int, repr_len is {repr_len} but limb width is {limb_width}");
+
                         Err(Error::TooBigBigint)
                     }
                 } else {

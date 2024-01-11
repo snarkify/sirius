@@ -12,6 +12,7 @@ use itertools::{EitherOrBoth, Itertools};
 use log::*;
 use num_bigint::BigUint as BigUintRaw;
 use num_traits::{One, ToPrimitive, Zero};
+use result_inspect::ResultInspectErr;
 
 use crate::{
     main_gate::{AssignAdviceFrom, MainGate, MainGateConfig, RegionCtx},
@@ -1166,10 +1167,14 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             big_uint::BigUint::from_assigned_cells(val, self.limb_width, self.limbs_count_limit)
         };
 
-        let mod_bn = to_bn(modulus)?;
+        let mod_bn = to_bn(modulus).inspect_err(|err| error!("while mod to bn: {err:?}"))?;
 
-        let lhs_bi = to_bn(lhs)?.map(|bn| bn.into_bigint());
-        let rhs_bi = to_bn(rhs)?.map(|bn| bn.into_bigint());
+        let lhs_bi = to_bn(lhs)
+            .inspect_err(|err| error!("while lhs to bn: {err:?}"))?
+            .map(|bn| bn.into_bigint());
+        let rhs_bi = to_bn(rhs)
+            .inspect_err(|err| error!("while rhs to bn: {err:?}"))?
+            .map(|bn| bn.into_bigint());
         let mod_bi = mod_bn.as_ref().map(|bn| bn.into_bigint());
 
         let (q, r) = lhs_bi
@@ -1185,6 +1190,10 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             })
             .transpose()?
             .unzip();
+
+        debug!(
+            "In bignat form: {lhs_bi:?} * {rhs_bi:?} mod {mod_bi:?} = {q:?} * {mod_bi:?} + {r:?}"
+        );
 
         // lhs * rhs
         let max_word_without_overflow: F =
