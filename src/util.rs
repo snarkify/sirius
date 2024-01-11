@@ -1,3 +1,4 @@
+use crate::main_gate::AssignedValue;
 use crate::poseidon::PoseidonHash;
 use crate::poseidon::ROTrait;
 use ff::{BatchInvert, Field, FromUniformBytes, PrimeField};
@@ -6,6 +7,7 @@ use halo2curves::CurveAffine;
 use num_bigint::BigUint;
 use poseidon::Spec;
 pub(crate) use rayon::current_num_threads;
+use std::fmt;
 use std::iter;
 use std::num::NonZeroUsize;
 
@@ -296,4 +298,32 @@ macro_rules! create_and_verify_proof {
 
 pub(crate) fn get_power_of_two_iter<F: ff::PrimeField>() -> impl Iterator<Item = F> {
     iter::successors(Some(F::ONE), |l| Some(l.double()))
+}
+
+pub(crate) struct CellsValuesView<'l, F: PrimeField> {
+    cells: &'l [AssignedValue<F>],
+}
+
+impl<'l, F: PrimeField> From<&'l [AssignedValue<F>]> for CellsValuesView<'l, F> {
+    fn from(value: &'l [AssignedValue<F>]) -> Self {
+        Self { cells: value }
+    }
+}
+impl<'l, F: PrimeField> fmt::Debug for CellsValuesView<'l, F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Cells: [")?;
+
+        if let Some(cells_values) = self
+            .cells
+            .iter()
+            .map(|cell| cell.value().unwrap().cloned())
+            .collect::<Option<Vec<_>>>()
+        {
+            write!(f, "{:?}", cells_values)?;
+        } else {
+            write!(f, "empty")?;
+        }
+
+        write!(f, "]")
+    }
 }

@@ -46,7 +46,7 @@
 use std::{iter, num::NonZeroUsize, ops};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
-use halo2_proofs::circuit::{AssignedCell, Value};
+use halo2_proofs::circuit::AssignedCell;
 use halo2curves::{Coordinates, CurveAffine};
 use itertools::Itertools;
 use log::*;
@@ -61,11 +61,14 @@ use crate::{
             big_uint_mul_mod_chip::{self, BigUintMulModChip, OverflowingBigUint},
         },
     },
-    main_gate::{AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
+    main_gate::{
+        AdviceCyclicAssignor, AssignedBit, AssignedValue, FixedCyclicAssignor, MainGate,
+        MainGateConfig, RegionCtx, WrapValue,
+    },
     nifs::CrossTermCommits,
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
-    util,
+    util::{self, CellsValuesView},
 };
 
 pub(crate) struct FoldRelaxedPlonkInstanceChip<C: CurveAffine>
@@ -341,23 +344,44 @@ where
             .try_fold(folded_E, |folded_E, rT_i| ecc.add(region, &folded_E, &rT_i))?)
     }
 
-    // TODO #32 rustdoc
+    /// Fold `input` with `folded` in bn form
+    ///
+    /// # Implementation Details
+    ///
     /// 1. Multiplies a part of the PLONK instance (`$input`) by a randomized value (`r_as_bn`),
     ///    and then takes the remainder modulo a specified modulus (`m_bn`).
     /// 2. Sums this multiplication result with a pre-assigned part of the instance (`$folded`).
     /// 3. Reduces the sum modulo the modulus (`m_bn`) to get the final folded value.
+    ///
+    /// ```markdown
+    /// new_folded = folded + (input * r mod m) mod m
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// We call this function in the chip if we need to perform the fold on a `Scalar` field.
     fn fold_via_biguint(
-        bn_chip: &BigUintMulModChip<C::Base>,
         region: &mut RegionCtx<C::Base>,
+        bn_chip: &BigUintMulModChip<C::Base>,
         input: &[AssignedValue<C::Base>],
         folded: Vec<AssignedValue<C::Base>>,
         m_bn: &[AssignedValue<C::Base>],
         r_as_bn: &[AssignedValue<C::Base>],
         limb_width: NonZeroUsize,
     ) -> Result<Vec<AssignedCell<C::Base, C::Base>>, Error> {
+        debug!(
+            "fold: via bn input: input = {:?} folded = {:?}, m = {:?}, r = {:?}",
+            CellsValuesView::from(input),
+            CellsValuesView::from(folded.as_slice()),
+            CellsValuesView::from(m_bn),
+            CellsValuesView::from(r_as_bn)
+        );
         // Multiply the part of the instance by the randomized value
         let part_mult_r = bn_chip.mult_mod(region, input, r_as_bn, m_bn)?.remainder;
-        debug!("fold: mult mod: {}", part_mult_r.len());
+        debug!(
+            "fold: mult mod: {:?}",
+            CellsValuesView::from(part_mult_r.as_slice())
+        );
 
         // Sum the multiplication result with the assigned part
         let part_mult_r_sum_part = bn_chip
@@ -367,7 +391,11 @@ where
                 &part_mult_r,
             )?
             .res;
-        debug!("fold: assign_sum {}", part_mult_r_sum_part.cells.len());
+
+        debug!(
+            "fold: assign_sum {:?}",
+            CellsValuesView::from(part_mult_r_sum_part.cells.as_slice())
+        );
 
         // Reduce the sum modulo the modulus
         Ok(bn_chip
@@ -375,10 +403,22 @@ where
             .remainder)
     }
 
-    // TODO #32 rustdoc
+    /// Fold [`RelaxedPlonkInstance::instance`] & [`PlonkInstance::instance`]
+    ///
+    /// # Description
+    ///
+    /// This function is responsible for combining the current `folded_instances` accumulator with
+    /// `input_instance`. This is achieved through a [`FoldRelaxedPlonkInstanceChip::fold_via_biguint`]
+    /// fn call.
+    ///
+    /// ```markdown
+    /// new_folded_instances[i] = fold_via_biguin(folded_instances[i], input_istances[i], m, r)
+    /// ```
+    ///
+    /// Please check [`FoldRelaxedPlonkInstanceChip::fold_via_biguint`] for more details
     fn fold_instances(
-        bn_chip: &BigUintMulModChip<C::Base>,
         region: &mut RegionCtx<C::Base>,
+        bn_chip: &BigUintMulModChip<C::Base>,
         input_instances: [Vec<AssignedValue<C::Base>>; 2],
         folded_instances: [Vec<AssignedValue<C::Base>>; 2],
         r_as_bn: &[AssignedCell<C::Base, C::Base>],
@@ -389,14 +429,20 @@ where
         let [folded_X0, folded_X1] = folded_instances;
 
         let new_folded_X0 = Self::fold_via_biguint(
-            bn_chip, region, &input_X0, folded_X0, m_bn, r_as_bn, limb_width,
+            region, bn_chip, &input_X0, folded_X0, m_bn, r_as_bn, limb_width,
         )?;
-        debug!("fold: X0 folded: {new_folded_X0:?}");
+        debug!(
+            "fold: X0 folded: {:?}",
+            CellsValuesView::from(new_folded_X0.as_slice())
+        );
 
         let new_folded_X1 = Self::fold_via_biguint(
-            bn_chip, region, &input_X1, folded_X1, m_bn, r_as_bn, limb_width,
+            region, bn_chip, &input_X1, folded_X1, m_bn, r_as_bn, limb_width,
         )?;
-        debug!("fold: X1 folded: {new_folded_X1:?}");
+        debug!(
+            "fold: X1 folded: {:?}",
+            CellsValuesView::from(new_folded_X1.as_slice())
+        );
 
         Ok([new_folded_X0, new_folded_X1])
     }
@@ -416,8 +462,8 @@ where
             .zip_eq(input_challenges)
             .map(|(folded_challenge, input_challange)| {
                 Self::fold_via_biguint(
-                    bn_chip,
                     region,
+                    bn_chip,
                     &input_challange,
                     folded_challenge,
                     m_bn,
@@ -500,8 +546,8 @@ where
         debug!("fold: u folded: {new_folded_u:?}");
 
         let [new_folded_X0, new_folded_X1] = Self::fold_instances(
-            &bn_chip,
             region,
+            &bn_chip,
             input_instances.try_into().unwrap(),
             [folded_X0, folded_X1],
             &r,
@@ -574,23 +620,10 @@ where
         config: &MainGateConfig<T>,
         mut ro_circuit: impl ROCircuitTrait<C::Base>,
         public_params_hash: &C::Base,
-        instance: &PlonkInstance<C>,
+        input_plonk: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
     ) -> Result<AssignedWitness<C>, Error> {
-        let mut advice_columns = config.iter_advice_columns().enumerate().cycle();
-
-        // A closure using a cyclic iterator that allows you to take available advice columns
-        // regardless of `T`, making as few row offsets as possible
-        let mut assign_next_advice =
-            move |annotation: &str, region: &mut RegionCtx<C::Base>, val| {
-                let (index, column) = advice_columns.by_ref().next().expect("Safe because cycle");
-
-                if index == 0 {
-                    region.next();
-                }
-
-                region.assign_advice(|| annotation.to_owned(), *column, Value::known(val))
-            };
+        let mut advice_columns_assigner = config.advice_cycle_assigner();
 
         macro_rules! assign_and_absorb_point {
             ($input:expr) => {{
@@ -601,14 +634,14 @@ where
                     })?;
 
                 let output = AssignedPoint::<C> {
-                    x: assign_next_advice(
-                        concat!(stringify!($input), ".x"),
+                    x: advice_columns_assigner.assign_next_advice(
                         region,
+                        || concat!(stringify!($input), ".x"),
                         *coordinates.x(),
                     )?,
-                    y: assign_next_advice(
-                        concat!(stringify!($input), ".y"),
+                    y: advice_columns_assigner.assign_next_advice(
                         region,
+                        || concat!(stringify!($input), ".y"),
                         *coordinates.y(),
                     )?,
                 };
@@ -630,7 +663,11 @@ where
                         variable_str: format!("{:?}", $input),
                     })?;
 
-                let assigned = assign_next_advice(stringify!($input), region, val)?;
+                let assigned = advice_columns_assigner.assign_next_advice(
+                    region,
+                    || stringify!($input),
+                    val,
+                )?;
 
                 ro_circuit.absorb_base(WrapValue::Assigned(assigned.clone()));
 
@@ -638,9 +675,9 @@ where
             }};
         }
 
-        let assigned_public_params_hash = assign_next_advice(
-            "Assigned public params commit for absorb",
+        let assigned_public_params_hash = advice_columns_assigner.assign_next_advice(
             region,
+            || "Assigned public params commit for absorb",
             *public_params_hash,
         )?;
         ro_circuit.absorb_base(WrapValue::Assigned(assigned_public_params_hash.clone()));
@@ -666,9 +703,9 @@ where
                             variable_str: format!("{limb:?}"),
                         })?;
 
-                        let limb_cell = assign_next_advice(
-                            format!("{}, limb {limb_index}", $annotation_prefix).as_str(),
+                        let limb_cell = advice_columns_assigner.assign_next_advice(
                             region,
+                            || format!("{}, limb {limb_index}", $annotation_prefix),
                             limb,
                         )?;
 
@@ -696,9 +733,9 @@ where
                     .iter()
                     .enumerate()
                     .map(|(limb_index, limb)| {
-                        let limb_cell = assign_next_advice(
-                            format!("{}, limb {limb_index}", $annot).as_str(),
+                        let limb_cell = advice_columns_assigner.assign_next_advice(
                             region,
+                            || format!("{}, limb {limb_index}", $annot),
                             *limb,
                         )?;
 
@@ -712,7 +749,7 @@ where
             }};
         }
 
-        let assigned_challanges_instance = instance
+        let assigned_challanges_instance = input_plonk
             .challenges
             .iter()
             .enumerate()
@@ -721,13 +758,13 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let assigned_instance_W_commitment_coordinates = instance
+        let assigned_instance_W_commitment_coordinates = input_plonk
             .W_commitments
             .iter()
             .map(|com| assign_and_absorb_point!(com))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let assigned_input_instance = instance
+        let assigned_input_instance = input_plonk
             .instance
             .iter()
             .enumerate()
@@ -745,20 +782,7 @@ where
 
         let r = ro_circuit.squeeze_n_bits(region, NUM_CHALLENGE_BITS)?;
 
-        let mut fixed_columns = config.iter_fixed_columns().enumerate().cycle();
-
-        // A closure using a cyclic iterator that allows you to take available advice columns
-        // regardless of `T`, making as few row offsets as possible
-        let mut assign_next_fixed =
-            move |annotation: &str, region: &mut RegionCtx<C::Base>, val| {
-                let (index, column) = fixed_columns.by_ref().next().expect("Safe because cycle");
-
-                if index == 0 {
-                    region.next();
-                }
-
-                region.assign_fixed(|| annotation.to_owned(), *column, val)
-            };
+        let mut fixed_columns_assigner = config.fixed_cycle_assigner();
 
         // TODO Check correctness
         let m_bn = BigUint::<C::Base>::from_biguint(
@@ -774,7 +798,7 @@ where
         .iter()
         .enumerate()
         .map(|(limb_index, limb)| {
-            assign_next_fixed(format!("{limb_index}").as_str(), region, *limb)
+            fixed_columns_assigner.assign_next_fixed(region, || limb_index.to_string(), *limb)
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -816,7 +840,7 @@ mod tests {
     use halo2_proofs::circuit::{
         floor_planner::single_pass::SingleChipLayouter,
         layouter::{RegionLayouter, RegionShape},
-        Layouter, Region, RegionIndex,
+        Layouter, Region, RegionIndex, Value,
     };
     use halo2curves::{bn256::G1Affine as C1, CurveAffine};
     use poseidon::Spec;
@@ -1152,6 +1176,169 @@ mod tests {
             assert_eq!(off_circuit_E_y, on_circuit_E_cell_y);
 
             folded_E = plonk.E_commitment;
+        }
+    }
+
+    #[test_log::test]
+    fn fold_instances_test() {
+        let Fixture {
+            mut td,
+            config,
+            mut rnd,
+            r,
+            ..
+        } = Fixture::default();
+
+        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+
+        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(2, 0, 0);
+
+        let bn_chip = BigUintMulModChip::<Base>::new(
+            config
+                .into_smaller_size::<{ big_uint_mul_mod_chip::MAIN_GATE_T }>()
+                .unwrap(),
+            LIMB_WIDTH,
+            LIMB_LIMIT,
+        );
+
+        for _round in 0..=NUM_OF_FOLD_ROUNDS {
+            let input_instances = [ScalarExt::random(&mut rnd), ScalarExt::random(&mut rnd)];
+
+            let on_circuit_instances_cell = layouter.assign_region(
+                || "fold instances test",
+                |region| {
+                    let mut ctx = RegionCtx::new(region, 0);
+
+                    let mut advice_columns_assigner = config.advice_cycle_assigner();
+
+                    macro_rules! assign_scalar_as_bn {
+                        ($region:expr, $input:expr, $annotation_prefix:expr) => {{
+                            BigUint::from_f(
+                                &util::fe_to_fe_safe::<_, Base>($input).unwrap(),
+                                LIMB_WIDTH,
+                                LIMB_LIMIT,
+                            )
+                            .unwrap()
+                            .limbs()
+                            .iter()
+                            .enumerate()
+                            .map(|(limb_index, limb)| {
+                                let limb = util::fe_to_fe_safe(limb)
+                                    .ok_or(Error::WhileScalarToBase {
+                                        variable_name: $annotation_prefix,
+                                        variable_str: format!("{limb:?}"),
+                                    })
+                                    .unwrap();
+
+                                advice_columns_assigner.assign_next_advice(
+                                    $region,
+                                    || format!("{}, limb {limb_index}", $annotation_prefix),
+                                    limb,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                        }};
+                    }
+
+                    let assigned_r = advice_columns_assigner
+                        .assign_next_advice(&mut ctx, || "r", util::fe_to_fe(&r).unwrap())
+                        .unwrap();
+
+                    let assigned_fold_instances = relaxed_plonk
+                        .instance
+                        .iter()
+                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "folded instance"))
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap()
+                        .try_into()
+                        .unwrap();
+
+                    let assigned_input_instance = input_instances
+                        .iter()
+                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "input instance"))
+                        .collect::<Result<Vec<_>, _>>()?
+                        .try_into()
+                        .unwrap();
+
+                    let mut fixed_columns_assigner = config.fixed_cycle_assigner();
+
+                    let m_bn = BigUint::<Base>::from_biguint(
+                        &num_bigint::BigUint::from_str_radix(
+                            <ScalarExt as PrimeField>::MODULUS.trim_start_matches("0x"),
+                            16,
+                        )
+                        .unwrap(),
+                        LIMB_WIDTH,
+                        LIMB_LIMIT,
+                    )
+                    .unwrap()
+                    .limbs()
+                    .iter()
+                    .enumerate()
+                    .map(|(limb_index, limb)| {
+                        fixed_columns_assigner.assign_next_fixed(
+                            &mut ctx,
+                            || format!("m_bn [{limb_index}"),
+                            *limb,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                    ctx.next();
+
+                    let r_as_bn = bn_chip
+                        .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
+                        .unwrap();
+
+                    Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_instances(
+                        &mut ctx,
+                        &bn_chip,
+                        assigned_input_instance,
+                        assigned_fold_instances,
+                        &r_as_bn,
+                        &m_bn,
+                        LIMB_WIDTH,
+                    )
+                    .unwrap())
+                },
+            );
+
+            relaxed_plonk = relaxed_plonk.fold(
+                &PlonkInstance {
+                    W_commitments: vec![],
+                    instance: input_instances.to_vec(),
+                    challenges: vec![],
+                },
+                &[],
+                &r,
+            );
+
+            let off_circuit_instances = relaxed_plonk
+                .instance
+                .iter()
+                .map(|instance| {
+                    BigUint::from_f(
+                        &util::fe_to_fe_safe::<ScalarExt, Base>(instance).unwrap(),
+                        LIMB_WIDTH,
+                        LIMB_LIMIT,
+                    )
+                    .unwrap()
+                    .limbs()
+                    .to_vec()
+                })
+                .collect::<Vec<_>>();
+
+            let on_circuit_instances = on_circuit_instances_cell
+                .unwrap()
+                .into_iter()
+                .map(|c| {
+                    c.into_iter()
+                        .map(|cell| *cell.value().unwrap().unwrap())
+                        .collect::<Vec<Base>>()
+                })
+                .collect::<Vec<Vec<Base>>>();
+
+            assert_eq!(off_circuit_instances, on_circuit_instances);
         }
     }
 
