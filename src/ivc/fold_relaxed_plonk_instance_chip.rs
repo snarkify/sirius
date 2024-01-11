@@ -53,7 +53,7 @@ use log::*;
 use num_traits::Num;
 
 use crate::{
-    constants::{MAX_BITS, NUM_CHALLENGE_BITS},
+    constants::NUM_CHALLENGE_BITS,
     gadgets::{
         ecc::{AssignedPoint, EccChip},
         nonnative::bn::{
@@ -233,7 +233,7 @@ where
         })
     }
 
-    /// Fold with proof [`RelaxedPlonkInstance::W_commitments`] & [`PlonkInstance::W_commitments`]
+    /// Fold [`RelaxedPlonkInstance::W_commitments`] & [`PlonkInstance::W_commitments`]
     ///
     /// # Description
     ///
@@ -246,7 +246,7 @@ where
     /// 1. **Scalar Multiplication**: Each `W` component from `input_W_commitments` is multiplied
     ///    by random the scalar `r` (challenge). This is executed using the [`EccChip`] for elliptic curve operations.
     /// 2. **Accumulation**: The result of the scalar multiplication is then added to the corresponding component in
-    ///    the current `folded_W` accumulator.
+    ///    the current `folded_W` accumulator. This is executed using the [`EccChip`] for elliptic curve operations.
     ///
     /// ```markdown
     /// new_folded_W[i] = folded_W[i] + input_W[i] * r
@@ -275,33 +275,60 @@ where
             .collect()
     }
 
-    // TODO #32 rustdoc
+    /// Fold [`RelaxedPlonkInstance::E_commitments`] & [`CrossTermCommits`]
+    ///
+    /// # Description
+    ///
+    /// This function is responsible for combining the current `folded_W` accumulator with
+    /// `cross_term_commits`. This is achieved through a scalar multiplication followed by
+    /// an elliptic curve addition. The scalar multiplication is defined by a random
+    /// scalar `r` in power of cross term commit index.
+    ///
+    /// # Implementation Details
+    ///
+    /// 1. **Multiplication & Conversion to bits**: Form a vector of degrees `r` and their representations as bits
+    /// 2. **Scalar Multiplication**: Each element of `cross_term_commits` is multiplied by power of random scalar
+    ///    `r` (challenge) in bits representation. This is executed using the [`EccChip`] for elliptic curve operations.
+    /// 3. **Accumulation**: The result of the scalar multiplication is then added to the corresponding component in
+    ///    the current `folded_E` accumulator. This is executed using the [`EccChip`] for elliptic curve operations.
+    ///
+    /// ```markdown
+    /// new_folded_E = folded_E + Sum [ cross_term_commits[i] * (r ^ i) ]
+    /// ```
     fn fold_E<const T: usize>(
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
+        bn_chip: &BigUintMulModChip<C::Base>,
         folded_E: AssignedPoint<C>,
         cross_term_commits: &[AssignedPoint<C>],
-        r: ValueView<C::Base>,
+        r: BigUintView<C::Base>,
+        m_bn: &[AssignedValue<C::Base>],
     ) -> Result<AssignedPoint<C>, Error> {
-        let ecc = EccChip::<C, C::Base, T>::new(config.clone());
-        let gate = MainGate::new(config.clone());
+        debug!("Start calculate r^i from {r:?}");
 
         let powers_of_r = iter::successors(Some(Ok(r.clone())), |val| {
             Some(Ok(val.as_ref().ok()?).and_then(|r_pow_i| {
-                let ValueView { value, bits: _ } = r_pow_i;
+                let BigUintView {
+                    as_bn_limbs,
+                    as_bits: _,
+                } = r_pow_i;
 
-                let current = gate.mul(region, value, &r.value)?;
-                let current_bits = gate.le_num_to_bits(region, current.clone(), MAX_BITS)?;
+                let next = bn_chip
+                    .mult_mod(region, as_bn_limbs, &r.as_bn_limbs, m_bn)?
+                    .remainder;
 
-                Result::<_, Error>::Ok(ValueView {
-                    value: current,
-                    bits: current_bits,
+                debug!("Next r^i from {next:?}");
+
+                Result::<_, Error>::Ok(BigUintView {
+                    as_bits: bn_chip.to_le_bits(region, &next)?,
+                    as_bn_limbs: next,
                 })
             }))
         })
         .take(cross_term_commits.len())
         .collect::<Result<Vec<_>, _>>()?;
 
+        let ecc = EccChip::<C, C::Base, T>::new(config.clone());
         // TODO Check what with all commits
         let rT = cross_term_commits
             .iter()
@@ -440,21 +467,6 @@ where
 
         let gate = MainGate::new(config.clone());
 
-        let r = ValueView {
-            value: gate.le_bits_to_num(region, &r)?,
-            bits: r,
-        };
-
-        let new_folded_W = Self::fold_W(region, config, &folded_W, &input_W_commitments, &r)?;
-
-        debug!("fold: W folded: {new_folded_W:?}");
-
-        let new_folded_E = Self::fold_E(region, config, folded_E, &cross_terms_commits, r.clone())?;
-        debug!("fold: E folded: {new_folded_W:?}");
-
-        let new_folded_u = gate.add(region, &folded_u, &r.value)?;
-        debug!("fold: u folded: {new_folded_u:?}");
-
         let bn_chip = BigUintMulModChip::<C::Base>::new(
             config
                 .into_smaller_size::<{ big_uint_mul_mod_chip::MAIN_GATE_T }>()
@@ -463,7 +475,30 @@ where
             self.limbs_count,
         );
 
-        let r_as_bn = bn_chip.from_assigned_cell_to_limbs(region, &r.value)?;
+        let r_value = gate.le_bits_to_num(region, &r)?;
+        let r = BigUintView {
+            as_bn_limbs: bn_chip.from_assigned_cell_to_limbs(region, &r_value)?,
+            as_bits: r,
+        };
+
+        let new_folded_W = Self::fold_W(region, config, &folded_W, &input_W_commitments, &r)?;
+
+        debug!("fold: W folded: {new_folded_W:?}");
+
+        let new_folded_E = Self::fold_E(
+            region,
+            config,
+            &bn_chip,
+            folded_E,
+            &cross_terms_commits,
+            r.clone(),
+            &m_bn,
+        )?;
+        debug!("fold: E folded: {new_folded_W:?}");
+
+        let new_folded_u = gate.add(region, &folded_u, &r_value)?;
+        debug!("fold: u folded: {new_folded_u:?}");
+
         let [new_folded_X0, new_folded_X1] = Self::fold_instances(
             &bn_chip,
             region,
@@ -479,7 +514,7 @@ where
             region,
             folded_challenges,
             input_challenges,
-            &r_as_bn,
+            &r.as_bn_limbs,
             &m_bn,
             self.limb_width,
         )?;
@@ -542,13 +577,7 @@ where
         instance: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
     ) -> Result<AssignedWitness<C>, Error> {
-        let mut advice_columns = config
-            .state
-            .iter()
-            .chain(iter::once(&config.input))
-            .chain(iter::once(&config.out))
-            .enumerate()
-            .cycle();
+        let mut advice_columns = config.iter_advice_columns().enumerate().cycle();
 
         // A closure using a cyclic iterator that allows you to take available advice columns
         // regardless of `T`, making as few row offsets as possible
@@ -716,16 +745,7 @@ where
 
         let r = ro_circuit.squeeze_n_bits(region, NUM_CHALLENGE_BITS)?;
 
-        let mut fixed_columns = config
-            .q_1
-            .iter()
-            .chain(config.q_5.iter())
-            .chain(config.q_m.iter())
-            .chain(iter::once(&config.q_i))
-            .chain(iter::once(&config.q_o))
-            .chain(iter::once(&config.rc))
-            .enumerate()
-            .cycle();
+        let mut fixed_columns = config.iter_fixed_columns().enumerate().cycle();
 
         // A closure using a cyclic iterator that allows you to take available advice columns
         // regardless of `T`, making as few row offsets as possible
@@ -779,15 +799,15 @@ where
 }
 
 #[derive(Debug, Clone)]
-struct ValueView<F: ff::Field> {
-    value: AssignedValue<F>,
-    bits: Vec<AssignedValue<F>>,
+struct BigUintView<F: ff::Field> {
+    as_bn_limbs: Vec<AssignedValue<F>>,
+    as_bits: Vec<AssignedValue<F>>,
 }
-impl<F: ff::Field> ops::Deref for ValueView<F> {
+impl<F: ff::Field> ops::Deref for BigUintView<F> {
     type Target = [AssignedValue<F>];
 
     fn deref(&self) -> &Self::Target {
-        &self.bits
+        &self.as_bits
     }
 }
 
@@ -804,7 +824,8 @@ mod tests {
     use rand::Rng;
 
     use crate::{
-        commitment::CommitmentKey, plonk::TableData, poseidon::poseidon_circuit::PoseidonChip,
+        commitment::CommitmentKey, constants::MAX_BITS, plonk::TableData,
+        poseidon::poseidon_circuit::PoseidonChip,
     };
 
     use super::*;
@@ -816,12 +837,12 @@ mod tests {
     const NUM_WITNESS: usize = 5;
     /// When the number of fold rounds increases, `K` must be increased too
     /// as the number of required rows in the table grows.
-    const NUM_OF_FOLD_ROUNDS: usize = 3;
+    const NUM_OF_FOLD_ROUNDS: usize = 1;
     /// 2 ^ K is count of table rows in [`TableData`]
-    const K: u32 = 19;
+    const K: u32 = 20;
 
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(64) };
-    const LIMB_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(255) };
+    const LIMB_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
     fn get_table_data() -> (TableData<Base>, MainGateConfig<T>) {
         let mut td = TableData::new(K, vec![]);
@@ -831,7 +852,7 @@ mod tests {
         (td, config)
     }
 
-    fn generate_random_input(mut rnd: impl Rng) -> Vec<C1> {
+    fn random_curve_vec(mut rnd: impl Rng) -> Vec<C1> {
         iter::repeat_with(|| C1::random(&mut rnd))
             .take(NUM_WITNESS)
             .collect::<Vec<_>>()
@@ -915,26 +936,24 @@ mod tests {
             C1::random(&mut rnd),
         ];
         let pp_hash = Base::random(&mut rnd);
-        for _ in 0..=1 {
-            layouter
-                .assign_region(
-                    || "assign_witness_with_challenge",
-                    |region| {
-                        let _assigned_challenge = chip
-                            .assign_witness_with_challenge(
-                                &mut RegionCtx::new(region, 0),
-                                &config.clone(),
-                                PoseidonChip::new(config.clone(), spec.clone()),
-                                &pp_hash,
-                                &plonk,
-                                &cross_term_commits,
-                            )
-                            .unwrap();
-                        Ok(())
-                    },
-                )
-                .unwrap();
-        }
+        layouter
+            .assign_region(
+                || "assign_witness_with_challenge",
+                |region| {
+                    let _assigned_challenge = chip
+                        .assign_witness_with_challenge(
+                            &mut RegionCtx::new(region, 0),
+                            &config.clone(),
+                            PoseidonChip::new(config.clone(), spec.clone()),
+                            &pp_hash,
+                            &plonk,
+                            &cross_term_commits,
+                        )
+                        .unwrap();
+                    Ok(())
+                },
+            )
+            .unwrap();
     }
 
     #[test_log::test]
@@ -955,40 +974,30 @@ mod tests {
         let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, NUM_WITNESS);
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
-            let mut on_circuit_W_cell = None;
-            let input_W = generate_random_input(&mut rnd);
+            let input_W = random_curve_vec(&mut rnd);
 
-            // Run twice for setup & real run
-            for _ in 0..=1 {
-                on_circuit_W_cell = Some(
-                    layouter
-                        .assign_region(
-                            || "fold W test",
-                            |region| {
-                                let mut ctx = RegionCtx::new(region, 0);
+            let on_circuit_W_cell = layouter.assign_region(
+                || "fold W test",
+                |region| {
+                    let mut ctx = RegionCtx::new(region, 0);
 
-                                let folded =
-                                    assign_curve_points(&mut ctx, &ecc, &folded_W, "folded_W")?;
-                                let input =
-                                    assign_curve_points(&mut ctx, &ecc, &input_W, "input_W")?;
+                    let folded = assign_curve_points(&mut ctx, &ecc, &folded_W, "folded_W")?;
+                    let input = assign_curve_points(&mut ctx, &ecc, &input_W, "input_W")?;
 
-                                let assigned_r = ctx.assign_advice(
-                                    || "r",
-                                    config.state[0],
-                                    Value::known(util::fe_to_fe(&r).unwrap()),
-                                )?;
+                    let assigned_r = ctx.assign_advice(
+                        || "r",
+                        config.state[0],
+                        Value::known(util::fe_to_fe(&r).unwrap()),
+                    )?;
 
-                                let r = gate.le_num_to_bits(&mut ctx, assigned_r, MAX_BITS)?;
+                    let r = gate.le_num_to_bits(&mut ctx, assigned_r, MAX_BITS)?;
 
-                                Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_W(
-                                    &mut ctx, &config, &folded, &input, &r,
-                                )
-                                .unwrap())
-                            },
-                        )
-                        .unwrap(),
-                );
-            }
+                    Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_W(
+                        &mut ctx, &config, &folded, &input, &r,
+                    )
+                    .unwrap())
+                },
+            );
 
             assert_eq!(plonk.W_commitments, folded_W);
 
@@ -1020,6 +1029,129 @@ mod tests {
             assert_eq!(off_circuit_W, on_circuit_W_cell);
 
             folded_W = plonk.W_commitments.clone();
+        }
+    }
+
+    #[test_log::test]
+    fn fold_E_test() {
+        let Fixture {
+            mut td,
+            config,
+            mut rnd,
+            ecc,
+            gate,
+            r,
+        } = Fixture::default();
+
+        let mut folded_E = C1::default();
+
+        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+
+        let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, 0);
+
+        let bn_chip = BigUintMulModChip::<Base>::new(
+            config
+                .into_smaller_size::<{ big_uint_mul_mod_chip::MAIN_GATE_T }>()
+                .unwrap(),
+            LIMB_WIDTH,
+            LIMB_LIMIT,
+        );
+
+        for _round in 0..=NUM_OF_FOLD_ROUNDS {
+            let cross_term_commits = random_curve_vec(&mut rnd);
+
+            let on_circuit_E_cell = layouter.assign_region(
+                || "fold E test",
+                |region| {
+                    let mut ctx = RegionCtx::new(region, 0);
+
+                    let folded_E = ecc.assign_from_curve(&mut ctx, || "folded_E", &folded_E)?;
+                    let cross_term_commits =
+                        assign_curve_points(&mut ctx, &ecc, &cross_term_commits, "input_W")?;
+
+                    let assigned_r = ctx.assign_advice(
+                        || "r",
+                        config.state[0],
+                        Value::known(util::fe_to_fe(&r).unwrap()),
+                    )?;
+
+                    let r =
+                        gate.le_num_to_bits(&mut ctx, assigned_r.clone(), NUM_CHALLENGE_BITS)?;
+                    let r_vv = BigUintView {
+                        as_bn_limbs: bn_chip
+                            .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
+                            .unwrap(),
+                        as_bits: r,
+                    };
+
+                    let mut fixed_columns = config.iter_fixed_columns().enumerate().cycle();
+
+                    let mut assign_next_fixed =
+                        move |annotation: &str, region: &mut RegionCtx<Base>, val| {
+                            let (index, column) =
+                                fixed_columns.by_ref().next().expect("Safe because cycle");
+
+                            if index == 0 {
+                                region.next();
+                            }
+
+                            region.assign_fixed(|| annotation.to_owned(), *column, val)
+                        };
+
+                    let m_bn = BigUint::<Base>::from_biguint(
+                        &num_bigint::BigUint::from_str_radix(
+                            <ScalarExt as PrimeField>::MODULUS.trim_start_matches("0x"),
+                            16,
+                        )
+                        .unwrap(),
+                        LIMB_WIDTH,
+                        LIMB_LIMIT,
+                    )
+                    .unwrap()
+                    .limbs()
+                    .iter()
+                    .enumerate()
+                    .map(|(limb_index, limb)| {
+                        assign_next_fixed(&format!("m_bn [{limb_index}"), &mut ctx, *limb)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                    Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_E(
+                        &mut ctx,
+                        &config,
+                        &bn_chip,
+                        folded_E,
+                        &cross_term_commits,
+                        r_vv,
+                        &m_bn,
+                    )
+                    .unwrap())
+                },
+            );
+
+            assert_eq!(plonk.E_commitment, folded_E);
+
+            plonk = plonk.fold(
+                &PlonkInstance {
+                    W_commitments: vec![],
+                    instance: vec![],
+                    challenges: vec![],
+                },
+                &cross_term_commits,
+                &r,
+            );
+
+            let off_circuit_E_coordinates = plonk.E_commitment.coordinates().unwrap();
+            let off_circuit_E_x = *off_circuit_E_coordinates.x();
+            let off_circuit_E_y = *off_circuit_E_coordinates.y();
+
+            let (on_circuit_E_cell_x, on_circuit_E_cell_y) =
+                on_circuit_E_cell.unwrap().coordinates_values().unwrap();
+
+            assert_eq!(off_circuit_E_x, on_circuit_E_cell_x);
+            assert_eq!(off_circuit_E_y, on_circuit_E_cell_y);
+
+            folded_E = plonk.E_commitment;
         }
     }
 
