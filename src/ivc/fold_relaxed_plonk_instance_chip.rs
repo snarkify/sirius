@@ -233,7 +233,7 @@ where
         })
     }
 
-    /// Fold with proof [`RelaxedPlonkInstance::W_commitments`] & [`PlonkInstance::W_commitments`]
+    /// Fold [`RelaxedPlonkInstance::W_commitments`] & [`PlonkInstance::W_commitments`]
     ///
     /// # Description
     ///
@@ -275,7 +275,7 @@ where
             .collect()
     }
 
-    /// Fold with proof [`RelaxedPlonkInstance::E_commitments`] & [`CrossTermCommits`]
+    /// Fold [`RelaxedPlonkInstance::E_commitments`] & [`CrossTermCommits`]
     ///
     /// # Description
     ///
