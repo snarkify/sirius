@@ -796,23 +796,13 @@ where
 
         let mut fixed_columns_assigner = config.fixed_cycle_assigner();
 
-        // TODO Check correctness
-        let m_bn = BigUint::<C::Base>::from_biguint(
-            &num_bigint::BigUint::from_str_radix(
-                <C::Scalar as PrimeField>::MODULUS.trim_start_matches("0x"),
-                16,
-            )
-            .unwrap(),
-            self.limb_width,
-            self.limbs_count,
-        )?
-        .limbs()
-        .iter()
-        .enumerate()
-        .map(|(limb_index, limb)| {
-            fixed_columns_assigner.assign_next_fixed(region, || limb_index.to_string(), *limb)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+        let m_bn = scalar_module_as_limbs::<C>(self.limb_width, self.limbs_count)?
+            .iter()
+            .enumerate()
+            .map(|(limb_index, limb)| {
+                fixed_columns_assigner.assign_next_fixed(region, || limb_index.to_string(), *limb)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         region.next();
 
@@ -845,6 +835,23 @@ impl<F: ff::Field> ops::Deref for BigUintView<F> {
     fn deref(&self) -> &Self::Target {
         &self.as_bits
     }
+}
+
+fn scalar_module_as_limbs<C: CurveAffine>(
+    limb_width: NonZeroUsize,
+    limbs_count: NonZeroUsize,
+) -> Result<Vec<C::Base>, big_uint::Error> {
+    Ok(BigUint::<C::Base>::from_biguint(
+        &num_bigint::BigUint::from_str_radix(
+            <C::Scalar as PrimeField>::MODULUS.trim_start_matches("0x"),
+            16,
+        )
+        .unwrap(),
+        limb_width,
+        limbs_count,
+    )?
+    .limbs()
+    .to_vec())
 }
 
 #[cfg(test)]
@@ -1134,23 +1141,14 @@ mod tests {
                             region.assign_fixed(|| annotation.to_owned(), *column, val)
                         };
 
-                    let m_bn = BigUint::<Base>::from_biguint(
-                        &num_bigint::BigUint::from_str_radix(
-                            <ScalarExt as PrimeField>::MODULUS.trim_start_matches("0x"),
-                            16,
-                        )
-                        .unwrap(),
-                        LIMB_WIDTH,
-                        LIMB_LIMIT,
-                    )
-                    .unwrap()
-                    .limbs()
-                    .iter()
-                    .enumerate()
-                    .map(|(limb_index, limb)| {
-                        assign_next_fixed(&format!("m_bn [{limb_index}"), &mut ctx, *limb)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    let m_bn = scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMB_LIMIT)
+                        .unwrap()
+                        .iter()
+                        .enumerate()
+                        .map(|(limb_index, limb)| {
+                            assign_next_fixed(&format!("m_bn [{limb_index}"), &mut ctx, *limb)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
 
                     Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_E(
                         &mut ctx,
@@ -1274,27 +1272,18 @@ mod tests {
 
                     let mut fixed_columns_assigner = config.fixed_cycle_assigner();
 
-                    let m_bn = BigUint::<Base>::from_biguint(
-                        &num_bigint::BigUint::from_str_radix(
-                            <ScalarExt as PrimeField>::MODULUS.trim_start_matches("0x"),
-                            16,
-                        )
-                        .unwrap(),
-                        LIMB_WIDTH,
-                        LIMB_LIMIT,
-                    )
-                    .unwrap()
-                    .limbs()
-                    .iter()
-                    .enumerate()
-                    .map(|(limb_index, limb)| {
-                        fixed_columns_assigner.assign_next_fixed(
-                            &mut ctx,
-                            || format!("m_bn [{limb_index}"),
-                            *limb,
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    let m_bn = scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMB_LIMIT)
+                        .unwrap()
+                        .iter()
+                        .enumerate()
+                        .map(|(limb_index, limb)| {
+                            fixed_columns_assigner.assign_next_fixed(
+                                &mut ctx,
+                                || format!("m_bn [{limb_index}"),
+                                *limb,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
 
                     ctx.next();
 
@@ -1437,27 +1426,18 @@ mod tests {
 
                     let mut fixed_columns_assigner = config.fixed_cycle_assigner();
 
-                    let m_bn = BigUint::<Base>::from_biguint(
-                        &num_bigint::BigUint::from_str_radix(
-                            <ScalarExt as PrimeField>::MODULUS.trim_start_matches("0x"),
-                            16,
-                        )
-                        .unwrap(),
-                        LIMB_WIDTH,
-                        LIMB_LIMIT,
-                    )
-                    .unwrap()
-                    .limbs()
-                    .iter()
-                    .enumerate()
-                    .map(|(limb_index, limb)| {
-                        fixed_columns_assigner.assign_next_fixed(
-                            &mut ctx,
-                            || format!("m_bn [{limb_index}"),
-                            *limb,
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    let m_bn = scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMB_LIMIT)
+                        .unwrap()
+                        .iter()
+                        .enumerate()
+                        .map(|(limb_index, limb)| {
+                            fixed_columns_assigner.assign_next_fixed(
+                                &mut ctx,
+                                || format!("m_bn [{limb_index}"),
+                                *limb,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
 
                     ctx.next();
 
