@@ -447,12 +447,24 @@ where
         Ok([new_folded_X0, new_folded_X1])
     }
 
-    // TODO #32 rustdoc
+    /// Fold [`RelaxedPlonkInstance::challenges`] & [`PlonkInstance::challenges`]
+    ///
+    /// # Description
+    ///
+    /// This function is responsible for combining the current `folded_challenges` accumulator with
+    /// `input_challenges`. This is achieved through a [`FoldRelaxedPlonkInstanceChip::fold_via_biguint`]
+    /// fn call.
+    ///
+    /// ```markdown
+    /// new_folded_challenges[i] = fold_via_biguin(folded_challenges[i], input_challenges[i], m, r)
+    /// ```
+    ///
+    /// Please check [`FoldRelaxedPlonkInstanceChip::fold_via_biguint`] for more details
     fn fold_challenges(
-        bn_chip: &BigUintMulModChip<C::Base>,
         region: &mut RegionCtx<C::Base>,
-        folded_challenges: Vec<Vec<AssignedValue<C::Base>>>,
+        bn_chip: &BigUintMulModChip<C::Base>,
         input_challenges: Vec<Vec<AssignedValue<C::Base>>>,
+        folded_challenges: Vec<Vec<AssignedValue<C::Base>>>,
         r_as_bn: &[AssignedValue<C::Base>],
         m_bn: &[AssignedValue<C::Base>],
         limb_width: NonZeroUsize,
@@ -556,10 +568,10 @@ where
         )?;
 
         let new_folded_challanges = Self::fold_challenges(
-            &bn_chip,
             region,
-            folded_challenges,
+            &bn_chip,
             input_challenges,
+            folded_challenges,
             &r.as_bn_limbs,
             &m_bn,
             self.limb_width,
@@ -1339,6 +1351,169 @@ mod tests {
                 .collect::<Vec<Vec<Base>>>();
 
             assert_eq!(off_circuit_instances, on_circuit_instances);
+        }
+    }
+
+    #[test_log::test]
+    fn fold_challenges_test() {
+        const NUM_CHALLENGES: usize = 5;
+        let Fixture {
+            mut td,
+            config,
+            mut rnd,
+            r,
+            ..
+        } = Fixture::default();
+
+        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+
+        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(0, NUM_CHALLENGES, 0);
+
+        let bn_chip = BigUintMulModChip::<Base>::new(
+            config
+                .into_smaller_size::<{ big_uint_mul_mod_chip::MAIN_GATE_T }>()
+                .unwrap(),
+            LIMB_WIDTH,
+            LIMB_LIMIT,
+        );
+
+        for _round in 0..=NUM_OF_FOLD_ROUNDS {
+            let input_challenges = iter::repeat_with(|| ScalarExt::random(&mut rnd))
+                .take(NUM_CHALLENGES)
+                .collect::<Vec<_>>();
+
+            // Run twice for setup & real run
+            let on_circuit_challanges_cell = layouter.assign_region(
+                || "fold challenges test",
+                |region| {
+                    let mut ctx = RegionCtx::new(region, 0);
+
+                    let mut advice_columns_assigner = config.advice_cycle_assigner();
+
+                    macro_rules! assign_scalar_as_bn {
+                        ($region:expr, $input:expr, $annotation_prefix:expr) => {{
+                            BigUint::from_f(
+                                &util::fe_to_fe_safe::<_, Base>($input).unwrap(),
+                                LIMB_WIDTH,
+                                LIMB_LIMIT,
+                            )
+                            .unwrap()
+                            .limbs()
+                            .iter()
+                            .enumerate()
+                            .map(|(limb_index, limb)| {
+                                let limb = util::fe_to_fe_safe(limb)
+                                    .ok_or(Error::WhileScalarToBase {
+                                        variable_name: $annotation_prefix,
+                                        variable_str: format!("{limb:?}"),
+                                    })
+                                    .unwrap();
+
+                                advice_columns_assigner.assign_next_advice(
+                                    $region,
+                                    || format!("{}, limb {limb_index}", $annotation_prefix),
+                                    limb,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                        }};
+                    }
+
+                    let assigned_r = advice_columns_assigner
+                        .assign_next_advice(&mut ctx, || "r", util::fe_to_fe(&r).unwrap())
+                        .unwrap();
+
+                    let assigned_fold_challenges = relaxed_plonk
+                        .challenges
+                        .iter()
+                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "folded instance"))
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap();
+
+                    let assigned_input_instance = input_challenges
+                        .iter()
+                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "input instance"))
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                    let mut fixed_columns_assigner = config.fixed_cycle_assigner();
+
+                    let m_bn = BigUint::<Base>::from_biguint(
+                        &num_bigint::BigUint::from_str_radix(
+                            <ScalarExt as PrimeField>::MODULUS.trim_start_matches("0x"),
+                            16,
+                        )
+                        .unwrap(),
+                        LIMB_WIDTH,
+                        LIMB_LIMIT,
+                    )
+                    .unwrap()
+                    .limbs()
+                    .iter()
+                    .enumerate()
+                    .map(|(limb_index, limb)| {
+                        fixed_columns_assigner.assign_next_fixed(
+                            &mut ctx,
+                            || format!("m_bn [{limb_index}"),
+                            *limb,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                    ctx.next();
+
+                    let r_as_bn = bn_chip
+                        .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
+                        .unwrap();
+
+                    Ok(FoldRelaxedPlonkInstanceChip::<C1>::fold_challenges(
+                        &mut ctx,
+                        &bn_chip,
+                        assigned_input_instance,
+                        assigned_fold_challenges,
+                        &r_as_bn,
+                        &m_bn,
+                        LIMB_WIDTH,
+                    )
+                    .unwrap())
+                },
+            );
+
+            relaxed_plonk = relaxed_plonk.fold(
+                &PlonkInstance {
+                    W_commitments: vec![],
+                    instance: vec![],
+                    challenges: input_challenges.to_vec(),
+                },
+                &[],
+                &r,
+            );
+
+            let off_circuit_challenges = relaxed_plonk
+                .challenges
+                .iter()
+                .map(|instance| {
+                    BigUint::from_f(
+                        &util::fe_to_fe_safe::<ScalarExt, Base>(instance).unwrap(),
+                        LIMB_WIDTH,
+                        LIMB_LIMIT,
+                    )
+                    .unwrap()
+                    .limbs()
+                    .to_vec()
+                })
+                .collect::<Vec<_>>();
+
+            let on_circuit_challenges = on_circuit_challanges_cell
+                .unwrap()
+                .into_iter()
+                .map(|c| {
+                    c.into_iter()
+                        .map(|cell| *cell.value().unwrap().unwrap())
+                        .collect::<Vec<Base>>()
+                })
+                .collect::<Vec<Vec<Base>>>();
+
+            assert_eq!(off_circuit_challenges, on_circuit_challenges);
         }
     }
 
