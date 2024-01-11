@@ -127,6 +127,24 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         Ok((cross_terms, cross_term_commits))
     }
 
+    /// Absorb all fields into RandomOracle `RO` & generate challenge based on that
+    pub(crate) fn generate_challenge(
+        ro_acc: &mut RO,
+        S: &PlonkStructure<C>,
+        U1: &RelaxedPlonkInstance<C>,
+        U2: &PlonkInstance<C>,
+        cross_term_commits: &CrossTermCommits<C>,
+    ) -> Result<<C as CurveAffine>::ScalarExt, Error> {
+        S.absorb_into(ro_acc);
+        U1.absorb_into(ro_acc);
+        U2.absorb_into(ro_acc);
+        cross_term_commits
+            .iter()
+            .for_each(|cm| ro_acc.absorb_point(cm));
+
+        Ok(ro_acc.squeeze(NUM_CHALLENGE_BITS))
+    }
+
     /// Generates a proof of correct folding using the NIFS protocol.
     ///
     /// This method takes two relaxed Plonk instance-witness pairs and calculates the folded instance and witness.
@@ -162,16 +180,12 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
     > {
         // TODO: hash gate into ro (#85)
         let S = td.plonk_structure(ck);
-        S.absorb_into(ro_acc);
 
         let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges)?;
-        U1.absorb_into(ro_acc);
-        U2.absorb_into(ro_acc);
         let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2)?;
-        cross_term_commits
-            .iter()
-            .for_each(|cm| ro_acc.absorb_point(cm));
-        let r = ro_acc.squeeze(NUM_CHALLENGE_BITS);
+
+        let r = Self::generate_challenge(ro_acc, &S, U1, &U2, &cross_term_commits)?;
+
         let U = U1.fold(&U2, &cross_term_commits, &r);
         let W = W1.fold(&W2, &cross_terms, &r);
         Ok((
@@ -204,14 +218,9 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         U2: PlonkInstance<C>,
     ) -> Result<RelaxedPlonkInstance<C>, Error> {
         S.run_sps_verifier(&U2, ro_nark)?;
-        S.absorb_into(ro_acc);
-        U1.absorb_into(ro_acc);
-        U2.absorb_into(ro_acc);
 
-        self.cross_term_commits
-            .iter()
-            .for_each(|cm| ro_acc.absorb_point(cm));
-        let r = ro_acc.squeeze(NUM_CHALLENGE_BITS);
+        let r = Self::generate_challenge(ro_acc, S, &U1, &U2, &self.cross_term_commits)?;
+
         Ok(U1.fold(&U2, &self.cross_term_commits, &r))
     }
 }
