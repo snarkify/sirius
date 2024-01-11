@@ -562,7 +562,7 @@ where
             &bn_chip,
             input_instances.try_into().unwrap(),
             [folded_X0, folded_X1],
-            &r,
+            &r.as_bn_limbs,
             &m_bn,
             self.limb_width,
         )?;
