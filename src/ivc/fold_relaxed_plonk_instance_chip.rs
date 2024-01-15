@@ -88,27 +88,103 @@ where
 pub(crate) struct AssignedRelaxedPlonkInstance<C: CurveAffine> {
     /// Assigned point representing the folded accumulator W.
     /// Derived from [`FoldRelaxedPlonkInstanceChip::W`]
-    folded_W: Vec<AssignedPoint<C>>,
+    pub folded_W: Vec<AssignedPoint<C>>,
 
     /// Assigned point representing the folded accumulator E.
     /// Derived from [`FoldRelaxedPlonkInstanceChip::E`]
-    folded_E: AssignedPoint<C>,
+    pub folded_E: AssignedPoint<C>,
 
     /// Assigned value of the folded scalar u.
     /// Derived from [`FoldRelaxedPlonkInstanceChip::u`]
-    folded_u: AssignedValue<C::Base>,
+    pub folded_u: AssignedValue<C::Base>,
 
     /// Vector of vectors of assigned values for each limb of the folded challenges.
     /// Derived from [`FoldRelaxedPlonkInstanceChip::challenges`].
-    folded_challenges: Vec<Vec<AssignedValue<C::Base>>>,
+    pub folded_challenges: Vec<Vec<AssignedValue<C::Base>>>,
 
     /// Vector of assigned values for each limb of the folded big number X0.
     /// Derived from [`FoldRelaxedPlonkInstanceChip::X0`]
-    folded_X0: Vec<AssignedValue<C::Base>>,
+    pub folded_X0: Vec<AssignedValue<C::Base>>,
 
     /// Vector of assigned values for each limb of the folded big number X1.
     /// Derived from [`FoldRelaxedPlonkInstanceChip::X1`]
-    folded_X1: Vec<AssignedValue<C::Base>>,
+    pub folded_X1: Vec<AssignedValue<C::Base>>,
+}
+impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
+    pub fn conditional_select<const T: usize>(
+        region: &mut RegionCtx<C::Base>,
+        config: &MainGateConfig<T>,
+        lhs: &Self,
+        rhs: &Self,
+        condition: AssignedValue<C::Base>,
+    ) -> Result<Self, Error>
+    where
+        C::Base: PrimeFieldBits,
+    {
+        let ecc = EccChip::<C, C::Base, T>::new(config.clone());
+        let gate = MainGate::<C::Base, T>::new(config.clone());
+
+        let Self {
+            folded_W: lhs_folded_W,
+            folded_E: lhs_folded_E,
+            folded_u: lhs_folded_u,
+            folded_challenges: lhs_folded_challenges,
+            folded_X0: lhs_folded_X0,
+            folded_X1: lhs_folded_X1,
+        } = lhs;
+
+        let Self {
+            folded_W: rhs_folded_W,
+            folded_E: rhs_folded_E,
+            folded_u: rhs_folded_u,
+            folded_challenges: rhs_folded_challenges,
+            folded_X0: rhs_folded_X0,
+            folded_X1: rhs_folded_X1,
+        } = rhs;
+
+        let folded_W = lhs_folded_W
+            .iter()
+            .zip_eq(rhs_folded_W.iter())
+            .map(|(lhs_Wi, rhs_Wi)| ecc.conditional_select(region, lhs_Wi, rhs_Wi, &condition))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let folded_E = ecc.conditional_select(region, lhs_folded_E, rhs_folded_E, &condition)?;
+
+        let folded_u = gate.conditional_select(region, lhs_folded_u, rhs_folded_u, &condition)?;
+
+        let folded_challenges = lhs_folded_challenges
+            .iter()
+            .zip_eq(rhs_folded_challenges.iter())
+            .map(|(lhs_challenge, rhs_challenge)| {
+                lhs_challenge
+                    .iter()
+                    .zip_eq(rhs_challenge.iter())
+                    .map(|(lhs, rhs)| gate.conditional_select(region, lhs, rhs, &condition))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let folded_X0 = lhs_folded_X0
+            .iter()
+            .zip_eq(rhs_folded_X0.iter())
+            .map(|(lhs, rhs)| gate.conditional_select(region, lhs, rhs, &condition))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let folded_X1 = lhs_folded_X1
+            .iter()
+            .zip_eq(rhs_folded_X1.iter())
+            .map(|(lhs, rhs)| gate.conditional_select(region, lhs, rhs, &condition))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self {
+            folded_W,
+            folded_E,
+            folded_u,
+            folded_challenges,
+            folded_X0,
+            folded_X1,
+        })
+    }
 }
 
 /// Holds the assigned values and points resulting from the folding process.

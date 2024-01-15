@@ -1,13 +1,13 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
-use ff::{FromUniformBytes, PrimeFieldBits};
+use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2curves::CurveAffine;
 
 use crate::{
     commitment::CommitmentKey,
     plonk::{PlonkTrace, RelaxedPlonkTrace, TableData},
-    poseidon::ROCircuitTrait,
+    poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
 };
 
 use super::step_circuit::SynthesizeStepParams;
@@ -17,17 +17,30 @@ pub use super::{
 };
 
 // TODO #31 docs
-pub struct CircuitPublicParams<C, RO>
+pub struct CircuitPublicParams<C, ROC>
 where
     C: CurveAffine,
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
-    RO: ROCircuitTrait<C::Base>,
+    ROC: ROCircuitTrait<C::Base>,
 {
     ck: CommitmentKey<C>,
     td: TableData<C::Scalar>,
-    ro_consts: RO::Args,
+    ro_consts: ROC::Args,
     // ro_consts_circuit: ROTrait::Constants, // NOTE: our `ROTraitCircuit` don't have main initializer
-    params: SynthesizeStepParams<C, RO>,
+    params: SynthesizeStepParams<C, ROC>,
+}
+
+impl<AnyCurve, CC, RO, ROC> AbsorbInRO<AnyCurve, RO> for CircuitPublicParams<CC, ROC>
+where
+    AnyCurve: CurveAffine,
+    CC: CurveAffine,
+    CC::Base: PrimeFieldBits + FromUniformBytes<64>,
+    RO: ROTrait<AnyCurve>,
+    ROC: ROCircuitTrait<CC::Base>,
+{
+    fn absorb_into(&self, _ro: &mut RO) {
+        todo!("#32")
+    }
 }
 
 // TODO #31 docs
@@ -70,6 +83,21 @@ where
         // TODO #31 docs
         // https://github.com/microsoft/Nova/blob/fb83e30e16e56b3b21c519b15b83c4ce1f077a13/src/lib.rs#L98
         todo!("Impl creation of pub params")
+    }
+
+    pub fn digest<ROT: ROTrait<C1>>(&self, constant: ROT::Constants) -> C1::ScalarExt {
+        let mut ro = ROT::new(constant);
+
+        let Self {
+            primary,
+            secondary,
+            _p,
+        } = &self;
+        primary.absorb_into(&mut ro);
+        secondary.absorb_into(&mut ro);
+
+        let bytes_count = C1::Base::ZERO.to_repr().as_ref().len();
+        ro.squeeze(NonZeroUsize::new(bytes_count * 8).unwrap())
     }
 }
 

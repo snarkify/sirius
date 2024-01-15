@@ -356,6 +356,23 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
         let yr = self.main_gate.sub(ctx, &tmp3, &p.y)?;
         Ok(AssignedPoint { x: xr, y: yr })
     }
+
+    pub fn conditional_select(
+        &self,
+        ctx: &mut RegionCtx<'_, C::Base>,
+        lhs: &AssignedPoint<C>,
+        rhs: &AssignedPoint<C>,
+        condition: &AssignedValue<C::Base>,
+    ) -> Result<AssignedPoint<C>, Error> {
+        Ok(AssignedPoint {
+            x: self
+                .main_gate
+                .conditional_select(ctx, &lhs.x, &rhs.x, condition)?,
+            y: self
+                .main_gate
+                .conditional_select(ctx, &lhs.y, &rhs.y, condition)?,
+        })
+    }
 }
 
 #[cfg(test)]
