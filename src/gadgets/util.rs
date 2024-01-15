@@ -65,12 +65,12 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
 
         // a * a' = 1 - r
         let state = Some(vec![a.clone().into(), a_inv.clone().into()]);
-        let state_terms = (None, Some(F::ONE), state);
+        let state_terms = (None, Some(vec![F::ONE]), state);
         self.apply(ctx, state_terms, Some(-F::ONE), (F::ONE, r.clone().into()))?;
 
         // r * a' = r
         let state = Some(vec![r.clone().into(), a_inv.clone().into()]);
-        let state_terms = (None, Some(F::ONE), state);
+        let state_terms = (None, Some(vec![F::ONE]), state);
         self.apply(ctx, state_terms, None, (-F::ONE, r.clone().into()))?;
         Ok((r, a_inv))
     }
@@ -95,6 +95,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
     }
 
     // cond must be either 0 or 1 (e.g. return value from is_zero_term)
+    // require T >= 4
     pub fn conditional_select(
         &self,
         ctx: &mut RegionCtx<'_, F>,
@@ -102,25 +103,20 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         b: &AssignedValue<F>,
         cond: &AssignedValue<F>,
     ) -> Result<AssignedValue<F>, Error> {
-        // res = cond * a + (1-cond) * b
-        let state = Some(vec![a.into(), cond.into()]);
-        let val1 = cond.value().copied() * a.value().copied();
-        let res1 = self.apply(
+        let state = Some(vec![a.into(), cond.into(), b.into(), cond.into()]);
+        // val = cond * a + (1-cond) * b
+        let val = cond.value().copied() * a.value().copied()
+            + (Value::known(F::ONE) - cond.value().copied()) * b.value().copied();
+        self.apply(
             ctx,
-            (None, Some(F::ONE), state),
+            (
+                Some(vec![F::ZERO, F::ZERO, F::ONE]),
+                Some(vec![F::ONE, -F::ONE]),
+                state,
+            ),
             None,
-            (-F::ONE, val1.into()),
-        )?;
-
-        let state = Some(vec![b.into(), cond.into()]);
-        let val2 = (Value::known(F::ONE) - cond.value().copied()) * b.value().copied();
-        let res2 = self.apply(
-            ctx,
-            (Some(vec![F::ONE]), Some(-F::ONE), state),
-            None,
-            (-F::ONE, val2.into()),
-        )?;
-        self.add(ctx, &res1, &res2)
+            (-F::ONE, val.into()),
+        )
     }
 
     // is_inf => 1, otherwise => 0
@@ -196,7 +192,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         b: &AssignedValue<F>,
     ) -> Result<AssignedValue<F>, Error> {
         let state = Some(vec![a.clone().into(), b.clone().into()]);
-        let state_terms = (None, Some(F::ONE), state);
+        let state_terms = (None, Some(vec![F::ONE]), state);
         let out_val = a.value().copied() * b.value().copied();
         let out_terms = (-F::ONE, out_val.into());
         let out = self.apply(ctx, state_terms, None, out_terms)?;
