@@ -199,6 +199,34 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         Ok(out)
     }
 
+    /// Add `lhs` assigned value to `rhs` constant
+    ///
+    /// By one row with simple expression
+    /// ```markdown
+    /// input * q_i + output * q_o + rc  = 0
+    /// lhs   * 1   + sum    * -1  + rhs = 0
+    /// ```
+    pub fn add_with_const(
+        &self,
+        ctx: &mut RegionCtx<'_, F>,
+        lhs: &AssignedValue<F>,
+        rhs: F,
+    ) -> Result<AssignedValue<F>, Error> {
+        let config = self.config();
+        ctx.assign_fixed(|| "q_i", config.q_i, F::ONE)?;
+        ctx.assign_fixed(|| "q_o", config.q_o, -F::ONE)?;
+
+        let assigned_lhs =
+            ctx.assign_advice_from(|| "lhs for sum with const", config.input, lhs)?;
+        let assigned_rhs = ctx.assign_fixed(|| "rhs for sum with const", config.rc, rhs)?;
+
+        let sum = assigned_lhs.value().copied() + assigned_rhs.value();
+        let assigned_res = ctx.assign_advice(|| "result for sum with const", config.input, sum)?;
+
+        ctx.next();
+        Ok(assigned_res)
+    }
+
     pub fn mul_by_const(
         &self,
         ctx: &mut RegionCtx<'_, F>,
