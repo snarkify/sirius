@@ -173,6 +173,12 @@ pub enum Error {
         variable_str: String,
     },
 }
+impl From<Error> for halo2_proofs::plonk::Error {
+    fn from(err: Error) -> halo2_proofs::plonk::Error {
+        error!("downcast error: {err:?} to `Synthesis`");
+        halo2_proofs::plonk::Error::Synthesis
+    }
+}
 
 impl<const T: usize, C: CurveAffine> FoldRelaxedPlonkInstanceChip<T, C>
 where
@@ -644,6 +650,77 @@ where
         Ok((Some(chip), assigned_relaxed))
     }
 
+    /// Assign [FoldRelaxedPlonkInstanceChip::relaxed`]
+    ///
+    /// The advice columns from `config: &MainGateConfig` are used for assignment in cycle.
+    pub fn assign_current_relaxed(
+        &self,
+        region: &mut RegionCtx<C::Base>,
+    ) -> Result<AssignedRelaxedPlonkInstance<C>, Error> {
+        let mut advice_columns_assigner = self.config.advice_cycle_assigner();
+
+        macro_rules! assign_point {
+            ($input:expr) => {{
+                assign_next_advice_from_point(&mut advice_columns_assigner, region, $input, || {
+                    stringify!($input)
+                })
+            }};
+        }
+
+        macro_rules! assign_diff_field {
+            ($input:expr, $annot:expr) => {{
+                assign_next_advice_from_diff_field::<C, _>(
+                    &mut advice_columns_assigner,
+                    region,
+                    $input,
+                    $annot,
+                )
+            }};
+        }
+
+        macro_rules! assign_diff_field_as_bn {
+            ($input:expr, $annot:expr) => {{
+                let assigned_cell = assign_diff_field!($input, $annot)?;
+
+                let assigned_bn = self
+                    .bn_chip
+                    .from_assigned_cell_to_limbs(region, &assigned_cell)?;
+
+                Result::<_, Error>::Ok(assigned_bn)
+            }};
+        }
+
+        let assigned_W = self
+            .relaxed
+            .W_commitments
+            .iter()
+            .map(|W| assign_point!(W))
+            .collect::<Result<Vec<_>, _>>()?;
+        let assigned_E = assign_point!(&self.relaxed.E_commitment)?;
+
+        let assigned_X0 = assign_diff_field_as_bn!(&self.relaxed.instance[0], || "X0")?;
+        let assigned_X1 = assign_diff_field_as_bn!(&self.relaxed.instance[1], || "X1")?;
+        assert_eq!(self.relaxed.instance.len(), 2);
+
+        let assigned_challenges = self
+            .relaxed
+            .challenges
+            .iter()
+            .map(|challenge| assign_diff_field_as_bn!(challenge, || "one of challanges"))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let assigned_u = assign_diff_field!(&self.relaxed.u, || "relaxed u")?;
+
+        Ok(AssignedRelaxedPlonkInstance {
+            folded_W: assigned_W,
+            folded_E: assigned_E,
+            folded_u: assigned_u,
+            folded_challenges: assigned_challenges,
+            folded_X0: assigned_X0,
+            folded_X1: assigned_X1,
+        })
+    }
+
     /// Assign all input arguments and generate challenge by random oracle circuit (`ro_circuit`)
     ///
     /// The advice columns from `config: &MainGateConfig` are used for assignment in cycle.
@@ -660,24 +737,12 @@ where
 
         macro_rules! assign_and_absorb_point {
             ($input:expr) => {{
-                let coordinates: Coordinates<C> =
-                    Option::from($input.coordinates()).ok_or(Error::CantBuildCoordinates {
-                        variable_name: stringify!($input),
-                        variable_str: format!("{:?}", $input),
-                    })?;
-
-                let output = AssignedPoint::<C> {
-                    x: advice_columns_assigner.assign_next_advice(
-                        region,
-                        || concat!(stringify!($input), ".x"),
-                        *coordinates.x(),
-                    )?,
-                    y: advice_columns_assigner.assign_next_advice(
-                        region,
-                        || concat!(stringify!($input), ".y"),
-                        *coordinates.y(),
-                    )?,
-                };
+                let output = assign_next_advice_from_point(
+                    &mut advice_columns_assigner,
+                    region,
+                    $input,
+                    || stringify!($input),
+                )?;
 
                 ro_circuit.absorb_point(
                     WrapValue::Assigned(output.x.clone()),
@@ -689,17 +754,12 @@ where
         }
 
         macro_rules! assign_and_absorb_diff_field {
-            ($input:expr) => {{
-                let val: C::Base =
-                    util::fe_to_fe_safe(&$input).ok_or(Error::WhileScalarToBase {
-                        variable_name: stringify!($input),
-                        variable_str: format!("{:?}", $input),
-                    })?;
-
-                let assigned = advice_columns_assigner.assign_next_advice(
+            ($input:expr, $annot:expr) => {{
+                let assigned: AssignedValue<C::Base> = assign_next_advice_from_diff_field::<C, _>(
+                    &mut advice_columns_assigner,
                     region,
-                    || stringify!($input),
-                    val,
+                    $input,
+                    $annot,
                 )?;
 
                 ro_circuit.absorb_base(WrapValue::Assigned(assigned.clone()));
@@ -710,17 +770,13 @@ where
 
         macro_rules! assign_and_absorb_diff_field_as_bn {
             ($input:expr, $annot:expr) => {{
-                let assigned_cell = advice_columns_assigner.assign_next_advice(
-                    region,
-                    || format!("{}, original val", $annot),
-                    util::fe_to_fe_safe::<C::ScalarExt, C::Base>($input).unwrap(),
-                )?;
+                let assigned_cell = assign_and_absorb_diff_field!($input, $annot)?;
 
-                ro_circuit.absorb_base(WrapValue::Assigned(assigned_cell.clone()));
+                let assigned_bn = self
+                    .bn_chip
+                    .from_assigned_cell_to_limbs(region, &assigned_cell)?;
 
-                region.next();
-                self.bn_chip
-                    .from_assigned_cell_to_limbs(region, &assigned_cell)
+                Result::<_, Error>::Ok(assigned_bn)
             }};
         }
 
@@ -732,20 +788,29 @@ where
             .iter()
             .map(|W| assign_and_absorb_point!(W))
             .collect::<Result<Vec<_>, _>>()?;
-        let assigned_E = assign_and_absorb_point!(self.relaxed.E_commitment)?;
+        let assigned_E = assign_and_absorb_point!(&self.relaxed.E_commitment)?;
 
-        let assigned_X0 = assign_and_absorb_diff_field_as_bn!(&self.relaxed.instance[0], "X0")?;
-        let assigned_X1 = assign_and_absorb_diff_field_as_bn!(&self.relaxed.instance[1], "X1")?;
+        let assigned_X0 = assign_and_absorb_diff_field_as_bn!(&self.relaxed.instance[0], || "X0")?;
+        let assigned_X1 = assign_and_absorb_diff_field_as_bn!(&self.relaxed.instance[1], || "X1")?;
         assert_eq!(self.relaxed.instance.len(), 2);
 
         let assigned_challenges = self
             .relaxed
             .challenges
             .iter()
-            .map(|challenge| assign_and_absorb_diff_field_as_bn!(&challenge, "one of challanges"))
+            .map(|challenge| assign_and_absorb_diff_field_as_bn!(challenge, || "one of challanges"))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let assigned_u = assign_and_absorb_diff_field!(self.relaxed.u)?;
+        let assigned_u = assign_and_absorb_diff_field!(&self.relaxed.u, || "relaxed u")?;
+
+        let assigned_relaxed = AssignedRelaxedPlonkInstance {
+            folded_W: assigned_W,
+            folded_E: assigned_E,
+            folded_u: assigned_u,
+            folded_challenges: assigned_challenges,
+            folded_X0: assigned_X0,
+            folded_X1: assigned_X1,
+        };
 
         let assigned_instance_W_commitment_coordinates = input_plonk
             .W_commitments
@@ -758,7 +823,8 @@ where
             .iter()
             .enumerate()
             .map(|(index, instance)| {
-                assign_and_absorb_diff_field_as_bn!(instance, format!("instance {index} value"))
+                let annot = format!("instance {index} value");
+                assign_and_absorb_diff_field_as_bn!(instance, || annot.clone())
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -767,7 +833,8 @@ where
             .iter()
             .enumerate()
             .map(|(index, challenge)| {
-                assign_and_absorb_diff_field_as_bn!(challenge, format!("challenge {index} value"))
+                let annot = format!("instance {index} value");
+                assign_and_absorb_diff_field_as_bn!(challenge, || annot.clone())
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -794,14 +861,7 @@ where
 
         Ok(AssignedWitness {
             public_params_hash: assigned_public_params_hash,
-            assigned_relaxed: AssignedRelaxedPlonkInstance {
-                folded_W: assigned_W,
-                folded_E: assigned_E,
-                folded_u: assigned_u,
-                folded_challenges: assigned_challenges,
-                folded_X0: assigned_X0,
-                folded_X1: assigned_X1,
-            },
+            assigned_relaxed,
             input_challenges: assigned_challanges_instance,
             input_W_commitments: assigned_instance_W_commitment_coordinates,
             input_instances: assigned_input_instance,
@@ -840,6 +900,38 @@ fn scalar_module_as_limbs<C: CurveAffine>(
     )?
     .limbs()
     .to_vec())
+}
+
+fn assign_next_advice_from_point<C: CurveAffine, AR: Into<String>>(
+    assignor: &mut impl AdviceCyclicAssignor<C::Base>,
+    region: &mut RegionCtx<C::Base>,
+    input: &C,
+    annotation: impl Fn() -> AR,
+) -> Result<AssignedPoint<C>, Error> {
+    let coordinates: Coordinates<C> =
+        Option::from(input.coordinates()).ok_or(Error::CantBuildCoordinates {
+            variable_name: "point",
+            variable_str: format!("{:?}", input),
+        })?;
+
+    Ok(AssignedPoint::<C> {
+        x: assignor.assign_next_advice(region, &annotation, *coordinates.x())?,
+        y: assignor.assign_next_advice(region, &annotation, *coordinates.y())?,
+    })
+}
+
+fn assign_next_advice_from_diff_field<C: CurveAffine, AR: Into<String>>(
+    assignor: &mut impl AdviceCyclicAssignor<C::Base>,
+    region: &mut RegionCtx<C::Base>,
+    input: &impl PrimeField,
+    annotation: impl Fn() -> AR,
+) -> Result<AssignedValue<C::Base>, Error> {
+    let val: C::Base = util::fe_to_fe_safe(input).ok_or(Error::WhileScalarToBase {
+        variable_name: "scalar field",
+        variable_str: format!("{:?}", input),
+    })?;
+
+    Ok(assignor.assign_next_advice(region, annotation, val)?)
 }
 
 #[cfg(test)]

@@ -9,12 +9,15 @@ use halo2curves::CurveAffine;
 
 use crate::{
     ivc::fold_relaxed_plonk_instance_chip::FoldRelaxedPlonkInstanceChip,
-    main_gate,
+    main_gate::{self, RegionCtx},
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
 };
 
-use super::{floor_planner::FloorPlanner, fold_relaxed_plonk_instance_chip};
+use super::{
+    floor_planner::FloorPlanner,
+    fold_relaxed_plonk_instance_chip::{self, AssignedRelaxedPlonkInstance},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SynthesisError {
@@ -215,14 +218,13 @@ where
         public_params: &SynthesizeStepParams<C, RO>,
         u: Option<&PlonkInstance<C>>,
         config: MainGateConfig,
-    ) -> Result<FoldRelaxedPlonkInstanceChip<MAIN_GATE_CONFIG_SIZE, C>, SynthesisError> {
+    ) -> Result<AssignedRelaxedPlonkInstance<C>, SynthesisError> {
         let u = u.cloned().unwrap_or_default();
 
         let Unew_base = layouter.assign_region(
             || "synthesize_step_base_case",
-            move |_region| {
-                // TODO Move this to diff lvl
-                Ok(if public_params.is_primary_circuit {
+            move |region| {
+                let chip = if public_params.is_primary_circuit {
                     FoldRelaxedPlonkInstanceChip::new_default(
                         public_params.limb_width,
                         public_params.n_limbs,
@@ -237,7 +239,9 @@ where
                         public_params.n_limbs,
                         config.clone(),
                     )
-                })
+                };
+
+                Ok(chip.assign_current_relaxed(&mut RegionCtx::new(region, 0))?)
             },
         )?;
 
