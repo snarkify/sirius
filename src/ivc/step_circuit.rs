@@ -195,8 +195,12 @@ where
         input: StepInputs<ARITY, C, RO>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
         // Synthesize the circuit for the base case and get the new running instance
-        let _U_new_base =
-            self.synthesize_step_base_case(layouter, input.public_params, input.u.as_ref())?;
+        let _U_new_base = self.synthesize_step_base_case(
+            layouter,
+            input.public_params,
+            input.u.as_ref(),
+            config.main_gate_config.clone(),
+        )?;
 
         // Synthesize the circuit for the non-base case and get the new running
         // instance along with a boolean indicating if all checks have passed
@@ -210,7 +214,8 @@ where
         layouter: &mut impl Layouter<C::Base>,
         public_params: &SynthesizeStepParams<C, RO>,
         u: Option<&PlonkInstance<C>>,
-    ) -> Result<FoldRelaxedPlonkInstanceChip<C>, SynthesisError> {
+        config: MainGateConfig,
+    ) -> Result<FoldRelaxedPlonkInstanceChip<MAIN_GATE_CONFIG_SIZE, C>, SynthesisError> {
         let u = u.cloned().unwrap_or_default();
 
         let Unew_base = layouter.assign_region(
@@ -218,21 +223,23 @@ where
             move |_region| {
                 // TODO Move this to diff lvl
                 Ok(if public_params.is_primary_circuit {
-                    Ok(FoldRelaxedPlonkInstanceChip::new_default(
+                    FoldRelaxedPlonkInstanceChip::new_default(
                         public_params.limb_width,
                         public_params.n_limbs,
                         u.challenges.len(),
                         u.W_commitments.len(),
-                    ))
+                        config.clone(),
+                    )
                 } else {
                     FoldRelaxedPlonkInstanceChip::from_instance(
                         u.clone(),
                         public_params.limb_width,
                         public_params.n_limbs,
+                        config.clone(),
                     )
                 })
             },
-        )??;
+        )?;
 
         Ok(Unew_base)
     }
@@ -242,30 +249,32 @@ where
         config: &StepConfig<ARITY, C, Self>,
         layouter: &mut impl Layouter<C::Base>,
         input: StepInputs<ARITY, C, RO>,
-    ) -> Result<FoldRelaxedPlonkInstanceChip<C>, SynthesisError> {
+    ) -> Result<FoldRelaxedPlonkInstanceChip<MAIN_GATE_CONFIG_SIZE, C>, SynthesisError> {
         // TODO Check hash of params
 
         let U = input
             .U
             .unwrap_or_else(|| todo!("understand what we should use in that case"));
 
-        let _Unew_base: FoldRelaxedPlonkInstanceChip<C> = layouter.assign_region(
-            || "synthesize_step_non_base_case",
-            move |_region| {
-                let _U = FoldRelaxedPlonkInstanceChip::from_relaxed(
-                    U.clone(),
-                    input.public_params.limb_width,
-                    input.public_params.n_limbs,
-                );
+        let _Unew_base: FoldRelaxedPlonkInstanceChip<MAIN_GATE_CONFIG_SIZE, C> = layouter
+            .assign_region(
+                || "synthesize_step_non_base_case",
+                move |_region| {
+                    let _U = FoldRelaxedPlonkInstanceChip::from_relaxed(
+                        U.clone(),
+                        input.public_params.limb_width,
+                        input.public_params.n_limbs,
+                        config.main_gate_config.clone(),
+                    );
 
-                let _ro_circuit = RO::new(
-                    config.main_gate_config.clone(),
-                    input.public_params.ro_constant.clone(),
-                );
+                    let _ro_circuit = RO::new(
+                        config.main_gate_config.clone(),
+                        input.public_params.ro_constant.clone(),
+                    );
 
-                todo!()
-            },
-        )?;
+                    todo!()
+                },
+            )?;
 
         todo!("#32")
     }

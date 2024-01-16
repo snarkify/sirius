@@ -206,6 +206,10 @@ impl<F: ff::PrimeField> BigUint<F> {
             })
     }
 
+    pub fn into_f(&self) -> Option<F> {
+        F::from_str_vartime(&self.into_bigint().to_str_radix(10))
+    }
+
     pub fn limbs(&self) -> &[F] {
         self.limbs.as_slice()
     }

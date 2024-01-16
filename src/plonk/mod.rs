@@ -80,7 +80,7 @@ pub struct PlonkStructure<C: CurveAffine> {
 
 #[derive(Clone, Debug)]
 pub struct PlonkInstance<C: CurveAffine> {
-    /// `W_commitments = round_sizes.len()`, see [`PlonkStructure.round_sizes`]
+    /// `W_commitments = round_sizes.len()`, see [`PlonkStructure::round_sizes`]
     pub(crate) W_commitments: Vec<C>,
     /// inst = [X0, X1]
     pub(crate) instance: Vec<C::ScalarExt>,
