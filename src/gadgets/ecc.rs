@@ -563,7 +563,7 @@ mod tests {
                         )?;
                         ctx.next();
                         let bits = ecc_chip.main_gate.le_num_to_bits(ctx, lambda, bit_len)?;
-                        ecc_chip.scalar_mul_non_zero(ctx, &a, &bits)
+                        ecc_chip.scalar_mul(ctx, &a, &bits)
                     }
                 },
             )?;

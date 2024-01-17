@@ -509,7 +509,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
     pub fn apply(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        state: (Option<Vec<F>>, Option<F>, Option<Vec<WrapValue<F>>>),
+        state: (Option<Vec<F>>, Option<Vec<F>>, Option<Vec<WrapValue<F>>>),
         rc: Option<F>,
         out: (F, WrapValue<F>),
     ) -> Result<AssignedValue<F>, Error> {
@@ -518,9 +518,16 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
                 ctx.assign_fixed(|| "q_1", self.config.q_1[i], *val)?;
             }
         }
-        if let Some(q_m_val) = state.1 {
-            ctx.assign_fixed(|| "q_m", self.config.q_m[0], q_m_val)?;
+
+        if let Some(q_m) = state.1 {
+            q_m.iter()
+                .zip(self.config.q_m.iter())
+                .try_for_each(|(val, column)| {
+                    ctx.assign_fixed(|| "q_m", *column, *val)?;
+                    Result::<_, Error>::Ok(())
+                })?;
         }
+
         if let Some(state) = state.2 {
             for (i, val) in state.iter().enumerate() {
                 match val {
