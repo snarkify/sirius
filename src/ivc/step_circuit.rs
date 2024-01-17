@@ -2,14 +2,14 @@ use std::num::NonZeroUsize;
 
 use ff::PrimeField;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter},
+    circuit::{AssignedCell, Layouter, Value},
     plonk::ConstraintSystem,
 };
 use halo2curves::CurveAffine;
 
 use crate::{
     ivc::fold_relaxed_plonk_instance_chip::FoldRelaxedPlonkInstanceChip,
-    main_gate::{self, RegionCtx},
+    main_gate::{self, MainGate, RegionCtx},
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
 };
@@ -108,9 +108,9 @@ pub(crate) enum ConfigureError {
 }
 
 // TODO #32 Rename
-pub(crate) struct SynthesizeStepParams<G: CurveAffine, RO: ROCircuitTrait<G::Base>>
+pub(crate) struct SynthesizeStepParams<C: CurveAffine, RO: ROCircuitTrait<C::Base>>
 where
-    G::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
     pub limb_width: NonZeroUsize,
     pub n_limbs: NonZeroUsize,
@@ -123,20 +123,21 @@ pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROCi
 where
     C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
-    public_params: &'link SynthesizeStepParams<C, RO>,
+    step_public_params: &'link SynthesizeStepParams<C, RO>,
+    public_params_hash: C,
     step: C::Base,
 
     z_0: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
     z_in: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
 
     // TODO docs
-    U: Option<RelaxedPlonkInstance<C>>,
+    U: RelaxedPlonkInstance<C>,
 
     // TODO docs
-    u: Option<PlonkInstance<C>>,
+    u: PlonkInstance<C>,
 
     // TODO docs
-    T_commitments: Option<Vec<C::Scalar>>,
+    cross_term_commits: Vec<C>,
 }
 
 // TODO #35 Change to real `T` and move it to IVC module level
@@ -170,6 +171,7 @@ pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
     StepCircuit<ARITY, C::Scalar> + Sized
 where
     <C as CurveAffine>::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    <C as CurveAffine>::ScalarExt: ff::PrimeField,
 {
     /// The crate-only expanding trait that checks that no instance columns have
     /// been created during [`StepCircuit::configure`].
@@ -198,16 +200,40 @@ where
         input: StepInputs<ARITY, C, RO>,
     ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
         // Synthesize the circuit for the base case and get the new running instance
-        let _U_new_base = self.synthesize_step_base_case(
+        let U_new_base = self.synthesize_step_base_case(
             layouter,
-            input.public_params,
-            input.u.as_ref(),
+            input.step_public_params,
+            &input.u,
             config.main_gate_config.clone(),
         )?;
 
         // Synthesize the circuit for the non-base case and get the new running
         // instance along with a boolean indicating if all checks have passed
-        let _U_new_non_base = self.synthesize_step_non_base_case(&config, layouter, input)?;
+        let U_new_non_base = self.synthesize_step_non_base_case(&config, layouter, &input)?;
+
+        let _new_U = layouter.assign_region(
+            || "choose case",
+            move |region| {
+                let mut region = RegionCtx::new(region, 0);
+                let gate = MainGate::new(config.main_gate_config.clone());
+
+                let assigned_step = region.assign_advice(
+                    || "step",
+                    config.main_gate_config.input,
+                    Value::known(input.step),
+                )?;
+
+                let assigned_is_zero_step = gate.is_zero_term(&mut region, assigned_step)?;
+
+                Ok(AssignedRelaxedPlonkInstance::<C>::conditional_select(
+                    &mut region,
+                    &config.main_gate_config,
+                    &U_new_non_base,
+                    &U_new_base,
+                    assigned_is_zero_step,
+                )?)
+            },
+        )?;
 
         todo!("#32")
     }
@@ -216,11 +242,9 @@ where
         &self,
         layouter: &mut impl Layouter<C::Base>,
         public_params: &SynthesizeStepParams<C, RO>,
-        u: Option<&PlonkInstance<C>>,
+        u: &PlonkInstance<C>,
         config: MainGateConfig,
     ) -> Result<AssignedRelaxedPlonkInstance<C>, SynthesisError> {
-        let u = u.cloned().unwrap_or_default();
-
         let Unew_base = layouter.assign_region(
             || "synthesize_step_base_case",
             move |region| {
@@ -252,35 +276,42 @@ where
         &self,
         config: &StepConfig<ARITY, C, Self>,
         layouter: &mut impl Layouter<C::Base>,
-        input: StepInputs<ARITY, C, RO>,
-    ) -> Result<FoldRelaxedPlonkInstanceChip<MAIN_GATE_CONFIG_SIZE, C>, SynthesisError> {
-        // TODO Check hash of params
+        input: &StepInputs<ARITY, C, RO>,
+    ) -> Result<AssignedRelaxedPlonkInstance<C>, SynthesisError> {
+        let StepInputs {
+            U,
+            u,
+            cross_term_commits,
+            public_params_hash,
+            ..
+        } = input;
 
-        let U = input
-            .U
-            .unwrap_or_else(|| todo!("understand what we should use in that case"));
+        let (_chip, assigned_U_new_base) = layouter.assign_region(
+            || "synthesize_step_non_base_case",
+            move |region| {
+                let chip = FoldRelaxedPlonkInstanceChip::from_relaxed(
+                    U.clone(),
+                    input.step_public_params.limb_width,
+                    input.step_public_params.n_limbs,
+                    config.main_gate_config.clone(),
+                );
 
-        let _Unew_base: FoldRelaxedPlonkInstanceChip<MAIN_GATE_CONFIG_SIZE, C> = layouter
-            .assign_region(
-                || "synthesize_step_non_base_case",
-                move |_region| {
-                    let _U = FoldRelaxedPlonkInstanceChip::from_relaxed(
-                        U.clone(),
-                        input.public_params.limb_width,
-                        input.public_params.n_limbs,
-                        config.main_gate_config.clone(),
-                    );
+                let ro_circuit = RO::new(
+                    config.main_gate_config.clone(),
+                    input.step_public_params.ro_constant.clone(),
+                );
 
-                    let _ro_circuit = RO::new(
-                        config.main_gate_config.clone(),
-                        input.public_params.ro_constant.clone(),
-                    );
+                Ok(chip.fold(
+                    &mut RegionCtx::new(region, 0),
+                    ro_circuit,
+                    public_params_hash,
+                    u,
+                    cross_term_commits,
+                )?)
+            },
+        )?;
 
-                    todo!()
-                },
-            )?;
-
-        todo!("#32")
+        Ok(assigned_U_new_base)
     }
 }
 
