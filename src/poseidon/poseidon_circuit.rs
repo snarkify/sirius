@@ -33,12 +33,12 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
         }
     }
 
-    fn absorb_base(&mut self, base: WrapValue<F>) {
+    fn absorb_base(&mut self, base: WrapValue<F>) -> &mut Self {
         self.update(&[base])
     }
 
-    fn absorb_point(&mut self, x: WrapValue<F>, y: WrapValue<F>) {
-        self.update(&[x, y])
+    fn absorb_point(&mut self, point: [WrapValue<F>; 2]) -> &mut Self {
+        self.update(&point)
     }
 
     fn squeeze_n_bits(
@@ -356,8 +356,9 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
         Ok(res)
     }
 
-    pub fn update(&mut self, inputs: &[WrapValue<F>]) {
-        self.buf.extend_from_slice(inputs)
+    pub fn update(&mut self, inputs: &[WrapValue<F>]) -> &mut Self {
+        self.buf.extend_from_slice(inputs);
+        self
     }
 
     pub fn squeeze(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedValue<F>, Error> {

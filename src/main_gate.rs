@@ -6,9 +6,13 @@ use halo2_proofs::{
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance},
     poly::Rotation,
 };
+use halo2curves::{Coordinates, CurveAffine};
 use itertools::Itertools;
 
-use crate::util::{self, normalize_trailing_zeros};
+use crate::{
+    gadgets::ecc::AssignedPoint,
+    util::{self, normalize_trailing_zeros},
+};
 
 pub type AssignedValue<F> = AssignedCell<F, F>;
 pub type AssignedBit<F> = AssignedCell<F, F>;
@@ -194,6 +198,27 @@ pub enum WrapValue<F: PrimeField> {
 }
 
 impl<F: PrimeField> WrapValue<F> {
+    pub fn from_point<C: CurveAffine>(input: &C) -> Option<(Self, Self)>
+    where
+        C: CurveAffine<Base = F>,
+    {
+        let coordinates: Coordinates<_> = Option::from(input.coordinates())?;
+        Some((
+            Self::Unassigned(Value::known(*coordinates.x())),
+            Self::Unassigned(Value::known(*coordinates.y())),
+        ))
+    }
+
+    pub fn from_assigned_point<C: CurveAffine>(input: &AssignedPoint<C>) -> [Self; 2]
+    where
+        C: CurveAffine<Base = F>,
+    {
+        [
+            Self::Assigned(input.x.clone()),
+            Self::Assigned(input.y.clone()),
+        ]
+    }
+
     pub fn value(&self) -> Value<F> {
         match self {
             WrapValue::Assigned(v) => v.value().copied(),

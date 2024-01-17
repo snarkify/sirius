@@ -9,15 +9,16 @@ use halo2curves::CurveAffine;
 use itertools::Itertools;
 
 use crate::{
+    constants::NUM_CHALLENGE_BITS,
     ivc::fold_relaxed_plonk_instance_chip::FoldRelaxedPlonkInstanceChip,
-    main_gate::{self, AssignedValue, MainGate, RegionCtx},
+    main_gate::{self, AssignedValue, MainGate, RegionCtx, WrapValue},
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
 };
 
 use super::{
     floor_planner::FloorPlanner,
-    fold_relaxed_plonk_instance_chip::{self, AssignedRelaxedPlonkInstance},
+    fold_relaxed_plonk_instance_chip::{self, AssignedRelaxedPlonkInstance, FoldResult},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -151,6 +152,12 @@ pub struct StepConfig<const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY,
     main_gate_config: MainGateConfig,
 }
 
+pub struct StepSynthesisResult<const ARITY: usize, C: CurveAffine> {
+    z_output: [AssignedValue<C::Base>; ARITY],
+    output_hash: AssignedValue<C::Base>,
+    X1: Vec<AssignedValue<C::Base>>,
+}
+
 /// Trait extends [`StepCircuit`] to represent the augmented function `F'` in the IVC scheme.
 ///
 /// If [`StepCircuit`] is defined by circuit developers, this trait automatically extends
@@ -199,7 +206,7 @@ where
         config: StepConfig<ARITY, C, Self>,
         layouter: &mut impl Layouter<C::Base>,
         input: StepInputs<ARITY, C, RO>,
-    ) -> Result<[AssignedCell<C::Scalar, C::Scalar>; ARITY], SynthesisError> {
+    ) -> Result<StepSynthesisResult<ARITY, C>, SynthesisError> {
         // Synthesize the circuit for the base case and get the new running instance
         let U_new_base = self.synthesize_step_base_case(
             layouter,
@@ -210,23 +217,27 @@ where
 
         // Synthesize the circuit for the non-base case and get the new running
         // instance along with a boolean indicating if all checks have passed
-        let U_new_non_base = self.synthesize_step_non_base_case(&config, layouter, &input)?;
+        let FoldResult {
+            assigned_input: assigned_input_witness,
+            assigned_result_of_fold: U_new_non_base,
+        } = self.synthesize_step_non_base_case(&config, layouter, &input)?;
 
-        let (_next_step, _new_U, input) = layouter.assign_region(
+        let (assigned_next_step_i, assigned_new_U, assigned_input) = layouter.assign_region(
             || "generate input",
-            move |region| {
+            |region| {
                 let mut region = RegionCtx::new(region, 0);
                 let gate = MainGate::new(config.main_gate_config.clone());
 
-                let assigned_step = region.assign_advice(
+                let assigned_step_i = region.assign_advice(
                     || "step",
                     config.main_gate_config.input,
                     Value::known(input.step),
                 )?;
 
-                let next_step = gate.add_with_const(&mut region, &assigned_step, C::Base::ONE)?;
+                let next_step_i =
+                    gate.add_with_const(&mut region, &assigned_step_i, C::Base::ONE)?;
 
-                let assigned_is_zero_step = gate.is_zero_term(&mut region, assigned_step)?;
+                let assigned_is_zero_step = gate.is_zero_term(&mut region, assigned_step_i)?;
 
                 let new_U = AssignedRelaxedPlonkInstance::<C>::conditional_select(
                     &mut region,
@@ -247,13 +258,39 @@ where
                     .try_into()
                     .unwrap();
 
-                Ok((next_step, new_U, assigned_input))
+                Ok((next_step_i, new_U, assigned_input))
             },
         )?;
 
-        let _output = self.synthesize_step(config.step_config, layouter, &input)?;
+        let z_output = self.synthesize_step(config.step_config, layouter, &assigned_input)?;
 
-        todo!("#32")
+        let output_hash = layouter.assign_region(
+            || "generate input",
+            |region| {
+                let mut ctx = RegionCtx::new(region, 0);
+
+                let bits = RO::new(
+                    config.main_gate_config.clone(),
+                    input.step_public_params.ro_constant.clone(),
+                )
+                .absorb_point(WrapValue::from_assigned_point(
+                    &assigned_input_witness.public_params_hash,
+                ))
+                .absorb_base(WrapValue::Assigned(assigned_next_step_i.clone()))
+                .absorb_iter(input.z_0.iter())
+                .absorb_iter(z_output.iter().cloned())
+                .absorb_iter(assigned_new_U.iter_wrap_values())
+                .squeeze_n_bits(&mut ctx, NUM_CHALLENGE_BITS)?;
+
+                MainGate::new(config.main_gate_config.clone()).le_bits_to_num(&mut ctx, &bits)
+            },
+        )?;
+
+        Ok(StepSynthesisResult {
+            z_output,
+            output_hash,
+            X1: assigned_input_witness.input_challenges[1].clone(),
+        })
     }
 
     fn synthesize_step_base_case<RO: ROCircuitTrait<C::Base, Config = MainGateConfig>>(
@@ -295,7 +332,7 @@ where
         config: &StepConfig<ARITY, C, Self>,
         layouter: &mut impl Layouter<C::Base>,
         input: &StepInputs<ARITY, C, RO>,
-    ) -> Result<AssignedRelaxedPlonkInstance<C>, SynthesisError> {
+    ) -> Result<FoldResult<C>, SynthesisError> {
         let StepInputs {
             U,
             u,
@@ -319,15 +356,13 @@ where
                     input.step_public_params.ro_constant.clone(),
                 );
 
-                Ok(chip
-                    .fold(
-                        &mut RegionCtx::new(region, 0),
-                        ro_circuit,
-                        public_params_hash,
-                        u,
-                        cross_term_commits,
-                    )?
-                    .1)
+                Ok(chip.fold(
+                    &mut RegionCtx::new(region, 0),
+                    ro_circuit,
+                    public_params_hash,
+                    u,
+                    cross_term_commits,
+                )?)
             },
         )?)
     }
