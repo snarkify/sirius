@@ -9,10 +9,14 @@ halo2_proofs = { git = "https://github.com/snarkify/halo2", branch = "snarkify/d
 ff = "0.13"
 group = "0.13"
 # pasta_curves = "0.5"
-sha3 = "0.8.2"
+sha3 = "0.10"
+bincode = "1.3"
+serde = { version = "1.0", features = ["derive"] }
 rayon = "1.5.3"
 num-bigint = "0.4.3"
 num-traits = "0.2.16"
+once_cell = "1.18.0"
+digest = "0.10"
 
 rand_core = { version = "0.6", default-features = false }
 halo2curves = { git = 'https://github.com/privacy-scaling-explorations/halo2curves', tag = "0.4.0" }
