@@ -1,15 +1,16 @@
 use std::num::NonZeroUsize;
 
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::ConstraintSystem,
 };
 use halo2curves::CurveAffine;
+use itertools::Itertools;
 
 use crate::{
     ivc::fold_relaxed_plonk_instance_chip::FoldRelaxedPlonkInstanceChip,
-    main_gate::{self, MainGate, RegionCtx},
+    main_gate::{self, AssignedValue, MainGate, RegionCtx},
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
 };
@@ -87,17 +88,17 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
         &self,
         config: Self::Config,
         layouter: &mut impl Layouter<F>,
-        z_in: &[AssignedCell<F, F>; ARITY],
+        z_i: &[AssignedCell<F, F>; ARITY],
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError>;
 
     /// An auxiliary function that allows you to perform a calculation step
     /// without using ConstraintSystem.
     ///
     /// By default, performs the step with a dummy `ConstraintSystem`
-    fn output(&self, z_in: &[F; ARITY]) -> [F; ARITY] {
+    fn output(&self, z_i: &[F; ARITY]) -> [F; ARITY] {
         todo!(
             "Default impl with `Self::synthesize` wrap
-            and comment about when manual impl needed by {z_in:?}"
+            and comment about when manual impl needed by {z_i:?}"
         )
     }
 }
@@ -127,8 +128,8 @@ where
     public_params_hash: C,
     step: C::Base,
 
-    z_0: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
-    z_in: [AssignedCell<C::Scalar, C::Scalar>; ARITY],
+    z_0: [AssignedValue<C::Base>; ARITY],
+    z_i: [AssignedValue<C::Base>; ARITY],
 
     // TODO docs
     U: RelaxedPlonkInstance<C>,
@@ -144,7 +145,7 @@ where
 const MAIN_GATE_CONFIG_SIZE: usize = 5;
 type MainGateConfig = main_gate::MainGateConfig<MAIN_GATE_CONFIG_SIZE>;
 
-pub struct StepConfig<const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Scalar>> {
+pub struct StepConfig<const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Base>> {
     step_config: SP::Config,
     // NOTE: check `T` size
     main_gate_config: MainGateConfig,
@@ -168,7 +169,7 @@ pub struct StepConfig<const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY,
 ///
 /// - For `F'` please look at [`StepCircuitExt`]
 pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
-    StepCircuit<ARITY, C::Scalar> + Sized
+    StepCircuit<ARITY, C::Base> + Sized
 where
     <C as CurveAffine>::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
     <C as CurveAffine>::ScalarExt: ff::PrimeField,
@@ -176,12 +177,12 @@ where
     /// The crate-only expanding trait that checks that no instance columns have
     /// been created during [`StepCircuit::configure`].
     fn configure(
-        cs: &mut ConstraintSystem<C::Scalar>,
+        cs: &mut ConstraintSystem<C::Base>,
         main_gate_config: MainGateConfig,
     ) -> Result<StepConfig<ARITY, C, Self>, ConfigureError> {
         let before = cs.num_instance_columns();
 
-        let step_config = <Self as StepCircuit<ARITY, C::Scalar>>::configure(cs);
+        let step_config = <Self as StepCircuit<ARITY, C::Base>>::configure(cs);
 
         if before == cs.num_instance_columns() {
             Ok(StepConfig {
@@ -211,8 +212,8 @@ where
         // instance along with a boolean indicating if all checks have passed
         let U_new_non_base = self.synthesize_step_non_base_case(&config, layouter, &input)?;
 
-        let _new_U = layouter.assign_region(
-            || "choose case",
+        let (_next_step, _new_U, input) = layouter.assign_region(
+            || "generate input",
             move |region| {
                 let mut region = RegionCtx::new(region, 0);
                 let gate = MainGate::new(config.main_gate_config.clone());
@@ -223,17 +224,34 @@ where
                     Value::known(input.step),
                 )?;
 
+                let next_step = gate.add_with_const(&mut region, &assigned_step, C::Base::ONE)?;
+
                 let assigned_is_zero_step = gate.is_zero_term(&mut region, assigned_step)?;
 
-                Ok(AssignedRelaxedPlonkInstance::<C>::conditional_select(
+                let new_U = AssignedRelaxedPlonkInstance::<C>::conditional_select(
                     &mut region,
                     &config.main_gate_config,
                     &U_new_non_base,
                     &U_new_base,
-                    assigned_is_zero_step,
-                )?)
+                    assigned_is_zero_step.clone(),
+                )?;
+
+                let assigned_input: [_; ARITY] = input
+                    .z_0
+                    .iter()
+                    .zip_eq(input.z_i.iter())
+                    .map(|(z_0, z_i)| {
+                        gate.conditional_select(&mut region, z_0, z_i, &assigned_is_zero_step)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .try_into()
+                    .unwrap();
+
+                Ok((next_step, new_U, assigned_input))
             },
         )?;
+
+        let _output = self.synthesize_step(config.step_config, layouter, &input)?;
 
         todo!("#32")
     }
@@ -286,7 +304,7 @@ where
             ..
         } = input;
 
-        let (_chip, assigned_U_new_base) = layouter.assign_region(
+        Ok(layouter.assign_region(
             || "synthesize_step_non_base_case",
             move |region| {
                 let chip = FoldRelaxedPlonkInstanceChip::from_relaxed(
@@ -301,22 +319,22 @@ where
                     input.step_public_params.ro_constant.clone(),
                 );
 
-                Ok(chip.fold(
-                    &mut RegionCtx::new(region, 0),
-                    ro_circuit,
-                    public_params_hash,
-                    u,
-                    cross_term_commits,
-                )?)
+                Ok(chip
+                    .fold(
+                        &mut RegionCtx::new(region, 0),
+                        ro_circuit,
+                        public_params_hash,
+                        u,
+                        cross_term_commits,
+                    )?
+                    .1)
             },
-        )?;
-
-        Ok(assigned_U_new_base)
+        )?)
     }
 }
 
 // auto-impl for all `StepCircuit` trait `StepCircuitExt`
-impl<'link, const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Scalar>>
+impl<'link, const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Base>>
     StepCircuitExt<'link, ARITY, C> for SP
 where
     <C as CurveAffine>::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
@@ -376,9 +394,9 @@ pub mod trivial {
             &self,
             _config: Self::Config,
             _layouter: &mut impl Layouter<F>,
-            z_in: &[AssignedCell<F, F>; ARITY],
+            z_i: &[AssignedCell<F, F>; ARITY],
         ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
-            Ok(z_in.clone())
+            Ok(z_i.clone())
         }
     }
 }
