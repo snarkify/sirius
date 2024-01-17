@@ -1,12 +1,10 @@
 use std::{io::Read, iter};
 
+use digest::{ExtendableOutput, Update};
 use group::Curve;
 use halo2_proofs::arithmetic::{best_multiexp, CurveAffine, CurveExt};
 use rayon::prelude::*;
-use sha3::{
-    digest::{ExtendableOutput, Input},
-    Shake256,
-};
+use sha3::Shake256;
 
 use crate::util::parallelize;
 
@@ -27,8 +25,8 @@ impl<C: CurveAffine> CommitmentKey<C> {
         let n: usize = 1 << k;
 
         let mut shake = Shake256::default();
-        shake.input(label);
-        let mut reader = shake.xof_result();
+        shake.update(label);
+        let mut reader = shake.finalize_xof();
 
         let ck_proj: Vec<_> = iter::repeat_with(|| {
             let mut uniform_bytes = [0u8; 32];
