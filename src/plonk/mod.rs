@@ -539,7 +539,8 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
+#[serde(bound(serialize = "F: serde::Serialize"))]
 pub struct TableData<F: PrimeField> {
     // TODO: without usable_rows still safe?
     pub(crate) k: u32,

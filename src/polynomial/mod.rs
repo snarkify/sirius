@@ -38,13 +38,13 @@ impl Ord for ColumnIndex {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct Query {
     pub index: usize,
     pub rotation: Rotation,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub enum Expression<F> {
     Constant(F),
     Polynomial(Query),

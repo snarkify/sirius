@@ -3,7 +3,7 @@ use halo2_proofs::plonk::permutation::Argument;
 use halo2_proofs::plonk::{Any, Column, Error};
 use log::*;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Assembly {
     /// Columns that participate on the copy permutation argument.
     columns: Vec<Column<Any>>,

@@ -8,7 +8,7 @@ use sha3::Shake256;
 
 use crate::util::parallelize;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct CommitmentKey<C: CurveAffine> {
     ck: Vec<C>,
 }

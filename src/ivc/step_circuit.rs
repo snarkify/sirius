@@ -7,6 +7,7 @@ use halo2_proofs::{
 };
 use halo2curves::CurveAffine;
 use itertools::Itertools;
+use serde::Serialize;
 
 use crate::{
     constants::NUM_CHALLENGE_BITS,
@@ -109,7 +110,12 @@ pub(crate) enum ConfigureError {
     InstanceColumnNotAllowed,
 }
 
-// TODO #32 Rename
+#[derive(Serialize)]
+#[serde(bound(serialize = "
+    C: Serialize,
+    C::Scalar: Serialize,
+    C::ScalarExt: Serialize,
+    RO::Args: Serialize"))]
 pub(crate) struct SynthesizeStepParams<C: CurveAffine, RO: ROCircuitTrait<C::Base>>
 where
     C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,

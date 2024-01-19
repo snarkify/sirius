@@ -1,8 +1,9 @@
-use std::{marker::PhantomData, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2curves::CurveAffine;
+use serde::Serialize;
 
 use crate::{
     commitment::CommitmentKey,
@@ -16,7 +17,12 @@ pub use super::{
     step_circuit::{StepCircuit, SynthesisError},
 };
 
-// TODO #31 docs
+#[derive(Serialize)]
+#[serde(bound(serialize = "
+    C: Serialize,
+    C::ScalarExt: Serialize,
+    ROC::Args: Serialize
+"))]
 pub struct CircuitPublicParams<C, ROC>
 where
     C: CurveAffine,
@@ -26,7 +32,7 @@ where
     ck: CommitmentKey<C>,
     td: TableData<C::Scalar>,
     ro_consts: ROC::Args,
-    // ro_consts_circuit: ROTrait::Constants, // NOTE: our `ROTraitCircuit` don't have main initializer
+    ro_consts_circuit: ROC::Args,
     params: SynthesizeStepParams<C, ROC>,
 }
 
@@ -43,7 +49,11 @@ where
     }
 }
 
-// TODO #31 docs
+#[derive(Serialize)]
+#[serde(bound(serialize = "
+    CircuitPublicParams<C1, R1>: Serialize,
+    CircuitPublicParams<C2, R2>: Serialize
+"))]
 pub struct PublicParams<const A1: usize, const A2: usize, C1, C2, R1, R2>
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
@@ -55,8 +65,23 @@ where
 {
     primary: CircuitPublicParams<C1, R1>,
     secondary: CircuitPublicParams<C2, R2>,
+}
 
-    _p: PhantomData<(C1, C2)>,
+impl<const A1: usize, const A2: usize, C1, C2, R1, R2> PublicParams<A1, A2, C1, C2, R1, R2>
+where
+    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
+    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
+    C1::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C2::Base: PrimeFieldBits + FromUniformBytes<64>,
+    R1: ROCircuitTrait<C1::Base>,
+    R2: ROCircuitTrait<C2::Base>,
+    CircuitPublicParams<C1, R1>: Serialize,
+    CircuitPublicParams<C2, R2>: Serialize,
+{
+    fn off_circuit_digest<F: PrimeField>(&self) -> F {
+        use crate::digest::{DefaultHasher, DigestToF};
+        DefaultHasher::digest_to_f(self).unwrap()
+    }
 }
 
 impl<const A1: usize, const A2: usize, C1, C2, R1, R2> PublicParams<A1, A2, C1, C2, R1, R2>
@@ -88,11 +113,7 @@ where
     pub fn digest<ROT: ROTrait<C1>>(&self, constant: ROT::Constants) -> C1::ScalarExt {
         let mut ro = ROT::new(constant);
 
-        let Self {
-            primary,
-            secondary,
-            _p,
-        } = &self;
+        let Self { primary, secondary } = &self;
         primary.absorb_into(&mut ro);
         secondary.absorb_into(&mut ro);
 

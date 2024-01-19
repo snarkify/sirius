@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 rand = "0.8"
-halo2_proofs = { git = "https://github.com/snarkify/halo2", branch = "snarkify/dev" }
+halo2_proofs = { git = "https://github.com/snarkify/halo2", rev = "2c65fa5afead71bd09a2896204949f48c716c420" }
 ff = "0.13"
 group = "0.13"
 # pasta_curves = "0.5"
@@ -30,7 +30,7 @@ result-inspect = "0.3.0"
 env_logger = "0.10.0"
 prettytable-rs = "0.10.0"
 test-log = "0.2.12"
-halo2_gadgets = { git = "https://github.com/snarkify/halo2", branch = "snarkify/dev", features = ["unstable"] }
+halo2_gadgets = { git = "https://github.com/snarkify/halo2", rev = "2c65fa5afead71bd09a2896204949f48c716c420", features = ["unstable"] }
 
 [dev-dependencies.cargo-husky]
 version = "1"
