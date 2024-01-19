@@ -54,10 +54,21 @@ pub trait ROCircuitTrait<F: PrimeFieldBits + FromUniformBytes<64>> {
     fn new(config: Self::Config, args: Self::Args) -> Self;
 
     /// Adds a scalar to the internal state
-    fn absorb_base(&mut self, base: WrapValue<F>);
+    fn absorb_base(&mut self, base: WrapValue<F>) -> &mut Self;
 
     /// Adds a point to the internal state
-    fn absorb_point(&mut self, x: WrapValue<F>, y: WrapValue<F>);
+    fn absorb_point(&mut self, point: [WrapValue<F>; 2]) -> &mut Self;
+
+    /// Adds elements of iterator of [`WrapValues`] to the internal state
+    fn absorb_iter<I>(&mut self, iter: impl Iterator<Item = I>) -> &mut Self
+    where
+        I: Into<WrapValue<F>>,
+    {
+        iter.for_each(|val| {
+            self.absorb_base(val.into());
+        });
+        self
+    }
 
     /// Returns a challenge of `num_bits` by hashing the internal state
     fn squeeze_n_bits(

@@ -110,6 +110,7 @@ pub(crate) struct AssignedRelaxedPlonkInstance<C: CurveAffine> {
     /// Derived from [`FoldRelaxedPlonkInstanceChip::X1`]
     pub folded_X1: Vec<AssignedValue<C::Base>>,
 }
+
 impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
     pub fn conditional_select<const T: usize>(
         region: &mut RegionCtx<C::Base>,
@@ -185,13 +186,119 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             folded_X1,
         })
     }
+
+    pub fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<C::Base>>
+    where
+        <C as halo2curves::CurveAffine>::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    {
+        let Self {
+            folded_W,
+            folded_E,
+            folded_u,
+            folded_challenges,
+            folded_X0,
+            folded_X1,
+        } = self;
+
+        folded_W
+            .iter()
+            .flat_map(|W| WrapValue::from_assigned_point(W))
+            .chain(WrapValue::from_assigned_point(folded_E))
+            .chain(folded_X0.iter().map(Into::into))
+            .chain(folded_X1.iter().map(Into::into))
+            .chain(folded_challenges.iter().flatten().map(Into::into))
+            .chain(iter::once(WrapValue::from(folded_u)))
+    }
+}
+impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
+    fn to_relaxed_plonk_instance(
+        &self,
+        limb_width: NonZeroUsize,
+        limbs_count: NonZeroUsize,
+    ) -> Result<Option<RelaxedPlonkInstance<C>>, Error> {
+        let Self {
+            folded_W,
+            folded_E,
+            folded_u,
+            folded_challenges,
+            folded_X0,
+            folded_X1,
+        } = self;
+
+        macro_rules! unwrap_result_option {
+            ($input:expr) => {{
+                match $input {
+                    Some(val) => val,
+                    None => {
+                        return Ok((None));
+                    }
+                }
+            }};
+        }
+
+        let folded_X0 = unwrap_result_option!(BigUint::from_assigned_cells(
+            folded_X0,
+            limb_width,
+            limbs_count
+        )?);
+        let folded_X1 = unwrap_result_option!(BigUint::from_assigned_cells(
+            folded_X1,
+            limb_width,
+            limbs_count
+        )?);
+
+        let to_diff_bn =
+            |bn: &[ AssignedCell<C::Base, C::Base> ]| -> Option<Result<C::ScalarExt, big_uint::Error>> {
+                let limbs = bn
+                    .iter()
+                    .map(|limb_cell| limb_cell.value().unwrap().copied())
+                    .map(|limb| {
+                        limb.map(|limb| util::fe_to_fe_safe(&limb).expect("fields same bytes len"))
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+
+                let bn = BigUint::<C::ScalarExt>::from_limbs(limbs.into_iter(), limb_width);
+
+                let bn_f = bn.map(|r| {
+                    r.into_f().expect(
+                        "since biguint calculations are modulo the scalar field, any result must fit",
+                    )
+                });
+
+                Some(bn_f)
+            };
+
+        Ok(Some(RelaxedPlonkInstance {
+            W_commitments: unwrap_result_option!(folded_W
+                .iter()
+                .map(AssignedPoint::to_curve)
+                .collect()),
+            E_commitment: unwrap_result_option!(folded_E.to_curve()),
+            u: util::fe_to_fe_safe(&unwrap_result_option!(folded_u.value().unwrap().copied()))
+                .expect("fields same bytes len"),
+            instance: vec![
+                util::fe_to_fe_safe(&folded_X0.into_f().expect(
+                    "since biguint calculations are modulo the scalar field, any result must fit",
+                ))
+                .expect("fields same bytes len"),
+                util::fe_to_fe_safe(&folded_X1.into_f().expect(
+                    "since biguint calculations are modulo the scalar field, any result must fit",
+                ))
+                .expect("fields same bytes len"),
+            ],
+            challenges: folded_challenges
+                .iter()
+                .flat_map(|c| to_diff_bn(c))
+                .collect::<Result<Vec<_>, _>>()?,
+        }))
+    }
 }
 
 /// Holds the assigned values and points resulting from the folding process.
 pub(crate) struct AssignedWitness<C: CurveAffine> {
     /// Assigned value of the public parameters commitment.
     /// Sourced directly from the `public_params_hash` argument of [`FoldRelaxedPlonkInstanceChip::fold`].
-    public_params_hash: AssignedPoint<C>,
+    pub public_params_hash: AssignedPoint<C>,
 
     /// Assigned [`RelaxedPlonkInstance`]
     assigned_relaxed: AssignedRelaxedPlonkInstance<C>,
@@ -206,7 +313,7 @@ pub(crate) struct AssignedWitness<C: CurveAffine> {
 
     /// Vector of vectors of assigned values for each limb of the input challenges.
     /// Sourced directly from [`PlonkInstance::challenges`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
-    input_challenges: Vec<Vec<AssignedValue<C::Base>>>,
+    pub input_challenges: Vec<Vec<AssignedValue<C::Base>>>,
 
     /// Vector of assigned points representing the commitments to the cross terms.
     /// Sourced directly from the `cross_term_commits` argument of [`FoldRelaxedPlonkInstanceChip::fold`].
@@ -222,6 +329,12 @@ pub(crate) struct AssignedWitness<C: CurveAffine> {
     /// Generated by [`ROCircuitTrait`] provided into [`FoldRelaxedPlonkInstanceChip::fold`] method.
     /// All params in this structure used as part of seeds for generate this challenge
     r: Vec<AssignedBit<C::Base>>,
+}
+impl<C: CurveAffine> ops::Deref for AssignedWitness<C> {
+    type Target = AssignedRelaxedPlonkInstance<C>;
+    fn deref(&self) -> &Self::Target {
+        &self.assigned_relaxed
+    }
 }
 
 /// Enumerates possible errors that can occur during the folding process
@@ -578,25 +691,8 @@ where
         public_params_hash: &C,
         input_plonk: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
-    ) -> Result<(Option<Self>, AssignedRelaxedPlonkInstance<C>), Error> {
-        let AssignedWitness {
-            public_params_hash: _, // TODO Check don't use in scheme
-            assigned_relaxed:
-                AssignedRelaxedPlonkInstance {
-                    folded_W,
-                    folded_E,
-                    folded_u,
-                    folded_X0,
-                    folded_X1,
-                    folded_challenges,
-                },
-            input_W_commitments,
-            input_instances,
-            input_challenges,
-            cross_terms_commits,
-            r,
-            m_bn,
-        } = self.assign_witness_with_challenge(
+    ) -> Result<FoldResult<C>, Error> {
+        let w = self.assign_witness_with_challenge(
             region,
             ro_circuit,
             public_params_hash,
@@ -604,33 +700,45 @@ where
             cross_term_commits,
         )?;
 
-        debug!("fold: Assigned & Generated challenge: {r:?}");
+        debug!("fold: Assigned & Generated challenge: {r:?}", r = w.r);
 
         let gate = MainGate::new(self.config.clone());
 
-        let r_value = gate.le_bits_to_num(region, &r)?;
+        let r_value = gate.le_bits_to_num(region, &w.r)?;
         let r = BigUintView {
             as_bn_limbs: self.bn_chip.from_assigned_cell_to_limbs(region, &r_value)?,
-            as_bits: r,
+            as_bits: w.r.clone(),
         };
 
-        let new_folded_W = Self::fold_W(region, &self.config, &folded_W, &input_W_commitments, &r)?;
+        let new_folded_W = Self::fold_W(
+            region,
+            &self.config,
+            &w.assigned_relaxed.folded_W,
+            &w.input_W_commitments,
+            &r,
+        )?;
 
         debug!("fold: W folded: {new_folded_W:?}");
 
-        let new_folded_E = self.fold_E(region, folded_E, &cross_terms_commits, r.clone(), &m_bn)?;
+        let new_folded_E = self.fold_E(
+            region,
+            w.folded_E.clone(),
+            &w.cross_terms_commits,
+            r.clone(),
+            &w.m_bn,
+        )?;
         debug!("fold: E folded: {new_folded_W:?}");
 
-        let new_folded_u = gate.add(region, &folded_u, &r_value)?;
+        let new_folded_u = gate.add(region, &w.folded_u, &r_value)?;
         debug!("fold: u folded: {new_folded_u:?}");
 
         let [new_folded_X0, new_folded_X1] = Self::fold_instances(
             region,
             &self.bn_chip,
-            input_instances.try_into().unwrap(),
-            [folded_X0, folded_X1],
+            w.input_instances.clone().try_into().unwrap(),
+            [w.folded_X0.clone(), w.folded_X1.clone()],
             &r.as_bn_limbs,
-            &m_bn,
+            &w.m_bn,
             self.limb_width,
         )
         .inspect_err(|err| error!("while fold instances: {err:?}"))?;
@@ -638,36 +746,16 @@ where
         let new_folded_challenges = Self::fold_challenges(
             region,
             &self.bn_chip,
-            input_challenges,
-            folded_challenges,
+            w.input_challenges.clone(),
+            w.folded_challenges.clone(),
             &r.as_bn_limbs,
-            &m_bn,
+            &w.m_bn,
             self.limb_width,
         )
         .inspect_err(|err| error!("while fold challenges: {err:?}"))?;
         debug!("fold: challenges folded: {new_folded_challenges:?}");
 
-        let to_diff_bn = |bn: Vec<AssignedCell<C::Base, C::Base>>| {
-            Some(
-                BigUint::from_limbs(
-                    bn.into_iter()
-                        .map(|limb_cell| limb_cell.value().unwrap().copied())
-                        .map(|limb| {
-                            limb.map(|limb| {
-                                util::fe_to_fe_safe(&limb).expect("fields same bytes len")
-                            })
-                        })
-                        .collect::<Option<Vec<_>>>()?
-                        .into_iter(),
-                    self.limb_width,
-                )
-                .map(|r| r.into_f()
-                    .expect("since biguint calculations are modulo the scalar field, any result must fit")
-                )
-            )
-        };
-
-        let assigned_relaxed = AssignedRelaxedPlonkInstance {
+        let assigned_result_of_fold = AssignedRelaxedPlonkInstance {
             folded_W: new_folded_W.clone(),
             folded_E: new_folded_E.clone(),
             folded_X0: new_folded_X0.clone(),
@@ -676,54 +764,10 @@ where
             folded_u: new_folded_u.clone(),
         };
 
-        let new_folded_X0 =
-            BigUint::from_assigned_cells(&new_folded_X0, self.limb_width, self.limbs_count)?
-                .unwrap_or_else(|| BigUint::zero(self.limb_width));
-        let new_folded_X1 =
-            BigUint::from_assigned_cells(&new_folded_X1, self.limb_width, self.limbs_count)?
-                .unwrap_or_else(|| BigUint::zero(self.limb_width));
-
-        macro_rules! unwrap_result_option {
-            ($input:expr) => {{
-                match $input {
-                    Some(val) => val,
-                    None => {
-                        return Ok((None, assigned_relaxed));
-                    }
-                }
-            }};
-        }
-        let chip = Self {
-            relaxed: RelaxedPlonkInstance {
-                W_commitments: unwrap_result_option!(new_folded_W
-                    .iter()
-                    .map(AssignedPoint::to_curve)
-                    .collect()),
-                E_commitment: unwrap_result_option!(new_folded_E.to_curve()),
-                u: util::fe_to_fe_safe(&unwrap_result_option!(new_folded_u
-                        .value()
-                        .unwrap()
-                        .copied())
-                    ).expect("fields same bytes len"),
-                instance: vec![
-                    util::fe_to_fe_safe(&new_folded_X0
-                        .into_f()
-                        .expect("since biguint calculations are modulo the scalar field, any result must fit")
-                    ).expect("fields same bytes len"),
-                    util::fe_to_fe_safe(&new_folded_X1
-                        .into_f()
-                        .expect("since biguint calculations are modulo the scalar field, any result must fit")
-                    ).expect("fields same bytes len"),
-                ],
-                challenges: new_folded_challenges
-                    .into_iter()
-                    .flat_map(to_diff_bn)
-                    .collect::<Result<Vec<_>, _>>()?,
-            },
-            ..self
-        };
-
-        Ok((Some(chip), assigned_relaxed))
+        Ok(FoldResult {
+            assigned_input: w,
+            assigned_result_of_fold,
+        })
     }
 
     /// Assign [FoldRelaxedPlonkInstanceChip::relaxed`]
@@ -820,10 +864,10 @@ where
                     || stringify!($input),
                 )?;
 
-                ro_circuit.absorb_point(
+                ro_circuit.absorb_point([
                     WrapValue::Assigned(output.x.clone()),
                     WrapValue::Assigned(output.y.clone()),
-                );
+                ]);
 
                 Result::<_, Error>::Ok(output)
             }};
@@ -1008,6 +1052,11 @@ fn assign_next_advice_from_diff_field<C: CurveAffine, AR: Into<String>>(
     })?;
 
     Ok(assignor.assign_next_advice(region, annotation, val)?)
+}
+
+pub struct FoldResult<C: CurveAffine> {
+    pub assigned_input: AssignedWitness<C>,
+    pub assigned_result_of_fold: AssignedRelaxedPlonkInstance<C>,
 }
 
 #[cfg(test)]
@@ -1732,9 +1781,10 @@ mod tests {
                     },
                 )
                 .unwrap()
-                .0
+                .assigned_result_of_fold
+                .to_relaxed_plonk_instance(LIMB_WIDTH, LIMB_LIMIT)
                 .unwrap()
-                .relaxed;
+                .unwrap();
 
             let off_circuit_r = generate_off_circuit_challenge(
                 &spec,
