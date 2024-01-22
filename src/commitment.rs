@@ -4,11 +4,13 @@ use digest::{ExtendableOutput, Update};
 use group::Curve;
 use halo2_proofs::arithmetic::{best_multiexp, CurveAffine, CurveExt};
 use rayon::prelude::*;
+use serde::Serialize;
 use sha3::Shake256;
 
 use crate::util::parallelize;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(bound(serialize = "C: Serialize"))]
 pub struct CommitmentKey<C: CurveAffine> {
     ck: Vec<C>,
 }

@@ -1,4 +1,4 @@
-use std::num::NonZeroUsize;
+use std::{fmt, num::NonZeroUsize};
 
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{arithmetic::CurveAffine, plonk::Error};
@@ -39,7 +39,7 @@ pub trait ROTrait<F: PrimeField> {
 pub trait ROCircuitTrait<F: PrimeFieldBits + FromUniformBytes<64>> {
     /// Associated type represents the arguments required to initialize the hash function in the circuit.
     /// These could include various parameters like the number of rounds, the internal state size, etc.
-    type Args: Clone;
+    type Args: fmt::Debug + Clone;
 
     /// Associated type represents the configuration settings for the hash function within the circuit.
     ///
@@ -82,8 +82,9 @@ where
     F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
     /// Argument for creating on-circuit & off-circuit versions of oracles
-    type Args;
+    type Args: fmt::Debug + serde::Serialize;
+    type Config;
 
     type OffCircuit: ROTrait<F, Constants = Self::Args>;
-    type OnCircuit: ROCircuitTrait<F, Args = Self::Args>;
+    type OnCircuit: ROCircuitTrait<F, Args = Self::Args, Config = Self::Config>;
 }

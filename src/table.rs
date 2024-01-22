@@ -41,7 +41,7 @@ use halo2_proofs::{
 use log::*;
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TableData<F: PrimeField> {
     // TODO: without usable_rows still safe?
     pub(crate) k: u32,
@@ -181,11 +181,11 @@ impl<F: PrimeField> TableData<F> {
     pub fn plonk_structure<C: CurveAffine<ScalarExt = F>>(
         &self,
         ck: &CommitmentKey<C>,
-    ) -> PlonkStructure<C> {
-        assert!(
-            !self.advice.is_empty(),
-            "should call TableData.assembly() first"
-        );
+    ) -> Option<PlonkStructure<C>> {
+        if self.advice.is_empty() {
+            return None;
+        }
+
         let selectors = self.selector.clone();
         let selector_columns =
             self.selector
@@ -266,7 +266,7 @@ impl<F: PrimeField> TableData<F> {
         let poly = compress_expression(&exprs, challenge_index).expand();
         let permutation_matrix = self.permutation_matrix();
 
-        PlonkStructure {
+        Some(PlonkStructure {
             k: self.k as usize,
             selectors,
             fixed_columns: self.fixed_columns.clone(),
@@ -277,7 +277,7 @@ impl<F: PrimeField> TableData<F> {
             fixed_commitment,
             permutation_matrix,
             lookup_arguments: self.lookup_arguments.clone(),
-        }
+        })
     }
 
     /// run 0-round special soundness protocol

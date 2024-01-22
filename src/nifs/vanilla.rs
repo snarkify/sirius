@@ -163,7 +163,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
         Error,
     > {
         // TODO: hash gate into ro (#85)
-        let S = td.plonk_structure(ck);
+        let S = td.plonk_structure(ck).unwrap();
 
         let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges)?;
         let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2)?;
