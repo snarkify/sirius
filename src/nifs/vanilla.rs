@@ -111,7 +111,8 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
                     .collect::<Result<Vec<C::ScalarExt>, EvalError>>()
             })
             .collect::<Result<Vec<Vec<C::ScalarExt>>, EvalError>>()?;
-        let cross_term_commits: Vec<C> = cross_terms.iter().map(|v| ck.commit(v)).collect();
+        let cross_term_commits: Vec<C> =
+            cross_terms.iter().map(|v| ck.commit(v).unwrap()).collect();
         Ok((cross_terms, cross_term_commits))
     }
 

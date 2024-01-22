@@ -1,18 +1,18 @@
-use std::{io::Read, iter};
+use std::{io::BufReader, iter, mem};
 
 use digest::{ExtendableOutput, Update};
 use group::Curve;
 use halo2_proofs::arithmetic::{best_multiexp, CurveAffine, CurveExt};
+use log::*;
 use rayon::prelude::*;
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha3::Shake256;
 
 use crate::util::parallelize;
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(bound(serialize = "C: Serialize"))]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommitmentKey<C: CurveAffine> {
-    ck: Vec<C>,
+    ck: Box<[C]>,
 }
 
 impl<C: CurveAffine> CommitmentKey<C> {
@@ -26,21 +26,19 @@ impl<C: CurveAffine> CommitmentKey<C> {
         assert!(k < 32);
         let n: usize = 1 << k;
 
-        let mut shake = Shake256::default();
-        shake.update(label);
-        let mut reader = shake.finalize_xof();
+        let mut reader = Shake256::default().chain(label).finalize_xof();
 
-        let ck_proj: Vec<_> = iter::repeat_with(|| {
-            let mut uniform_bytes = [0u8; 32];
-            reader.read_exact(&mut uniform_bytes).unwrap();
-            uniform_bytes
+        let ck_proj: Box<[_]> = iter::repeat_with(|| {
+            let mut buffer = [0u8; 32];
+            reader.read_exact(&mut buffer).unwrap();
+            buffer
         })
         .take(n)
         .par_bridge()
         .map(|uniform_byte| (C::CurveExt::hash_to_curve("from_uniform_bytes"))(&uniform_byte))
         .collect();
 
-        let mut ck: Vec<C> = vec![C::identity(); n];
+        let mut ck: Box<[C]> = iter::repeat(C::identity()).take(n).collect();
         parallelize(&mut ck, |(ck, start)| {
             C::Curve::batch_normalize(&ck_proj[start..start + ck.len()], ck);
         });
@@ -48,11 +46,51 @@ impl<C: CurveAffine> CommitmentKey<C> {
         CommitmentKey { ck }
     }
 
-    pub fn commit(&self, v: &[C::Scalar]) -> C {
-        assert!(
-            self.ck.len() >= v.len(),
-            "CommitmentKey size must be greater than or equal to scalar vector size"
-        );
-        best_multiexp(v, &self.ck[..v.len()]).to_affine()
+    pub fn commit(&self, v: &[C::Scalar]) -> Option<C> {
+        if self.ck.len() < v.len() {
+            return None;
+        }
+        Some(best_multiexp(v, &self.ck[..v.len()]).to_affine())
+    }
+}
+
+use std::{
+    fs::File,
+    io::{self, Read, Write},
+    path::Path,
+};
+
+impl<C: CurveAffine + Serialize + DeserializeOwned> CommitmentKey<C> {
+    pub fn save_to_file(&self, file_path: &Path) -> io::Result<()> {
+        File::create(file_path)?.write_all(
+            &bincode::serialize(self)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+        )
+    }
+
+    pub fn load_from_file(file_path: &Path) -> io::Result<Self> {
+        let mut file = BufReader::new(File::open(file_path)?);
+
+        // Read the initial usize
+        let mut usize_buffer = [0u8; mem::size_of::<usize>()];
+        file.read_exact(&mut usize_buffer)?;
+        let _size = usize::from_le_bytes(usize_buffer);
+
+        let chunks: Box<[_]> = iter::repeat_with(|| {
+            let mut buffer = [0u8; 32];
+            file.read_exact(&mut buffer).ok()?;
+            Some(buffer)
+        })
+        .map_while(|b| b)
+        .collect();
+
+        debug!("chunk collected");
+
+        Ok(CommitmentKey {
+            ck: chunks
+                .into_par_iter()
+                .map(|chunk| unsafe { *(chunk.as_ptr() as *const C) })
+                .collect::<Box<[C]>>(),
+        })
     }
 }

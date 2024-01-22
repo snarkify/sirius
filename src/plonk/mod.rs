@@ -184,6 +184,11 @@ impl<F: PrimeField> PlonkStructure<F> {
         self.fixed_columns.len() + self.selectors.len()
     }
 
+    pub fn get_degree_for_folding(&self) -> usize {
+        let offset = self.num_non_fold_vars();
+        self.poly.degree_for_folding(offset)
+    }
+
     /// return the number of variables to be folded
     /// each lookup argument will add 5 variables (l,t,m,h,g)
     pub fn num_fold_vars(&self) -> usize {
@@ -221,7 +226,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             .W_commitments
             .iter()
             .zip(W.W.iter())
-            .filter_map(|(Ci, Wi)| ck.commit(Wi).ne(Ci).then_some(()))
+            .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
             .count();
 
         let data = PlonkEvalDomain {
@@ -266,7 +271,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             .W_commitments
             .iter()
             .zip(W.W.iter())
-            .filter_map(|(Ci, Wi)| ck.commit(Wi).ne(Ci).then_some(()))
+            .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
             .count();
 
         let nrow = 2usize.pow(self.k as u32);
@@ -290,7 +295,7 @@ impl<F: PrimeField> PlonkStructure<F> {
                     .filter(|(i, v)| W.E[*i].ne(v))
                     .count()
             })?;
-        let is_E_equal = ck.commit(&W.E).eq(&U.E_commitment);
+        let is_E_equal = ck.commit(&W.E).unwrap().eq(&U.E_commitment);
         let is_h_equal_g = self.is_sat_log_derivative(&W.W);
 
         match (res == 0, check_W_commitments == 0, is_E_equal, is_h_equal_g) {
