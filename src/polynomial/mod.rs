@@ -1,6 +1,6 @@
 use std::{
     cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd},
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, BTreeSet},
     fmt,
     fmt::{Debug, Display},
     ops::{Add, Mul, Neg, Sub},
@@ -71,7 +71,7 @@ impl<F: PrimeField> Display for Expression<F> {
 }
 impl<F: PrimeField> Expression<F> {
     // uniquely determined by (rotation, index, var_type)
-    pub fn poly_set(&self, set: &mut HashSet<ColumnIndex>) {
+    pub fn poly_set(&self, set: &mut BTreeSet<ColumnIndex>) {
         match self {
             Expression::Constant(_) => (),
             Expression::Polynomial(poly) => {
@@ -220,11 +220,10 @@ impl<F: PrimeField> Expression<F> {
     }
 
     pub fn expand(&self) -> MultiPolynomial<F> {
-        let mut set = HashSet::new();
+        let mut set = BTreeSet::new();
         self.poly_set(&mut set);
-        let mut index_to_poly: Vec<ColumnIndex> = set.into_iter().collect();
-        index_to_poly.sort();
-        self._expand(&index_to_poly[..])
+        let index_to_poly = set.into_iter().collect::<Box<[_]>>();
+        self._expand(&index_to_poly)
     }
 
     // fold_transform will fold a polynomial expression P(f_1,...f_m, x_1,...,x_n)
@@ -695,11 +694,11 @@ impl<F: PrimeField> MultiPolynomial<F> {
             if idx >= self.monomials.len() {
                 break;
             }
-            if self.monomials[idx] == self.monomials[idx - 1] {
+            if self.monomials[idx].coeff == F::ZERO {
+                continue;
+            } else if self.monomials[idx] == reduced[reduced.len() - 1] {
                 let size = reduced.len();
                 reduced[size - 1].add(&self.monomials[idx]);
-            } else if self.monomials[idx].coeff == F::ZERO {
-                continue;
             } else {
                 reduced.push(self.monomials[idx].clone());
             }

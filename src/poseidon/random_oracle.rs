@@ -19,7 +19,7 @@ pub trait ROConstantsTrait {
 
 pub trait ROTrait<F: PrimeField> {
     /// A type representing constants/parameters associated with the hash function
-    type Constants: ROConstantsTrait;
+    type Constants: ROConstantsTrait + Clone;
 
     /// Initializes the hash function
     fn new(constants: Self::Constants) -> Self;
@@ -82,7 +82,7 @@ where
     F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
     /// Argument for creating on-circuit & off-circuit versions of oracles
-    type Args: fmt::Debug + serde::Serialize;
+    type Args: fmt::Debug + serde::Serialize + Clone;
     type Config;
 
     type OffCircuit: ROTrait<F, Constants = Self::Args>;

@@ -27,7 +27,7 @@ use crate::{
     polynomial::{sparse::SparseMatrix, Expression},
     poseidon::ROTrait,
     sps::Error as SpsError,
-    util::{batch_invert_assigned, concatenate_with_padding, fe_to_fe},
+    util::{self, concatenate_with_padding, fe_to_fe},
 };
 use ff::PrimeField;
 use halo2_proofs::{
@@ -156,8 +156,8 @@ impl<F: PrimeField> TableData<F> {
 
     // TODO Change design
     pub(crate) fn postpone_assembly(&mut self) {
-        self.fixed_columns = batch_invert_assigned(&self.fixed);
-        self.advice_columns = batch_invert_assigned(&self.advice);
+        self.fixed_columns = util::batch_invert_assigned(&self.fixed);
+        self.advice_columns = util::batch_invert_assigned(&self.advice);
     }
 
     pub fn assembly<ConcreteCircuit: Circuit<F>>(
@@ -268,8 +268,11 @@ impl<F: PrimeField> TableData<F> {
             return Err(SpsError::LackOfAdvices);
         }
 
+        debug!("sps protocol for zero start W1 concatenation");
         let W1 = concatenate_with_padding(&self.advice_columns, 2usize.pow(self.k));
-        let C1 = ck.commit(&W1);
+        debug!("sps protocol for zero W1 concatenated: {}", W1.len());
+        let C1 = ck.commit(&W1).unwrap();
+        debug!("sps protocol for zero W1 commited");
 
         Ok((
             PlonkInstance {
@@ -340,7 +343,7 @@ impl<F: PrimeField> TableData<F> {
         ]
         .concat();
 
-        let C1 = ck.commit(&W1);
+        let C1 = ck.commit(&W1).unwrap();
 
         self.instance.iter().for_each(|inst| {
             ro_nark.absorb_field(fe_to_fe(inst).unwrap());
@@ -356,7 +359,7 @@ impl<F: PrimeField> TableData<F> {
             k_power_of_2,
         );
 
-        let C2 = ck.commit(&W2);
+        let C2 = ck.commit(&W2).unwrap();
         ro_nark.absorb_point(&C2);
         let r2 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
 
@@ -390,10 +393,16 @@ impl<F: PrimeField> TableData<F> {
         let k_power_of_2 = 2usize.pow(self.k);
 
         // round 1
+        debug!("sps protocol for 3: start W1 concatenation");
         let W1 = concatenate_with_padding(&self.advice_columns, k_power_of_2);
-        let C1 = ck.commit(&W1);
+        debug!("sps protocol for 3: W1 concatenated: {}", W1.len());
+
+        let C1 = ck.commit(&W1).unwrap();
+        debug!("sps protocol for 3: W1 commited");
+
         ro_nark.absorb_point(&C1);
         let r1 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
+        debug!("r1 generated");
 
         // round 2
         let lookup_coeff = self
@@ -402,26 +411,38 @@ impl<F: PrimeField> TableData<F> {
             .map(|la| la.evaluate_coefficient_1(self, r1))
             .transpose()?
             .ok_or(SpsError::LackOfLookupArguments)?;
+        debug!("lookup calculated");
 
+        debug!("sps protocol for 3: start W2 concatenation");
         let W2 = concatenate_with_padding(
             &concat_vec!(&lookup_coeff.ls, &lookup_coeff.ts, &lookup_coeff.ms),
             k_power_of_2,
         );
-        let C2 = ck.commit(&W2);
+        debug!("sps protocol for 3: W2 concatenated: {}", W2.len());
+
+        let C2 = ck.commit(&W2).unwrap();
+        debug!("sps protocol for 3: W2 commited");
+
         ro_nark.absorb_point(&C2);
         let r2 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
+        debug!("r2 generated");
 
         // round 3
         let lookup_coeff = lookup_coeff.evaluate_coefficient_2(r2);
 
+        debug!("sps protocol for 3: start W3 concatenation");
         let W3 = concatenate_with_padding(
             &concat_vec!(&lookup_coeff.hs, &lookup_coeff.gs),
             k_power_of_2,
         );
+        debug!("sps protocol for 3: W3 concatenated: {}", W3.len());
 
-        let C3 = ck.commit(&W3);
+        let C3 = ck.commit(&W3).unwrap();
+        debug!("sps protocol for 3: W3 commited");
+
         ro_nark.absorb_point(&C3);
         let r3 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
+        debug!("r3 generated");
 
         Ok((
             PlonkInstance {
@@ -447,6 +468,8 @@ impl<F: PrimeField> TableData<F> {
         if self.advice.is_empty() {
             return Err(SpsError::LackOfAdvices);
         }
+
+        debug!("start sps protocol for {num_challenges}");
 
         match num_challenges {
             0 => self.run_sps_protocol_0(ck),

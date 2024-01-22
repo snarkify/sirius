@@ -459,7 +459,12 @@ mod components_tests {
             }
         }
 
-        BigUint::from_limbs(production_cells.into_iter().flatten(), LIMB_WIDTH).unwrap()
+        BigUint::from_limbs(
+            production_cells.into_iter().flatten(),
+            LIMB_WIDTH,
+            LIMBS_COUNT_LIMIT,
+        )
+        .unwrap()
     }
 
     fn sum_with_overflow<F: PrimeField>(lhs: &BigUint<F>, rhs: &BigUint<F>) -> BigUint<F> {
@@ -490,6 +495,7 @@ mod components_tests {
                     limb
                 }),
             LIMB_WIDTH,
+            LIMBS_COUNT_LIMIT,
         )
         .unwrap()
     }
@@ -516,6 +522,7 @@ mod components_tests {
                         .sum()
                 }),
             LIMB_WIDTH,
+            LIMBS_COUNT_LIMIT,
         )
         .unwrap()
     }

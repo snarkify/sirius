@@ -74,8 +74,12 @@ impl<F: ff::PrimeField> BigUint<F> {
     pub fn from_limbs(
         limbs: impl Iterator<Item = F>,
         limb_width: NonZeroUsize,
+        limbs_count_limit: NonZeroUsize,
     ) -> Result<Self, Error> {
-        let limbs = limbs.collect::<Vec<_>>();
+        let limbs = limbs
+            .chain(iter::repeat(F::ZERO))
+            .take(limbs_count_limit.get())
+            .collect::<Vec<_>>();
 
         Ok(if limbs.is_empty() {
             Self {
@@ -142,10 +146,12 @@ impl<F: ff::PrimeField> BigUint<F> {
                     Ok(None)
                 }
             })
+            .chain(iter::repeat_with(|| Ok(Some(F::ZERO))))
+            .take(limbs_count_limit.get())
             .collect::<Result<Option<Vec<_>>, _>>()?;
 
         limbs
-            .map(|limbs| Self::from_limbs(limbs.into_iter(), limb_width))
+            .map(|limbs| Self::from_limbs(limbs.into_iter(), limb_width, limbs_count_limit))
             .transpose()
     }
 
@@ -185,6 +191,7 @@ impl<F: ff::PrimeField> BigUint<F> {
             .take(max_limbs_count)
             .map_while(|mut o| o.take()),
             limb_width,
+            limbs_count_limit,
         )
     }
 
@@ -291,9 +298,11 @@ fn get_max_word_mask_bits(limb_width: usize) -> usize {
 mod tests {
     use std::mem;
 
-    use super::*;
+    use ff::Field;
     use halo2curves::pasta::Fp;
     use test_log::test;
+
+    use super::*;
 
     #[test]
     fn from_u64() {
@@ -304,8 +313,11 @@ mod tests {
                 NonZeroUsize::new(4).unwrap(),
             )
             .unwrap();
-            assert_eq!(bn.limbs_count().get(), 1, "Limbs > 1 at {input}");
-            assert_eq!(bn.limbs(), &[Fp::from_u128(input.into())]);
+            assert_eq!(bn.limbs_count().get(), 4, "Limbs > 1 at {input}");
+            assert_eq!(
+                bn.limbs(),
+                &[Fp::from_u128(input.into()), Fp::ZERO, Fp::ZERO, Fp::ZERO,]
+            );
             assert_eq!(bn.into_bigint(), BigUintRaw::from(input));
         }
     }
@@ -319,8 +331,11 @@ mod tests {
                 NonZeroUsize::new(4).unwrap(),
             )
             .unwrap();
-            assert_eq!(bn.limbs_count().get(), 1, "Limbs > 1 at {input}");
-            assert_eq!(bn.limbs(), &[Fp::from_u128(input)]);
+            assert_eq!(bn.limbs_count().get(), 4, "Limbs > 1 at {input}");
+            assert_eq!(
+                bn.limbs(),
+                &[Fp::from_u128(input), Fp::ZERO, Fp::ZERO, Fp::ZERO]
+            );
             assert_eq!(bn.into_bigint(), BigUintRaw::from(input));
         }
     }
@@ -334,12 +349,14 @@ mod tests {
             NonZeroUsize::new(4).unwrap(),
         )
         .unwrap();
-        assert_eq!(bn.limbs_count().get(), 2, "Limbs > 1 at {input}");
+        assert_eq!(bn.limbs_count().get(), 4, "Limbs > 1 at {input}");
         assert_eq!(
             bn.limbs(),
             &[
                 Fp::from_u128(0x0000000000000000000000000000000000000000000000000000000000000001),
-                Fp::from_u128(0x00000000000000000000000000000000fffffffffffffffffffffffffffffffe)
+                Fp::from_u128(0x00000000000000000000000000000000fffffffffffffffffffffffffffffffe),
+                Fp::from_u128(0x0000000000000000000000000000000000000000000000000000000000000000),
+                Fp::from_u128(0x0000000000000000000000000000000000000000000000000000000000000000)
             ]
         );
 

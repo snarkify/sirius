@@ -7,6 +7,7 @@ use halo2_proofs::{
 };
 use halo2curves::CurveAffine;
 use itertools::Itertools;
+use log::*;
 use serde::Serialize;
 
 use crate::{
@@ -175,7 +176,7 @@ pub struct StepSynthesisResult<const ARITY: usize, C: CurveAffine> {
     /// Output of current synthesis step
     pub z_output: [AssignedValue<C::Base>; ARITY],
     pub output_hash: AssignedValue<C::Base>,
-    pub X1: Vec<AssignedValue<C::Base>>,
+    pub X1: Option<Vec<AssignedValue<C::Base>>>,
 }
 
 /// Trait extends [`StepCircuit`] to represent the augmented function `F'` in the IVC scheme.
@@ -227,6 +228,8 @@ where
         layouter: &mut impl Layouter<C::Base>,
         input: StepInputs<ARITY, C, RO>,
     ) -> Result<StepSynthesisResult<ARITY, C>, SynthesisError> {
+        debug!("start step circuit ext synthesize");
+
         // Synthesize the circuit for the base case and get the new running instance
         let U_new_base = self.synthesize_step_base_case(
             layouter,
@@ -234,6 +237,7 @@ where
             &input.u,
             config.main_gate_config.clone(),
         )?;
+        debug!("base case synthesized");
 
         // Synthesize the circuit for the non-base case and get the new running
         // instance along with a boolean indicating if all checks have passed
@@ -241,9 +245,10 @@ where
             assigned_input: assigned_input_witness,
             assigned_result_of_fold: U_new_non_base,
         } = self.synthesize_step_non_base_case(&config, layouter, &input)?;
+        debug!("non base case synthesized");
 
         let (assigned_next_step_i, assigned_new_U, assigned_input) = layouter.assign_region(
-            || "generate input",
+            || "select case",
             |region| {
                 let mut region = RegionCtx::new(region, 0);
                 let gate = MainGate::new(config.main_gate_config.clone());
@@ -281,8 +286,10 @@ where
                 Ok((next_step_i, new_U, assigned_input))
             },
         )?;
+        debug!("case selected");
 
         let z_output = self.synthesize_step(config.step_config, layouter, &assigned_input)?;
+        debug!("step circuit step synthesized");
 
         let output_hash = layouter.assign_region(
             || "generate input",
@@ -305,11 +312,12 @@ where
                 MainGate::new(config.main_gate_config.clone()).le_bits_to_num(&mut ctx, &bits)
             },
         )?;
+        debug!("output hash calculated");
 
         Ok(StepSynthesisResult {
             z_output,
             output_hash,
-            X1: assigned_input_witness.input_challenges[1].clone(),
+            X1: assigned_input_witness.input_challenges.get(1).cloned(),
         })
     }
 
@@ -343,6 +351,7 @@ where
                     )
                 };
 
+                debug!("start assign base case");
                 Ok(chip.assign_current_relaxed(&mut RegionCtx::new(region, 0))?)
             },
         )?;

@@ -4,4 +4,6 @@
 *.sh
 *.txt
 .vscode
+.cache
 .idea
+tags

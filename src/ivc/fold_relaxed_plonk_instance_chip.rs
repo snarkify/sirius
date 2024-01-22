@@ -257,7 +257,7 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
                     })
                     .collect::<Option<Vec<_>>>()?;
 
-                let bn = BigUint::<C::ScalarExt>::from_limbs(limbs.into_iter(), limb_width);
+                let bn = BigUint::<C::ScalarExt>::from_limbs(limbs.into_iter(), limb_width, limbs_count);
 
                 let bn_f = bn.map(|r| {
                     r.into_f().expect(
@@ -352,7 +352,7 @@ pub enum Error {
 
     #[error("Error constructing elliptic curve coordinates for {variable_name}: {variable_str}")]
     CantBuildCoordinates {
-        variable_name: &'static str,
+        variable_name: String,
         variable_str: String,
     },
 
@@ -571,8 +571,10 @@ where
             .mult_mod(region, input, r_as_bn, m_bn)
             .inspect_err(|err| error!("while mult: input * r mod m: {err:?}"))?
             .remainder;
+
         debug!(
-            "fold: mult mod: {:?}",
+            "fold: mult mod ({}): {:?}",
+            part_mult_r.len(),
             CellsValuesView::from(part_mult_r.as_slice())
         );
 
@@ -586,14 +588,23 @@ where
             .res;
 
         debug!(
-            "fold: assign_sum {:?}",
+            "fold: assign_sum ({}): {:?}",
+            part_mult_r_sum_part.cells.len(),
             CellsValuesView::from(part_mult_r_sum_part.cells.as_slice())
         );
 
-        // Reduce the sum modulo the modulus
-        Ok(bn_chip
+        let reduces = bn_chip
             .red_mod(region, part_mult_r_sum_part, m_bn)?
-            .remainder)
+            .remainder;
+
+        debug!(
+            "fold: red_mod ({}): {:?}",
+            reduces.len(),
+            CellsValuesView::from(reduces.as_slice())
+        );
+
+        // Reduce the sum modulo the modulus
+        Ok(reduces)
     }
 
     /// Fold [`RelaxedPlonkInstance::instance`] & [`PlonkInstance::instance`]
@@ -780,10 +791,8 @@ where
         let mut advice_columns_assigner = self.config.advice_cycle_assigner();
 
         macro_rules! assign_point {
-            ($input:expr) => {{
-                assign_next_advice_from_point(&mut advice_columns_assigner, region, $input, || {
-                    stringify!($input)
-                })
+            ($input:expr, $annot:expr) => {{
+                assign_next_advice_from_point(&mut advice_columns_assigner, region, $input, $annot)
             }};
         }
 
@@ -814,13 +823,15 @@ where
             .relaxed
             .W_commitments
             .iter()
-            .map(|W| assign_point!(W))
+            .enumerate()
+            .map(|(i, W)| assign_point!(W, || format!("W_{i}")))
             .collect::<Result<Vec<_>, _>>()?;
-        let assigned_E = assign_point!(&self.relaxed.E_commitment)?;
 
+        let assigned_E = assign_point!(&self.relaxed.E_commitment, || "E_commitment")?;
+
+        assert_eq!(self.relaxed.instance.len(), 2);
         let assigned_X0 = assign_diff_field_as_bn!(&self.relaxed.instance[0], || "X0")?;
         let assigned_X1 = assign_diff_field_as_bn!(&self.relaxed.instance[1], || "X1")?;
-        assert_eq!(self.relaxed.instance.len(), 2);
 
         let assigned_challenges = self
             .relaxed
@@ -1030,7 +1041,7 @@ fn assign_next_advice_from_point<C: CurveAffine, AR: Into<String>>(
 ) -> Result<AssignedPoint<C>, Error> {
     let coordinates: Coordinates<C> =
         Option::from(input.coordinates()).ok_or(Error::CantBuildCoordinates {
-            variable_name: "point",
+            variable_name: (annotation)().into(),
             variable_str: format!("{:?}", input),
         })?;
 
