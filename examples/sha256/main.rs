@@ -16,8 +16,8 @@ use grumpkin::G1 as C2;
 
 use sirius::{
     ivc::{step_circuit, PublicParams, SimpleFloorPlanner, StepCircuit, SynthesisError, IVC},
-    plonk::TableData,
     poseidon::{poseidon_circuit, ROCircuitTrait},
+    table::TableData,
 };
 
 mod table16;

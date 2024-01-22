@@ -14,10 +14,10 @@ use crate::constants::NUM_CHALLENGE_BITS;
 use crate::plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain};
 use crate::plonk::{
     PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
-    SpsError, TableData,
 };
 use crate::polynomial::ColumnIndex;
 use crate::poseidon::{AbsorbInRO, ROTrait};
+use crate::table::{SpsError, TableData};
 use halo2_proofs::arithmetic::CurveAffine;
 use rayon::prelude::*;
 use std::marker::PhantomData;

@@ -6,8 +6,9 @@ use halo2curves::CurveAffine;
 
 use crate::{
     commitment::CommitmentKey,
-    plonk::{PlonkTrace, RelaxedPlonkTrace, TableData},
+    plonk::{PlonkTrace, RelaxedPlonkTrace},
     poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
+    table::TableData,
 };
 
 use super::step_circuit::SynthesizeStepParams;
