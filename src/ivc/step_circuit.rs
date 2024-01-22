@@ -175,7 +175,7 @@ pub struct StepSynthesisResult<const ARITY: usize, C: CurveAffine> {
     /// Output of current synthesis step
     pub z_output: [AssignedValue<C::Base>; ARITY],
     pub output_hash: AssignedValue<C::Base>,
-    pub X1: Vec<AssignedValue<C::Base>>,
+    pub X1: Option<Vec<AssignedValue<C::Base>>>,
 }
 
 /// Trait extends [`StepCircuit`] to represent the augmented function `F'` in the IVC scheme.
@@ -309,7 +309,7 @@ where
         Ok(StepSynthesisResult {
             z_output,
             output_hash,
-            X1: assigned_input_witness.input_challenges[1].clone(),
+            X1: assigned_input_witness.input_challenges.get(1).cloned(),
         })
     }
 

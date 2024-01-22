@@ -257,7 +257,7 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
                     })
                     .collect::<Option<Vec<_>>>()?;
 
-                let bn = BigUint::<C::ScalarExt>::from_limbs(limbs.into_iter(), limb_width);
+                let bn = BigUint::<C::ScalarExt>::from_limbs(limbs.into_iter(), limb_width, limbs_count);
 
                 let bn_f = bn.map(|r| {
                     r.into_f().expect(
@@ -571,8 +571,10 @@ where
             .mult_mod(region, input, r_as_bn, m_bn)
             .inspect_err(|err| error!("while mult: input * r mod m: {err:?}"))?
             .remainder;
+
         debug!(
-            "fold: mult mod: {:?}",
+            "fold: mult mod ({}): {:?}",
+            part_mult_r.len(),
             CellsValuesView::from(part_mult_r.as_slice())
         );
 
@@ -586,14 +588,23 @@ where
             .res;
 
         debug!(
-            "fold: assign_sum {:?}",
+            "fold: assign_sum ({}): {:?}",
+            part_mult_r_sum_part.cells.len(),
             CellsValuesView::from(part_mult_r_sum_part.cells.as_slice())
         );
 
-        // Reduce the sum modulo the modulus
-        Ok(bn_chip
+        let reduces = bn_chip
             .red_mod(region, part_mult_r_sum_part, m_bn)?
-            .remainder)
+            .remainder;
+
+        debug!(
+            "fold: red_mod ({}): {:?}",
+            reduces.len(),
+            CellsValuesView::from(reduces.as_slice())
+        );
+
+        // Reduce the sum modulo the modulus
+        Ok(reduces)
     }
 
     /// Fold [`RelaxedPlonkInstance::instance`] & [`PlonkInstance::instance`]

@@ -8,9 +8,7 @@ use serde::Serialize;
 use crate::{
     commitment::CommitmentKey,
     digest::{self, DigestToCurve},
-    plonk::PlonkStructure,
     poseidon::ROPair,
-    table::TableData,
 };
 
 use super::step_circuit::SynthesizeStepParams;
@@ -21,9 +19,9 @@ where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
     RP: ROPair<C::Base>,
 {
+    pub k: u32,
     pub ck: CommitmentKey<C>,
     pub params: SynthesizeStepParams<C, RP::OnCircuit>,
-    pub td: TableData<C::Base>,
 }
 
 impl<C: fmt::Debug, RP> fmt::Debug for CircuitPublicParams<C, RP>
@@ -36,7 +34,6 @@ where
         f.debug_struct("CircuitPublicParams")
             .field("ck", &self.ck)
             .field("params", &self.params)
-            .field("td", &self.td)
             .finish()
     }
 }
@@ -49,14 +46,15 @@ where
 {
     fn new(
         k: u32,
+        commitment_key: CommitmentKey<C>,
         is_primary_circuit: bool,
         ro_constant: RP::Args,
         limb_width: NonZeroUsize,
         n_limbs: NonZeroUsize,
     ) -> Self {
         Self {
-            ck: CommitmentKey::setup(k as usize, b"step circuit"),
-            td: TableData::new(k, vec![]),
+            k,
+            ck: commitment_key,
             params: SynthesizeStepParams {
                 limb_width,
                 n_limbs,
@@ -129,21 +127,16 @@ where
         {
             primary_ck: &'l CommitmentKey<C2>,
             primary_params: &'l SynthesizeStepParams<C2, RP2::OnCircuit>,
-            primary_structure: PlonkStructure<C1::ScalarExt>,
 
             secondary_ck: &'l CommitmentKey<C1>,
             secondary_params: &'l SynthesizeStepParams<C1, RP1::OnCircuit>,
-            secondary_structure: PlonkStructure<C2::ScalarExt>,
         }
 
         Wrapper::<'_, C1, C2, RP1, RP2> {
             primary_params: &self.primary.params,
             primary_ck: &self.primary.ck,
-            primary_structure: self.primary.td.plonk_structure().unwrap_or_default(),
-
             secondary_params: &self.secondary.params,
             secondary_ck: &self.secondary.ck,
-            secondary_structure: self.secondary.td.plonk_structure().unwrap_or_default(),
         }
         .serialize(serializer)
     }
@@ -162,6 +155,8 @@ where
 {
     pub fn new(
         k: u32,
+        primary_commitment_key: CommitmentKey<C2>,
+        secondary_commitment_key: CommitmentKey<C1>,
         primary_ro_constant: R2::Args,
         secondary_ro_constant: R1::Args,
         limb_width: NonZeroUsize,
@@ -170,6 +165,7 @@ where
         Self {
             primary: CircuitPublicParams::<C2, _>::new(
                 k,
+                primary_commitment_key,
                 true,
                 primary_ro_constant,
                 limb_width,
@@ -177,6 +173,7 @@ where
             ),
             secondary: CircuitPublicParams::<C1, _>::new(
                 k,
+                secondary_commitment_key,
                 false,
                 secondary_ro_constant,
                 limb_width,
@@ -217,6 +214,8 @@ mod pp_test {
         const K: usize = 5;
         PublicParams::<C1Affine, C2Affine, RandomOracle<5, 4>, RandomOracle<5, 4>>::new(
             K as u32,
+            CommitmentKey::setup(K, b"1"),
+            CommitmentKey::setup(K, b"2"),
             spec2,
             spec1,
             LIMB_WIDTH,

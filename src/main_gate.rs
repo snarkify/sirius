@@ -380,7 +380,15 @@ impl<const T: usize> MainGateConfig<T> {
 
 // Macro to create structs and impl for both fixed and advice columns
 macro_rules! create_column_cycle {
-    ($struct_name:ident, $trait_name:ident, $column_type:ty, $assign_next_fn_name:ident, $region_assign_fn:ident, $value_wrapper:expr) => {
+    (
+        $struct_name:ident,
+        $trait_name:ident,
+        $column_type:ty,
+        $assign_next_fn_name:ident,
+        $assign_next_collection_fn_name:ident,
+        $region_assign_fn:ident,
+        $value_wrapper:expr
+    ) => {
         struct $struct_name<'a, I: Iterator<Item = (usize, &'a Column<$column_type>)>> {
             iter: I,
             first_pass: bool,
@@ -393,6 +401,13 @@ macro_rules! create_column_cycle {
                 annotation: impl Fn() -> AR,
                 value: F,
             ) -> Result<AssignedCell<F, F>, halo2_proofs::plonk::Error>;
+
+            fn $assign_next_collection_fn_name<AR: Into<String>>(
+                &mut self,
+                region: &mut RegionCtx<'_, F>,
+                annotation: impl Clone + Fn() -> AR,
+                values: impl Iterator<Item = F>,
+            ) -> Result<Vec<AssignedCell<F, F>>, halo2_proofs::plonk::Error>;
         }
 
         impl<'a, I, F> $trait_name<F> for $struct_name<'a, I>
@@ -417,6 +432,17 @@ macro_rules! create_column_cycle {
                 let wrapper = $value_wrapper;
                 region.$region_assign_fn(annotation, *column, wrapper(value))
             }
+
+            fn $assign_next_collection_fn_name<AR: Into<String>>(
+                &mut self,
+                region: &mut RegionCtx<'_, F>,
+                annotation: impl Clone + Fn() -> AR,
+                values: impl Iterator<Item = F>,
+            ) -> Result<Vec<AssignedCell<F, F>>, halo2_proofs::plonk::Error> {
+                values
+                    .map(|val| self.$assign_next_fn_name(region, annotation.clone(), val))
+                    .collect()
+            }
         }
     };
 }
@@ -426,6 +452,7 @@ create_column_cycle!(
     FixedCyclicAssignor,
     Fixed,
     assign_next_fixed,
+    assign_all_fixed,
     assign_fixed,
     |value| value
 );
@@ -435,6 +462,7 @@ create_column_cycle!(
     AdviceCyclicAssignor,
     Advice,
     assign_next_advice,
+    assign_all_advice,
     assign_advice,
     |value| Value::known(value)
 );
