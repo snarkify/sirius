@@ -16,7 +16,7 @@ use grumpkin::G1 as C2;
 
 use sirius::{
     ivc::{step_circuit, PublicParams, SimpleFloorPlanner, StepCircuit, SynthesisError, IVC},
-    poseidon::{poseidon_circuit, ROCircuitTrait},
+    poseidon::{self, ROPair},
     table::TableData,
 };
 
@@ -318,11 +318,10 @@ impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
     }
 }
 
-type RandomOracle<const T: usize, const RATE: usize, F> =
-    poseidon_circuit::PoseidonChip<F, T, RATE>;
+type RandomOracle<const T: usize, const RATE: usize> = poseidon::PoseidonRO<T, RATE>;
 
 type RandomOracleConstant<const T: usize, const RATE: usize, F> =
-    <RandomOracle<T, RATE, F> as ROCircuitTrait<F>>::Args;
+    <RandomOracle<T, RATE> as ROPair<F>>::Args;
 
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
 const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
@@ -345,21 +344,21 @@ fn main() {
     let spec1 = RandomOracleConstant::<5, 5, <C1 as CurveExt>::Base>::new(10, 10);
     let spec2 = RandomOracleConstant::<5, 5, <C2 as CurveExt>::Base>::new(10, 10);
 
-    let pp = PublicParams::<
-        ARITY,
-        ARITY,
-        C1Affine,
-        C2Affine,
-        RandomOracle<5, 5, <C1 as CurveExt>::Base>,
-        RandomOracle<5, 5, <C2 as CurveExt>::Base>,
-    >::new(LIMB_WIDTH, LIMBS_COUNT_LIMIT, &sc1, spec1, &sc2, spec2);
+    const K: usize = 20;
+    let mut pp = PublicParams::<C1Affine, C2Affine, RandomOracle<5, 5>, RandomOracle<5, 5>>::new(
+        K as u32,
+        spec1,
+        spec2,
+        LIMB_WIDTH,
+        LIMBS_COUNT_LIMIT,
+    );
 
     let mut ivc = IVC::new(
-        &pp,
+        &mut pp,
         sc1,
-        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
-        sc2,
         array::from_fn(|i| C2Scalar::from_u128(i as u128)),
+        sc2,
+        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
     )
     .unwrap();
 

@@ -43,7 +43,7 @@ use halo2_proofs::{
 use log::*;
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TableData<F: PrimeField> {
     // TODO: without usable_rows still safe?
     pub(crate) k: u32,

@@ -8,12 +8,13 @@ use std::{
 
 use ff::PrimeField;
 use halo2_proofs::{plonk::Expression as PE, poly::Rotation};
+use serde::Serialize;
 
 use crate::util::trim_leading_zeros;
 
 pub mod sparse;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum ColumnIndex {
     Challenge { column_index: usize },
     Polynominal { rotation: i32, column_index: usize },
@@ -38,13 +39,21 @@ impl Ord for ColumnIndex {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Query {
     pub index: usize,
+    #[serde(serialize_with = "serialize_rotation")]
     pub rotation: Rotation,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+fn serialize_rotation<S: serde::ser::Serializer>(
+    v: &Rotation,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    v.0.serialize(serializer)
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum Expression<F> {
     Constant(F),
     Polynomial(Query),
@@ -341,7 +350,7 @@ impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
 /// index_to_poly is mapping from i to (rotation, column_index, type)
 /// poly_to_index is mapping from (rotation, column_index, type) to i \in [0,..,n-1]
 /// type has value either CHALLENGE_TYPE or POLYNOMIAL_TYPE
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Monomial<F: PrimeField> {
     pub(crate) arity: usize,
     // poly or challenge: (rotation, column_index, type)
@@ -567,7 +576,7 @@ impl<F: PrimeField> Ord for Monomial<F> {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Serialize)]
 pub struct MultiPolynomial<F: PrimeField> {
     pub(crate) arity: usize,
     pub(crate) monomials: Vec<Monomial<F>>,

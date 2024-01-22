@@ -16,6 +16,13 @@
 //! a given Plonk instance and witness satisfy the circuit constraints.
 use std::iter;
 
+use ff::{Field, PrimeField};
+use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
+use itertools::Itertools;
+use log::*;
+use rayon::prelude::*;
+use serde::Serialize;
+
 use crate::{
     commitment::CommitmentKey,
     concat_vec,
@@ -29,11 +36,6 @@ use crate::{
     table::SpsError,
     util::fe_to_fe,
 };
-use ff::{Field, PrimeField};
-use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
-use itertools::Itertools;
-use log::*;
-use rayon::prelude::*;
 
 pub mod eval;
 pub mod lookup;
@@ -59,7 +61,11 @@ pub enum DeciderError {
     },
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Serialize)]
+#[serde(bound(serialize = "
+    C: Serialize,
+    C::ScalarExt: Serialize
+"))]
 pub struct PlonkStructure<C: CurveAffine> {
     /// k is a parameter such that 2^k is the total number of rows
     pub(crate) k: usize,
@@ -136,14 +142,14 @@ pub struct RelaxedPlonkWitness<F: PrimeField> {
 
 // TODO #31 docs
 pub struct RelaxedPlonkTrace<C: CurveAffine> {
-    U: RelaxedPlonkInstance<C>,
-    W: RelaxedPlonkWitness<C::Scalar>,
+    pub U: RelaxedPlonkInstance<C>,
+    pub W: RelaxedPlonkWitness<C::Scalar>,
 }
 
 // TODO #31 docs
 pub struct PlonkTrace<C: CurveAffine> {
-    u: PlonkInstance<C>,
-    w: PlonkWitness<C::Scalar>,
+    pub u: PlonkInstance<C>,
+    pub w: PlonkWitness<C::Scalar>,
 }
 
 impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for PlonkStructure<C> {
