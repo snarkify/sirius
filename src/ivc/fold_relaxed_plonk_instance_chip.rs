@@ -1072,8 +1072,8 @@ mod tests {
         commitment::CommitmentKey,
         constants::MAX_BITS,
         nifs::NIFS,
-        plonk::TableData,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait},
+        table::TableData,
     };
 
     use super::*;

@@ -48,8 +48,8 @@ use std::array;
 use crate::{
     plonk::eval::{Eval, LookupEvalDomain},
     plonk::util::compress_halo2_expression,
-    plonk::TableData,
     polynomial::{Expression, Query},
+    table::TableData,
 };
 
 /// Lookup Argument
