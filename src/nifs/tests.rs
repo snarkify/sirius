@@ -1,7 +1,7 @@
 use super::*;
 use crate::nifs::Error as NIFSError;
 use crate::util::create_ro;
-use ff::PrimeField;
+use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},
@@ -32,7 +32,7 @@ fn fold_instances<C, F1, F2>(
 where
     C: CurveAffine<ScalarExt = F1, Base = F2>,
     F1: PrimeField,
-    F2: PrimeField + FromUniformBytes<64>,
+    F2: PrimeFieldBits + FromUniformBytes<64>,
 {
     const T: usize = 3;
     const RATE: usize = 2;
@@ -43,17 +43,17 @@ where
     let mut f_U =
         RelaxedPlonkInstance::new(td1.instance.len(), S.num_challenges, S.round_sizes.len());
     let mut f_W = RelaxedPlonkWitness::new(td1.k, &S.round_sizes);
-    let mut ro_nark_prover = create_ro::<C, F2, T, RATE, R_F, R_P>();
-    let mut ro_nark_prepare = create_ro::<C, F2, T, RATE, R_F, R_P>();
-    let mut ro_nark_verifier = create_ro::<C, F2, T, RATE, R_F, R_P>();
-    let mut ro_nark_decider = create_ro::<C, F2, T, RATE, R_F, R_P>();
+    let mut ro_nark_prover = create_ro::<C, T, RATE, R_F, R_P>();
+    let mut ro_nark_prepare = create_ro::<C, T, RATE, R_F, R_P>();
+    let mut ro_nark_verifier = create_ro::<C, T, RATE, R_F, R_P>();
+    let mut ro_nark_decider = create_ro::<C, T, RATE, R_F, R_P>();
     let (U1, W1) = td1
         .run_sps_protocol(ck, &mut ro_nark_prepare, S.num_challenges)
         .unwrap();
     assert_eq!(S.is_sat(ck, &mut ro_nark_decider, &U1, &W1).err(), None);
 
-    let mut ro_acc_prover = create_ro::<C, F2, T, RATE, R_F, R_P>();
-    let mut ro_acc_verifier = create_ro::<C, F2, T, RATE, R_F, R_P>();
+    let mut ro_acc_prover = create_ro::<C, T, RATE, R_F, R_P>();
+    let mut ro_acc_verifier = create_ro::<C, T, RATE, R_F, R_P>();
     let (nifs, (U_from_prove, W)) =
         NIFS::prove(ck, &mut ro_nark_prover, &mut ro_acc_prover, td1, &f_U, &f_W)?;
     let U_from_verify = nifs
