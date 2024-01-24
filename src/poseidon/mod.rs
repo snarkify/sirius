@@ -6,6 +6,7 @@ use halo2_proofs::{arithmetic::CurveAffine, plonk::Error};
 
 pub mod poseidon_circuit;
 pub mod poseidon_hash;
+use poseidon::Spec;
 pub use poseidon_hash::PoseidonHash;
 
 /// A helper trait to obsorb different objects into RO
@@ -76,4 +77,28 @@ pub trait ROCircuitTrait<F: PrimeFieldBits + FromUniformBytes<64>> {
         ctx: &mut RegionCtx<'_, F>,
         num_bits: NonZeroUsize,
     ) -> Result<Vec<AssignedBit<F>>, Error>;
+}
+
+/// Random Oracle is represented as a pair of on-circuit & off-circuit types,
+/// allowing the use of a single generic.
+pub trait ROPair<C: CurveAffine>
+where
+    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+{
+    /// Argument for creating on-circuit & off-circuit versions of oracles
+    type Args;
+
+    type OffCircuit: ROTrait<C, Constants = Self::Args>;
+    type OnCircuit: ROCircuitTrait<C::Base, Args = Self::Args>;
+}
+
+pub struct PoseidonRO<const T: usize, const RATE: usize>;
+
+impl<const T: usize, const RATE: usize, C: CurveAffine> ROPair<C> for PoseidonRO<T, RATE>
+where
+    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+{
+    type Args = Spec<C::Base, T, RATE>;
+    type OnCircuit = poseidon_circuit::PoseidonChip<C::Base, T, RATE>;
+    type OffCircuit = poseidon_hash::PoseidonHash<C, T, RATE>;
 }
