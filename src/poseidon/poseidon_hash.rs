@@ -1,11 +1,10 @@
 use crate::poseidon::{ROConstantsTrait, ROTrait};
 use crate::util::{bits_to_fe_le, fe_to_bits_le};
-use ff::Field;
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2curves::group::ff::{FromUniformBytes, PrimeField};
 use poseidon::{self, SparseMDSMatrix, Spec};
 use std::num::NonZeroUsize;
-use std::{iter, marker::PhantomData, mem};
+use std::{iter, mem};
 
 // adapted from: https://github.com/privacy-scaling-explorations/snark-verifier
 
@@ -101,25 +100,25 @@ where
     }
 }
 
-impl<C: CurveAffine, const T: usize, const RATE: usize> ROTrait<C> for PoseidonHash<C, T, RATE>
+impl<F: PrimeField, const T: usize, const RATE: usize> ROTrait<F> for PoseidonHash<F, T, RATE>
 where
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
-    type Constants = Spec<C::Base, T, RATE>;
+    type Constants = Spec<F, T, RATE>;
+
     fn new(constants: Self::Constants) -> Self {
         Self {
             spec: constants,
             state: State::new(poseidon::State::default().words()),
             buf: Vec::new(),
-            _marker: PhantomData,
         }
     }
 
-    fn absorb_base(&mut self, base: C::Base) {
+    fn absorb_base(&mut self, base: F) {
         self.update(&[base]);
     }
 
-    fn absorb_point(&mut self, point: &C) {
+    fn absorb_point<C: CurveAffine<Base = F>>(&mut self, point: &C) {
         let encoded = point.coordinates().map(|coordinates| {
             [coordinates.x(), coordinates.y()]
                 .into_iter()
@@ -133,31 +132,30 @@ where
         }
     }
 
-    fn squeeze(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
-        self.output(num_bits)
+    fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
+        self.output::<C>(num_bits)
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct PoseidonHash<C: CurveAffine, const T: usize, const RATE: usize>
+pub struct PoseidonHash<F: PrimeField, const T: usize, const RATE: usize>
 where
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
-    spec: Spec<C::Base, T, RATE>,
-    state: State<C::Base, T, RATE>,
-    buf: Vec<C::Base>,
-    _marker: PhantomData<C>,
+    spec: Spec<F, T, RATE>,
+    state: State<F, T, RATE>,
+    buf: Vec<F>,
 }
 
-impl<C: CurveAffine, const T: usize, const RATE: usize> PoseidonHash<C, T, RATE>
+impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonHash<F, T, RATE>
 where
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
-    fn update(&mut self, elements: &[C::Base]) {
+    fn update(&mut self, elements: &[F]) {
         self.buf.extend_from_slice(elements);
     }
 
-    fn output(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
+    fn output<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
         let buf = mem::take(&mut self.buf);
         let exact = buf.len() % RATE == 0;
 
@@ -173,7 +171,7 @@ where
         bits_to_fe_le(bits)
     }
 
-    fn permutation(&mut self, inputs: &[C::Base]) {
+    fn permutation(&mut self, inputs: &[F]) {
         let r_f = self.spec.r_f() / 2;
         let mds = self.spec.mds_matrices().mds().rows();
         let pre_sparse_mds = self.spec.mds_matrices().pre_sparse_mds().rows();
@@ -202,7 +200,7 @@ where
             self.state.sbox_full(constants);
             self.state.apply_mds(&mds);
         }
-        self.state.sbox_full(&[C::Base::ZERO; T]);
+        self.state.sbox_full(&[F::ZERO; T]);
         self.state.apply_mds(&mds);
     }
 }
@@ -218,13 +216,14 @@ mod tests {
         const RATE: usize = 2;
         const R_F: usize = 4;
         const R_P: usize = 3;
-        type PH = PoseidonHash<EpAffine, T, RATE>;
+
+        type PH = PoseidonHash<<EpAffine as CurveAffine>::Base, T, RATE>;
         let spec = Spec::<Fp, T, RATE>::new(R_F, R_P);
         let mut poseidon = PH::new(spec);
         for i in 0..5 {
             poseidon.absorb_base(Fp::from(i as u64));
         }
-        let output = poseidon.squeeze(NonZeroUsize::new(128).unwrap());
+        let output = poseidon.squeeze::<EpAffine>(NonZeroUsize::new(128).unwrap());
         // let out_hash = Fq::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();
         let out_hash = Fq::from_str_vartime("277726250230731218669330566268314254439").unwrap();
         assert_eq!(output, out_hash);

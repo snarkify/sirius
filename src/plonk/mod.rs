@@ -146,14 +146,14 @@ pub struct PlonkTrace<C: CurveAffine> {
     w: PlonkWitness<C::Scalar>,
 }
 
-impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkStructure<C> {
+impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for PlonkStructure<C> {
     // TODO: add hash of other fields including gates
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb_point(&self.fixed_commitment);
     }
 }
 
-impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkInstance<C> {
+impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for PlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
         for pt in self.W_commitments.iter() {
             ro.absorb_point(pt);
@@ -167,7 +167,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for PlonkInstance<C> {
     }
 }
 
-impl<C: CurveAffine, RO: ROTrait<C>> AbsorbInRO<C, RO> for RelaxedPlonkInstance<C> {
+impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
         for pt in self.W_commitments.iter() {
             ro.absorb_point(pt);
@@ -212,7 +212,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
     }
 
     /// run special soundness protocol for verifier
-    pub fn run_sps_verifier<RO: ROTrait<C>>(
+    pub fn run_sps_verifier<RO: ROTrait<C::Base>>(
         &self,
         U: &PlonkInstance<C>,
         ro_nark: &mut RO,
@@ -226,7 +226,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
         });
         for i in 0..self.num_challenges {
             ro_nark.absorb_point(&U.W_commitments[i]);
-            let r = ro_nark.squeeze(NUM_CHALLENGE_BITS);
+            let r = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
             if r != U.challenges[i] {
                 return Err(SpsError::ChallengeNotMatch { challenge_index: i });
             }
@@ -234,7 +234,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
         Ok(())
     }
 
-    pub fn is_sat<F, RO: ROTrait<C>>(
+    pub fn is_sat<F, RO: ROTrait<C::Base>>(
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,

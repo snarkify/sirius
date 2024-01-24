@@ -310,7 +310,7 @@ impl<F: PrimeField> TableData<F> {
     /// sequence of generating challenges:
     /// [pi.instance] -> [C] -> ]r1[
     /// w.r.t multiple gates + no lookup
-    fn run_sps_protocol_1<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
+    fn run_sps_protocol_1<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
@@ -326,7 +326,7 @@ impl<F: PrimeField> TableData<F> {
 
         plonk_instance
             .challenges
-            .push(ro_nark.squeeze(NUM_CHALLENGE_BITS));
+            .push(ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS));
 
         Ok((plonk_instance, plonk_witness))
     }
@@ -336,7 +336,7 @@ impl<F: PrimeField> TableData<F> {
     /// sequence of generating challenges:
     /// [pi.instance] -> [C1] -> ]r1[ -> [C2] -> ]r2[
     /// w.r.t has lookup but no vector lookup
-    fn run_sps_protocol_2<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
+    fn run_sps_protocol_2<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
@@ -370,7 +370,7 @@ impl<F: PrimeField> TableData<F> {
             ro_nark.absorb_base(fe_to_fe(inst).unwrap());
         });
         ro_nark.absorb_point(&C1);
-        let r1 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
+        let r1 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
 
         // round 2
         let lookup_coeff = lookup_coeff.evaluate_coefficient_2(r1);
@@ -382,7 +382,7 @@ impl<F: PrimeField> TableData<F> {
 
         let C2 = ck.commit(&W2);
         ro_nark.absorb_point(&C2);
-        let r2 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
+        let r2 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
 
         Ok((
             PlonkInstance {
@@ -398,7 +398,7 @@ impl<F: PrimeField> TableData<F> {
     /// notations: "[C]" absorb C; "]r[" squeeze r;
     /// sequence of generating challenges:
     /// [pi.instance] -> [C1] -> ]r1[ -> [C2] -> ]r2[ -> [C3] -> ]r3[
-    fn run_sps_protocol_3<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
+    fn run_sps_protocol_3<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
@@ -417,7 +417,7 @@ impl<F: PrimeField> TableData<F> {
         let W1 = concatenate_with_padding(&self.advice_columns, k_power_of_2);
         let C1 = ck.commit(&W1);
         ro_nark.absorb_point(&C1);
-        let r1 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
+        let r1 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
 
         // round 2
         let lookup_coeff = self
@@ -433,7 +433,7 @@ impl<F: PrimeField> TableData<F> {
         );
         let C2 = ck.commit(&W2);
         ro_nark.absorb_point(&C2);
-        let r2 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
+        let r2 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
 
         // round 3
         let lookup_coeff = lookup_coeff.evaluate_coefficient_2(r2);
@@ -445,7 +445,7 @@ impl<F: PrimeField> TableData<F> {
 
         let C3 = ck.commit(&W3);
         ro_nark.absorb_point(&C3);
-        let r3 = ro_nark.squeeze(NUM_CHALLENGE_BITS);
+        let r3 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
 
         Ok((
             PlonkInstance {
@@ -462,7 +462,7 @@ impl<F: PrimeField> TableData<F> {
     /// run special soundness protocol to generate witnesses and challenges
     /// depending on whether we have multiple gates, lookup arguments and whether
     /// we have vector lookup, we will call different sub-sps protocol
-    pub fn run_sps_protocol<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C>>(
+    pub fn run_sps_protocol<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
