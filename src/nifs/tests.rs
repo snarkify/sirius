@@ -26,6 +26,7 @@ use std::marker::PhantomData;
 /// copy constrains relation
 fn fold_instances<C, F1, F2>(
     ck: &CommitmentKey<C>,
+    pp_digest: &C,
     td1: &TableData<F1>,
     td2: &TableData<F1>,
 ) -> Result<(), NIFSError>
@@ -54,10 +55,24 @@ where
 
     let mut ro_acc_prover = create_ro::<C, T, RATE, R_F, R_P>();
     let mut ro_acc_verifier = create_ro::<C, T, RATE, R_F, R_P>();
-    let (nifs, (U_from_prove, W)) =
-        NIFS::prove(ck, &mut ro_nark_prover, &mut ro_acc_prover, td1, &f_U, &f_W)?;
+    let (nifs, (U_from_prove, W)) = NIFS::prove(
+        ck,
+        pp_digest,
+        &mut ro_nark_prover,
+        &mut ro_acc_prover,
+        td1,
+        &f_U,
+        &f_W,
+    )?;
     let U_from_verify = nifs
-        .verify(&mut ro_nark_verifier, &mut ro_acc_verifier, &S, f_U, U1)
+        .verify(
+            pp_digest,
+            &mut ro_nark_verifier,
+            &mut ro_acc_verifier,
+            &S,
+            f_U,
+            U1,
+        )
         .unwrap();
     assert_eq!(U_from_prove, U_from_verify);
 
@@ -71,10 +86,24 @@ where
         .unwrap();
     assert_eq!(S.is_sat(ck, &mut ro_nark_decider, &U1, &W1).err(), None);
 
-    let (nifs, (U_from_prove, _W)) =
-        NIFS::prove(ck, &mut ro_nark_prover, &mut ro_acc_prover, td2, &f_U, &f_W)?;
+    let (nifs, (U_from_prove, _W)) = NIFS::prove(
+        ck,
+        pp_digest,
+        &mut ro_nark_prover,
+        &mut ro_acc_prover,
+        td2,
+        &f_U,
+        &f_W,
+    )?;
     let U_from_verify = nifs
-        .verify(&mut ro_nark_verifier, &mut ro_acc_verifier, &S, f_U, U1)
+        .verify(
+            pp_digest,
+            &mut ro_nark_verifier,
+            &mut ro_acc_verifier,
+            &S,
+            f_U,
+            U1,
+        )
         .unwrap();
     assert_eq!(U_from_prove, U_from_verify);
 
@@ -176,7 +205,7 @@ mod zero_round_test {
         let p2 = smallest_power(td1.cs.num_selectors() + td1.cs.num_fixed_columns(), K);
         let ck = CommitmentKey::<G1Affine>::setup(p1.max(p2), b"zero_round_test");
 
-        fold_instances(&ck, &td1, &td2)
+        fold_instances(&ck, &G1Affine::default(), &td1, &td2)
     }
 }
 
@@ -364,7 +393,7 @@ mod one_round_test {
         let p2 = smallest_power(td1.cs.num_selectors() + td1.cs.num_fixed_columns(), K);
         let ck = CommitmentKey::<G1Affine>::setup(p1.max(p2), b"one_round_test");
 
-        fold_instances(&ck, &td1, &td2)
+        fold_instances(&ck, &G1Affine::default(), &td1, &td2)
     }
 }
 
@@ -673,6 +702,6 @@ mod three_rounds_test {
         let p2 = smallest_power(td1.cs.num_selectors() + td1.cs.num_fixed_columns(), K);
         let ck = CommitmentKey::<G1Affine>::setup(p1.max(p2), b"three_rounds_test");
 
-        fold_instances(&ck, &td1, &td2)
+        fold_instances(&ck, &G1Affine::default(), &td1, &td2)
     }
 }

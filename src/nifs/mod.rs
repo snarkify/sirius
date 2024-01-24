@@ -129,13 +129,13 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
 
     /// Absorb all fields into RandomOracle `RO` & generate challenge based on that
     pub(crate) fn generate_challenge(
+        pp_digest: C,
         ro_acc: &mut RO,
-        S: &PlonkStructure<C>,
         U1: &RelaxedPlonkInstance<C>,
         U2: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
     ) -> Result<<C as CurveAffine>::ScalarExt, Error> {
-        S.absorb_into(ro_acc);
+        ro_acc.absorb_point(&pp_digest);
         U1.absorb_into(ro_acc);
         U2.absorb_into(ro_acc);
         cross_term_commits
@@ -166,6 +166,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
     /// providing cryptographic evidence of this fact.
     pub fn prove(
         ck: &CommitmentKey<C>,
+        pp_digest: &C,
         ro_nark: &mut RO,
         ro_acc: &mut RO,
         td: &TableData<C::ScalarExt>,
@@ -184,7 +185,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
         let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges)?;
         let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2)?;
 
-        let r = Self::generate_challenge(ro_acc, &S, U1, &U2, &cross_term_commits)?;
+        let r = Self::generate_challenge(*pp_digest, ro_acc, U1, &U2, &cross_term_commits)?;
 
         let U = U1.fold(&U2, &cross_term_commits, &r);
         let W = W1.fold(&W2, &cross_terms, &r);
@@ -211,6 +212,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
     /// The folded relaxed Plonk instance.
     pub fn verify(
         &self,
+        pp_digest: &C,
         ro_nark: &mut RO,
         ro_acc: &mut RO,
         S: &PlonkStructure<C>,
@@ -219,7 +221,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
     ) -> Result<RelaxedPlonkInstance<C>, Error> {
         S.run_sps_verifier(&U2, ro_nark)?;
 
-        let r = Self::generate_challenge(ro_acc, S, &U1, &U2, &self.cross_term_commits)?;
+        let r = Self::generate_challenge(*pp_digest, ro_acc, &U1, &U2, &self.cross_term_commits)?;
 
         Ok(U1.fold(&U2, &self.cross_term_commits, &r))
     }
