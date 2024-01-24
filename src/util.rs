@@ -1,14 +1,14 @@
-use crate::main_gate::AssignedValue;
-use crate::poseidon::PoseidonHash;
-use crate::poseidon::ROTrait;
+use std::{fmt, iter, num::NonZeroUsize};
+
 use ff::{BatchInvert, Field, PrimeField};
 use halo2_proofs::plonk::Assigned;
 use num_bigint::BigUint;
-use poseidon::Spec;
 pub(crate) use rayon::current_num_threads;
-use std::fmt;
-use std::iter;
-use std::num::NonZeroUsize;
+
+use crate::{
+    main_gate::AssignedValue,
+    poseidon::{PoseidonHash, ROTrait, Spec},
+};
 
 pub fn bytes_to_bits_le(bytes: Vec<u8>) -> Vec<bool> {
     let mut bits = Vec::new();

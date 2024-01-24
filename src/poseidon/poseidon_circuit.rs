@@ -1,16 +1,18 @@
-use crate::{
-    constants::MAX_BITS,
-    main_gate::{AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
-};
+use std::{convert::TryInto, num::NonZeroUsize};
+
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Value},
     plonk::Error,
 };
-use poseidon::{self, Spec};
-use std::{convert::TryInto, num::NonZeroUsize};
+use poseidon::{self};
 
-use super::ROCircuitTrait;
+use crate::{
+    constants::MAX_BITS,
+    main_gate::{AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
+};
+
+use super::{ROCircuitTrait, Spec};
 
 pub struct PoseidonChip<F: PrimeFieldBits, const T: usize, const RATE: usize> {
     main_gate: MainGate<F, T>,
@@ -394,14 +396,20 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
 
 #[cfg(test)]
 mod tests {
+    use halo2_proofs::{
+        circuit::{Layouter, SimpleFloorPlanner},
+        plonk::{Circuit, Column, ConstraintSystem, Instance},
+    };
+    use halo2curves::{
+        group::ff::FromUniformBytes,
+        pasta::{EqAffine, Fp},
+    };
+
+    use crate::{
+        create_and_verify_proof, main_gate::MainGateConfig, poseidon::Spec, run_mock_prover_test,
+    };
+
     use super::*;
-    use crate::main_gate::MainGateConfig;
-    use crate::{create_and_verify_proof, run_mock_prover_test};
-    use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
-    use halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
-    use halo2curves::group::ff::FromUniformBytes;
-    use halo2curves::pasta::{EqAffine, Fp};
-    use poseidon::Spec;
 
     const T: usize = 3;
     const RATE: usize = 2;
