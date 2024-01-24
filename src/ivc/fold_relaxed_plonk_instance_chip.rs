@@ -1061,10 +1061,10 @@ pub struct FoldResult<C: CurveAffine> {
 
 #[cfg(test)]
 mod tests {
+    use crate::poseidon::Spec;
     use bitter::{BitReader, LittleEndianReader};
     use halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter, Value};
     use halo2curves::{bn256::G1Affine as C1, CurveAffine};
-    use poseidon::Spec;
     use rand::rngs::ThreadRng;
     use rand::Rng;
 
