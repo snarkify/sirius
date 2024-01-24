@@ -1813,9 +1813,6 @@ mod tests {
         let mut td = TableData::<ScalarExt>::new(K as u32, vec![]);
         let _config = td.prepare_assembly(MainGate::<ScalarExt, T>::configure);
 
-        let mut structure = td.plonk_structure(&CommitmentKey::<C1>::setup(K, b"mock"));
-
-        structure.fixed_commitment = pp_hash;
-        NIFS::generate_challenge(&mut ro, &structure, relaxed, input, cross_term_commits).unwrap()
+        NIFS::generate_challenge(pp_hash, &mut ro, relaxed, input, cross_term_commits).unwrap()
     }
 }
