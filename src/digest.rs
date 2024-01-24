@@ -4,11 +4,12 @@ use bincode::Options;
 use bitter::{BitReader, LittleEndianReader};
 use digest::{typenum::U32, Digest, OutputSizeUser};
 use ff::PrimeField;
+use halo2curves::CurveAffine;
 use serde::Serialize;
 
 pub use sha3::Sha3_256 as DefaultHasher;
 
-use crate::constants::NUM_HASH_BITS;
+use crate::{commitment::CommitmentKey, constants::NUM_HASH_BITS};
 
 /// A trait for converting a digest to a prime field element.
 ///
@@ -45,6 +46,16 @@ pub trait DigestToF: Digest {
 
         Ok(into_field_by_bits(digest.deref(), NUM_HASH_BITS))
     }
+
+    fn digest_to_curve<C: CurveAffine>(
+        input: &impl Serialize,
+        ck: &CommitmentKey<C>,
+    ) -> Result<C, io::Error>
+    where
+        Self: OutputSizeUser<OutputSize = U32>,
+    {
+        Ok(ck.commit(&[Self::digest_to_f(input)?]))
+    }
 }
 impl DigestToF for sha3::Sha3_256 {}
 
@@ -71,8 +82,10 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use ff::PrimeField;
-    use halo2curves::bn256::Fr;
+    use halo2curves::bn256::{Fr, G1Affine};
     use serde::*;
+
+    use crate::digest::CommitmentKey;
 
     use super::{into_field_by_bits, DigestToF};
 
@@ -151,5 +164,19 @@ mod tests {
         .expect("Failed to convert digest to field element for empty input");
 
         assert_eq!(foo, boo);
+    }
+
+    /// Tests successful conversion of a hash to a prime field element.
+    #[test]
+    fn test_digest_to_curve_conversion() {
+        let test_data = TestStruct {
+            bytes: vec![100; 100],
+            num: u128::MAX,
+            s: "string".into(),
+        };
+
+        let _result =
+            sha3::Sha3_256::digest_to_curve::<G1Affine>(&test_data, &CommitmentKey::setup(5, b""))
+                .expect("Failed to convert digest to curve element");
     }
 }
