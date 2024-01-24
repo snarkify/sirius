@@ -31,12 +31,12 @@ where
     params: SynthesizeStepParams<C, ROC>,
 }
 
-impl<AnyCurve, CC, RO, ROC> AbsorbInRO<AnyCurve, RO> for CircuitPublicParams<CC, ROC>
+impl<F, CC, RO, ROC> AbsorbInRO<F, RO> for CircuitPublicParams<CC, ROC>
 where
-    AnyCurve: CurveAffine,
+    F: PrimeField,
     CC: CurveAffine,
     CC::Base: PrimeFieldBits + FromUniformBytes<64>,
-    RO: ROTrait<AnyCurve>,
+    RO: ROTrait<F>,
     ROC: ROCircuitTrait<CC::Base>,
 {
     fn absorb_into(&self, _ro: &mut RO) {
@@ -86,8 +86,8 @@ where
         todo!("Impl creation of pub params")
     }
 
-    pub fn digest<ROT: ROTrait<C1>>(&self, constant: ROT::Constants) -> C1::ScalarExt {
-        let mut ro = ROT::new(constant);
+    pub fn digest<RO: ROTrait<C1::Base>>(&self, constant: RO::Constants) -> C1::ScalarExt {
+        let mut ro = RO::new(constant);
 
         let Self {
             primary,
@@ -98,7 +98,7 @@ where
         secondary.absorb_into(&mut ro);
 
         let bytes_count = C1::Base::ZERO.to_repr().as_ref().len();
-        ro.squeeze(NonZeroUsize::new(bytes_count * 8).unwrap())
+        ro.squeeze::<C1>(NonZeroUsize::new(bytes_count * 8).unwrap())
     }
 }
 

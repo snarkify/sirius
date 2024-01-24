@@ -44,17 +44,17 @@ where
     let mut f_U =
         RelaxedPlonkInstance::new(td1.instance.len(), S.num_challenges, S.round_sizes.len());
     let mut f_W = RelaxedPlonkWitness::new(td1.k, &S.round_sizes);
-    let mut ro_nark_prover = create_ro::<C, T, RATE, R_F, R_P>();
-    let mut ro_nark_prepare = create_ro::<C, T, RATE, R_F, R_P>();
-    let mut ro_nark_verifier = create_ro::<C, T, RATE, R_F, R_P>();
-    let mut ro_nark_decider = create_ro::<C, T, RATE, R_F, R_P>();
+    let mut ro_nark_prover = create_ro::<C::Base, T, RATE, R_F, R_P>();
+    let mut ro_nark_prepare = create_ro::<C::Base, T, RATE, R_F, R_P>();
+    let mut ro_nark_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
+    let mut ro_nark_decider = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let (U1, W1) = td1
         .run_sps_protocol(ck, &mut ro_nark_prepare, S.num_challenges)
         .unwrap();
     assert_eq!(S.is_sat(ck, &mut ro_nark_decider, &U1, &W1).err(), None);
 
-    let mut ro_acc_prover = create_ro::<C, T, RATE, R_F, R_P>();
-    let mut ro_acc_verifier = create_ro::<C, T, RATE, R_F, R_P>();
+    let mut ro_acc_prover = create_ro::<C::Base, T, RATE, R_F, R_P>();
+    let mut ro_acc_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let (nifs, (U_from_prove, W)) = NIFS::prove(
         ck,
         pp_digest,
@@ -64,6 +64,7 @@ where
         &f_U,
         &f_W,
     )?;
+
     let U_from_verify = nifs
         .verify(
             pp_digest,
