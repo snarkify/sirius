@@ -1,5 +1,6 @@
 use crate::poseidon::{ROConstantsTrait, ROTrait};
 use crate::util::{bits_to_fe_le, fe_to_bits_le};
+use ff::Field;
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2curves::group::ff::{FromUniformBytes, PrimeField};
 use poseidon::{self, SparseMDSMatrix, Spec};
@@ -100,12 +101,11 @@ where
     }
 }
 
-impl<C, F, const T: usize, const RATE: usize> ROTrait<C> for PoseidonHash<C, F, T, RATE>
+impl<C: CurveAffine, const T: usize, const RATE: usize> ROTrait<C> for PoseidonHash<C, T, RATE>
 where
-    C: CurveAffine<Base = F>,
-    F: PrimeField + FromUniformBytes<64>,
+    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
-    type Constants = Spec<F, T, RATE>;
+    type Constants = Spec<C::Base, T, RATE>;
     fn new(constants: Self::Constants) -> Self {
         Self {
             spec: constants,
@@ -139,26 +139,21 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct PoseidonHash<
-    C: CurveAffine<Base = F>,
-    F: PrimeField + FromUniformBytes<64>,
-    const T: usize,
-    const RATE: usize,
-> {
-    spec: Spec<F, T, RATE>,
-    state: State<F, T, RATE>,
-    buf: Vec<F>,
+pub struct PoseidonHash<C: CurveAffine, const T: usize, const RATE: usize>
+where
+    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+{
+    spec: Spec<C::Base, T, RATE>,
+    state: State<C::Base, T, RATE>,
+    buf: Vec<C::Base>,
     _marker: PhantomData<C>,
 }
 
-impl<
-        C: CurveAffine<Base = F>,
-        F: PrimeField + FromUniformBytes<64>,
-        const T: usize,
-        const RATE: usize,
-    > PoseidonHash<C, F, T, RATE>
+impl<C: CurveAffine, const T: usize, const RATE: usize> PoseidonHash<C, T, RATE>
+where
+    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
-    fn update(&mut self, elements: &[F]) {
+    fn update(&mut self, elements: &[C::Base]) {
         self.buf.extend_from_slice(elements);
     }
 
@@ -178,7 +173,7 @@ impl<
         bits_to_fe_le(bits)
     }
 
-    fn permutation(&mut self, inputs: &[F]) {
+    fn permutation(&mut self, inputs: &[C::Base]) {
         let r_f = self.spec.r_f() / 2;
         let mds = self.spec.mds_matrices().mds().rows();
         let pre_sparse_mds = self.spec.mds_matrices().pre_sparse_mds().rows();
@@ -207,7 +202,7 @@ impl<
             self.state.sbox_full(constants);
             self.state.apply_mds(&mds);
         }
-        self.state.sbox_full(&[F::ZERO; T]);
+        self.state.sbox_full(&[C::Base::ZERO; T]);
         self.state.apply_mds(&mds);
     }
 }
@@ -223,7 +218,7 @@ mod tests {
         const RATE: usize = 2;
         const R_F: usize = 4;
         const R_P: usize = 3;
-        type PH = PoseidonHash<EpAffine, Fp, T, RATE>;
+        type PH = PoseidonHash<EpAffine, T, RATE>;
         let spec = Spec::<Fp, T, RATE>::new(R_F, R_P);
         let mut poseidon = PH::new(spec);
         for i in 0..5 {

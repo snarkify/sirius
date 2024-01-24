@@ -1,7 +1,7 @@
 use crate::main_gate::AssignedValue;
 use crate::poseidon::PoseidonHash;
 use crate::poseidon::ROTrait;
-use ff::{BatchInvert, Field, FromUniformBytes, PrimeField};
+use ff::{BatchInvert, Field, PrimeField};
 use halo2_proofs::plonk::Assigned;
 use halo2curves::CurveAffine;
 use num_bigint::BigUint;
@@ -193,15 +193,17 @@ pub(crate) fn concatenate_with_padding<F: PrimeField>(vs: &[Vec<F>], pad_size: u
 }
 
 pub(crate) fn create_ro<
-    C: CurveAffine<Base = F>,
-    F: PrimeField + FromUniformBytes<64>,
+    C: CurveAffine,
     const T: usize,
     const RATE: usize,
     const R_F: usize,
     const R_P: usize,
->() -> PoseidonHash<C, F, T, RATE> {
-    let spec = Spec::<F, T, RATE>::new(R_F, R_P);
-    PoseidonHash::<C, F, T, RATE>::new(spec)
+>() -> PoseidonHash<C, T, RATE>
+where
+    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+{
+    let spec = Spec::<C::Base, T, RATE>::new(R_F, R_P);
+    PoseidonHash::<C, T, RATE>::new(spec)
 }
 
 /// Concatenate N vectors
