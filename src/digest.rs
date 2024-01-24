@@ -3,7 +3,8 @@ use std::{io, iter, num::NonZeroUsize, ops::Deref};
 use bincode::Options;
 use bitter::{BitReader, LittleEndianReader};
 use digest::{typenum::U32, Digest, OutputSizeUser};
-use ff::PrimeField;
+use ff::{Field, PrimeField};
+use halo2curves::CurveAffine;
 use serde::Serialize;
 
 pub use sha3::Sha3_256 as DefaultHasher;
@@ -14,23 +15,23 @@ use crate::constants::NUM_HASH_BITS;
 ///
 /// This trait is intended for use with types implementing the [`Digest`] trait,
 /// allowing the conversion of a digest to an element of a prime field.
-pub trait DigestToF: Digest {
-    /// Serialize input & calculate digest & convert into [`PrimeField`]
+pub trait DigestToCurve: Digest {
+    /// Serialize input & calculate digest & convert into [`CurveAffine`]
     //
     // Allows you to use any hash function whose output is of size `[u8; 32]`
     //
-    fn digest_to_f<F: PrimeField>(input: &impl Serialize) -> Result<F, io::Error>
+    fn digest_to_curve<C: CurveAffine>(input: &impl Serialize) -> Result<C, io::Error>
     where
         Self: OutputSizeUser<OutputSize = U32>,
     {
         // Because [rust#92827](https://github.com/rust-lang/rust/issues/92827)
         // we can't explicitly limit `F::NUM_BITS = 32` as generic params
-        if F::NUM_BITS > 32 * 8 {
+        if C::ScalarExt::NUM_BITS > 32 * 8 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
                     "Field representation too big for this hash function, {} but expected < 32 * 8",
-                    F::NUM_BITS
+                    C::ScalarExt::NUM_BITS
                 ),
             ));
         }
@@ -43,19 +44,19 @@ pub trait DigestToF: Digest {
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
         );
 
-        Ok(into_field_by_bits(digest.deref(), NUM_HASH_BITS))
+        Ok(onto_curve_by_bits(digest.deref(), NUM_HASH_BITS))
     }
 }
-impl DigestToF for sha3::Sha3_256 {}
+impl DigestToCurve for sha3::Sha3_256 {}
 
-fn into_field_by_bits<F: PrimeField>(input: &[u8], bits_count: NonZeroUsize) -> F {
-    let mut coeff = F::ONE;
+fn onto_curve_by_bits<C: CurveAffine>(input: &[u8], bits_count: NonZeroUsize) -> C {
+    let mut coeff = C::ScalarExt::ONE;
 
     let mut reader = LittleEndianReader::new(input);
-    iter::repeat_with(|| reader.read_bit())
+    let scalar = iter::repeat_with(|| reader.read_bit())
         .map_while(|b| b)
         .take(bits_count.get())
-        .fold(F::ZERO, |mut result, bit| {
+        .fold(C::ScalarExt::ZERO, |mut result, bit| {
             if bit {
                 result += coeff;
             }
@@ -63,7 +64,8 @@ fn into_field_by_bits<F: PrimeField>(input: &[u8], bits_count: NonZeroUsize) -> 
             coeff = coeff.double();
 
             result
-        })
+        });
+    C::generator().mul(scalar).into()
 }
 
 #[cfg(test)]
@@ -71,10 +73,10 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use ff::PrimeField;
-    use halo2curves::bn256::Fr;
+    use halo2curves::bn256::{Fr, G1Affine};
     use serde::*;
 
-    use super::{into_field_by_bits, DigestToF};
+    use super::{onto_curve_by_bits, DigestToCurve};
 
     #[test]
     fn consistency() {
@@ -85,11 +87,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            into_field_by_bits::<Fr>(
+            onto_curve_by_bits::<G1Affine>(
                 &input.to_repr(),
                 NonZeroUsize::new(Fr::NUM_BITS as usize).unwrap()
             ),
-            input
+            -G1Affine::generator()
         );
     }
 
@@ -103,14 +105,14 @@ mod tests {
 
     /// Tests successful conversion of a hash to a prime field element.
     #[test]
-    fn test_digest_to_field_conversion() {
+    fn test_digest_to_curve_conversion() {
         let test_data = TestStruct {
             bytes: vec![100; 100],
             num: u128::MAX,
             s: "string".into(),
         };
 
-        let _result = sha3::Sha3_256::digest_to_f::<Fr>(&test_data)
+        let _result = sha3::Sha3_256::digest_to_curve::<G1Affine>(&test_data)
             .expect("Failed to convert digest to field element");
     }
 
@@ -123,7 +125,7 @@ mod tests {
             s: "".into(),
         };
 
-        let _result = sha3::Sha3_256::digest_to_f::<Fr>(&test_data)
+        let _result = sha3::Sha3_256::digest_to_curve::<G1Affine>(&test_data)
             .expect("Failed to convert digest to field element for empty input");
     }
 
@@ -141,10 +143,10 @@ mod tests {
             skipme: String,
         }
 
-        let foo = sha3::Sha3_256::digest_to_f::<Fr>(&Foo { num: 32 })
+        let foo = sha3::Sha3_256::digest_to_curve::<G1Affine>(&Foo { num: 32 })
             .expect("Failed to convert digest to field element for empty input");
 
-        let boo = sha3::Sha3_256::digest_to_f::<Fr>(&Boo {
+        let boo = sha3::Sha3_256::digest_to_curve::<G1Affine>(&Boo {
             num: 32,
             skipme: "data".to_string(),
         })
