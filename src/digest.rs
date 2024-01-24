@@ -44,12 +44,12 @@ pub trait DigestToCurve: Digest {
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
         );
 
-        Ok(onto_curve_by_bits(digest.deref(), NUM_HASH_BITS))
+        Ok(into_curve_by_bits(digest.deref(), NUM_HASH_BITS))
     }
 }
 impl DigestToCurve for sha3::Sha3_256 {}
 
-fn onto_curve_by_bits<C: CurveAffine>(input: &[u8], bits_count: NonZeroUsize) -> C {
+fn into_curve_by_bits<C: CurveAffine>(input: &[u8], bits_count: NonZeroUsize) -> C {
     let mut coeff = C::ScalarExt::ONE;
 
     let mut reader = LittleEndianReader::new(input);
@@ -76,7 +76,7 @@ mod tests {
     use halo2curves::bn256::{Fr, G1Affine};
     use serde::*;
 
-    use super::{onto_curve_by_bits, DigestToCurve};
+    use super::{into_curve_by_bits, DigestToCurve};
 
     #[test]
     fn consistency() {
@@ -87,7 +87,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            onto_curve_by_bits::<G1Affine>(
+            into_curve_by_bits::<G1Affine>(
                 &input.to_repr(),
                 NonZeroUsize::new(Fr::NUM_BITS as usize).unwrap()
             ),
