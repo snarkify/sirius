@@ -66,7 +66,7 @@ use crate::{
         AdviceCyclicAssignor, AssignedBit, AssignedValue, FixedCyclicAssignor, MainGate,
         MainGateConfig, RegionCtx, WrapValue,
     },
-    nifs::CrossTermCommits,
+    nifs::vanilla::CrossTermCommits,
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
     util::{self, CellsValuesView},
@@ -1071,7 +1071,7 @@ mod tests {
     use crate::{
         commitment::CommitmentKey,
         constants::MAX_BITS,
-        nifs::NIFS,
+        nifs::vanilla::VanillaFS,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait},
         table::TableData,
     };
@@ -1813,6 +1813,6 @@ mod tests {
         let mut td = TableData::<ScalarExt>::new(K as u32, vec![]);
         let _config = td.prepare_assembly(MainGate::<ScalarExt, T>::configure);
 
-        NIFS::generate_challenge(pp_hash, &mut ro, relaxed, input, cross_term_commits).unwrap()
+        VanillaFS::generate_challenge(pp_hash, &mut ro, relaxed, input, cross_term_commits).unwrap()
     }
 }
