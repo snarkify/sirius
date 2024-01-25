@@ -19,7 +19,7 @@ use rayon::prelude::*;
 pub mod vanilla;
 
 /// Trait representing the NIFS folding scheme.
-trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
+pub trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
     /// Metadata for prover including hash of public params
     type ProverParam;
 
@@ -32,9 +32,7 @@ trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
     /// The Instance of the Accumulator (e.g. [`RelaxedPlonkInstace`])
     type AccumulatorInstance;
 
-    fn setup_params(
-        td: &TableData<C::ScalarExt>,
-    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
+    fn setup_params(td: &TableData<C::ScalarExt>) -> (Self::ProverParam, Self::VerifierParam);
 
     /// Perform the folding operation as a prover.
     fn prove(

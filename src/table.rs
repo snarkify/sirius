@@ -178,31 +178,10 @@ impl<F: PrimeField> TableData<F> {
         Ok(())
     }
 
-    pub fn plonk_structure<C: CurveAffine<ScalarExt = F>>(
-        &self,
-        ck: &CommitmentKey<C>,
-    ) -> Option<PlonkStructure<C>> {
+    pub fn plonk_structure(&self) -> Option<PlonkStructure<F>> {
         if self.advice.is_empty() {
             return None;
         }
-
-        let selectors = self.selector.clone();
-        let selector_columns =
-            self.selector
-                .iter()
-                .flatten()
-                .map(|sel| if *sel { F::ONE } else { F::ZERO });
-        // TODO: avoid clone
-        let fixed_commitment = ck.commit(
-            &self
-                .fixed_columns
-                .clone()
-                .into_iter()
-                .flatten()
-                .chain(selector_columns)
-                .collect::<Vec<_>>(),
-        );
-
         let num_gates = self
             .cs
             .gates()
@@ -268,13 +247,12 @@ impl<F: PrimeField> TableData<F> {
 
         Some(PlonkStructure {
             k: self.k as usize,
-            selectors,
+            selectors: self.selector.clone(),
             fixed_columns: self.fixed_columns.clone(),
             num_advice_columns: self.cs.num_advice_columns(),
             num_challenges,
             round_sizes,
             poly,
-            fixed_commitment,
             permutation_matrix,
             lookup_arguments: self.lookup_arguments.clone(),
         })
