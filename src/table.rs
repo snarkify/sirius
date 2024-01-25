@@ -184,10 +184,10 @@ impl<F: PrimeField> TableData<F> {
         &self,
         ck: &CommitmentKey<C>,
     ) -> PlonkStructure<C> {
-        assert!(
-            !self.advice.is_empty(),
-            "should call TableData.assembly() first"
-        );
+        if self.advice.is_empty() {
+            return PlonkStructure::default();
+        }
+
         let selectors = self.selector.clone();
         let selector_columns =
             self.selector

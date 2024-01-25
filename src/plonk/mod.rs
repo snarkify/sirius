@@ -61,7 +61,7 @@ pub enum DeciderError {
     },
 }
 
-#[derive(Clone, PartialEq, Serialize)]
+#[derive(Clone, PartialEq, Serialize, Default)]
 #[serde(bound(serialize = "
     C: Serialize,
     C::ScalarExt: Serialize

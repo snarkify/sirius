@@ -576,7 +576,7 @@ impl<F: PrimeField> Ord for Monomial<F> {
     }
 }
 
-#[derive(Clone, PartialEq, Serialize)]
+#[derive(Clone, PartialEq, Serialize, Default)]
 pub struct MultiPolynomial<F: PrimeField> {
     pub(crate) arity: usize,
     pub(crate) monomials: Vec<Monomial<F>>,
