@@ -1,106 +1,21 @@
-use std::{marker::PhantomData, num::NonZeroUsize};
+use std::io;
 
-use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
+use ff::{FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2curves::CurveAffine;
+use serde::Serialize;
 
 use crate::{
-    commitment::CommitmentKey,
+    ivc::public_params::PublicParams,
+    main_gate::{AssignedValue, MainGateConfig},
     plonk::{PlonkTrace, RelaxedPlonkTrace},
-    poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
-    table::TableData,
+    poseidon::ROPair,
 };
 
-use super::step_circuit::SynthesizeStepParams;
 pub use super::{
     floor_planner::{FloorPlanner, SimpleFloorPlanner},
-    step_circuit::{StepCircuit, SynthesisError},
+    step_circuit::{self, StepCircuit, SynthesisError},
 };
-
-// TODO #31 docs
-pub struct CircuitPublicParams<C, ROC>
-where
-    C: CurveAffine,
-    C::Base: PrimeFieldBits + FromUniformBytes<64>,
-    ROC: ROCircuitTrait<C::Base>,
-{
-    ck: CommitmentKey<C>,
-    td: TableData<C::Scalar>,
-    ro_consts: ROC::Args,
-    // ro_consts_circuit: ROTrait::Constants, // NOTE: our `ROTraitCircuit` don't have main initializer
-    params: SynthesizeStepParams<C, ROC>,
-}
-
-impl<F, CC, RO, ROC> AbsorbInRO<F, RO> for CircuitPublicParams<CC, ROC>
-where
-    F: PrimeField,
-    CC: CurveAffine,
-    CC::Base: PrimeFieldBits + FromUniformBytes<64>,
-    RO: ROTrait<F>,
-    ROC: ROCircuitTrait<CC::Base>,
-{
-    fn absorb_into(&self, _ro: &mut RO) {
-        todo!("#32")
-    }
-}
-
-// TODO #31 docs
-pub struct PublicParams<const A1: usize, const A2: usize, C1, C2, R1, R2>
-where
-    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
-    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
-    C1::Base: PrimeFieldBits + FromUniformBytes<64>,
-    C2::Base: PrimeFieldBits + FromUniformBytes<64>,
-    R1: ROCircuitTrait<C1::Base>,
-    R2: ROCircuitTrait<C2::Base>,
-{
-    primary: CircuitPublicParams<C1, R1>,
-    secondary: CircuitPublicParams<C2, R2>,
-
-    _p: PhantomData<(C1, C2)>,
-}
-
-impl<const A1: usize, const A2: usize, C1, C2, R1, R2> PublicParams<A1, A2, C1, C2, R1, R2>
-where
-    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
-    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
-    R1: ROCircuitTrait<C1::Base>,
-    R2: ROCircuitTrait<C2::Base>,
-    C1::Base: PrimeFieldBits + FromUniformBytes<64>,
-    C2::Base: PrimeFieldBits + FromUniformBytes<64>,
-{
-    pub fn new<SC1, SC2>(
-        _limb_width: NonZeroUsize,
-        _limbs_count_limit: NonZeroUsize,
-        _primary: &SC1,
-        _primary_ro_constant: R1::Args,
-        _secondary: &SC2,
-        _secondary_ro_constant: R2::Args,
-    ) -> Self
-    where
-        SC1: StepCircuit<A1, C1::Scalar>,
-        SC2: StepCircuit<A2, C2::Scalar>,
-    {
-        // TODO #31 docs
-        // https://github.com/microsoft/Nova/blob/fb83e30e16e56b3b21c519b15b83c4ce1f077a13/src/lib.rs#L98
-        todo!("Impl creation of pub params")
-    }
-
-    pub fn digest<RO: ROTrait<C1::Base>>(&self, constant: RO::Constants) -> C1::ScalarExt {
-        let mut ro = RO::new(constant);
-
-        let Self {
-            primary,
-            secondary,
-            _p,
-        } = &self;
-        primary.absorb_into(&mut ro);
-        secondary.absorb_into(&mut ro);
-
-        let bytes_count = C1::Base::ZERO.to_repr().as_ref().len();
-        ro.squeeze::<C1>(NonZeroUsize::new(bytes_count * 8).unwrap())
-    }
-}
 
 // TODO #31 docs
 struct StepCircuitContext<const ARITY: usize, C, SC>
@@ -110,12 +25,22 @@ where
 {
     step_circuit: SC,
     relaxed_trace: RelaxedPlonkTrace<C>,
-    z_input: [C::Scalar; ARITY],
+    z_0: [AssignedValue<C::Scalar>; ARITY],
+    z_i: [AssignedValue<C::Scalar>; ARITY],
 }
 
 // TODO #31 docs
 #[derive(Debug, thiserror::Error)]
-pub enum Error {}
+pub enum Error {
+    #[error(transparent)]
+    StepConfigure(#[from] step_circuit::ConfigureError),
+    #[error(transparent)]
+    Plonk(#[from] halo2_proofs::plonk::Error),
+    #[error(transparent)]
+    Step(#[from] step_circuit::SynthesisError),
+    #[error("TODO")]
+    WhileHash(io::Error),
+}
 
 // TODO #31 docs
 #[allow(clippy::upper_case_acronyms)]
@@ -130,30 +55,32 @@ where
     primary: StepCircuitContext<A1, C1, SC1>,
     secondary: StepCircuitContext<A2, C2, SC2>,
 
-    trace: PlonkTrace<C2>,
+    primary_trace: PlonkTrace<C2>,
 
     step: usize,
 }
 
 impl<const A1: usize, const A2: usize, C1, C2, SC1, SC2> IVC<A1, A2, C1, C2, SC1, SC2>
 where
-    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
-    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
+    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
+    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
+    C1::ScalarExt: Serialize,
+    C2::ScalarExt: Serialize,
     SC1: StepCircuit<A1, C1::Scalar>,
     SC2: StepCircuit<A2, C2::Scalar>,
     C1::Base: PrimeFieldBits + FromUniformBytes<64>,
     C2::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    pub fn new<RO1, RO2>(
-        _pp: &PublicParams<A1, A2, C1, C2, RO1, RO2>,
+    pub fn new<const T: usize, RP1, RP2>(
+        _pp: &mut PublicParams<C1, C2, RP1, RP2>,
         _primary: SC1,
-        _z0_primary: [C1::Scalar; A1],
+        _z0_primary: [C1::Base; A1],
         _secondary: SC2,
-        _z0_secondary: [C2::Scalar; A2],
+        _z0_secondary: [C2::Base; A2],
     ) -> Result<Self, Error>
     where
-        RO1: ROCircuitTrait<C1::Base>,
-        RO2: ROCircuitTrait<C2::Base>,
+        RP1: ROPair<C1::Base, Config = MainGateConfig<T>>,
+        RP2: ROPair<C2::Base, Config = MainGateConfig<T>>,
     {
         // TODO #31
         todo!("Logic at `RecursiveSNARK::new`")
@@ -161,13 +88,13 @@ where
 
     pub fn prove_step<RO1, RO2>(
         &mut self,
-        _pp: &PublicParams<A1, A2, C1, C2, RO1, RO2>,
+        _pp: &PublicParams<C1, C2, RO1, RO2>,
         _z0_primary: [C1::Scalar; A1],
         _z0_secondary: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
-        RO1: ROCircuitTrait<C1::Base>,
-        RO2: ROCircuitTrait<C2::Base>,
+        RO1: ROPair<C1::Base>,
+        RO2: ROPair<C2::Base>,
     {
         // TODO #31
         todo!("Logic at `RecursiveSNARK::prove_step`")
@@ -175,14 +102,14 @@ where
 
     pub fn verify<RO1, RO2>(
         &mut self,
-        _pp: &PublicParams<A1, A2, C1, C2, RO1, RO2>,
+        _pp: &PublicParams<C1, C2, RO1, RO2>,
         _steps_count: usize,
         _z0_primary: [C1::Scalar; A1],
         _z0_secondary: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
-        RO1: ROCircuitTrait<C1::Base>,
-        RO2: ROCircuitTrait<C2::Base>,
+        RO1: ROPair<C1::Base>,
+        RO2: ROPair<C2::Base>,
     {
         // TODO #31
         todo!("Logic at `RecursiveSNARK::verify`")

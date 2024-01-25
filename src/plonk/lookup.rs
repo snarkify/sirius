@@ -36,18 +36,20 @@
 //!
 //! Please see (#34)[https://github.com/snarkify/sirius/issues/34] for details on notations.
 //!
+use std::array;
 
-use crate::concat_vec;
-use crate::plonk::eval::Error;
 use ff::PrimeField;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
 use itertools::Itertools;
 use rayon::prelude::*;
-use std::array;
+use serde::Serialize;
 
 use crate::{
-    plonk::eval::{Eval, LookupEvalDomain},
-    plonk::util::compress_halo2_expression,
+    concat_vec,
+    plonk::{
+        eval::{Error, Eval, LookupEvalDomain},
+        util::compress_halo2_expression,
+    },
     polynomial::{Expression, Query},
     table::TableData,
 };
@@ -65,7 +67,7 @@ use crate::{
 /// into a single (i.e. non-vector) Expression:
 /// - lookup_poly = L(x_1,...,x_a) = a_1 + a_2*r + a_3*r^2 + ...
 /// - table_poly  = T(y_1,...,y_b) = t_1 + t_2*r + t_3*r^2 + ...
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Arguments<F: PrimeField> {
     /// vector of the compressed lookup expressions
     /// L_i(x_1,...,x_{a_i})
