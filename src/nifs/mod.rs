@@ -20,17 +20,23 @@ pub mod vanilla;
 
 /// Trait representing the NIFS folding scheme.
 trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
-    // metadata for prover including pp_digest
+    /// Metadata for prover including hash of public params
     type ProverParam;
-    // metadata for verifier including pp_digest
+
+    /// Metadata for verifier including hash of public params
     type VerifierParam;
-    // Accumulator contains AccumulatorInstance and Witness data
+
+    /// Accumulator contains AccumulatorInstance and AccumulatorWitness (e.g. RelaxedPlonkWitness)
     type Accumulator;
+
+    /// The Instance of the Accumulator (e.g. RelaxedPlonkInstace)
     type AccumulatorInstance;
+
     fn setup_params(
         td: &TableData<C::ScalarExt>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
-    // Perform the folding operation as a prover.
+
+    /// Perform the folding operation as a prover.
     fn prove(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
