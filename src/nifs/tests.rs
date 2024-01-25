@@ -1,5 +1,6 @@
 use super::*;
-use crate::nifs::Error as NIFSError;
+use crate::nifs::{vanilla::VanillaFS, Error as NIFSError};
+use crate::plonk::{RelaxedPlonkInstance, RelaxedPlonkWitness};
 use crate::util::create_ro;
 use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
@@ -55,7 +56,7 @@ where
 
     let mut ro_acc_prover = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_acc_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
-    let (nifs, (U_from_prove, W)) = NIFS::prove(
+    let (nifs, (U_from_prove, W)) = VanillaFS::prove(
         ck,
         pp_digest,
         &mut ro_nark_prover,
@@ -86,7 +87,7 @@ where
         .unwrap();
     assert_eq!(S.is_sat(ck, &mut ro_nark_decider, &U1, &W1).err(), None);
 
-    let (nifs, (U_from_prove, _W)) = NIFS::prove(
+    let (nifs, (U_from_prove, _W)) = VanillaFS::prove(
         ck,
         pp_digest,
         &mut ro_nark_prover,
