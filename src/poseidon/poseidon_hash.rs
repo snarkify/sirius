@@ -1,10 +1,14 @@
-use crate::poseidon::{ROConstantsTrait, ROTrait};
-use crate::util::{bits_to_fe_le, fe_to_bits_le};
-use halo2_proofs::arithmetic::CurveAffine;
-use halo2curves::group::ff::{FromUniformBytes, PrimeField};
-use poseidon::{self, SparseMDSMatrix, Spec};
 use std::num::NonZeroUsize;
 use std::{iter, mem};
+
+use halo2_proofs::arithmetic::CurveAffine;
+use halo2curves::group::ff::{FromUniformBytes, PrimeField};
+use poseidon::{self, SparseMDSMatrix};
+
+use crate::poseidon::{ROConstantsTrait, ROTrait};
+use crate::util::{bits_to_fe_le, fe_to_bits_le};
+
+use super::Spec;
 
 // adapted from: https://github.com/privacy-scaling-explorations/snark-verifier
 
