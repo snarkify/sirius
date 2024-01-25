@@ -26,10 +26,10 @@ trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
     /// Metadata for verifier including hash of public params
     type VerifierParam;
 
-    /// Accumulator contains AccumulatorInstance and AccumulatorWitness (e.g. RelaxedPlonkWitness)
+    /// Accumulator contains AccumulatorInstance and the corresponding Witness (e.g. [`RelaxedPlonkWitness`])
     type Accumulator;
 
-    /// The Instance of the Accumulator (e.g. RelaxedPlonkInstace)
+    /// The Instance of the Accumulator (e.g. [`RelaxedPlonkInstace`])
     type AccumulatorInstance;
 
     fn setup_params(
@@ -45,7 +45,7 @@ trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
         incoming: Self::Accumulator,
     ) -> Result<Self::Accumulator, Error>;
 
-    // Perform the folding operation as a verifier.
+    /// Perform the folding operation as a verifier.
     fn verify(
         vp: &Self::VerifierParam,
         ro_nark: &mut RO,
