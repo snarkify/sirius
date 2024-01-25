@@ -70,7 +70,6 @@ where
             pp_digest,
             &mut ro_nark_verifier,
             &mut ro_acc_verifier,
-            &S,
             f_U,
             U1,
         )
@@ -101,7 +100,6 @@ where
             pp_digest,
             &mut ro_nark_verifier,
             &mut ro_acc_verifier,
-            &S,
             f_U,
             U1,
         )

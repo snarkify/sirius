@@ -19,14 +19,13 @@ use std::iter;
 use crate::{
     commitment::CommitmentKey,
     concat_vec,
-    constants::NUM_CHALLENGE_BITS,
     plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain},
     polynomial::{
         sparse::{matrix_multiply, SparseMatrix},
         MultiPolynomial,
     },
     poseidon::{AbsorbInRO, ROTrait},
-    table::SpsError,
+    sps::{Error as SpsError, SpecialSoundnessVerifier},
     util::fe_to_fe,
 };
 use ff::{Field, PrimeField};
@@ -211,29 +210,6 @@ impl<C: CurveAffine> PlonkStructure<C> {
             .unwrap_or(false)
     }
 
-    /// run special soundness protocol for verifier
-    pub fn run_sps_verifier<RO: ROTrait<C::Base>>(
-        &self,
-        U: &PlonkInstance<C>,
-        ro_nark: &mut RO,
-    ) -> Result<(), SpsError> {
-        if self.num_challenges == 0 {
-            return Ok(());
-        }
-
-        U.instance.iter().for_each(|inst| {
-            ro_nark.absorb_field(fe_to_fe(inst).unwrap());
-        });
-        for i in 0..self.num_challenges {
-            ro_nark.absorb_point(&U.W_commitments[i]);
-            let r = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
-            if r != U.challenges[i] {
-                return Err(SpsError::ChallengeNotMatch { challenge_index: i });
-            }
-        }
-        Ok(())
-    }
-
     pub fn is_sat<F, RO: ROTrait<C::Base>>(
         &self,
         ck: &CommitmentKey<C>,
@@ -245,7 +221,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
         C: CurveAffine<ScalarExt = F>,
         F: PrimeField,
     {
-        self.run_sps_verifier(U, ro_nark)?;
+        U.sps_verify(ro_nark)?;
         let check_commitments = U
             .W_commitments
             .iter()

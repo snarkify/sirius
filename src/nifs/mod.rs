@@ -17,10 +17,42 @@ use crate::plonk::{
 };
 use crate::polynomial::ColumnIndex;
 use crate::poseidon::{AbsorbInRO, ROTrait};
-use crate::table::{SpsError, TableData};
+use crate::sps::{Error as SpsError, SpecialSoundnessVerifier};
+use crate::table::TableData;
 use halo2_proofs::arithmetic::CurveAffine;
 use rayon::prelude::*;
 use std::marker::PhantomData;
+
+/// Trait representing the NIFS folding scheme.
+trait FoldingScheme<C: CurveAffine, RO: ROTrait<C>> {
+    // metadata for prover including pp_digest
+    type ProverParam;
+    // metadata for verifier including pp_digest
+    type VerifierParam;
+    // Accumulator contains AccumulatorInstance and Witness data
+    type Accumulator;
+    type AccumulatorInstance;
+    fn setup_params(
+        td: &TableData<C::ScalarExt>,
+    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
+    // Perform the folding operation as a prover.
+    fn prove(
+        ck: &CommitmentKey<C>,
+        pp: &Self::ProverParam,
+        ro_acc: &mut RO,
+        accumulator: Self::Accumulator,
+        incoming: Self::Accumulator,
+    ) -> Result<Self::Accumulator, Error>;
+
+    // Perform the folding operation as a verifier.
+    fn verify(
+        vp: &Self::VerifierParam,
+        ro_nark: &mut RO,
+        ro_acc: &mut RO,
+        accumulator: Self::AccumulatorInstance,
+        incoming: Self::AccumulatorInstance,
+    ) -> Result<Self::AccumulatorInstance, Error>;
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -215,11 +247,10 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> NIFS<C, RO> {
         pp_digest: &C,
         ro_nark: &mut RO,
         ro_acc: &mut RO,
-        S: &PlonkStructure<C>,
         U1: RelaxedPlonkInstance<C>,
         U2: PlonkInstance<C>,
     ) -> Result<RelaxedPlonkInstance<C>, Error> {
-        S.run_sps_verifier(&U2, ro_nark)?;
+        U2.sps_verify(ro_nark)?;
 
         let r = Self::generate_challenge(*pp_digest, ro_acc, &U1, &U2, &self.cross_term_commits)?;
 

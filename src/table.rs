@@ -8,8 +8,6 @@
 //!   generating instance/witnesses/challenges securely
 //! - Construction of permutation matrices, ensuring copy constraints consistency in the constraint system.
 //! - Construction of lookup Arguments when the circuits contains lookup argument
-//! - Comprehensive error handling through the `SpsError` enum, addressing potential issues in
-//!   constraint system setup and execution.
 //!
 //! The module is the intermediate data representation of plonkish constrain system defined by the
 //! circuits
@@ -20,7 +18,6 @@ use crate::{
     constants::NUM_CHALLENGE_BITS,
     plonk::{
         self,
-        eval::Error as EvalError,
         util::{
             cell_to_z_idx, column_index, compress_expression, fill_sparse_matrix,
             instance_column_index,
@@ -29,6 +26,7 @@ use crate::{
     },
     polynomial::{sparse::SparseMatrix, Expression},
     poseidon::ROTrait,
+    sps::Error as SpsError,
     util::{batch_invert_assigned, concatenate_with_padding, fe_to_fe},
 };
 use ff::PrimeField;
@@ -664,20 +662,6 @@ impl<F: PrimeField> Assignment<F> for TableData<F> {
     fn pop_namespace(&mut self, _: Option<String>) {
         // Do nothing; we don't care about namespaces in this context.
     }
-}
-
-#[derive(Debug, thiserror::Error, PartialEq)]
-pub enum SpsError {
-    #[error(transparent)]
-    Eval(#[from] EvalError),
-    #[error("Sps verification fail challenge not match at index {challenge_index}")]
-    ChallengeNotMatch { challenge_index: usize },
-    #[error("For this challenges count table must have lookup aguments")]
-    LackOfLookupArguments,
-    #[error("Lack of advices, should call `TableData::assembly` first")]
-    LackOfAdvices,
-    #[error("Only 0..=3 num of challenges supported: {challenges_count} not")]
-    UnsupportedChallengesCount { challenges_count: usize },
 }
 
 #[cfg(test)]
