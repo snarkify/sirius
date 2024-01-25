@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
 use crate::main_gate::{AssignedBit, RegionCtx, WrapValue};
-use ff::{FromUniformBytes, PrimeFieldBits};
+use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{arithmetic::CurveAffine, plonk::Error};
 
 pub mod poseidon_circuit;
@@ -10,7 +10,7 @@ use poseidon::Spec;
 pub use poseidon_hash::PoseidonHash;
 
 /// A helper trait to obsorb different objects into RO
-pub trait AbsorbInRO<C: CurveAffine, RO: ROTrait<C>> {
+pub trait AbsorbInRO<F: PrimeField, RO: ROTrait<F>> {
     /// Absorbs the value in the provided RO
     fn absorb_into(&self, ro: &mut RO);
 }
@@ -21,7 +21,7 @@ pub trait ROConstantsTrait {
     fn new(r_f: usize, r_p: usize) -> Self;
 }
 
-pub trait ROTrait<C: CurveAffine> {
+pub trait ROTrait<F: PrimeField> {
     /// A type representing constants/parameters associated with the hash function
     type Constants: ROConstantsTrait;
 
@@ -29,13 +29,13 @@ pub trait ROTrait<C: CurveAffine> {
     fn new(constants: Self::Constants) -> Self;
 
     /// Adds a base to the internal state
-    fn absorb_base(&mut self, base: C::Base);
+    fn absorb_field(&mut self, element: F);
 
     /// Adds a point to the internal state
-    fn absorb_point(&mut self, p: &C);
+    fn absorb_point<C: CurveAffine<Base = F>>(&mut self, p: &C);
 
     /// Returns a challenge by hashing the internal state
-    fn squeeze(&mut self, num_bits: NonZeroUsize) -> C::Scalar;
+    fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar;
 }
 
 /// A helper trait that defines the behavior of a hash function used as a Random Oracle (RO)
@@ -81,24 +81,24 @@ pub trait ROCircuitTrait<F: PrimeFieldBits + FromUniformBytes<64>> {
 
 /// Random Oracle is represented as a pair of on-circuit & off-circuit types,
 /// allowing the use of a single generic.
-pub trait ROPair<C: CurveAffine>
+pub trait ROPair<F: PrimeField>
 where
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
     /// Argument for creating on-circuit & off-circuit versions of oracles
     type Args;
 
-    type OffCircuit: ROTrait<C, Constants = Self::Args>;
-    type OnCircuit: ROCircuitTrait<C::Base, Args = Self::Args>;
+    type OffCircuit: ROTrait<F, Constants = Self::Args>;
+    type OnCircuit: ROCircuitTrait<F, Args = Self::Args>;
 }
 
 pub struct PoseidonRO<const T: usize, const RATE: usize>;
 
-impl<const T: usize, const RATE: usize, C: CurveAffine> ROPair<C> for PoseidonRO<T, RATE>
+impl<const T: usize, const RATE: usize, F: PrimeField> ROPair<F> for PoseidonRO<T, RATE>
 where
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
-    type Args = Spec<C::Base, T, RATE>;
-    type OnCircuit = poseidon_circuit::PoseidonChip<C::Base, T, RATE>;
-    type OffCircuit = poseidon_hash::PoseidonHash<C, T, RATE>;
+    type Args = Spec<F, T, RATE>;
+    type OnCircuit = poseidon_circuit::PoseidonChip<F, T, RATE>;
+    type OffCircuit = poseidon_hash::PoseidonHash<F, T, RATE>;
 }

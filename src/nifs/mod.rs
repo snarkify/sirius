@@ -53,12 +53,12 @@ pub type CrossTermCommits<C> = Vec<C>;
 /// Please refer to: [notes](https://hackmd.io/@chaosma/BJvWmnw_h#31-NIFS)
 // TODO Replace links to either the documentation right here, or the official Snarkify resource
 #[derive(Clone, Debug)]
-pub struct NIFS<C: CurveAffine, RO: ROTrait<C>> {
+pub struct NIFS<C: CurveAffine, RO: ROTrait<C::Base>> {
     pub(crate) cross_term_commits: CrossTermCommits<C>,
     _marker: PhantomData<RO>,
 }
 
-impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
+impl<C: CurveAffine, RO: ROTrait<C::Base>> NIFS<C, RO> {
     /// Commits to the cross terms between two Plonk instance-witness pairs.
     ///
     /// This method calculates the cross terms and their commitments, which
@@ -142,7 +142,7 @@ impl<C: CurveAffine, RO: ROTrait<C>> NIFS<C, RO> {
             .iter()
             .for_each(|cm| ro_acc.absorb_point(cm));
 
-        Ok(ro_acc.squeeze(NUM_CHALLENGE_BITS))
+        Ok(ro_acc.squeeze::<C>(NUM_CHALLENGE_BITS))
     }
 
     /// Generates a proof of correct folding using the NIFS protocol.
