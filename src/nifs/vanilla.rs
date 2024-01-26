@@ -218,11 +218,12 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> FoldingScheme<C, RO> for VanillaFS<C,
     type VerifierParam = PlonkStructure<C::ScalarExt>;
     type Accumulator = PlonkAccumulator<C>;
     type AccumulatorInstance = RelaxedPlonkInstance<C>;
+
     fn setup_params(
         td: &TableData<<C as CurveAffine>::ScalarExt>,
-    ) -> (Self::ProverParam, Self::VerifierParam) {
-        let pp = td.plonk_structure().unwrap();
-        (pp.clone(), pp)
+    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
+        let pp = td.plonk_structure().ok_or(Error::ParamNotSetup)?;
+        Ok((pp.clone(), pp))
     }
 
     // Perform the folding operation as a prover.

@@ -337,24 +337,19 @@ impl<F: PrimeField> PlonkStructure<F> {
     pub fn is_sat_log_derivative(&self, W: &[Vec<F>]) -> bool {
         let nrow = 2usize.pow(self.k as u32);
         let check_is_zero = |hs: &[Vec<F>], gs: &[Vec<F>]| -> bool {
-            hs.iter()
-                .zip(gs)
-                .map(|(h, g)| {
-                    // check sum_i h_i = sum_i g_i for each lookup
-                    h.iter()
-                        .zip_eq(g)
-                        .map(|(hi, gi)| *hi - *gi)
-                        .fold(F::ZERO, |acc, d| acc + d)
-                })
-                .filter(|v| F::ZERO.ne(v))
-                .count()
-                == 0
+            hs.iter().zip(gs).all(|(h, g)| {
+                // check sum_i h_i = sum_i g_i for each lookup
+                h.iter()
+                    .zip_eq(g)
+                    .map(|(hi, gi)| *hi - *gi)
+                    .sum::<F>()
+                    .eq(&F::ZERO)
+            })
         };
         let gather_vectors = |W: &Vec<F>, start_index: usize| -> Vec<Vec<F>> {
-            let indexes = iter::successors(Some(start_index), |idx| Some(idx + 2));
-            (0..self.num_lookups())
-                .zip(indexes)
-                .map(|(_, idx)| W[idx * nrow..(idx * nrow + nrow)].to_vec())
+            iter::successors(Some(start_index), |idx| Some(idx + 2))
+                .take(self.num_lookups())
+                .map(|idx| W[idx * nrow..(idx * nrow + nrow)].to_vec())
                 .collect::<Vec<_>>()
         };
 

@@ -32,7 +32,9 @@ pub trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
     /// The Instance of the Accumulator (e.g. [`RelaxedPlonkInstace`])
     type AccumulatorInstance;
 
-    fn setup_params(td: &TableData<C::ScalarExt>) -> (Self::ProverParam, Self::VerifierParam);
+    fn setup_params(
+        td: &TableData<C::ScalarExt>,
+    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 
     /// Perform the folding operation as a prover.
     fn prove(
@@ -55,6 +57,8 @@ pub trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("parameter not setup")]
+    ParamNotSetup,
     #[error(transparent)]
     Eval(#[from] EvalError),
     #[error(transparent)]
