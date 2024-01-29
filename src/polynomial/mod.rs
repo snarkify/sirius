@@ -695,7 +695,7 @@ impl<F: PrimeField> MultiPolynomial<F> {
             if idx >= self.monomials.len() {
                 break;
             }
-            if self.monomials[idx] == self.monomials[idx - 1] {
+            if self.monomials[idx] == reduced[reduced.len() - 1] {
                 let size = reduced.len();
                 reduced[size - 1].add(&self.monomials[idx]);
             } else if self.monomials[idx].coeff == F::ZERO {
