@@ -25,6 +25,11 @@ pub type CrossTerms<C> = Vec<Vec<<C as CurveAffine>::ScalarExt>>;
 /// Cryptographic commitments to the [`CrossTerms`].
 pub type CrossTermCommits<C> = Vec<C>;
 
+pub struct PlonkAccumulator<C: CurveAffine> {
+    pub(crate) instance: RelaxedPlonkInstance<C>,
+    pub(crate) witness: RelaxedPlonkWitness<C::ScalarExt>,
+}
+
 /// VanillaFS: Vanilla version of Non Interactive Folding Scheme
 ///
 /// Given a polynomial relation `P(x_1,...,x_n)` with polynomial degree `d.
@@ -65,7 +70,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
     /// to be combined into one.
     pub fn commit_cross_terms(
         ck: &CommitmentKey<C>,
-        S: &PlonkStructure<C>,
+        S: &PlonkStructure<C::ScalarExt>,
         U1: &RelaxedPlonkInstance<C>,
         W1: &RelaxedPlonkWitness<C::ScalarExt>,
         U2: &PlonkInstance<C>,
@@ -162,8 +167,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
         ),
         Error,
     > {
-        // TODO: hash gate into ro (#85)
-        let S = td.plonk_structure(ck).unwrap();
+        let S = td.plonk_structure().unwrap();
 
         let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges)?;
         let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2)?;
@@ -206,5 +210,41 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
         let r = Self::generate_challenge(*pp_digest, ro_acc, &U1, &U2, &self.cross_term_commits)?;
 
         Ok(U1.fold(&U2, &self.cross_term_commits, &r))
+    }
+}
+
+impl<C: CurveAffine, RO: ROTrait<C::Base>> FoldingScheme<C, RO> for VanillaFS<C, RO> {
+    type ProverParam = PlonkStructure<C::ScalarExt>;
+    type VerifierParam = PlonkStructure<C::ScalarExt>;
+    type Accumulator = PlonkAccumulator<C>;
+    type AccumulatorInstance = RelaxedPlonkInstance<C>;
+
+    fn setup_params(
+        td: &TableData<<C as CurveAffine>::ScalarExt>,
+    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
+        let pp = td.plonk_structure().ok_or(Error::ParamNotSetup)?;
+        Ok((pp.clone(), pp))
+    }
+
+    // Perform the folding operation as a prover.
+    fn prove(
+        _ck: &CommitmentKey<C>,
+        _pp: &Self::ProverParam,
+        _ro_acc: &mut RO,
+        _accumulator: Self::Accumulator,
+        _incoming: Self::Accumulator,
+    ) -> Result<Self::Accumulator, Error> {
+        todo!()
+    }
+
+    // Perform the folding operation as a verifier.
+    fn verify(
+        _vp: &Self::VerifierParam,
+        _ro_nark: &mut RO,
+        _ro_acc: &mut RO,
+        _accumulator: Self::AccumulatorInstance,
+        _incoming: Self::AccumulatorInstance,
+    ) -> Result<Self::AccumulatorInstance, Error> {
+        todo!()
     }
 }

@@ -41,7 +41,7 @@ where
     const R_F: usize = 4;
     const R_P: usize = 3;
 
-    let S = td1.plonk_structure(ck).unwrap();
+    let S = td1.plonk_structure().unwrap();
     let mut f_U =
         RelaxedPlonkInstance::new(td1.instance.len(), S.num_challenges, S.round_sizes.len());
     let mut f_W = RelaxedPlonkWitness::new(td1.k, &S.round_sizes);

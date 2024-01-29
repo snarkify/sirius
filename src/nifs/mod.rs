@@ -19,7 +19,7 @@ use rayon::prelude::*;
 pub mod vanilla;
 
 /// Trait representing the NIFS folding scheme.
-trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
+pub trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
     /// Metadata for prover including hash of public params
     type ProverParam;
 
@@ -57,6 +57,8 @@ trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("parameter not setup")]
+    ParamNotSetup,
     #[error(transparent)]
     Eval(#[from] EvalError),
     #[error(transparent)]

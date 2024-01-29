@@ -62,16 +62,13 @@ pub enum DeciderError {
 
 #[derive(Clone, PartialEq, Serialize, Default)]
 #[serde(bound(serialize = "
-    C: Serialize,
-    C::ScalarExt: Serialize
+    F: Serialize
 "))]
-pub struct PlonkStructure<C: CurveAffine> {
+pub struct PlonkStructure<F: PrimeField> {
     /// k is a parameter such that 2^k is the total number of rows
     pub(crate) k: usize,
     pub(crate) selectors: Vec<Vec<bool>>,
-    pub(crate) fixed_columns: Vec<Vec<C::ScalarExt>>,
-    /// concatenate selectors and num_fixed_columns together, then commit
-    pub(crate) fixed_commitment: C,
+    pub(crate) fixed_columns: Vec<Vec<F>>,
 
     pub(crate) num_advice_columns: usize,
 
@@ -84,9 +81,9 @@ pub struct PlonkStructure<C: CurveAffine> {
     pub(crate) round_sizes: Vec<usize>,
 
     /// singla polynomial relation that combines custom gates and lookup relations
-    pub(crate) poly: MultiPolynomial<C::ScalarExt>,
-    pub(crate) permutation_matrix: SparseMatrix<C::ScalarExt>,
-    pub(crate) lookup_arguments: Option<lookup::Arguments<C::ScalarExt>>,
+    pub(crate) poly: MultiPolynomial<F>,
+    pub(crate) permutation_matrix: SparseMatrix<F>,
+    pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
 }
 
 #[derive(Clone, Debug)]
@@ -151,13 +148,6 @@ pub struct PlonkTrace<C: CurveAffine> {
     pub w: PlonkWitness<C::Scalar>,
 }
 
-impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for PlonkStructure<C> {
-    // TODO: add hash of other fields including gates
-    fn absorb_into(&self, ro: &mut RO) {
-        ro.absorb_point(&self.fixed_commitment);
-    }
-}
-
 impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for PlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
         for pt in self.W_commitments.iter() {
@@ -188,7 +178,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPl
     }
 }
 
-impl<C: CurveAffine> PlonkStructure<C> {
+impl<F: PrimeField> PlonkStructure<F> {
     /// return the index offset of fixed variables(i.e. not folded)
     pub fn num_non_fold_vars(&self) -> usize {
         self.fixed_columns.len() + self.selectors.len()
@@ -216,7 +206,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
             .unwrap_or(false)
     }
 
-    pub fn is_sat<F, RO: ROTrait<C::Base>>(
+    pub fn is_sat<C, RO: ROTrait<C::Base>>(
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
@@ -225,7 +215,6 @@ impl<C: CurveAffine> PlonkStructure<C> {
     ) -> Result<(), DeciderError>
     where
         C: CurveAffine<ScalarExt = F>,
-        F: PrimeField,
     {
         U.sps_verify(ro_nark)?;
         let check_commitments = U
@@ -264,7 +253,7 @@ impl<C: CurveAffine> PlonkStructure<C> {
         }
     }
 
-    pub fn is_sat_relaxed<F>(
+    pub fn is_sat_relaxed<C>(
         &self,
         ck: &CommitmentKey<C>,
         U: &RelaxedPlonkInstance<C>,
@@ -272,7 +261,6 @@ impl<C: CurveAffine> PlonkStructure<C> {
     ) -> Result<(), DeciderError>
     where
         C: CurveAffine<ScalarExt = F>,
-        F: PrimeField,
     {
         let check_W_commitments = U
             .W_commitments
@@ -317,14 +305,13 @@ impl<C: CurveAffine> PlonkStructure<C> {
     }
 
     // permutation check for folding instance-witness pair
-    pub fn is_sat_perm<F>(
+    pub fn is_sat_perm<C>(
         &self,
         U: &RelaxedPlonkInstance<C>,
         W: &RelaxedPlonkWitness<F>,
     ) -> Result<(), DeciderError>
     where
         C: CurveAffine<ScalarExt = F>,
-        F: PrimeField,
     {
         let Z = U
             .instance
@@ -347,30 +334,24 @@ impl<C: CurveAffine> PlonkStructure<C> {
     }
 
     /// check whether the log-derivative equation is satisfied
-    pub fn is_sat_log_derivative(&self, W: &[Vec<C::ScalarExt>]) -> bool {
+    pub fn is_sat_log_derivative(&self, W: &[Vec<F>]) -> bool {
         let nrow = 2usize.pow(self.k as u32);
-        let check_is_zero = |hs: &[Vec<C::ScalarExt>], gs: &[Vec<C::ScalarExt>]| -> bool {
-            hs.iter()
-                .zip(gs)
-                .map(|(h, g)| {
-                    // check sum_i h_i = sum_i g_i for each lookup
-                    h.iter()
-                        .zip_eq(g)
-                        .map(|(hi, gi)| *hi - *gi)
-                        .fold(C::ScalarExt::ZERO, |acc, d| acc + d)
-                })
-                .filter(|v| C::ScalarExt::ZERO.ne(v))
-                .count()
-                == 0
+        let check_is_zero = |hs: &[Vec<F>], gs: &[Vec<F>]| -> bool {
+            hs.iter().zip(gs).all(|(h, g)| {
+                // check sum_i h_i = sum_i g_i for each lookup
+                h.iter()
+                    .zip_eq(g)
+                    .map(|(hi, gi)| *hi - *gi)
+                    .sum::<F>()
+                    .eq(&F::ZERO)
+            })
         };
-        let gather_vectors =
-            |W: &Vec<C::ScalarExt>, start_index: usize| -> Vec<Vec<C::ScalarExt>> {
-                let indexes = iter::successors(Some(start_index), |idx| Some(idx + 2));
-                (0..self.num_lookups())
-                    .zip(indexes)
-                    .map(|(_, idx)| W[idx * nrow..(idx * nrow + nrow)].to_vec())
-                    .collect::<Vec<_>>()
-            };
+        let gather_vectors = |W: &Vec<F>, start_index: usize| -> Vec<Vec<F>> {
+            iter::successors(Some(start_index), |idx| Some(idx + 2))
+                .take(self.num_lookups())
+                .map(|idx| W[idx * nrow..(idx * nrow + nrow)].to_vec())
+                .collect::<Vec<_>>()
+        };
 
         if self.has_vector_lookup() {
             let hs = gather_vectors(&W[2], 0);

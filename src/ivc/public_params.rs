@@ -129,29 +129,21 @@ where
         {
             primary_ck: &'l CommitmentKey<C2>,
             primary_params: &'l SynthesizeStepParams<C2, RP2::OnCircuit>,
-            primary_structure: PlonkStructure<C1>,
+            primary_structure: PlonkStructure<C1::ScalarExt>,
 
             secondary_ck: &'l CommitmentKey<C1>,
             secondary_params: &'l SynthesizeStepParams<C1, RP1::OnCircuit>,
-            secondary_structure: PlonkStructure<C2>,
+            secondary_structure: PlonkStructure<C2::ScalarExt>,
         }
 
         Wrapper::<'_, C1, C2, RP1, RP2> {
             primary_params: &self.primary.params,
             primary_ck: &self.primary.ck,
-            primary_structure: self
-                .primary
-                .td
-                .plonk_structure(&self.secondary.ck)
-                .unwrap_or_default(),
+            primary_structure: self.primary.td.plonk_structure().unwrap_or_default(),
 
             secondary_params: &self.secondary.params,
             secondary_ck: &self.secondary.ck,
-            secondary_structure: self
-                .secondary
-                .td
-                .plonk_structure(&self.primary.ck)
-                .unwrap_or_default(),
+            secondary_structure: self.secondary.td.plonk_structure().unwrap_or_default(),
         }
         .serialize(serializer)
     }
