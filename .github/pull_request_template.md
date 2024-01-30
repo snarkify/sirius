@@ -1,3 +1,4 @@
+<!-- Please read https://developers.google.com/blockly/guides/contribute/get-started/write_a_good_pr for general guidance-->
 <!-- The most simplified version of Conventional Commits for PR titles. -->
 <!-- allowed prefixes: `feat`, `fix`, `chore`, `ci`, `docs`, `test` -->
 <!-- module names: the full name of the top-level module whose modifications were the reason for creating the PR or an accepted abbreviation, which should be specified in the rustdoc of the corresponding module -->
