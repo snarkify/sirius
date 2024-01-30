@@ -695,11 +695,11 @@ impl<F: PrimeField> MultiPolynomial<F> {
             if idx >= self.monomials.len() {
                 break;
             }
-            if self.monomials[idx] == reduced[reduced.len() - 1] {
+            if self.monomials[idx].coeff == F::ZERO {
+                continue;
+            } else if self.monomials[idx] == reduced[reduced.len() - 1] {
                 let size = reduced.len();
                 reduced[size - 1].add(&self.monomials[idx]);
-            } else if self.monomials[idx].coeff == F::ZERO {
-                continue;
             } else {
                 reduced.push(self.monomials[idx].clone());
             }
