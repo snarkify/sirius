@@ -2,14 +2,15 @@
 <!-- allowed prefixes: `feat`, `fix`, `chore`, `ci`, `docs`, `test` -->
 <!-- module names: the full name of the top-level module whose modifications were the reason for creating the PR or an accepted abbreviation, which should be specified in the rustdoc of the corresponding module -->
 
-**Why?**
-<!-- It makes more sense to add a link to the issue here, adding context as to whether this PR is the final or partial insertion of it. If there is no issue, there should be a short description of why the change is needed here -->
+**Issue Link / Motivation**
+<!-- Link to the related issue(s). If there's no issue, briefly explain the need for this change. -->
 
-**What?**
-<!-- A short description of what this PR brings to the project. For example "split module A into two parts" or "added implementation of B". -->
+**Changes Overview**
+<!-- Concisely describe the changes and their impact on the project, point out anything you want reviewers to scrutinize-->
 
-**How?**
-<!-- An explanation of how it was done. This paragraph should be the context for reading already diff, so that the reviewer keeps in mind that these changes were made in this way for such purposes. -->
+<!-- Optional Sections -->
+<!--**Implementation Details**-->
+<!-- For non-trivial changes, provide context on the approach taken, focusing on the rationale behind key decisions.-->
 
-<!-- BREAKING_CHANGE: after stabilization -->
-<!-- **Tested?** section after stabilization -->
+<!--**Testing plan**-->
+<!-- Detail the testing performed to ensure reliability and performance.-->
