@@ -14,10 +14,11 @@ use halo2curves::{bn256, grumpkin, CurveExt};
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
 
+use log::*;
 use sirius::{
+    commitment::CommitmentKey,
     ivc::{step_circuit, PublicParams, SimpleFloorPlanner, StepCircuit, SynthesisError, IVC},
     poseidon::{self, ROPair},
-    table::TableData,
 };
 
 mod table16;
@@ -265,6 +266,9 @@ struct TestSha256Circuit<F: PrimeField> {
 // TODO
 const ARITY: usize = BLOCK_SIZE / 2;
 
+const CIRCUIT_TABLE_SIZE: usize = 22;
+const COMMITMENT_KEY_SIZE: usize = 27;
+
 impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
     type Config = Table16Config;
     type FloorPlanner = SimpleFloorPlanner;
@@ -318,10 +322,12 @@ impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
     }
 }
 
-type RandomOracle<const T: usize, const RATE: usize> = poseidon::PoseidonRO<T, RATE>;
+const T: usize = 5;
+const RATE: usize = 4;
 
-type RandomOracleConstant<const T: usize, const RATE: usize, F> =
-    <RandomOracle<T, RATE> as ROPair<F>>::Args;
+type RandomOracle = poseidon::PoseidonRO<T, RATE>;
+
+type RandomOracleConstant<F> = <RandomOracle as ROPair<F>>::Args;
 
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
 const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
@@ -333,52 +339,38 @@ type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
 type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
 
 fn main() {
+    env_logger::init();
+    log::info!("Start");
     // C1
     let sc1 = TestSha256Circuit::default();
     // C2
     let sc2 = step_circuit::trivial::Circuit::<ARITY, _>::default();
 
-    let _cs1 = TableData::<<C1 as CurveExt>::Base>::new(11, vec![]);
-    let _cs2 = TableData::<<C2 as CurveExt>::Base>::new(11, vec![]);
+    let primary_spec = RandomOracleConstant::<<C2 as CurveExt>::Base>::new(10, 10);
+    let secondary_spec = RandomOracleConstant::<<C1 as CurveExt>::Base>::new(10, 10);
 
-    let primary_spec = RandomOracleConstant::<5, 5, <C2 as CurveExt>::Base>::new(10, 10);
-    let secondary_spec = RandomOracleConstant::<5, 5, <C1 as CurveExt>::Base>::new(10, 10);
+    let primary_commitment_key = CommitmentKey::setup(COMMITMENT_KEY_SIZE, b"primary");
+    let secondary_commitment_key = CommitmentKey::setup(COMMITMENT_KEY_SIZE, b"secondary");
 
-    const K: usize = 20;
-    let mut pp = PublicParams::<C1Affine, C2Affine, RandomOracle<5, 5>, RandomOracle<5, 5>>::new(
-        K as u32,
+    let pp = PublicParams::<C1Affine, C2Affine, RandomOracle, RandomOracle>::new(
+        CIRCUIT_TABLE_SIZE as u32,
+        &primary_commitment_key,
+        &secondary_commitment_key,
         primary_spec,
         secondary_spec,
         LIMB_WIDTH,
         LIMBS_COUNT_LIMIT,
     );
+    info!("Public Params: {pp:?}");
 
-    let mut ivc = IVC::new(
-        &mut pp,
+    let _ivc = IVC::new(
+        &pp,
         sc1,
-        array::from_fn(|i| C2Scalar::from_u128(i as u128)),
+        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
         sc2,
-        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
-    )
-    .unwrap();
-
-    ivc.prove_step(
-        &pp,
-        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
         array::from_fn(|i| C2Scalar::from_u128(i as u128)),
     )
     .unwrap();
 
-    ivc.verify(
-        &pp,
-        2,
-        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
-        array::from_fn(|i| C2Scalar::from_u128(i as u128)),
-    )
-    .unwrap();
-
-    todo!(
-        "#33 Waiting for IVC Circuit for test {:?}",
-        TestSha256Circuit::<<C1 as CurveExt>::Base>::default()
-    );
+    debug!("base case ready");
 }
