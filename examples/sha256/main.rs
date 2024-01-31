@@ -401,5 +401,5 @@ fn main() {
     )
     .unwrap();
 
-    debug!("base case ready: {ivc:?}");
+    debug!("base case ready");
 }

@@ -1,6 +1,6 @@
 use std::{
     cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd},
-    collections::{HashMap, HashSet, BTreeSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt,
     fmt::{Debug, Display},
     ops::{Add, Mul, Neg, Sub},

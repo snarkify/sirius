@@ -43,7 +43,6 @@ use std::{
 
 use ff::PrimeField;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
-use itertools::Itertools;
 use log::*;
 use rayon::prelude::*;
 use serde::Serialize;
@@ -280,12 +279,12 @@ impl<F: PrimeField> Arguments<F> {
 
     fn evaluate_h_g(l: &[F], t: &[F], r: F, m: &[F]) -> (Vec<F>, Vec<F>) {
         let h = l
-            .iter()
+            .par_iter()
             .map(|&l_i| Option::from((l_i + r).invert()).unwrap_or(F::ZERO))
             .collect::<Vec<F>>();
         let g = t
-            .iter()
-            .zip_eq(m)
+            .par_iter()
+            .zip_eq(m.par_iter())
             .map(|(t_i, m_i)| *m_i * Option::from((*t_i + r).invert()).unwrap_or(F::ZERO))
             .collect::<Vec<F>>();
         (h, g)
@@ -326,6 +325,7 @@ impl<F: PrimeField> ArgumentCoefficient1<F> {
     pub(crate) fn evaluate_coefficient_2(&self, r: F) -> ArgumentCoefficient2<F> {
         let (hs, gs): (Vec<_>, Vec<_>) =
             itertools::multizip((self.ls.iter(), self.ts.iter(), self.ms.iter()))
+                .par_bridge()
                 .map(|(l, t, m)| Arguments::evaluate_h_g(l, t, r, m))
                 .unzip();
 
