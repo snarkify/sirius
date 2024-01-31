@@ -4,6 +4,7 @@ use ff::{BatchInvert, Field, PrimeField};
 use halo2_proofs::plonk::Assigned;
 use num_bigint::BigUint;
 pub(crate) use rayon::current_num_threads;
+use rayon::prelude::*;
 
 use crate::{
     main_gate::AssignedValue,
@@ -182,13 +183,87 @@ pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>, bit_len: NonZeroUsi
     }
 }
 
+/// Concatenates a slice of vectors, each containing elements of type `F`, into a single vector,
+/// with padding to ensure uniform segment sizes.
 pub(crate) fn concatenate_with_padding<F: PrimeField>(vs: &[Vec<F>], pad_size: usize) -> Vec<F> {
-    vs.iter()
-        .fold(Vec::with_capacity(vs.len() * pad_size), |mut result, v| {
-            result.extend_from_slice(v);
-            result.extend(iter::repeat(F::ZERO).take(pad_size.saturating_sub(v.len())));
-            result
+    vs.par_iter()
+        .flat_map_iter(|v| {
+            v.iter()
+                .copied()
+                .chain(iter::repeat(F::ZERO).take(pad_size.saturating_sub(v.len())))
         })
+        .collect()
+}
+
+#[allow(clippy::items_after_test_module)]
+#[cfg(test)]
+mod tests {
+    use halo2curves::pasta::Fp;
+
+    use super::*;
+
+    // Helper to easily create an Fp element
+    fn fp(num: u64) -> Fp {
+        Fp::from(num)
+    }
+
+    // Test empty input
+    #[test]
+    fn concatenate_empty() {
+        let input: Vec<Vec<Fp>> = vec![];
+        let result = concatenate_with_padding(&input, 4);
+        assert!(result.is_empty());
+    }
+
+    // Test padding with single vector
+    #[test]
+    fn single_vector_with_padding() {
+        let input = vec![vec![fp(1), fp(2)]];
+        let result = concatenate_with_padding(&input, 4);
+        assert_eq!(result, vec![fp(1), fp(2), Fp::zero(), Fp::zero()]);
+    }
+
+    // Test no padding needed (perfect fit)
+    #[test]
+    fn single_vector_no_padding() {
+        let input = vec![vec![fp(1), fp(2), fp(3), fp(4)]];
+        let result = concatenate_with_padding(&input, 4);
+        assert_eq!(result, vec![fp(1), fp(2), fp(3), fp(4)]);
+    }
+
+    // Test padding with multiple vectors
+    #[test]
+    fn multiple_vectors_with_padding() {
+        let input = vec![vec![fp(1), fp(2)], vec![fp(3)], vec![fp(4), fp(5), fp(6)]];
+        let pad_size = 4;
+
+        assert_eq!(
+            concatenate_with_padding(&input, pad_size),
+            [
+                fp(1),
+                fp(2),
+                Fp::zero(),
+                Fp::zero(), // First vector with padding
+                fp(3),
+                Fp::zero(),
+                Fp::zero(),
+                Fp::zero(), // Second vector with padding
+                fp(4),
+                fp(5),
+                fp(6),
+                Fp::zero(), // Third vector with padding
+            ]
+        );
+    }
+
+    // Test with pad_size = 1 (should mirror input exactly)
+    #[test]
+    fn pad_size_one() {
+        assert_eq!(
+            concatenate_with_padding(&[vec![fp(1)], vec![fp(2), fp(3)]], 1),
+            [fp(1), fp(2), fp(3)]
+        );
+    }
 }
 
 pub(crate) fn create_ro<
