@@ -1,4 +1,10 @@
-use std::{io::Read, iter, ops};
+use std::{
+    fs::File,
+    io::{self, Read, Write},
+    iter, ops,
+    path::Path,
+    slice,
+};
 
 use digest::{ExtendableOutput, Update};
 use group::Curve;
@@ -77,5 +83,67 @@ impl<C: CurveAffine> CommitmentKey<C> {
                 limit: self.ck.len(),
             })
         }
+    }
+}
+
+impl<C: CurveAffine> CommitmentKey<C> {
+    /// Saves `Self` as memory cast to a file.
+    /// Fast, but takes up a lot of memory.
+    ///
+    /// # Safety
+    /// Check [`std::slice::from_raw_parts`] for details
+    pub unsafe fn save_to_file(&self, file_path: &Path) -> io::Result<()> {
+        let ptr = self.ck.as_ptr();
+        let len = self.ck.len();
+        let byte_slice = slice::from_raw_parts(ptr as *const u8, len * std::mem::size_of::<C>());
+        File::create(file_path)?.write_all(byte_slice)
+    }
+
+    /// Load `Self` from memory cast at file.
+    /// Fast, but unsafe
+    ///
+    /// # Safety
+    /// - Safe only if the file is created with [`CommitmentKey::save_to_file`]
+    /// - Check [`std::slice::from_raw_parts_mut`] for details
+    pub unsafe fn load_from_file(file_path: &Path, k: usize) -> io::Result<Self> {
+        let vec_len: usize = 1 << k;
+
+        let mut ck = Vec::with_capacity(vec_len);
+        let byte_slice = slice::from_raw_parts_mut(
+            ck.as_mut_ptr() as *mut u8,
+            vec_len * std::mem::size_of::<C>(),
+        );
+
+        File::open(file_path)?.read_exact(byte_slice)?;
+        ck.set_len(vec_len);
+
+        Ok(Self {
+            ck: ck.into_boxed_slice(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod file_tests {
+    use halo2curves::bn256::G1Affine;
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[test]
+    fn consistency() {
+        const K: usize = 10;
+
+        let key = CommitmentKey::<G1Affine>::setup(K, b"");
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("my-temporary-note.txt");
+
+        unsafe {
+            key.save_to_file(&file_path).unwrap();
+        }
+
+        let loaded = unsafe { CommitmentKey::load_from_file(&file_path, K).unwrap() };
+
+        assert_eq!(key, loaded);
     }
 }

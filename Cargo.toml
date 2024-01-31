@@ -32,6 +32,7 @@ prettytable-rs = "0.10.0"
 test-log = "0.2.12"
 halo2_gadgets = { git = "https://github.com/snarkify/halo2", branch = "snarkify/dev", features = ["unstable"] }
 bincode = "1.3"
+tempfile = "3.9.0"
 
 [dev-dependencies.cargo-husky]
 version = "1"
