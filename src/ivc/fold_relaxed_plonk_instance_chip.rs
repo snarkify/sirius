@@ -257,7 +257,7 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
                     })
                     .collect::<Option<Vec<_>>>()?;
 
-                let bn = BigUint::<C::ScalarExt>::from_limbs(limbs.into_iter(), limb_width);
+                let bn = BigUint::<C::ScalarExt>::from_limbs(limbs.into_iter(), limb_width, limbs_count);
 
                 let bn_f = bn.map(|r| {
                     r.into_f().expect(
@@ -1092,7 +1092,7 @@ mod tests {
     const K: u32 = 20;
 
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(64) };
-    const LIMB_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
+    const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
     fn get_table_data() -> (TableData<Base>, MainGateConfig<T>) {
         let mut td = TableData::new(K, vec![]);
@@ -1179,7 +1179,7 @@ mod tests {
         let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::from_relaxed(
             relaxed.clone(),
             LIMB_WIDTH,
-            LIMB_LIMIT,
+            LIMBS_COUNT,
             config.clone(),
         );
 
@@ -1337,7 +1337,7 @@ mod tests {
 
         let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new_default(
             LIMB_WIDTH,
-            LIMB_LIMIT,
+            LIMBS_COUNT,
             0,
             0,
             config.clone(),
@@ -1385,7 +1385,7 @@ mod tests {
                             region.assign_fixed(|| annotation.to_owned(), *column, val)
                         };
 
-                    let m_bn = scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMB_LIMIT)
+                    let m_bn = scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
                         .unwrap()
                         .iter()
                         .enumerate()
@@ -1445,7 +1445,7 @@ mod tests {
                 .into_smaller_size::<{ big_uint_mul_mod_chip::MAIN_GATE_T }>()
                 .unwrap(),
             LIMB_WIDTH,
-            LIMB_LIMIT,
+            LIMBS_COUNT,
         );
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
@@ -1463,7 +1463,7 @@ mod tests {
                             BigUint::from_f(
                                 &util::fe_to_fe_safe::<_, Base>($input).unwrap(),
                                 LIMB_WIDTH,
-                                LIMB_LIMIT,
+                                LIMBS_COUNT,
                             )
                             .unwrap()
                             .limbs()
@@ -1509,7 +1509,7 @@ mod tests {
 
                     let mut fixed_columns_assigner = config.fixed_cycle_assigner();
 
-                    let m_bn = scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMB_LIMIT)
+                    let m_bn = scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
                         .unwrap()
                         .iter()
                         .enumerate()
@@ -1558,7 +1558,7 @@ mod tests {
                     BigUint::from_f(
                         &util::fe_to_fe_safe::<ScalarExt, Base>(instance).unwrap(),
                         LIMB_WIDTH,
-                        LIMB_LIMIT,
+                        LIMBS_COUNT,
                     )
                     .unwrap()
                     .limbs()
@@ -1599,7 +1599,7 @@ mod tests {
                 .into_smaller_size::<{ big_uint_mul_mod_chip::MAIN_GATE_T }>()
                 .unwrap(),
             LIMB_WIDTH,
-            LIMB_LIMIT,
+            LIMBS_COUNT,
         );
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
@@ -1620,7 +1620,7 @@ mod tests {
                             BigUint::from_f(
                                 &util::fe_to_fe_safe::<_, Base>($input).unwrap(),
                                 LIMB_WIDTH,
-                                LIMB_LIMIT,
+                                LIMBS_COUNT,
                             )
                             .unwrap()
                             .limbs()
@@ -1662,7 +1662,7 @@ mod tests {
 
                     let mut fixed_columns_assigner = config.fixed_cycle_assigner();
 
-                    let m_bn = scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMB_LIMIT)
+                    let m_bn = scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
                         .unwrap()
                         .iter()
                         .enumerate()
@@ -1711,7 +1711,7 @@ mod tests {
                     BigUint::from_f(
                         &util::fe_to_fe_safe::<ScalarExt, Base>(instance).unwrap(),
                         LIMB_WIDTH,
-                        LIMB_LIMIT,
+                        LIMBS_COUNT,
                     )
                     .unwrap()
                     .limbs()
@@ -1763,7 +1763,7 @@ mod tests {
                         let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::from_relaxed(
                             relaxed.clone(),
                             LIMB_WIDTH,
-                            LIMB_LIMIT,
+                            LIMBS_COUNT,
                             config.clone(),
                         );
 
@@ -1782,7 +1782,7 @@ mod tests {
                 )
                 .unwrap()
                 .assigned_result_of_fold
-                .to_relaxed_plonk_instance(LIMB_WIDTH, LIMB_LIMIT)
+                .to_relaxed_plonk_instance(LIMB_WIDTH, LIMBS_COUNT)
                 .unwrap()
                 .unwrap();
 

@@ -44,18 +44,18 @@ pub const MAIN_GATE_T: usize = 4;
 pub struct BigUintMulModChip<F: ff::PrimeField> {
     main_gate: MainGate<F, MAIN_GATE_T>,
     limb_width: NonZeroUsize,
-    limbs_count_limit: NonZeroUsize,
+    limbs_count: NonZeroUsize,
 }
 
 impl<F: ff::PrimeField> BigUintMulModChip<F> {
     pub fn new(
         config: <Self as Chip<F>>::Config,
         limb_width: NonZeroUsize,
-        limbs_count_limit: NonZeroUsize,
+        limbs_count: NonZeroUsize,
     ) -> Self {
         Self {
             main_gate: MainGate::new(config),
-            limbs_count_limit,
+            limbs_count,
             limb_width,
         }
     }
@@ -64,7 +64,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         Ok(BigUint::<F>::from_biguint(
             input,
             self.limb_width,
-            self.limbs_count_limit,
+            self.limbs_count,
         )?)
     }
 
@@ -151,14 +151,14 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             big_uint::nat_to_f::<F>(&big_uint::get_big_int_with_n_ones(self.limb_width.get()))
                 .unwrap_or_default();
 
-        if rhs_cells.len() > self.limbs_count_limit.get() {
-            let (rhs_head, rhs_tail) = rhs_cells.split_at(self.limbs_count_limit.get());
+        if rhs_cells.len() > self.limbs_count.get() {
+            let (rhs_head, rhs_tail) = rhs_cells.split_at(self.limbs_count.get());
 
             if rhs_tail.iter().any(|cell| {
                 bool::from(cell.value().unwrap().copied().unwrap_or_default().is_zero()).not()
             }) {
                 return Err(big_uint::Error::LimbLimitReached {
-                    limit: self.limbs_count_limit,
+                    limit: self.limbs_count,
                     actual: rhs_cells.len() + rhs_tail.len(),
                 }
                 .into());
@@ -1029,12 +1029,12 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         let mut limbs = BigUint::from_f(
             &input.value().unwrap().copied().unwrap_or_default(),
             self.limb_width,
-            self.limbs_count_limit,
+            self.limbs_count,
         )?
         .limbs()
         .to_vec();
 
-        limbs.resize(self.limbs_count_limit.get(), F::ZERO);
+        limbs.resize(self.limbs_count.get(), F::ZERO);
 
         let mut limbs = limbs
             .into_iter()
@@ -1163,9 +1163,8 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
     ) -> Result<ModOperationResult<F>, Error> {
         // lhs * rhs = q * m + r
 
-        let to_bn = |val| {
-            big_uint::BigUint::from_assigned_cells(val, self.limb_width, self.limbs_count_limit)
-        };
+        let to_bn =
+            |val| big_uint::BigUint::from_assigned_cells(val, self.limb_width, self.limbs_count);
 
         let mod_bn = to_bn(modulus).inspect_err(|err| error!("while mod to bn: {err:?}"))?;
 
@@ -1209,7 +1208,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         )?;
 
         let empty = iter::repeat(F::ZERO)
-            .take(self.limbs_count_limit.get())
+            .take(self.limbs_count.get())
             .collect::<Box<[_]>>();
 
         // q * m + r
@@ -1284,9 +1283,8 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
     ) -> Result<ModOperationResult<F>, Error> {
         // lhs * rhs = q * m + r
 
-        let to_bn = |val| {
-            big_uint::BigUint::from_assigned_cells(val, self.limb_width, self.limbs_count_limit)
-        };
+        let to_bn =
+            |val| big_uint::BigUint::from_assigned_cells(val, self.limb_width, self.limbs_count);
 
         let mod_bn = to_bn(modulus)?;
         debug!("red_mod: mod {mod_bn:?}");
@@ -1317,7 +1315,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         // lhs * rhs
 
         let empty = iter::repeat(F::ZERO)
-            .take(self.limbs_count_limit.get())
+            .take(self.limbs_count.get())
             .collect::<Box<[_]>>();
 
         // q * m + r

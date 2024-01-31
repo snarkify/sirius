@@ -330,7 +330,7 @@ type RandomOracle = poseidon::PoseidonRO<T, RATE>;
 type RandomOracleConstant<F> = <RandomOracle as ROPair<F>>::Args;
 
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
-const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
+const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
 type C1Affine = <C1 as halo2curves::group::prime::PrimeCurve>::Affine;
 type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
@@ -386,7 +386,7 @@ fn main() {
         primary_spec,
         secondary_spec,
         LIMB_WIDTH,
-        LIMBS_COUNT_LIMIT,
+        LIMBS_COUNT,
     );
     info!("Public Params: {pp:?}");
 
