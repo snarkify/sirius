@@ -5,3 +5,5 @@
 *.txt
 .vscode
 .idea
+.cache
+tags

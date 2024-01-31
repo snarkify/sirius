@@ -1,9 +1,11 @@
-use std::{array, num::NonZeroUsize};
+#![allow(dead_code)]
+
+use std::{array, fs, io, num::NonZeroUsize, path::Path};
 
 use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
 
-use halo2curves::{bn256, grumpkin, CurveExt};
+use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
@@ -35,6 +37,28 @@ type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
 type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
 type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
 
+fn get_or_create_commitment_key<C: CurveAffine>(
+    k: usize,
+    label: &'static str,
+) -> io::Result<CommitmentKey<C>> {
+    const FOLDER: &str = ".cache/examples";
+
+    let file_path = Path::new(FOLDER).join(label).join("{k}.bin");
+
+    if file_path.exists() {
+        debug!("{file_path:?} exists, load key");
+        unsafe { CommitmentKey::load_from_file(&file_path, k) }
+    } else {
+        debug!("{file_path:?} not exists, start generate");
+        let key = CommitmentKey::setup(k, label.as_bytes());
+        fs::create_dir_all(file_path.parent().unwrap())?;
+        unsafe {
+            key.save_to_file(&file_path)?;
+        }
+        Ok(key)
+    }
+}
+
 fn main() {
     env_logger::init();
     log::info!("Start");
@@ -46,8 +70,13 @@ fn main() {
     let primary_spec = RandomOracleConstant::<<C2 as CurveExt>::Base>::new(10, 10);
     let secondary_spec = RandomOracleConstant::<<C1 as CurveExt>::Base>::new(10, 10);
 
-    let primary_commitment_key = CommitmentKey::setup(COMMITMENT_KEY_SIZE, b"primary");
-    let secondary_commitment_key = CommitmentKey::setup(COMMITMENT_KEY_SIZE, b"secondary");
+    info!("Start generate");
+    let primary_commitment_key = get_or_create_commitment_key(COMMITMENT_KEY_SIZE, "grumpkin")
+        .expect("Failed to get primary key");
+    info!("Primary generated");
+    let secondary_commitment_key = get_or_create_commitment_key(COMMITMENT_KEY_SIZE, "bn256")
+        .expect("Failed to get secondary key");
+    info!("Secondary generated");
 
     let pp = PublicParams::<C1Affine, C2Affine, RandomOracle, RandomOracle>::new(
         CIRCUIT_TABLE_SIZE as u32,
