@@ -162,17 +162,43 @@ where
     pub cross_term_commits: Vec<C>,
 }
 
-pub struct StepConfig<const ARITY: usize, F: PrimeField, SP: StepCircuit<ARITY, F>, const T: usize>
+pub struct StepConfig<const ARITY: usize, const T: usize, F: PrimeField, SP: StepCircuit<ARITY, F>>
 {
     pub step_config: SP::Config,
     pub main_gate_config: MainGateConfig<T>,
+}
+
+impl<const ARITY: usize, F: PrimeField + Clone, SP: StepCircuit<ARITY, F>, const T: usize> Clone
+    for StepConfig<ARITY, T, F, SP>
+where
+    SP::Config: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            step_config: self.step_config.clone(),
+            main_gate_config: self.main_gate_config.clone(),
+        }
+    }
+}
+
+impl<const ARITY: usize, F: PrimeField + fmt::Debug, SP: StepCircuit<ARITY, F>, const T: usize>
+    fmt::Debug for StepConfig<ARITY, T, F, SP>
+where
+    SP::Config: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StepConfig")
+            .field("step_config", &self.step_config)
+            .field("main_gate_config", &self.main_gate_config)
+            .finish()
+    }
 }
 
 pub struct StepSynthesisResult<const ARITY: usize, F: PrimeField> {
     /// Output of current synthesis step
     pub z_output: [AssignedValue<F>; ARITY],
     pub output_hash: AssignedValue<F>,
-    pub X1: Vec<AssignedValue<F>>,
+    pub X1: Option<Vec<AssignedValue<F>>>,
 }
 
 /// Trait extends [`StepCircuit`] to represent the augmented function `F'` in the IVC scheme.
@@ -201,7 +227,7 @@ where
     /// been created during [`StepCircuit::configure`].
     fn configure<const T: usize>(
         cs: &mut ConstraintSystem<F>,
-    ) -> Result<StepConfig<ARITY, F, Self, T>, ConfigureError> {
+    ) -> Result<StepConfig<ARITY, T, F, Self>, ConfigureError> {
         let before = cs.num_instance_columns();
 
         let main_gate_config = MainGate::configure(cs);
@@ -223,7 +249,7 @@ where
         RO: ROCircuitTrait<F, Config = MainGateConfig<T>>,
     >(
         &self,
-        config: StepConfig<ARITY, F, Self, T>,
+        config: StepConfig<ARITY, T, F, Self>,
         layouter: &mut impl Layouter<F>,
         input: StepInputs<ARITY, C, RO>,
     ) -> Result<StepSynthesisResult<ARITY, F>, SynthesisError> {
@@ -308,7 +334,7 @@ where
         Ok(StepSynthesisResult {
             z_output,
             output_hash,
-            X1: assigned_input_witness.input_challenges[1].clone(),
+            X1: assigned_input_witness.input_challenges.get(1).cloned(),
         })
     }
 
@@ -356,7 +382,7 @@ where
         RO: ROCircuitTrait<F, Config = MainGateConfig<T>>,
     >(
         &self,
-        config: &StepConfig<ARITY, F, Self, T>,
+        config: &StepConfig<ARITY, T, F, Self>,
         layouter: &mut impl Layouter<F>,
         input: &StepInputs<ARITY, C, RO>,
     ) -> Result<FoldResult<C>, SynthesisError> {

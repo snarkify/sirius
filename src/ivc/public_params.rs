@@ -39,7 +39,7 @@ where
 
     td: TableData<C::Scalar>,
     X0: Column<Instance>,
-    config: StepConfig<ARITY, C::Scalar, SC, MAIN_GATE_T>,
+    config: StepConfig<ARITY, MAIN_GATE_T, C::Scalar, SC>,
 }
 
 impl<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, SC, RP> fmt::Debug
@@ -102,10 +102,20 @@ where
         })
     }
 
-    pub fn prepare_td(&self, instance_columns: &[C::Scalar]) -> TableData<C::Scalar> {
+    pub fn td_k(&self) -> u32 {
+        self.td.k
+    }
+
+    pub fn prepare_td(
+        &self,
+        instance_columns: &[C::Scalar],
+    ) -> (
+        StepConfig<ARITY, MAIN_GATE_T, C::Scalar, SC>,
+        TableData<C::Scalar>,
+    ) {
         let mut td = self.td.clone();
         td.instance = instance_columns.to_vec();
-        td
+        (self.config.clone(), td)
     }
 }
 
