@@ -72,11 +72,11 @@ where
     C2::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
     pub fn new<const T: usize, RP1, RP2>(
-        _pp: &mut PublicParams<C1, C2, RP1, RP2>,
+        _pp: &PublicParams<C1, C2, RP1, RP2>,
         _primary: SC1,
-        _z0_primary: [C1::Base; A1],
+        _z0_primary: [C1::Scalar; A1],
         _secondary: SC2,
-        _z0_secondary: [C2::Base; A2],
+        _z0_secondary: [C2::Scalar; A2],
     ) -> Result<Self, Error>
     where
         RP1: ROPair<C1::Base, Config = MainGateConfig<T>>,

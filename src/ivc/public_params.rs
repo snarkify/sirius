@@ -3,30 +3,29 @@ use std::{fmt, num::NonZeroUsize};
 use ff::{FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2curves::CurveAffine;
+use log::*;
 use serde::Serialize;
 
 use crate::{
     commitment::CommitmentKey,
     digest::{self, DigestToCurve},
-    plonk::PlonkStructure,
     poseidon::ROPair,
-    table::TableData,
 };
 
 use super::step_circuit::SynthesizeStepParams;
 
-pub(crate) struct CircuitPublicParams<C, RP>
+pub(crate) struct CircuitPublicParams<'key, C, RP>
 where
     C: CurveAffine,
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
     RP: ROPair<C::Base>,
 {
-    pub ck: CommitmentKey<C>,
+    pub ck: &'key CommitmentKey<C>,
+    pub k_table_size: u32,
     pub params: SynthesizeStepParams<C, RP::OnCircuit>,
-    pub td: TableData<C::Base>,
 }
 
-impl<C: fmt::Debug, RP> fmt::Debug for CircuitPublicParams<C, RP>
+impl<'key, C: fmt::Debug, RP> fmt::Debug for CircuitPublicParams<'key, C, RP>
 where
     C: CurveAffine,
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
@@ -34,29 +33,30 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CircuitPublicParams")
-            .field("ck", &self.ck)
+            .field("ck_len", &self.ck.len())
             .field("params", &self.params)
-            .field("td", &self.td)
             .finish()
     }
 }
 
-impl<C, RP> CircuitPublicParams<C, RP>
+impl<'key, C, RP> CircuitPublicParams<'key, C, RP>
 where
     C: CurveAffine,
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
     RP: ROPair<C::Base>,
 {
     fn new(
-        k: u32,
+        k_table_size: u32,
+        commitment_key: &'key CommitmentKey<C>,
         is_primary_circuit: bool,
         ro_constant: RP::Args,
         limb_width: NonZeroUsize,
         n_limbs: NonZeroUsize,
     ) -> Self {
+        debug!("start creating circuit pp");
         Self {
-            ck: CommitmentKey::setup(k as usize, b"step circuit"),
-            td: TableData::new(k, vec![]),
+            k_table_size,
+            ck: commitment_key,
             params: SynthesizeStepParams {
                 limb_width,
                 n_limbs,
@@ -67,7 +67,7 @@ where
     }
 }
 
-pub struct PublicParams<C1, C2, RP1, RP2>
+pub struct PublicParams<'key, C1, C2, RP1, RP2>
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
@@ -78,11 +78,12 @@ where
     RP1: ROPair<C1::Base>,
     RP2: ROPair<C2::Base>,
 {
-    pub(crate) primary: CircuitPublicParams<C2, RP2>,
-    pub(crate) secondary: CircuitPublicParams<C1, RP1>,
+    pub(crate) primary: CircuitPublicParams<'key, C2, RP2>,
+    pub(crate) secondary: CircuitPublicParams<'key, C1, RP1>,
 }
 
-impl<C1: fmt::Debug, C2: fmt::Debug, RP1, RP2> fmt::Debug for PublicParams<C1, C2, RP1, RP2>
+impl<'key, C1: fmt::Debug, C2: fmt::Debug, RP1, RP2> fmt::Debug
+    for PublicParams<'key, C1, C2, RP1, RP2>
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
@@ -99,7 +100,7 @@ where
     }
 }
 
-impl<C1, C2, RP1, RP2> serde::Serialize for PublicParams<C1, C2, RP1, RP2>
+impl<'key, C1, C2, RP1, RP2> PublicParams<'key, C1, C2, RP1, RP2>
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
@@ -110,10 +111,39 @@ where
     RP1: ROPair<C1::Base>,
     RP2: ROPair<C2::Base>,
 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
+    pub fn new(
+        k: u32,
+        primary_commitment_key: &'key CommitmentKey<C2>,
+        secondary_commitment_key: &'key CommitmentKey<C1>,
+        primary_ro_constant: RP2::Args,
+        secondary_ro_constant: RP1::Args,
+        limb_width: NonZeroUsize,
+        limbs_count_limit: NonZeroUsize,
+    ) -> Self {
+        debug!("start creating pp");
+        Self {
+            primary: CircuitPublicParams::<C2, _>::new(
+                k,
+                primary_commitment_key,
+                true,
+                primary_ro_constant,
+                limb_width,
+                limbs_count_limit,
+            ),
+            secondary: CircuitPublicParams::<C1, _>::new(
+                k,
+                secondary_commitment_key,
+                false,
+                secondary_ro_constant,
+                limb_width,
+                limbs_count_limit,
+            ),
+        }
+    }
+
+    /// This method calculate digest of [`PublicParams`], but ignore [`CircuitPublicParams::ck`]
+    /// from both step circuits params
+    pub fn digest<C: CurveAffine>(&self) -> Result<C, crate::ivc::Error> {
         #[derive(serde::Serialize)]
         #[serde(bound(serialize = ""))]
         struct Wrapper<'l, C1, C2, RP1, RP2>
@@ -127,66 +157,19 @@ where
             RP1: ROPair<C1::Base>,
             RP2: ROPair<C2::Base>,
         {
-            primary_ck: &'l CommitmentKey<C2>,
+            primary_k_table_size: u32,
+            secondary_k_table_size: u32,
             primary_params: &'l SynthesizeStepParams<C2, RP2::OnCircuit>,
-            primary_structure: PlonkStructure<C1::ScalarExt>,
-
-            secondary_ck: &'l CommitmentKey<C1>,
             secondary_params: &'l SynthesizeStepParams<C1, RP1::OnCircuit>,
-            secondary_structure: PlonkStructure<C2::ScalarExt>,
         }
 
-        Wrapper::<'_, C1, C2, RP1, RP2> {
+        digest::DefaultHasher::digest_to_curve(&Wrapper::<'_, C1, C2, RP1, RP2> {
+            primary_k_table_size: self.primary.k_table_size,
+            secondary_k_table_size: self.secondary.k_table_size,
             primary_params: &self.primary.params,
-            primary_ck: &self.primary.ck,
-            primary_structure: self.primary.td.plonk_structure().unwrap_or_default(),
-
             secondary_params: &self.secondary.params,
-            secondary_ck: &self.secondary.ck,
-            secondary_structure: self.secondary.td.plonk_structure().unwrap_or_default(),
-        }
-        .serialize(serializer)
-    }
-}
-
-impl<C1, C2, R1, R2> PublicParams<C1, C2, R1, R2>
-where
-    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
-    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
-
-    C1::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
-    C2::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
-
-    R1: ROPair<C1::Base>,
-    R2: ROPair<C2::Base>,
-{
-    pub fn new(
-        k: u32,
-        primary_ro_constant: R2::Args,
-        secondary_ro_constant: R1::Args,
-        limb_width: NonZeroUsize,
-        limbs_count_limit: NonZeroUsize,
-    ) -> Self {
-        Self {
-            primary: CircuitPublicParams::<C2, _>::new(
-                k,
-                true,
-                primary_ro_constant,
-                limb_width,
-                limbs_count_limit,
-            ),
-            secondary: CircuitPublicParams::<C1, _>::new(
-                k,
-                false,
-                secondary_ro_constant,
-                limb_width,
-                limbs_count_limit,
-            ),
-        }
-    }
-
-    pub fn digest<C: CurveAffine>(&self) -> Result<C, crate::ivc::Error> {
-        digest::DefaultHasher::digest_to_curve(self).map_err(crate::ivc::Error::WhileHash)
+        })
+        .map_err(crate::ivc::Error::WhileHash)
     }
 }
 #[cfg(test)]
@@ -217,6 +200,8 @@ mod pp_test {
         const K: usize = 5;
         PublicParams::<C1Affine, C2Affine, RandomOracle<5, 4>, RandomOracle<5, 4>>::new(
             K as u32,
+            &CommitmentKey::setup(K, b"1"),
+            &CommitmentKey::setup(K, b"2"),
             spec2,
             spec1,
             LIMB_WIDTH,
