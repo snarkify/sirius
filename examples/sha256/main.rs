@@ -348,7 +348,7 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 ) -> io::Result<CommitmentKey<C>> {
     const FOLDER: &str = ".cache/examples";
 
-    let file_path = Path::new(FOLDER).join(label).join("{k}.bin");
+    let file_path = Path::new(FOLDER).join(label).join(format!("{k}.bin"));
 
     if file_path.exists() {
         debug!("{file_path:?} exists, load key");
