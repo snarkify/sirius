@@ -137,12 +137,14 @@ pub struct RelaxedPlonkWitness<F: PrimeField> {
 }
 
 // TODO #31 docs
+#[derive(Debug)]
 pub struct RelaxedPlonkTrace<C: CurveAffine> {
     pub U: RelaxedPlonkInstance<C>,
     pub W: RelaxedPlonkWitness<C::Scalar>,
 }
 
 // TODO #31 docs
+#[derive(Debug)]
 pub struct PlonkTrace<C: CurveAffine> {
     pub u: PlonkInstance<C>,
     pub w: PlonkWitness<C::Scalar>,
@@ -182,6 +184,11 @@ impl<F: PrimeField> PlonkStructure<F> {
     /// return the index offset of fixed variables(i.e. not folded)
     pub fn num_non_fold_vars(&self) -> usize {
         self.fixed_columns.len() + self.selectors.len()
+    }
+
+    pub fn get_degree_for_folding(&self) -> usize {
+        let offset = self.num_non_fold_vars();
+        self.poly.degree_for_folding(offset)
     }
 
     /// return the number of variables to be folded
