@@ -101,9 +101,9 @@ fn invert<F: Field>(
 
 pub(crate) fn batch_invert_assigned<F: Field>(assigned: &[Vec<Assigned<F>>]) -> Vec<Vec<F>> {
     let mut assigned_denominators: Vec<_> = assigned
-        .iter()
+        .par_iter()
         .map(|f| {
-            f.iter()
+            f.par_iter()
                 .map(|value| value.denominator())
                 .collect::<Vec<_>>()
         })

@@ -36,11 +36,14 @@
 //!
 //! Please see (#34)[https://github.com/snarkify/sirius/issues/34] for details on notations.
 //!
-use std::array;
+use std::{
+    array,
+    collections::{HashMap, HashSet},
+};
 
 use ff::PrimeField;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
-use itertools::Itertools;
+use log::*;
 use rayon::prelude::*;
 use serde::Serialize;
 
@@ -204,9 +207,11 @@ impl<F: PrimeField> Arguments<F> {
             fixed: &table.fixed_columns,
             advice: &table.advice_columns,
         };
+
         let nrow = 2usize.pow(table.k);
+        debug!("lookup_polys len: {} ", self.lookup_polys.len());
         self.lookup_polys
-            .iter()
+            .par_iter()
             .map(|expr| expr.expand())
             .map(|poly| {
                 (0..nrow)
@@ -229,7 +234,7 @@ impl<F: PrimeField> Arguments<F> {
         };
         let nrow = 2usize.pow(table.k);
         self.table_polys
-            .iter()
+            .par_iter()
             .map(|expr| expr.expand())
             .map(|poly| {
                 (0..nrow)
@@ -242,15 +247,31 @@ impl<F: PrimeField> Arguments<F> {
     /// calculate the coefficients {m_i} in the log derivative formula
     /// m_i = sum_j \xi(w_j=t_i) assuming {t_i} have no duplicates
     fn evaluate_m(&self, l: &[F], t: &[F]) -> Vec<F> {
-        let mut processed_t = Vec::new();
+        debug!("evaluate_m: {} & {}", l.len(), t.len());
+        let mut processed_t = HashSet::with_capacity(l.len().max(t.len()));
+
+        let l_elements = l
+            .iter()
+            .fold(HashMap::with_capacity(l.len()), |mut acc, l_i| {
+                *acc.entry(l_i.to_repr().as_ref().to_vec()).or_insert(0) += 1;
+                acc
+            });
+
+        debug!("builded l_elements {}", l_elements.len());
 
         t.iter()
             .map(|t_i| {
-                if processed_t.contains(&t_i) {
+                if processed_t.contains(t_i.to_repr().as_ref()) {
                     F::ZERO
                 } else {
-                    processed_t.push(t_i);
-                    F::from_u128(l.iter().filter(|l_j| l_j.eq(&t_i)).count() as u128)
+                    processed_t.insert(t_i.to_repr().as_ref().to_vec());
+
+                    F::from_u128(
+                        l_elements
+                            .get(t_i.to_repr().as_ref())
+                            .copied()
+                            .unwrap_or_default() as u128,
+                    )
                 }
             })
             .collect()
@@ -258,12 +279,12 @@ impl<F: PrimeField> Arguments<F> {
 
     fn evaluate_h_g(l: &[F], t: &[F], r: F, m: &[F]) -> (Vec<F>, Vec<F>) {
         let h = l
-            .iter()
+            .par_iter()
             .map(|&l_i| Option::from((l_i + r).invert()).unwrap_or(F::ZERO))
             .collect::<Vec<F>>();
         let g = t
-            .iter()
-            .zip_eq(m)
+            .par_iter()
+            .zip_eq(m.par_iter())
             .map(|(t_i, m_i)| *m_i * Option::from((*t_i + r).invert()).unwrap_or(F::ZERO))
             .collect::<Vec<F>>();
         (h, g)
@@ -274,14 +295,18 @@ impl<F: PrimeField> Arguments<F> {
         table: &TableData<F>,
         r: F,
     ) -> Result<ArgumentCoefficient1<F>, Error> {
+        debug!("start evaluate_coefficient_1");
         let ls = self.evaluate_ls(table, r)?;
+        debug!("ls calculated: {}", ls.len());
         let ts = self.evaluate_ts(table, r)?;
+        debug!("ts calculated: {}", ts.len());
 
-        let ms = ls
-            .iter()
-            .zip_eq(ts.iter())
+        let mut ms = Vec::with_capacity(ls.len());
+        ls.par_iter()
+            .zip_eq(ts.par_iter())
             .map(|(l, t)| self.evaluate_m(l, t))
-            .collect::<Vec<_>>();
+            .collect_into_vec(&mut ms);
+        debug!("ms calculated");
 
         Ok(ArgumentCoefficient1 { ls, ts, ms })
     }
@@ -300,6 +325,7 @@ impl<F: PrimeField> ArgumentCoefficient1<F> {
     pub(crate) fn evaluate_coefficient_2(&self, r: F) -> ArgumentCoefficient2<F> {
         let (hs, gs): (Vec<_>, Vec<_>) =
             itertools::multizip((self.ls.iter(), self.ts.iter(), self.ms.iter()))
+                .par_bridge()
                 .map(|(l, t, m)| Arguments::evaluate_h_g(l, t, r, m))
                 .unzip();
 
