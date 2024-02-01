@@ -6,4 +6,4 @@ mod incrementally_verifiable_computation;
 mod public_params;
 
 pub use incrementally_verifiable_computation::*;
-pub use public_params::PublicParams;
+pub use public_params::{CircuitPublicParamsInput, PublicParams};
