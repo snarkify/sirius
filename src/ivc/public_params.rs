@@ -73,7 +73,7 @@ where
         is_primary_circuit: bool,
         ro_constant: RP::Args,
         limb_width: NonZeroUsize,
-        n_limbs: NonZeroUsize,
+        limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
         debug!("start creating circuit pp");
 
@@ -95,7 +95,7 @@ where
             ck: commitment_key,
             params: SynthesizeStepParams {
                 limb_width,
-                n_limbs,
+                limbs_count,
                 is_primary_circuit,
                 ro_constant,
             },

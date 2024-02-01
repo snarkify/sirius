@@ -309,7 +309,7 @@ pub(crate) struct AssignedWitness<C: CurveAffine> {
 
     /// Vector of vectors of assigned values for each limb of the input instances.
     /// Sourced directly from [`PlonkInstance::instance`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
-    input_instances: Vec<Vec<AssignedValue<C::Base>>>,
+    pub input_instances: Vec<Vec<AssignedValue<C::Base>>>,
 
     /// Vector of vectors of assigned values for each limb of the input challenges.
     /// Sourced directly from [`PlonkInstance::challenges`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
@@ -352,7 +352,7 @@ pub enum Error {
 
     #[error("Error constructing elliptic curve coordinates for {variable_name}: {variable_str}")]
     CantBuildCoordinates {
-        variable_name: &'static str,
+        variable_name: String,
         variable_str: String,
     },
 
@@ -818,9 +818,9 @@ where
             .collect::<Result<Vec<_>, _>>()?;
         let assigned_E = assign_point!(&self.relaxed.E_commitment)?;
 
+        assert_eq!(self.relaxed.instance.len(), 2);
         let assigned_X0 = assign_diff_field_as_bn!(&self.relaxed.instance[0], || "X0")?;
         let assigned_X1 = assign_diff_field_as_bn!(&self.relaxed.instance[1], || "X1")?;
-        assert_eq!(self.relaxed.instance.len(), 2);
 
         let assigned_challenges = self
             .relaxed
@@ -1028,7 +1028,7 @@ fn assign_next_advice_from_point<C: CurveAffine, AR: Into<String>>(
 ) -> Result<AssignedPoint<C>, Error> {
     let coordinates: Coordinates<C> =
         Option::from(input.coordinates()).ok_or(Error::CantBuildCoordinates {
-            variable_name: "point",
+            variable_name: (annotation)().into(),
             variable_str: format!("{:?}", input),
         })?;
 

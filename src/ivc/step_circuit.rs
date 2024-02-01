@@ -119,7 +119,7 @@ where
     RO: ROCircuitTrait<F>,
 {
     pub limb_width: NonZeroUsize,
-    pub n_limbs: NonZeroUsize,
+    pub limbs_count: NonZeroUsize,
     /// A boolean indicating if this is the primary circuit
     pub is_primary_circuit: bool,
     pub ro_constant: RO::Args,
@@ -133,7 +133,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SynthesizeStepParams")
             .field("limb_width", &self.limb_width)
-            .field("n_limbs", &self.n_limbs)
+            .field("n_limbs", &self.limbs_count)
             .field("is_primary_circuit", &self.is_primary_circuit)
             .field("ro_constant", &self.ro_constant)
             .finish()
@@ -334,7 +334,7 @@ where
         Ok(StepSynthesisResult {
             z_output,
             output_hash,
-            X1: assigned_input_witness.input_challenges.get(1).cloned(),
+            X1: assigned_input_witness.input_instances.get(1).cloned(),
         })
     }
 
@@ -355,7 +355,7 @@ where
                 let chip = if public_params.is_primary_circuit {
                     FoldRelaxedPlonkInstanceChip::new_default(
                         public_params.limb_width,
-                        public_params.n_limbs,
+                        public_params.limbs_count,
                         u.challenges.len(),
                         u.W_commitments.len(),
                         config.clone(),
@@ -364,7 +364,7 @@ where
                     FoldRelaxedPlonkInstanceChip::from_instance(
                         u.clone(),
                         public_params.limb_width,
-                        public_params.n_limbs,
+                        public_params.limbs_count,
                         config.clone(),
                     )
                 };
@@ -400,7 +400,7 @@ where
                 let chip = FoldRelaxedPlonkInstanceChip::from_relaxed(
                     U.clone(),
                     input.step_public_params.limb_width,
-                    input.step_public_params.n_limbs,
+                    input.step_public_params.limbs_count,
                     config.main_gate_config.clone(),
                 );
 
