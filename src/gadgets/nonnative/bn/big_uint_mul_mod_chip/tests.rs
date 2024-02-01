@@ -13,7 +13,7 @@ use crate::run_mock_prover_test;
 use super::*;
 
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(Fp::S as usize) };
-const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
+const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
 mod mult_mod_tests {
     use super::*;
@@ -89,7 +89,7 @@ mod mult_mod_tests {
             trace!("Start synthesize");
 
             let chip =
-                BigUintMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT);
+                BigUintMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT);
 
             let (quotient, remainder): (Vec<_>, Vec<_>) = layouter
                 .assign_region(
@@ -97,9 +97,9 @@ mod mult_mod_tests {
                     |region| {
                         let mut region = RegionCtx::new(region, 0);
 
-                        let limbs_count_limit = LIMBS_COUNT_LIMIT.get();
+                        let limbs_count = LIMBS_COUNT.get();
                         let (lhs, rhs, module): (Vec<_>, Vec<_>, Vec<_>) =
-                            itertools::multiunzip((0..limbs_count_limit).map(|limb_index| {
+                            itertools::multiunzip((0..limbs_count).map(|limb_index| {
                                 let res = (
                                     region
                                         .assign_advice_from_instance(
@@ -208,12 +208,12 @@ mod mult_mod_tests {
 
             println!("{lhs} * {rhs} = {quotient} * {modulus} + {remainer}");
 
-            let lhs = BigUint::from_biguint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-            let rhs = BigUint::from_biguint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-            let modulus = BigUint::from_biguint(&modulus, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let lhs = BigUint::from_biguint(&lhs, LIMB_WIDTH, LIMBS_COUNT).unwrap();
+            let rhs = BigUint::from_biguint(&rhs, LIMB_WIDTH, LIMBS_COUNT).unwrap();
+            let modulus = BigUint::from_biguint(&modulus, LIMB_WIDTH, LIMBS_COUNT).unwrap();
 
-            let quotient = BigUint::from_biguint(&quotient, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-            let remainer = BigUint::from_biguint(&remainer, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let quotient = BigUint::from_biguint(&quotient, LIMB_WIDTH, LIMBS_COUNT).unwrap();
+            let remainer = BigUint::from_biguint(&remainer, LIMB_WIDTH, LIMBS_COUNT).unwrap();
 
             let public_inputs = vec![
                 lhs.limbs().to_vec(),
@@ -249,7 +249,7 @@ mod components_tests {
     }
 
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(Fp::S as usize) };
-    const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
+    const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
     impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
         type Config = Config;
@@ -301,7 +301,7 @@ mod components_tests {
             trace!("Start synthesize");
 
             let chip =
-                BigUintMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT);
+                BigUintMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT);
 
             let (assigned_mult, assigned_sum, grouped_mult): (Vec<_>, Vec<_>, Vec<_>) = layouter
                 .assign_region(
@@ -309,8 +309,8 @@ mod components_tests {
                     |region| {
                         let mut region = RegionCtx::new(region, 0);
 
-                        let limbs_count_limit = LIMBS_COUNT_LIMIT.get();
-                        let (lhs, rhs): (Vec<_>, Vec<_>) = (0..limbs_count_limit)
+                        let limbs_count = LIMBS_COUNT.get();
+                        let (lhs, rhs): (Vec<_>, Vec<_>) = (0..limbs_count)
                             .map(|limb_index| {
                                 let res = (
                                     region
@@ -363,7 +363,7 @@ mod components_tests {
                                     .unwrap_or_default(),
                                 },
                                 &rhs.iter()
-                                    .take(limbs_count_limit)
+                                    .take(limbs_count)
                                     .map(|c| *c.value().unwrap().unwrap_or(&F::ZERO))
                                     .collect::<Box<[_]>>(),
                             )
@@ -459,7 +459,19 @@ mod components_tests {
             }
         }
 
-        BigUint::from_limbs(production_cells.into_iter().flatten(), LIMB_WIDTH).unwrap()
+        let mut production_cells = production_cells.into_iter().flatten();
+
+        let bn = BigUint::from_limbs(
+            production_cells.by_ref().take(LIMBS_COUNT.get()),
+            LIMB_WIDTH,
+            LIMBS_COUNT,
+        )
+        .unwrap();
+
+        // Check then limbs count not reached expected limit & all tail contains only zeroes
+        assert!(production_cells.all(|limb| limb.eq(&F::ZERO)));
+
+        bn
     }
 
     fn sum_with_overflow<F: PrimeField>(lhs: &BigUint<F>, rhs: &BigUint<F>) -> BigUint<F> {
@@ -490,6 +502,7 @@ mod components_tests {
                     limb
                 }),
             LIMB_WIDTH,
+            LIMBS_COUNT,
         )
         .unwrap()
     }
@@ -516,6 +529,7 @@ mod components_tests {
                         .sum()
                 }),
             LIMB_WIDTH,
+            LIMBS_COUNT,
         )
         .unwrap()
     }
@@ -525,8 +539,8 @@ mod components_tests {
         let lhs = BigUintRaw::from_u64(u64::MAX).unwrap() * BigUintRaw::from_u64(100).unwrap();
         let rhs = BigUintRaw::from_u64(u64::MAX).unwrap() * BigUintRaw::from_u64(u64::MAX).unwrap();
 
-        let lhs = BigUint::from_biguint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-        let rhs = BigUint::from_biguint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let lhs = BigUint::from_biguint(&lhs, LIMB_WIDTH, LIMBS_COUNT).unwrap();
+        let rhs = BigUint::from_biguint(&rhs, LIMB_WIDTH, LIMBS_COUNT).unwrap();
         let prod = mult_with_overflow(&lhs, &rhs);
         log::info!("prod {prod:?}");
         let sum = sum_with_overflow(&lhs, &rhs);
@@ -556,8 +570,8 @@ mod components_tests {
         let lhs = BigUintRaw::from_u64(u64::MAX).unwrap() * BigUintRaw::from_u64(100).unwrap();
         let rhs = BigUintRaw::from_u64(0).unwrap();
 
-        let lhs = BigUint::from_biguint(&lhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-        let rhs = BigUint::from_biguint(&rhs, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+        let lhs = BigUint::from_biguint(&lhs, LIMB_WIDTH, LIMBS_COUNT).unwrap();
+        let rhs = BigUint::from_biguint(&rhs, LIMB_WIDTH, LIMBS_COUNT).unwrap();
         let prod = mult_with_overflow(&lhs, &rhs);
         log::info!("prod {prod:?}");
         let sum = sum_with_overflow(&lhs, &rhs);
@@ -609,7 +623,7 @@ mod red_mod_tests {
     }
 
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(Fp::S as usize) };
-    const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
+    const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
     #[derive(Debug, Default)]
     struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits>(PhantomData<F>);
@@ -660,7 +674,7 @@ mod red_mod_tests {
             trace!("Start synthesize");
 
             let chip =
-                BigUintMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT);
+                BigUintMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT);
 
             let (quotient, remainder): (Vec<_>, Vec<_>) = layouter
                 .assign_region(
@@ -668,9 +682,9 @@ mod red_mod_tests {
                     |region| {
                         let mut region = RegionCtx::new(region, 0);
 
-                        let limbs_count_limit = LIMBS_COUNT_LIMIT.get();
+                        let limbs_count = LIMBS_COUNT.get();
                         let (val, module): (Vec<_>, Vec<_>) =
-                            itertools::multiunzip((0..limbs_count_limit).map(|limb_index| {
+                            itertools::multiunzip((0..limbs_count).map(|limb_index| {
                                 let res = (
                                     region
                                         .assign_advice_from_instance(
@@ -769,11 +783,11 @@ mod red_mod_tests {
 
             println!("{val} = {quotient} * {modulus} + {remainer}");
 
-            let val = BigUint::from_biguint(&val, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-            let modulus = BigUint::from_biguint(&modulus, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let val = BigUint::from_biguint(&val, LIMB_WIDTH, LIMBS_COUNT).unwrap();
+            let modulus = BigUint::from_biguint(&modulus, LIMB_WIDTH, LIMBS_COUNT).unwrap();
 
-            let quotient = BigUint::from_biguint(&quotient, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
-            let remainer = BigUint::from_biguint(&remainer, LIMB_WIDTH, LIMBS_COUNT_LIMIT).unwrap();
+            let quotient = BigUint::from_biguint(&quotient, LIMB_WIDTH, LIMBS_COUNT).unwrap();
+            let remainer = BigUint::from_biguint(&remainer, LIMB_WIDTH, LIMBS_COUNT).unwrap();
 
             run_mock_prover_test!(
                 K,
@@ -802,7 +816,7 @@ mod decompose_tests {
     }
 
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(Fp::S as usize) };
-    const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(5) };
+    const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(5) };
 
     #[derive(Debug, Default)]
     struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits>(PhantomData<F>);
@@ -843,7 +857,7 @@ mod decompose_tests {
             let config_clone = config.clone();
 
             let chip =
-                BigUintMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT_LIMIT);
+                BigUintMulModChip::<F>::new(config.main_gate_config, LIMB_WIDTH, LIMBS_COUNT);
 
             let limbs: Vec<_> = layouter
                 .assign_region(
@@ -915,11 +929,11 @@ mod decompose_tests {
         ];
 
         for Context { val } in cases {
-            let mut limbs = BigUint::from_u128(val, LIMB_WIDTH, LIMBS_COUNT_LIMIT)
+            let mut limbs = BigUint::from_u128(val, LIMB_WIDTH, LIMBS_COUNT)
                 .unwrap()
                 .limbs()
                 .to_vec();
-            limbs.resize(LIMBS_COUNT_LIMIT.get(), Fp::ZERO);
+            limbs.resize(LIMBS_COUNT.get(), Fp::ZERO);
 
             run_mock_prover_test!(K, ts, vec![vec![Fp::from_u128(val)], limbs]);
         }
@@ -976,7 +990,7 @@ mod to_le_bits {
             let chip = BigUintMulModChip::<F>::new(
                 config.main_gate_config.clone(),
                 LIMB_WIDTH,
-                LIMBS_COUNT_LIMIT,
+                LIMBS_COUNT,
             );
 
             let bits: Vec<_> = layouter
@@ -987,7 +1001,7 @@ mod to_le_bits {
 
                         let mut region = RegionCtx::new(region, 0);
 
-                        let assigned_limbs = (0..LIMBS_COUNT_LIMIT.get())
+                        let assigned_limbs = (0..LIMBS_COUNT.get())
                             .zip(config.main_gate_config.state.iter().enumerate().cycle())
                             .map(|(limb_index, (column_index, column))| {
                                 if column_index == 0 {
@@ -1028,17 +1042,17 @@ mod to_le_bits {
         let ts = TestCircuit::<Fp>::default();
 
         for val in [0, u128::MAX, rand::thread_rng().gen()] {
-            let mut input_limbs = BigUint::from_u128(val, LIMB_WIDTH, LIMBS_COUNT_LIMIT)
+            let mut input_limbs = BigUint::from_u128(val, LIMB_WIDTH, LIMBS_COUNT)
                 .unwrap()
                 .limbs()
                 .to_vec();
-            input_limbs.resize(LIMBS_COUNT_LIMIT.get(), Fp::ZERO);
+            input_limbs.resize(LIMBS_COUNT.get(), Fp::ZERO);
 
             let val = val.to_le_bytes();
             let mut bits_repr = LittleEndianReader::new(&val);
             let expected_bits = iter::repeat_with(|| bits_repr.read_bit())
                 .map(|b| b.unwrap_or(false))
-                .take(LIMB_WIDTH.get() * LIMBS_COUNT_LIMIT.get())
+                .take(LIMB_WIDTH.get() * LIMBS_COUNT.get())
                 .enumerate()
                 .map(|(i, bit)| {
                     debug!("off-circuit bits[{i}] = {bit:?}");

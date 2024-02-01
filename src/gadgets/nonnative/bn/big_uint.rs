@@ -72,40 +72,47 @@ pub enum Error {
 
 impl<F: ff::PrimeField> BigUint<F> {
     pub fn from_limbs(
-        limbs: impl Iterator<Item = F>,
+        mut limbs_input: impl Iterator<Item = F>,
         limb_width: NonZeroUsize,
+        limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
-        let limbs = limbs.collect::<Vec<_>>();
+        let limbs = limbs_input
+            .by_ref()
+            .chain(iter::repeat(F::ZERO))
+            .take(limbs_count.get())
+            .collect::<Vec<_>>();
 
-        Ok(if limbs.is_empty() {
-            Self {
-                limbs: vec![F::ZERO],
-                width: limb_width,
-            }
-        } else {
-            Self {
+        let tail = limbs_input.collect::<Box<[_]>>();
+        if tail.len() == 0 {
+            Ok(Self {
                 limbs,
                 width: limb_width,
-            }
-        })
+            })
+        } else {
+            error!("More limbs then expected count: {tail:?}");
+            Err(Error::LimbLimitReached {
+                limit: limbs_count,
+                actual: tail.len() + limbs_count.get(),
+            })
+        }
     }
 
     pub fn from_u64(
         input: u64,
         limb_width: NonZeroUsize,
-        limbs_count_limit: NonZeroUsize,
+        limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
         // FIXME Simplify
-        Self::from_biguint(&BigUintRaw::from(input), limb_width, limbs_count_limit)
+        Self::from_biguint(&BigUintRaw::from(input), limb_width, limbs_count)
     }
 
     pub fn from_u128(
         input: u128,
         limb_width: NonZeroUsize,
-        limbs_count_limit: NonZeroUsize,
+        limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
         // FIXME Simplify
-        Self::from_biguint(&BigUintRaw::from(input), limb_width, limbs_count_limit)
+        Self::from_biguint(&BigUintRaw::from(input), limb_width, limbs_count)
     }
 
     // If the values in Cell are unknown, they will be filled in
@@ -113,12 +120,12 @@ impl<F: ff::PrimeField> BigUint<F> {
     pub fn from_assigned_cells(
         input: &[AssignedCell<F, F>],
         limb_width: NonZeroUsize,
-        limbs_count_limit: NonZeroUsize,
+        limbs_count: NonZeroUsize,
     ) -> Result<Option<Self>, Error> {
-        if input.len() > limbs_count_limit.get() {
+        if input.len() > limbs_count.get() {
             let err = Error::LimbLimitReached {
                 actual: input.len(),
-                limit: limbs_count_limit,
+                limit: limbs_count,
             };
             error!("while `from_assigned_cells` limbs limit reached: {err:?}");
             return Err(err);
@@ -142,31 +149,33 @@ impl<F: ff::PrimeField> BigUint<F> {
                     Ok(None)
                 }
             })
+            .chain(iter::repeat_with(|| Ok(Some(F::ZERO))))
+            .take(limbs_count.get())
             .collect::<Result<Option<Vec<_>>, _>>()?;
 
         limbs
-            .map(|limbs| Self::from_limbs(limbs.into_iter(), limb_width))
+            .map(|limbs| Self::from_limbs(limbs.into_iter(), limb_width, limbs_count))
             .transpose()
     }
 
     pub fn from_f(
         input: &F,
         limb_width: NonZeroUsize,
-        limbs_count_limit: NonZeroUsize,
+        limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
         Self::from_biguint(
             &BigUintRaw::from_bytes_le(input.to_repr().as_ref()),
             limb_width,
-            limbs_count_limit,
+            limbs_count,
         )
     }
 
     pub fn from_biguint(
         input: &BigUintRaw,
         limb_width: NonZeroUsize,
-        limbs_count_limit: NonZeroUsize,
+        limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
-        let max_limbs_count = limbs_count_limit.get();
+        let max_limbs_count = limbs_count.get();
 
         if input.bits() as usize > max_limbs_count * limb_width.get() {
             return Err(Error::TooBigBigint);
@@ -185,6 +194,7 @@ impl<F: ff::PrimeField> BigUint<F> {
             .take(max_limbs_count)
             .map_while(|mut o| o.take()),
             limb_width,
+            limbs_count,
         )
     }
 
@@ -291,9 +301,11 @@ fn get_max_word_mask_bits(limb_width: usize) -> usize {
 mod tests {
     use std::mem;
 
-    use super::*;
+    use ff::Field;
     use halo2curves::pasta::Fp;
     use test_log::test;
+
+    use super::*;
 
     #[test]
     fn from_u64() {
@@ -304,8 +316,11 @@ mod tests {
                 NonZeroUsize::new(4).unwrap(),
             )
             .unwrap();
-            assert_eq!(bn.limbs_count().get(), 1, "Limbs > 1 at {input}");
-            assert_eq!(bn.limbs(), &[Fp::from_u128(input.into())]);
+            assert_eq!(bn.limbs_count().get(), 4, "Limbs > 1 at {input}");
+            assert_eq!(
+                bn.limbs(),
+                &[Fp::from_u128(input.into()), Fp::ZERO, Fp::ZERO, Fp::ZERO,]
+            );
             assert_eq!(bn.into_bigint(), BigUintRaw::from(input));
         }
     }
@@ -319,8 +334,11 @@ mod tests {
                 NonZeroUsize::new(4).unwrap(),
             )
             .unwrap();
-            assert_eq!(bn.limbs_count().get(), 1, "Limbs > 1 at {input}");
-            assert_eq!(bn.limbs(), &[Fp::from_u128(input)]);
+            assert_eq!(bn.limbs_count().get(), 4, "Limbs > 1 at {input}");
+            assert_eq!(
+                bn.limbs(),
+                &[Fp::from_u128(input), Fp::ZERO, Fp::ZERO, Fp::ZERO]
+            );
             assert_eq!(bn.into_bigint(), BigUintRaw::from(input));
         }
     }
@@ -334,12 +352,14 @@ mod tests {
             NonZeroUsize::new(4).unwrap(),
         )
         .unwrap();
-        assert_eq!(bn.limbs_count().get(), 2, "Limbs > 1 at {input}");
+        assert_eq!(bn.limbs_count().get(), 4, "Limbs > 1 at {input}");
         assert_eq!(
             bn.limbs(),
             &[
                 Fp::from_u128(0x0000000000000000000000000000000000000000000000000000000000000001),
-                Fp::from_u128(0x00000000000000000000000000000000fffffffffffffffffffffffffffffffe)
+                Fp::from_u128(0x00000000000000000000000000000000fffffffffffffffffffffffffffffffe),
+                Fp::from_u128(0x0000000000000000000000000000000000000000000000000000000000000000),
+                Fp::from_u128(0x0000000000000000000000000000000000000000000000000000000000000000)
             ]
         );
 
@@ -356,5 +376,23 @@ mod tests {
         );
 
         assert_eq!(result_with_bn, Err(Error::TooBigBigint));
+    }
+
+    #[test]
+    fn limbs_limit_err() {
+        let limbs_count = NonZeroUsize::new(50).unwrap();
+        let result_with_bn = BigUint::<Fp>::from_limbs(
+            iter::repeat(Fp::ZERO).take(100),
+            NonZeroUsize::new(mem::size_of::<u64>() * 8).unwrap(),
+            limbs_count,
+        );
+
+        assert_eq!(
+            result_with_bn,
+            Err(Error::LimbLimitReached {
+                limit: limbs_count,
+                actual: 100,
+            })
+        );
     }
 }
