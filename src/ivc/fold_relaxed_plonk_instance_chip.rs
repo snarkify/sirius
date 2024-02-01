@@ -967,15 +967,13 @@ where
 
         let r = ro_circuit.squeeze_n_bits(region, NUM_CHALLENGE_BITS)?;
 
-        let mut fixed_columns_assigner = self.config.fixed_cycle_assigner();
-
-        let m_bn = scalar_module_as_limbs::<C>(self.limb_width, self.limbs_count)?
-            .iter()
-            .enumerate()
-            .map(|(limb_index, limb)| {
-                fixed_columns_assigner.assign_next_fixed(region, || limb_index.to_string(), *limb)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let m_bn = self.config.fixed_cycle_assigner().assign_all_fixed(
+            region,
+            || "m_bn",
+            scalar_module_as_limbs::<C>(self.limb_width, self.limbs_count)
+                .unwrap()
+                .into_iter(),
+        )?;
 
         region.next();
 
@@ -1371,28 +1369,13 @@ mod tests {
                         as_bits: r,
                     };
 
-                    let mut fixed_columns = config.iter_fixed_columns().enumerate().cycle();
-
-                    let mut assign_next_fixed =
-                        move |annotation: &str, region: &mut RegionCtx<Base>, val| {
-                            let (index, column) =
-                                fixed_columns.by_ref().next().expect("Safe because cycle");
-
-                            if index == 0 {
-                                region.next();
-                            }
-
-                            region.assign_fixed(|| annotation.to_owned(), *column, val)
-                        };
-
-                    let m_bn = scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
-                        .unwrap()
-                        .iter()
-                        .enumerate()
-                        .map(|(limb_index, limb)| {
-                            assign_next_fixed(&format!("m_bn [{limb_index}"), &mut ctx, *limb)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
+                    let m_bn = config.fixed_cycle_assigner().assign_all_fixed(
+                        &mut ctx,
+                        || "m_bn",
+                        scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
+                            .unwrap()
+                            .into_iter(),
+                    )?;
 
                     Ok(chip
                         .fold_E(&mut ctx, folded_E, &cross_term_commits, r_vv, &m_bn)
@@ -1460,30 +1443,26 @@ mod tests {
 
                     macro_rules! assign_scalar_as_bn {
                         ($region:expr, $input:expr, $annotation_prefix:expr) => {{
-                            BigUint::from_f(
-                                &util::fe_to_fe_safe::<_, Base>($input).unwrap(),
-                                LIMB_WIDTH,
-                                LIMBS_COUNT,
-                            )
-                            .unwrap()
-                            .limbs()
-                            .iter()
-                            .enumerate()
-                            .map(|(limb_index, limb)| {
-                                let limb = util::fe_to_fe_safe(limb)
-                                    .ok_or(Error::WhileScalarToBase {
-                                        variable_name: $annotation_prefix,
-                                        variable_str: format!("{limb:?}"),
-                                    })
-                                    .unwrap();
-
-                                advice_columns_assigner.assign_next_advice(
-                                    $region,
-                                    || format!("{}, limb {limb_index}", $annotation_prefix),
-                                    limb,
+                            advice_columns_assigner.assign_all_advice(
+                                $region,
+                                || $annotation_prefix,
+                                BigUint::from_f(
+                                    &util::fe_to_fe_safe::<_, Base>($input).unwrap(),
+                                    LIMB_WIDTH,
+                                    LIMBS_COUNT,
                                 )
-                            })
-                            .collect::<Result<Vec<_>, _>>()
+                                .unwrap()
+                                .limbs()
+                                .iter()
+                                .map(|limb| {
+                                    util::fe_to_fe_safe(limb)
+                                        .ok_or(Error::WhileScalarToBase {
+                                            variable_name: $annotation_prefix,
+                                            variable_str: format!("{limb:?}"),
+                                        })
+                                        .unwrap()
+                                }),
+                            )
                         }};
                     }
 
@@ -1507,20 +1486,13 @@ mod tests {
                         .try_into()
                         .unwrap();
 
-                    let mut fixed_columns_assigner = config.fixed_cycle_assigner();
-
-                    let m_bn = scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
-                        .unwrap()
-                        .iter()
-                        .enumerate()
-                        .map(|(limb_index, limb)| {
-                            fixed_columns_assigner.assign_next_fixed(
-                                &mut ctx,
-                                || format!("m_bn [{limb_index}"),
-                                *limb,
-                            )
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
+                    let m_bn = config.fixed_cycle_assigner().assign_all_fixed(
+                        &mut ctx,
+                        || "m_bn",
+                        scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
+                            .unwrap()
+                            .into_iter(),
+                    )?;
 
                     ctx.next();
 
@@ -1617,30 +1589,26 @@ mod tests {
 
                     macro_rules! assign_scalar_as_bn {
                         ($region:expr, $input:expr, $annotation_prefix:expr) => {{
-                            BigUint::from_f(
-                                &util::fe_to_fe_safe::<_, Base>($input).unwrap(),
-                                LIMB_WIDTH,
-                                LIMBS_COUNT,
-                            )
-                            .unwrap()
-                            .limbs()
-                            .iter()
-                            .enumerate()
-                            .map(|(limb_index, limb)| {
-                                let limb = util::fe_to_fe_safe(limb)
-                                    .ok_or(Error::WhileScalarToBase {
-                                        variable_name: $annotation_prefix,
-                                        variable_str: format!("{limb:?}"),
-                                    })
-                                    .unwrap();
-
-                                advice_columns_assigner.assign_next_advice(
-                                    $region,
-                                    || format!("{}, limb {limb_index}", $annotation_prefix),
-                                    limb,
+                            advice_columns_assigner.assign_all_advice(
+                                $region,
+                                || $annotation_prefix,
+                                BigUint::from_f(
+                                    &util::fe_to_fe_safe::<_, Base>($input).unwrap(),
+                                    LIMB_WIDTH,
+                                    LIMBS_COUNT,
                                 )
-                            })
-                            .collect::<Result<Vec<_>, _>>()
+                                .unwrap()
+                                .limbs()
+                                .iter()
+                                .map(|limb| {
+                                    util::fe_to_fe_safe(limb)
+                                        .ok_or(Error::WhileScalarToBase {
+                                            variable_name: $annotation_prefix,
+                                            variable_str: format!("{limb:?}"),
+                                        })
+                                        .unwrap()
+                                }),
+                            )
                         }};
                     }
 
@@ -1660,20 +1628,13 @@ mod tests {
                         .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "input instance"))
                         .collect::<Result<Vec<_>, _>>()?;
 
-                    let mut fixed_columns_assigner = config.fixed_cycle_assigner();
-
-                    let m_bn = scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
-                        .unwrap()
-                        .iter()
-                        .enumerate()
-                        .map(|(limb_index, limb)| {
-                            fixed_columns_assigner.assign_next_fixed(
-                                &mut ctx,
-                                || format!("m_bn [{limb_index}"),
-                                *limb,
-                            )
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
+                    let m_bn = config.fixed_cycle_assigner().assign_all_fixed(
+                        &mut ctx,
+                        || "m_bn",
+                        scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
+                            .unwrap()
+                            .into_iter(),
+                    )?;
 
                     ctx.next();
 
