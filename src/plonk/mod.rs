@@ -221,7 +221,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             .W_commitments
             .iter()
             .zip(W.W.iter())
-            .filter_map(|(Ci, Wi)| ck.commit(Wi).ne(Ci).then_some(()))
+            .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
             .count();
 
         let data = PlonkEvalDomain {
@@ -266,7 +266,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             .W_commitments
             .iter()
             .zip(W.W.iter())
-            .filter_map(|(Ci, Wi)| ck.commit(Wi).ne(Ci).then_some(()))
+            .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
             .count();
 
         let nrow = 2usize.pow(self.k as u32);
@@ -290,7 +290,7 @@ impl<F: PrimeField> PlonkStructure<F> {
                     .filter(|(i, v)| W.E[*i].ne(v))
                     .count()
             })?;
-        let is_E_equal = ck.commit(&W.E).eq(&U.E_commitment);
+        let is_E_equal = ck.commit(&W.E).unwrap().eq(&U.E_commitment);
         let is_h_equal_g = self.is_sat_log_derivative(&W.W);
 
         match (res == 0, check_W_commitments == 0, is_E_equal, is_h_equal_g) {

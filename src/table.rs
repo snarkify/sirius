@@ -269,7 +269,12 @@ impl<F: PrimeField> TableData<F> {
         }
 
         let W1 = concatenate_with_padding(&self.advice_columns, 2usize.pow(self.k));
-        let C1 = ck.commit(&W1);
+        let C1 = ck
+            .commit(&W1)
+            .map_err(|err| SpsError::WrongCommitmentSize {
+                annotation: "W1",
+                err,
+            })?;
 
         Ok((
             PlonkInstance {
@@ -340,7 +345,12 @@ impl<F: PrimeField> TableData<F> {
         ]
         .concat();
 
-        let C1 = ck.commit(&W1);
+        let C1 = ck
+            .commit(&W1)
+            .map_err(|err| SpsError::WrongCommitmentSize {
+                annotation: "W1",
+                err,
+            })?;
 
         self.instance.iter().for_each(|inst| {
             ro_nark.absorb_field(fe_to_fe(inst).unwrap());
@@ -356,7 +366,12 @@ impl<F: PrimeField> TableData<F> {
             k_power_of_2,
         );
 
-        let C2 = ck.commit(&W2);
+        let C2 = ck
+            .commit(&W2)
+            .map_err(|err| SpsError::WrongCommitmentSize {
+                annotation: "W2",
+                err,
+            })?;
         ro_nark.absorb_point(&C2);
         let r2 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
 
@@ -391,7 +406,12 @@ impl<F: PrimeField> TableData<F> {
 
         // round 1
         let W1 = concatenate_with_padding(&self.advice_columns, k_power_of_2);
-        let C1 = ck.commit(&W1);
+        let C1 = ck
+            .commit(&W1)
+            .map_err(|err| SpsError::WrongCommitmentSize {
+                annotation: "W1",
+                err,
+            })?;
         ro_nark.absorb_point(&C1);
         let r1 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
 
@@ -407,7 +427,12 @@ impl<F: PrimeField> TableData<F> {
             &concat_vec!(&lookup_coeff.ls, &lookup_coeff.ts, &lookup_coeff.ms),
             k_power_of_2,
         );
-        let C2 = ck.commit(&W2);
+        let C2 = ck
+            .commit(&W2)
+            .map_err(|err| SpsError::WrongCommitmentSize {
+                annotation: "W2",
+                err,
+            })?;
         ro_nark.absorb_point(&C2);
         let r2 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
 
@@ -419,7 +444,12 @@ impl<F: PrimeField> TableData<F> {
             k_power_of_2,
         );
 
-        let C3 = ck.commit(&W3);
+        let C3 = ck
+            .commit(&W3)
+            .map_err(|err| SpsError::WrongCommitmentSize {
+                annotation: "W3",
+                err,
+            })?;
         ro_nark.absorb_point(&C3);
         let r3 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
 

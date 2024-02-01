@@ -1,23 +1,45 @@
-use std::{io::Read, iter};
+use std::{io::Read, iter, ops};
 
 use digest::{ExtendableOutput, Update};
 use group::Curve;
 use halo2_proofs::arithmetic::{best_multiexp, CurveAffine, CurveExt};
+use log::*;
 use rayon::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha3::Shake256;
 
 use crate::util::parallelize;
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(bound(serialize = "C: Serialize"))]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum Error {
+    #[error("Can't commit too long input: input len: {input_len}, but limit is {limit}")]
+    TooLongInput { input_len: usize, limit: usize },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommitmentKey<C: CurveAffine> {
-    ck: Vec<C>,
+    ck: Box<[C]>,
+}
+
+impl<C: CurveAffine> ops::Deref for CommitmentKey<C> {
+    type Target = [C];
+
+    fn deref(&self) -> &Self::Target {
+        &self.ck
+    }
 }
 
 impl<C: CurveAffine> CommitmentKey<C> {
     pub fn default_value() -> C {
         C::identity()
+    }
+
+    pub fn len(&self) -> usize {
+        self.ck.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ck.is_empty()
     }
 
     pub fn setup(k: usize, label: &'static [u8]) -> Self {
@@ -26,21 +48,19 @@ impl<C: CurveAffine> CommitmentKey<C> {
         assert!(k < 32);
         let n: usize = 1 << k;
 
-        let mut shake = Shake256::default();
-        shake.update(label);
-        let mut reader = shake.finalize_xof();
+        let mut reader = Shake256::default().chain(label).finalize_xof();
 
-        let ck_proj: Vec<_> = iter::repeat_with(|| {
-            let mut uniform_bytes = [0u8; 32];
-            reader.read_exact(&mut uniform_bytes).unwrap();
-            uniform_bytes
+        let ck_proj: Box<[_]> = iter::repeat_with(|| {
+            let mut buffer = [0u8; 32];
+            reader.read_exact(&mut buffer).unwrap();
+            buffer
         })
         .take(n)
         .par_bridge()
         .map(|uniform_byte| (C::CurveExt::hash_to_curve("from_uniform_bytes"))(&uniform_byte))
         .collect();
 
-        let mut ck: Vec<C> = vec![C::identity(); n];
+        let mut ck: Box<[C]> = iter::repeat(C::identity()).take(n).collect();
         parallelize(&mut ck, |(ck, start)| {
             C::Curve::batch_normalize(&ck_proj[start..start + ck.len()], ck);
         });
@@ -48,11 +68,14 @@ impl<C: CurveAffine> CommitmentKey<C> {
         CommitmentKey { ck }
     }
 
-    pub fn commit(&self, v: &[C::Scalar]) -> C {
-        assert!(
-            self.ck.len() >= v.len(),
-            "CommitmentKey size must be greater than or equal to scalar vector size"
-        );
-        best_multiexp(v, &self.ck[..v.len()]).to_affine()
+    pub fn commit(&self, v: &[C::Scalar]) -> Result<C, Error> {
+        if self.ck.len() >= v.len() {
+            Ok(best_multiexp(v, &self.ck[..v.len()]).to_affine())
+        } else {
+            Err(Error::TooLongInput {
+                input_len: v.len(),
+                limit: self.ck.len(),
+            })
+        }
     }
 }
