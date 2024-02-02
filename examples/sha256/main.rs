@@ -17,7 +17,10 @@ use grumpkin::G1 as C2;
 use log::*;
 use sirius::{
     commitment::CommitmentKey,
-    ivc::{step_circuit, PublicParams, SimpleFloorPlanner, StepCircuit, SynthesisError, IVC},
+    ivc::{
+        step_circuit, CircuitPublicParamsInput, PublicParams, SimpleFloorPlanner, StepCircuit,
+        SynthesisError, IVC,
+    },
     poseidon::{self, ROPair},
 };
 
@@ -266,7 +269,8 @@ struct TestSha256Circuit<F: PrimeField> {
 // TODO
 const ARITY: usize = BLOCK_SIZE / 2;
 
-const CIRCUIT_TABLE_SIZE: usize = 22;
+const CIRCUIT_TABLE_SIZE1: usize = 22;
+const CIRCUIT_TABLE_SIZE2: usize = 22;
 const COMMITMENT_KEY_SIZE: usize = 27;
 
 impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
@@ -379,16 +383,33 @@ fn main() {
         .expect("Failed to get secondary key");
     info!("Secondary generated");
 
-    let pp = PublicParams::<C1Affine, C2Affine, RandomOracle, RandomOracle>::new(
-        CIRCUIT_TABLE_SIZE as u32,
-        &primary_commitment_key,
-        &secondary_commitment_key,
-        primary_spec,
-        secondary_spec,
+    let pp = PublicParams::<
+        '_,
+        ARITY,
+        ARITY,
+        T,
+        C1Affine,
+        C2Affine,
+        TestSha256Circuit<_>,
+        step_circuit::trivial::Circuit<ARITY, _>,
+        RandomOracle,
+        RandomOracle,
+    >::new(
+        CircuitPublicParamsInput {
+            k_table_size: CIRCUIT_TABLE_SIZE1 as u32,
+            commitment_key: &primary_commitment_key,
+            ro_constant: primary_spec,
+        },
+        CircuitPublicParamsInput {
+            k_table_size: CIRCUIT_TABLE_SIZE2 as u32,
+            commitment_key: &secondary_commitment_key,
+            ro_constant: secondary_spec,
+        },
         LIMB_WIDTH,
         LIMBS_COUNT,
-    );
-    info!("Public Params: {pp:?}");
+    )
+    .unwrap();
+    info!("public params: {pp:?}");
 
     let _ivc = IVC::new(
         &pp,

@@ -1,6 +1,6 @@
 use std::{fmt, num::NonZeroUsize};
 
-use ff::{Field, PrimeField};
+use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::ConstraintSystem,
@@ -113,9 +113,10 @@ pub enum ConfigureError {
 
 #[derive(Serialize)]
 #[serde(bound(serialize = "RO::Args: Serialize"))]
-pub(crate) struct SynthesizeStepParams<C: CurveAffine, RO: ROCircuitTrait<C::Base>>
+pub(crate) struct SynthesizeStepParams<F, RO>
 where
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: PrimeFieldBits + FromUniformBytes<64>,
+    RO: ROCircuitTrait<F>,
 {
     pub limb_width: NonZeroUsize,
     pub n_limbs: NonZeroUsize,
@@ -124,10 +125,10 @@ where
     pub ro_constant: RO::Args,
 }
 
-impl<C: CurveAffine + std::fmt::Debug, RO: ROCircuitTrait<C::Base>> fmt::Debug
-    for SynthesizeStepParams<C, RO>
+impl<F, RO> fmt::Debug for SynthesizeStepParams<F, RO>
 where
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: PrimeFieldBits + FromUniformBytes<64>,
+    RO: ROCircuitTrait<F>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SynthesizeStepParams")
@@ -143,7 +144,7 @@ pub(crate) struct StepInputs<'link, const ARITY: usize, C: CurveAffine, RO: ROCi
 where
     C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
-    pub step_public_params: &'link SynthesizeStepParams<C, RO>,
+    pub step_public_params: &'link SynthesizeStepParams<C::Base, RO>,
     pub public_params_hash: C,
     pub step: C::Base,
 
@@ -161,21 +162,17 @@ where
     pub cross_term_commits: Vec<C>,
 }
 
-pub struct StepConfig<
-    const ARITY: usize,
-    C: CurveAffine,
-    SP: StepCircuit<ARITY, C::Base>,
-    const T: usize,
-> {
+pub struct StepConfig<const ARITY: usize, F: PrimeField, SP: StepCircuit<ARITY, F>, const T: usize>
+{
     pub step_config: SP::Config,
     pub main_gate_config: MainGateConfig<T>,
 }
 
-pub struct StepSynthesisResult<const ARITY: usize, C: CurveAffine> {
+pub struct StepSynthesisResult<const ARITY: usize, F: PrimeField> {
     /// Output of current synthesis step
-    pub z_output: [AssignedValue<C::Base>; ARITY],
-    pub output_hash: AssignedValue<C::Base>,
-    pub X1: Vec<AssignedValue<C::Base>>,
+    pub z_output: [AssignedValue<F>; ARITY],
+    pub output_hash: AssignedValue<F>,
+    pub X1: Vec<AssignedValue<F>>,
 }
 
 /// Trait extends [`StepCircuit`] to represent the augmented function `F'` in the IVC scheme.
@@ -195,21 +192,20 @@ pub struct StepSynthesisResult<const ARITY: usize, C: CurveAffine> {
 ///         It takes additional parameters such as \( vk, Ui, ui, (i, z0, zi), \omega_i, T \) and outputs \( x \).
 ///
 /// - For `F'` please look at [`StepCircuitExt`]
-pub(crate) trait StepCircuitExt<'link, const ARITY: usize, C: CurveAffine>:
-    StepCircuit<ARITY, C::Base> + Sized
+pub(crate) trait StepCircuitExt<'link, const ARITY: usize, F>:
+    StepCircuit<ARITY, F> + Sized
 where
-    <C as CurveAffine>::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
-    <C as CurveAffine>::ScalarExt: ff::PrimeField,
+    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
     /// The crate-only expanding trait that checks that no instance columns have
     /// been created during [`StepCircuit::configure`].
     fn configure<const T: usize>(
-        cs: &mut ConstraintSystem<C::Base>,
-    ) -> Result<StepConfig<ARITY, C, Self, T>, ConfigureError> {
+        cs: &mut ConstraintSystem<F>,
+    ) -> Result<StepConfig<ARITY, F, Self, T>, ConfigureError> {
         let before = cs.num_instance_columns();
 
         let main_gate_config = MainGate::configure(cs);
-        let step_config = <Self as StepCircuit<ARITY, C::Base>>::configure(cs);
+        let step_config = <Self as StepCircuit<ARITY, F>>::configure(cs);
 
         if before == cs.num_instance_columns() {
             Ok(StepConfig {
@@ -221,12 +217,16 @@ where
         }
     }
 
-    fn synthesize<const T: usize, RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>>(
+    fn synthesize<
+        const T: usize,
+        C: CurveAffine<Base = F>,
+        RO: ROCircuitTrait<F, Config = MainGateConfig<T>>,
+    >(
         &self,
-        config: StepConfig<ARITY, C, Self, T>,
-        layouter: &mut impl Layouter<C::Base>,
+        config: StepConfig<ARITY, F, Self, T>,
+        layouter: &mut impl Layouter<F>,
         input: StepInputs<ARITY, C, RO>,
-    ) -> Result<StepSynthesisResult<ARITY, C>, SynthesisError> {
+    ) -> Result<StepSynthesisResult<ARITY, F>, SynthesisError> {
         // Synthesize the circuit for the base case and get the new running instance
         let U_new_base = self.synthesize_step_base_case(
             layouter,
@@ -254,8 +254,7 @@ where
                     Value::known(input.step),
                 )?;
 
-                let next_step_i =
-                    gate.add_with_const(&mut region, &assigned_step_i, C::Base::ONE)?;
+                let next_step_i = gate.add_with_const(&mut region, &assigned_step_i, F::ONE)?;
 
                 let assigned_is_zero_step = gate.is_zero_term(&mut region, assigned_step_i)?;
 
@@ -315,11 +314,12 @@ where
 
     fn synthesize_step_base_case<
         const T: usize,
-        RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
+        C: CurveAffine<Base = F>,
+        RO: ROCircuitTrait<F, Config = MainGateConfig<T>>,
     >(
         &self,
-        layouter: &mut impl Layouter<C::Base>,
-        public_params: &SynthesizeStepParams<C, RO>,
+        layouter: &mut impl Layouter<F>,
+        public_params: &SynthesizeStepParams<F, RO>,
         u: &PlonkInstance<C>,
         config: MainGateConfig<T>,
     ) -> Result<AssignedRelaxedPlonkInstance<C>, SynthesisError> {
@@ -352,11 +352,12 @@ where
 
     fn synthesize_step_non_base_case<
         const T: usize,
-        RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
+        C: CurveAffine<Base = F>,
+        RO: ROCircuitTrait<F, Config = MainGateConfig<T>>,
     >(
         &self,
-        config: &StepConfig<ARITY, C, Self, T>,
-        layouter: &mut impl Layouter<C::Base>,
+        config: &StepConfig<ARITY, F, Self, T>,
+        layouter: &mut impl Layouter<F>,
         input: &StepInputs<ARITY, C, RO>,
     ) -> Result<FoldResult<C>, SynthesisError> {
         let StepInputs {
@@ -395,10 +396,10 @@ where
 }
 
 // auto-impl for all `StepCircuit` trait `StepCircuitExt`
-impl<'link, const ARITY: usize, C: CurveAffine, SP: StepCircuit<ARITY, C::Base>>
-    StepCircuitExt<'link, ARITY, C> for SP
+impl<'link, const ARITY: usize, F: PrimeField, SP: StepCircuit<ARITY, F>>
+    StepCircuitExt<'link, ARITY, F> for SP
 where
-    <C as CurveAffine>::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
 }
 

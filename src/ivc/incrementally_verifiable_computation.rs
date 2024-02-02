@@ -72,44 +72,44 @@ where
     C2::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
     pub fn new<const T: usize, RP1, RP2>(
-        _pp: &PublicParams<C1, C2, RP1, RP2>,
+        _pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
         _primary: SC1,
         _z0_primary: [C1::Scalar; A1],
         _secondary: SC2,
         _z0_secondary: [C2::Scalar; A2],
     ) -> Result<Self, Error>
     where
-        RP1: ROPair<C1::Base, Config = MainGateConfig<T>>,
-        RP2: ROPair<C2::Base, Config = MainGateConfig<T>>,
+        RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
+        RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
         // TODO #31
         todo!("Logic at `RecursiveSNARK::new`")
     }
 
-    pub fn prove_step<RO1, RO2>(
+    pub fn prove_step<const T: usize, RP1, RP2>(
         &mut self,
-        _pp: &PublicParams<C1, C2, RO1, RO2>,
+        _pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
         _z0_primary: [C1::Scalar; A1],
         _z0_secondary: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
-        RO1: ROPair<C1::Base>,
-        RO2: ROPair<C2::Base>,
+        RP1: ROPair<C1::Scalar>,
+        RP2: ROPair<C2::Scalar>,
     {
         // TODO #31
         todo!("Logic at `RecursiveSNARK::prove_step`")
     }
 
-    pub fn verify<RO1, RO2>(
+    pub fn verify<const T: usize, RP1, RP2>(
         &mut self,
-        _pp: &PublicParams<C1, C2, RO1, RO2>,
+        _pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
         _steps_count: usize,
         _z0_primary: [C1::Scalar; A1],
         _z0_secondary: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
-        RO1: ROPair<C1::Base>,
-        RO2: ROPair<C2::Base>,
+        RP1: ROPair<C1::Scalar>,
+        RP2: ROPair<C2::Scalar>,
     {
         // TODO #31
         todo!("Logic at `RecursiveSNARK::verify`")

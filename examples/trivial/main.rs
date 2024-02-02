@@ -13,13 +13,14 @@ use grumpkin::G1 as C2;
 use log::*;
 use sirius::{
     commitment::CommitmentKey,
-    ivc::{step_circuit, PublicParams, IVC},
+    ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, IVC},
     poseidon::{self, ROPair},
 };
 
 const ARITY: usize = BLOCK_SIZE / 2;
 
-const CIRCUIT_TABLE_SIZE: usize = 20;
+const CIRCUIT_TABLE_SIZE1: usize = 20;
+const CIRCUIT_TABLE_SIZE2: usize = 20;
 const COMMITMENT_KEY_SIZE: usize = 25;
 const T: usize = 5;
 const RATE: usize = 4;
@@ -43,7 +44,7 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 ) -> io::Result<CommitmentKey<C>> {
     const FOLDER: &str = ".cache/examples";
 
-    let file_path = Path::new(FOLDER).join(label).join("{k}.bin");
+    let file_path = Path::new(FOLDER).join(label).join(format!("{k}.bin"));
 
     if file_path.exists() {
         debug!("{file_path:?} exists, load key");
@@ -67,8 +68,8 @@ fn main() {
     // C2
     let sc2 = step_circuit::trivial::Circuit::<ARITY, _>::default();
 
-    let primary_spec = RandomOracleConstant::<<C2 as CurveExt>::Base>::new(10, 10);
-    let secondary_spec = RandomOracleConstant::<<C1 as CurveExt>::Base>::new(10, 10);
+    let primary_spec = RandomOracleConstant::<<C1 as CurveExt>::ScalarExt>::new(10, 10);
+    let secondary_spec = RandomOracleConstant::<<C2 as CurveExt>::ScalarExt>::new(10, 10);
 
     info!("Start generate");
     let primary_commitment_key = get_or_create_commitment_key(COMMITMENT_KEY_SIZE, "grumpkin")
@@ -78,15 +79,32 @@ fn main() {
         .expect("Failed to get secondary key");
     info!("Secondary generated");
 
-    let pp = PublicParams::<C1Affine, C2Affine, RandomOracle, RandomOracle>::new(
-        CIRCUIT_TABLE_SIZE as u32,
-        &primary_commitment_key,
-        &secondary_commitment_key,
-        primary_spec,
-        secondary_spec,
+    let pp = PublicParams::<
+        '_,
+        ARITY,
+        ARITY,
+        T,
+        C1Affine,
+        C2Affine,
+        step_circuit::trivial::Circuit<ARITY, _>,
+        step_circuit::trivial::Circuit<ARITY, _>,
+        RandomOracle,
+        RandomOracle,
+    >::new(
+        CircuitPublicParamsInput {
+            k_table_size: CIRCUIT_TABLE_SIZE1 as u32,
+            commitment_key: &primary_commitment_key,
+            ro_constant: primary_spec,
+        },
+        CircuitPublicParamsInput {
+            k_table_size: CIRCUIT_TABLE_SIZE2 as u32,
+            commitment_key: &secondary_commitment_key,
+            ro_constant: secondary_spec,
+        },
         LIMB_WIDTH,
         LIMBS_COUNT_LIMIT,
-    );
+    )
+    .unwrap();
     info!("public params: {pp:?}");
 
     debug!("start ivc");
