@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::{
     ivc::{
-        public_params::PublicParams,
+        public_params::{self, PublicParams},
         step_circuit::{StepCircuitExt, StepInputs, StepSynthesisResult},
     },
     main_gate::{AdviceCyclicAssignor, AssignedValue, MainGateConfig, RegionCtx},
@@ -29,10 +29,10 @@ where
     C: CurveAffine,
     SC: StepCircuit<ARITY, C::Scalar>,
 {
-    step_circuit: SC,
-    relaxed_trace: RelaxedPlonkTrace<C>,
-    z_0: [AssignedValue<C::Scalar>; ARITY],
-    z_i: [AssignedValue<C::Scalar>; ARITY],
+    pub step_circuit: SC,
+    pub relaxed_trace: RelaxedPlonkTrace<C>,
+    pub z_0: [AssignedValue<C::Scalar>; ARITY],
+    pub z_i: [AssignedValue<C::Scalar>; ARITY],
 }
 
 // TODO #31 docs
@@ -44,10 +44,12 @@ pub enum Error {
     Plonk(#[from] halo2_proofs::plonk::Error),
     #[error(transparent)]
     Step(#[from] step_circuit::SynthesisError),
-    #[error("TODO")]
+    #[error("While calculate hash of pp: {0:?}")]
     WhileHash(io::Error),
-    #[error("TODO")]
+    #[error("While run sps procotol: {0:?}")]
     Sps(#[from] sps::Error),
+    #[error("Can't eval plonk structure, Primary - {is_primary}")]
+    MissedPlonkStructure { is_primary: bool },
 }
 
 // TODO #31 docs
@@ -135,9 +137,6 @@ where
         // TODO #31
         info!("start ivc base case");
 
-        let primary_public_params_hash = pp.digest()?;
-        let secondary_public_params_hash = pp.digest()?;
-
         let (primary_config, mut primary_td) =
             pp.primary.prepare_td(&[C1::Scalar::ZERO, C1::Scalar::ZERO]);
         debug!("primary step circuit configured");
@@ -147,15 +146,28 @@ where
             .prepare_td(&[C2::Scalar::ZERO, C2::Scalar::ZERO]);
         debug!("secondary step circuit configured");
 
-        let primary_cross_term_commits_len = secondary_td
+        let secondary_ps = secondary_td
             .plonk_structure()
-            .unwrap()
-            .get_degree_for_folding();
+            .ok_or(Error::MissedPlonkStructure { is_primary: false })?;
+        let primary_cross_term_commits_len = secondary_ps.get_degree_for_folding();
 
-        let secondary_cross_term_commits_len = primary_td
+        let primary_ps = primary_td
             .plonk_structure()
-            .unwrap()
-            .get_degree_for_folding();
+            .ok_or(Error::MissedPlonkStructure { is_primary: true })?;
+        let secondary_cross_term_commits_len = primary_ps.get_degree_for_folding();
+
+        let primary_public_params_hash = public_params::calc_digest::<C1, C2, C2, RP1, RP2>(
+            pp.primary.params(),
+            &primary_ps,
+            pp.secondary.params(),
+            &secondary_ps,
+        )?;
+        let secondary_public_params_hash = public_params::calc_digest::<C1, C2, C1, RP1, RP2>(
+            pp.primary.params(),
+            &primary_ps,
+            pp.secondary.params(),
+            &secondary_ps,
+        )?;
 
         debug!("cross term commits len: primary={primary_cross_term_commits_len}, secondary={secondary_cross_term_commits_len}");
 
@@ -190,7 +202,7 @@ where
                 primary_config,
                 &mut layouter,
                 step_circuit::StepInputs {
-                    step_public_params: &pp.primary.params,
+                    step_public_params: pp.primary.params(),
                     public_params_hash: primary_public_params_hash,
                     step: C1::Scalar::ZERO,
                     z_0: primary_assigned_z0.clone(),
@@ -208,8 +220,8 @@ where
             debug!("primary synthesized, start sps");
 
             let (primary_plonk_instance, primary_plonk_witness) = primary_td.run_sps_protocol(
-                pp.primary.ck,
-                &mut RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone()),
+                pp.primary.ck(),
+                &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant.clone()),
                 primary_td.plonk_structure().unwrap().num_challenges,
             )?;
 
@@ -259,7 +271,7 @@ where
                 secondary_config,
                 &mut layouter,
                 StepInputs {
-                    step_public_params: &pp.secondary.params,
+                    step_public_params: pp.secondary.params(),
                     public_params_hash: secondary_public_params_hash,
                     step: C2::Scalar::ZERO,
                     z_0: secondary_assigned_z0.clone(),
@@ -277,8 +289,8 @@ where
 
             let (secondary_plonk_instance, secondary_plonk_witness) = secondary_td
                 .run_sps_protocol(
-                    pp.secondary.ck,
-                    &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
+                    pp.secondary.ck(),
+                    &mut RP1::OffCircuit::new(pp.primary.params().ro_constant.clone()),
                     secondary_td.plonk_structure().unwrap().num_challenges,
                 )?;
 

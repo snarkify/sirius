@@ -971,7 +971,7 @@ impl<F: PrimeField> Deref for ModOperationResult<F> {
 #[derive(Debug)]
 pub struct MultContext<F: PrimeField> {
     lhs: Vec<AssignedCell<F, F>>,
-    rhs: Vec<AssignedCell<F, F>>,
+    pub rhs: Vec<AssignedCell<F, F>>,
     res: OverflowingBigUint<F>,
 }
 

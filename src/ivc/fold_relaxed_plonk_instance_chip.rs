@@ -211,7 +211,8 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
     }
 }
 impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
-    fn to_relaxed_plonk_instance(
+    #[cfg(test)]
+    pub fn to_relaxed_plonk_instance(
         &self,
         limb_width: NonZeroUsize,
         limbs_count: NonZeroUsize,

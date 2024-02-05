@@ -34,8 +34,8 @@ where
     SC: StepCircuit<ARITY, C::Scalar>,
     RP: ROPair<C::Scalar>,
 {
-    pub ck: &'key CommitmentKey<C>,
-    pub params: SynthesizeStepParams<C::Scalar, RP::OnCircuit>,
+    ck: &'key CommitmentKey<C>,
+    params: SynthesizeStepParams<C::Scalar, RP::OnCircuit>,
 
     td: TableData<C::Scalar>,
     X0: Column<Instance>,
@@ -116,6 +116,14 @@ where
         let mut td = self.td.clone();
         td.instance = instance_columns.to_vec();
         (self.config.clone(), td)
+    }
+
+    pub fn params(&self) -> &SynthesizeStepParams<C::Scalar, RP::OnCircuit> {
+        &self.params
+    }
+
+    pub fn ck(&self) -> &'key CommitmentKey<C> {
+        self.ck
     }
 }
 
@@ -243,42 +251,67 @@ where
     /// This method calculate digest of [`PublicParams`], but ignore [`CircuitPublicParams::ck`]
     /// from both step circuits params
     pub fn digest<C: CurveAffine>(&self) -> Result<C, crate::ivc::Error> {
-        #[derive(serde::Serialize)]
-        #[serde(bound(serialize = ""))]
-        struct Wrapper<'l, C1, C2, RP1, RP2>
-        where
-            C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
-            C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
-
-            C1::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
-            C2::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
-
-            RP1: ROPair<C1::Scalar>,
-            RP2: ROPair<C2::Scalar>,
-        {
-            primary_plonk_struct: PlonkStructure<C1::Scalar>,
-            secondary_plonk_struct: PlonkStructure<C2::Scalar>,
-            primary_params: &'l SynthesizeStepParams<C1::Scalar, RP1::OnCircuit>,
-            secondary_params: &'l SynthesizeStepParams<C2::Scalar, RP2::OnCircuit>,
-        }
-
-        digest::DefaultHasher::digest_to_curve(&Wrapper::<'_, C1, C2, RP1, RP2> {
-            primary_plonk_struct: self
+        calc_digest::<C1, C2, C, RP1, RP2>(
+            &self.primary.params,
+            &self
                 .primary
                 .td
                 .plonk_structure()
                 .expect("unrechable, prepared in constructor"),
-            secondary_plonk_struct: self
+            &self.secondary.params,
+            &self
                 .secondary
                 .td
                 .plonk_structure()
                 .expect("unrechable, prepared in constructor"),
-            primary_params: &self.primary.params,
-            secondary_params: &self.secondary.params,
-        })
-        .map_err(crate::ivc::Error::WhileHash)
+        )
     }
 }
+
+pub fn calc_digest<C1: CurveAffine, C2: CurveAffine, CO: CurveAffine, RP1, RP2>(
+    primary_params: &SynthesizeStepParams<C1::Scalar, RP1::OnCircuit>,
+    primary_plonk_struct: &PlonkStructure<C1::Scalar>,
+    secondary_params: &SynthesizeStepParams<C2::Scalar, RP2::OnCircuit>,
+    secondary_plonk_struct: &PlonkStructure<C2::Scalar>,
+) -> Result<CO, crate::ivc::Error>
+where
+    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
+    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
+
+    C1::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
+    C2::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
+
+    RP1: ROPair<C1::Scalar>,
+    RP2: ROPair<C2::Scalar>,
+{
+    #[derive(serde::Serialize)]
+    #[serde(bound(serialize = ""))]
+    struct SerializableWrapper<'l, C1, C2, RP1, RP2>
+    where
+        C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
+        C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
+
+        C1::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
+        C2::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
+
+        RP1: ROPair<C1::Scalar>,
+        RP2: ROPair<C2::Scalar>,
+    {
+        primary_plonk_struct: &'l PlonkStructure<C1::Scalar>,
+        secondary_plonk_struct: &'l PlonkStructure<C2::Scalar>,
+        primary_params: &'l SynthesizeStepParams<C1::Scalar, RP1::OnCircuit>,
+        secondary_params: &'l SynthesizeStepParams<C2::Scalar, RP2::OnCircuit>,
+    }
+
+    digest::DefaultHasher::digest_to_curve(&SerializableWrapper::<'_, C1, C2, RP1, RP2> {
+        primary_plonk_struct,
+        secondary_plonk_struct,
+        primary_params,
+        secondary_params,
+    })
+    .map_err(crate::ivc::Error::WhileHash)
+}
+
 #[cfg(test)]
 mod pp_test {
     use group::Group;
