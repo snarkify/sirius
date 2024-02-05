@@ -6,6 +6,7 @@ use crate::plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain};
 use crate::plonk::{
     PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
 };
+use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
 use crate::polynomial::ColumnIndex;
 use crate::poseidon::{AbsorbInRO, ROTrait};
 use crate::sps::SpecialSoundnessVerifier;
@@ -25,11 +26,6 @@ pub type CrossTerms<C> = Vec<Vec<<C as CurveAffine>::ScalarExt>>;
 /// Cryptographic commitments to the [`CrossTerms`].
 pub type CrossTermCommits<C> = Vec<C>;
 
-pub struct PlonkAccumulator<C: CurveAffine> {
-    pub(crate) instance: RelaxedPlonkInstance<C>,
-    pub(crate) witness: RelaxedPlonkWitness<C::ScalarExt>,
-}
-
 /// VanillaFS: Vanilla version of Non Interactive Folding Scheme
 ///
 /// Given a polynomial relation `P(x_1,...,x_n)` with polynomial degree `d.
@@ -42,8 +38,13 @@ pub struct PlonkAccumulator<C: CurveAffine> {
 // TODO Replace links to either the documentation right here, or the official Snarkify resource
 #[derive(Clone, Debug)]
 pub struct VanillaFS<C: CurveAffine, RO: ROTrait<C::Base>> {
-    pub(crate) cross_term_commits: CrossTermCommits<C>,
-    _marker: PhantomData<RO>,
+    _marker: PhantomData<(C, RO)>,
+}
+
+pub struct VanillaFSProverParam<C: CurveAffine> {
+    S: PlonkStructure<C::ScalarExt>,
+    /// digest of public parameter of IVC circuit
+    pp_digest: C,
 }
 
 impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
@@ -118,13 +119,13 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
 
     /// Absorb all fields into RandomOracle `RO` & generate challenge based on that
     pub(crate) fn generate_challenge(
-        pp_digest: C,
+        pp_digest: &C,
         ro_acc: &mut RO,
         U1: &RelaxedPlonkInstance<C>,
         U2: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
     ) -> Result<<C as CurveAffine>::ScalarExt, Error> {
-        ro_acc.absorb_point(&pp_digest);
+        ro_acc.absorb_point(pp_digest);
         U1.absorb_into(ro_acc);
         U2.absorb_into(ro_acc);
         cross_term_commits
@@ -132,6 +133,33 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
             .for_each(|cm| ro_acc.absorb_point(cm));
 
         Ok(ro_acc.squeeze::<C>(NUM_CHALLENGE_BITS))
+    }
+}
+
+impl<C: CurveAffine, RO: ROTrait<C::Base>> FoldingScheme<C, RO> for VanillaFS<C, RO> {
+    type ProverParam = VanillaFSProverParam<C>;
+    type VerifierParam = C;
+    type Accumulator = RelaxedPlonkTrace<C>;
+    type AccumulatorInstance = RelaxedPlonkInstance<C>;
+    type Proof = CrossTermCommits<C>;
+
+    fn setup_params(
+        pp_digest: C,
+        td: &TableData<<C as CurveAffine>::ScalarExt>,
+    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
+        let S = td.plonk_structure().ok_or(Error::ParamNotSetup)?;
+        let pp = VanillaFSProverParam { S, pp_digest };
+        Ok((pp, pp_digest))
+    }
+
+    fn generate_plonk_trace(
+        ck: &CommitmentKey<C>,
+        td: &TableData<<C as CurveAffine>::ScalarExt>,
+        pp: &VanillaFSProverParam<C>,
+        ro_nark: &mut RO,
+    ) -> Result<PlonkTrace<C>, Error> {
+        let (u, w) = td.run_sps_protocol(ck, ro_nark, pp.S.num_challenges)?;
+        Ok(PlonkTrace { u, w })
     }
 
     /// Generates a proof of correct folding using the NIFS protocol.
@@ -141,54 +169,34 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
     ///
     /// # Arguments
     /// * `ck`: The commitment key.
+    /// * `pp`: The prover parameter.
     /// * `ro_acc`: The random oracle for the accumulation scheme. Used to securely combine
     ///             multiple verification steps or proofs into a single, updated accumulator.
-    /// * `ro_nark`: The random oracle used within the non-interactive argument of knowledge (NARK)
-    ///              system. Facilitates the Fiat-Shamir transformation, converting interactive
-    ///              proofs to non-interactive by deterministically generating challenges based
-    ///              on the protocol's messages.
-    /// * `td`: Table data associated with the (strict not relaxed) plonk instance to be folded
-    /// * `U1`: The first relaxed Plonk instance.
-    /// * `W1`: The witness for the first relaxed Plonk instance.
+    /// * `accumulator`: The instance-witness pair for accumulator
+    /// * `incoming`: The instance-witness pair from synthesize of circuit
     ///
     /// # Returns
-    /// A tuple containing the NIFS instance and the folded relaxed Plonk instance-witness pair.
-    ///
-    /// # Context
-    /// The prove function is central to the NIFS protocol. It demonstrates
-    /// that two polynomial relations have been correctly folded into one,
-    /// providing cryptographic evidence of this fact.
-    pub fn prove(
+    /// A tuple containing folded accumulator and proof for the folding scheme verifier
+    fn prove(
         ck: &CommitmentKey<C>,
-        pp_digest: &C,
-        ro_nark: &mut RO,
+        pp: &Self::ProverParam,
         ro_acc: &mut RO,
-        td: &TableData<C::ScalarExt>,
-        U1: &RelaxedPlonkInstance<C>,
-        W1: &RelaxedPlonkWitness<C::ScalarExt>,
-    ) -> Result<
-        (
-            Self,
-            (RelaxedPlonkInstance<C>, RelaxedPlonkWitness<C::ScalarExt>),
-        ),
-        Error,
-    > {
-        let S = td.plonk_structure().unwrap();
+        accumulator: &Self::Accumulator,
+        incoming: &PlonkTrace<C>,
+    ) -> Result<(Self::Accumulator, Self::Proof), Error> {
+        let U1 = &accumulator.U;
+        let W1 = &accumulator.W;
+        let U2 = &incoming.u;
+        let W2 = &incoming.w;
 
-        let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges)?;
-        let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2)?;
+        let (cross_terms, cross_term_commits) =
+            Self::commit_cross_terms(ck, &pp.S, U1, W1, U2, W2)?;
 
-        let r = Self::generate_challenge(*pp_digest, ro_acc, U1, &U2, &cross_term_commits)?;
+        let r = VanillaFS::generate_challenge(&pp.pp_digest, ro_acc, U1, U2, &cross_term_commits)?;
 
-        let U = U1.fold(&U2, &cross_term_commits, &r);
-        let W = W1.fold(&W2, &cross_terms, &r);
-        Ok((
-            Self {
-                cross_term_commits,
-                _marker: PhantomData,
-            },
-            (U, W),
-        ))
+        let U = U1.fold(U2, &cross_term_commits, &r);
+        let W = W1.fold(W2, &cross_terms, &r);
+        Ok((RelaxedPlonkTrace { U, W }, cross_term_commits))
     }
 
     /// Verifies the correctness of the folding using the NIFS protocol.
@@ -196,61 +204,30 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
     /// This method takes a relaxed Plonk instance and a Plonk instance and verifies if they have been correctly folded.
     ///
     /// # Arguments
-    /// * `ro`: A mutable reference to the random oracle.
-    /// * `S`: The Plonk structure shared by both instances.
+    /// * `vp`: verifier parameter
+    /// * `ro_acc`: The random oracle for the accumulation scheme. Used to securely combine
+    ///             multiple verification steps or proofs into a single, updated accumulator.
+    /// * `ro_nark`: The random oracle used within the non-interactive argument of knowledge (NARK)
+    ///              system. Facilitates the Fiat-Shamir transformation, converting interactive
+    ///              proofs to non-interactive by deterministically generating challenges based
+    ///              on the protocol's messages.
     /// * `U1`: The relaxed Plonk instance.
     /// * `U2`: The Plonk instance.
     ///
     /// # Returns
     /// The folded relaxed Plonk instance.
-    pub fn verify(
-        &self,
-        pp_digest: &C,
+    fn verify(
+        vp: &Self::VerifierParam,
         ro_nark: &mut RO,
         ro_acc: &mut RO,
-        U1: RelaxedPlonkInstance<C>,
-        U2: PlonkInstance<C>,
-    ) -> Result<RelaxedPlonkInstance<C>, Error> {
+        U1: &Self::AccumulatorInstance,
+        U2: &PlonkInstance<C>,
+        cross_term_commits: &CrossTermCommits<C>,
+    ) -> Result<Self::AccumulatorInstance, Error> {
         U2.sps_verify(ro_nark)?;
 
-        let r = Self::generate_challenge(*pp_digest, ro_acc, &U1, &U2, &self.cross_term_commits)?;
+        let r = VanillaFS::generate_challenge(vp, ro_acc, U1, U2, cross_term_commits)?;
 
-        Ok(U1.fold(&U2, &self.cross_term_commits, &r))
-    }
-}
-
-impl<C: CurveAffine, RO: ROTrait<C::Base>> FoldingScheme<C, RO> for VanillaFS<C, RO> {
-    type ProverParam = PlonkStructure<C::ScalarExt>;
-    type VerifierParam = PlonkStructure<C::ScalarExt>;
-    type Accumulator = PlonkAccumulator<C>;
-    type AccumulatorInstance = RelaxedPlonkInstance<C>;
-
-    fn setup_params(
-        td: &TableData<<C as CurveAffine>::ScalarExt>,
-    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
-        let pp = td.plonk_structure().ok_or(Error::ParamNotSetup)?;
-        Ok((pp.clone(), pp))
-    }
-
-    // Perform the folding operation as a prover.
-    fn prove(
-        _ck: &CommitmentKey<C>,
-        _pp: &Self::ProverParam,
-        _ro_acc: &mut RO,
-        _accumulator: Self::Accumulator,
-        _incoming: Self::Accumulator,
-    ) -> Result<Self::Accumulator, Error> {
-        todo!()
-    }
-
-    // Perform the folding operation as a verifier.
-    fn verify(
-        _vp: &Self::VerifierParam,
-        _ro_nark: &mut RO,
-        _ro_acc: &mut RO,
-        _accumulator: Self::AccumulatorInstance,
-        _incoming: Self::AccumulatorInstance,
-    ) -> Result<Self::AccumulatorInstance, Error> {
-        todo!()
+        Ok(U1.fold(U2, cross_term_commits, &r))
     }
 }

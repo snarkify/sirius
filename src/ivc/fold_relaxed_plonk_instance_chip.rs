@@ -1774,6 +1774,7 @@ mod tests {
         let mut td = TableData::<ScalarExt>::new(K as u32, vec![]);
         let _config = td.prepare_assembly(MainGate::<ScalarExt, T>::configure);
 
-        VanillaFS::generate_challenge(pp_hash, &mut ro, relaxed, input, cross_term_commits).unwrap()
+        VanillaFS::generate_challenge(&pp_hash, &mut ro, relaxed, input, cross_term_commits)
+            .unwrap()
     }
 }
