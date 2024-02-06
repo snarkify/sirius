@@ -149,12 +149,14 @@ where
         let secondary_ps = secondary_td
             .plonk_structure()
             .ok_or(Error::MissedPlonkStructure { is_primary: false })?;
-        let primary_cross_term_commits_len = secondary_ps.get_degree_for_folding();
+        let primary_cross_term_commits_len =
+            secondary_ps.get_degree_for_folding().saturating_sub(1);
 
         let primary_ps = primary_td
             .plonk_structure()
             .ok_or(Error::MissedPlonkStructure { is_primary: true })?;
-        let secondary_cross_term_commits_len = primary_ps.get_degree_for_folding();
+        let secondary_cross_term_commits_len =
+            primary_ps.get_degree_for_folding().saturating_sub(1);
 
         let primary_public_params_hash = public_params::calc_digest::<C1, C2, C2, RP1, RP2>(
             pp.primary.params(),
