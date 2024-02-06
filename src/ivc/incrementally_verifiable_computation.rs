@@ -1,6 +1,6 @@
 use std::io;
 
-use ff::{Field, FromUniformBytes, PrimeFieldBits};
+use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter};
 use halo2curves::CurveAffine;
@@ -12,10 +12,12 @@ use crate::{
         public_params::{self, PublicParams},
         step_circuit::{StepCircuitExt, StepInputs, StepSynthesisResult},
     },
-    main_gate::{AdviceCyclicAssignor, AssignedValue, MainGateConfig, RegionCtx},
-    plonk::{PlonkInstance, PlonkTrace, RelaxedPlonkTrace},
+    main_gate::{AdviceCyclicAssignor, MainGateConfig, RegionCtx},
+    nifs::{self, vanilla::VanillaFS},
+    plonk::{PlonkInstance, RelaxedPlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
+    table::TableData,
 };
 
 pub use super::{
@@ -31,8 +33,8 @@ where
 {
     pub step_circuit: SC,
     pub relaxed_trace: RelaxedPlonkTrace<C>,
-    pub z_0: [AssignedValue<C::Scalar>; ARITY],
-    pub z_i: [AssignedValue<C::Scalar>; ARITY],
+    pub z_0: [C::Scalar; ARITY],
+    pub z_next: [C::Scalar; ARITY],
 }
 
 // TODO #31 docs
@@ -50,6 +52,8 @@ pub enum Error {
     Sps(#[from] sps::Error),
     #[error("Can't eval plonk structure, Primary - {is_primary}")]
     MissedPlonkStructure { is_primary: bool },
+    #[error("While nifs: {0:?}")]
+    NIFS(#[from] nifs::Error),
 }
 
 // TODO #31 docs
@@ -65,7 +69,7 @@ where
     primary: StepCircuitContext<A1, C1, SC1>,
     secondary: StepCircuitContext<A2, C2, SC2>,
 
-    secondary_trace: PlonkTrace<C2>,
+    secondary_prev_td: TableData<C2::Scalar>,
 
     step: usize,
 }
@@ -136,6 +140,7 @@ where
     {
         // TODO #31
         info!("start ivc base case");
+        let step = 0;
 
         let (primary_config, mut primary_td) =
             pp.primary.prepare_td(&[C1::Scalar::ZERO, C1::Scalar::ZERO]);
@@ -163,35 +168,38 @@ where
             &primary_ps,
             pp.secondary.params(),
             &secondary_ps,
-        )?;
+        )
+        .map_err(Error::WhileHash)?;
         let secondary_public_params_hash = public_params::calc_digest::<C1, C2, C1, RP1, RP2>(
             pp.primary.params(),
             &primary_ps,
             pp.secondary.params(),
             &secondary_ps,
-        )?;
+        )
+        .map_err(Error::WhileHash)?;
 
         debug!("cross term commits len: primary={primary_cross_term_commits_len}, secondary={secondary_cross_term_commits_len}");
 
         let (primary_ctx, primary_plonk_instance) = {
+            debug!("primary step circuit configured");
             let mut layouter =
                 SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?;
 
             let primary_assigned_z0: [_; A1] = layouter.assign_region(
-                || "assigned_z0_primary",
+                || format!("assigned_z{step}_primary"),
                 |region| {
                     primary_config
                         .main_gate_config
                         .advice_cycle_assigner()
                         .assign_all_advice(
                             &mut RegionCtx::new(region, 0),
-                            || "z0_primary",
+                            || format!("z{step}_primary"),
                             z0_primary.iter().copied(),
                         )
                         .map(|inp| inp.try_into().unwrap())
                 },
             )?;
-            debug!("primary z0 assigned");
+            debug!("primary z{step} assigned");
             debug!("start primary synthesize");
 
             let StepSynthesisResult {
@@ -206,7 +214,7 @@ where
                 step_circuit::StepInputs {
                     step_public_params: pp.primary.params(),
                     public_params_hash: primary_public_params_hash,
-                    step: C1::Scalar::ZERO,
+                    step: C1::Scalar::from_u128(step),
                     z_0: primary_assigned_z0.clone(),
                     z_i: primary_assigned_z0.clone(),
                     // Can be any
@@ -234,33 +242,34 @@ where
                         U: primary_plonk_instance.to_relax(),
                         W: primary_plonk_witness.to_relax(pp.primary.td_k() as usize),
                     },
-                    z_0: primary_assigned_z0,
-                    z_i: primary_assigned_z_output,
+                    z_0: z0_primary,
+                    z_next: primary_assigned_z_output
+                        .map(|cell| cell.value().unwrap().copied().unwrap()),
                 },
                 primary_plonk_instance,
             )
         };
         debug!("primary ctx ready");
 
-        let (secondary_ctx, secondary_trace) = {
+        let (secondary_ctx, secondary_prev_td) = {
             let mut layouter =
                 SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?;
 
             let secondary_assigned_z0: [_; A2] = layouter.assign_region(
-                || "assigned_z0_secondary",
+                || "assigned_z{step}_secondary",
                 |region| {
                     secondary_config
                         .main_gate_config
                         .advice_cycle_assigner()
                         .assign_all_advice(
                             &mut RegionCtx::new(region, 0),
-                            || "z0_secondary",
+                            || "z{step}_secondary",
                             z0_secondary.iter().copied(),
                         )
                         .map(|inp| inp.try_into().unwrap())
                 },
             )?;
-            debug!("secondary z0 assigned");
+            debug!("secondary z{step} assigned");
             debug!("start secondary synthesize");
 
             let StepSynthesisResult {
@@ -275,7 +284,7 @@ where
                 StepInputs {
                     step_public_params: pp.secondary.params(),
                     public_params_hash: secondary_public_params_hash,
-                    step: C2::Scalar::ZERO,
+                    step: C2::Scalar::from_u128(step),
                     z_0: secondary_assigned_z0.clone(),
                     z_i: secondary_assigned_z0.clone(),
                     // Can be any
@@ -303,35 +312,133 @@ where
                         U: secondary_plonk_instance.to_relax(),
                         W: secondary_plonk_witness.to_relax(pp.secondary.td_k() as usize),
                     },
-                    z_0: secondary_assigned_z0,
-                    z_i: secondary_assigned_z_output,
+                    z_0: z0_secondary,
+                    z_next: secondary_assigned_z_output
+                        .map(|cell| cell.value().unwrap().copied().unwrap()),
                 },
-                PlonkTrace {
-                    u: secondary_plonk_instance,
-                    w: secondary_plonk_witness,
-                },
+                secondary_td,
             )
         };
         debug!("secondary ctx ready");
 
         Ok(Self {
             step: 1,
-            secondary_trace,
+            secondary_prev_td,
             primary: primary_ctx,
             secondary: secondary_ctx,
         })
     }
 
-    pub fn prove_step<const T: usize, RP1, RP2>(
+    pub fn fold_step<const T: usize, RP1, RP2>(
         &mut self,
-        _pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
-        _z0_primary: [C1::Scalar; A1],
-        _z0_secondary: [C2::Scalar; A2],
+        pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
     ) -> Result<(), Error>
     where
-        RP1: ROPair<C1::Scalar>,
-        RP2: ROPair<C2::Scalar>,
+        RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
+        RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
+        let (
+            VanillaFS {
+                cross_term_commits: secondary_cross_term_commits,
+                ..
+            },
+            (secondary_U, secondary_W),
+        ) = nifs::vanilla::VanillaFS::prove(
+            pp.secondary.ck(),
+            &pp.digest().map_err(Error::WhileHash)?,
+            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant.clone()),
+            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant.clone()),
+            &self.secondary_prev_td,
+            &self.secondary.relaxed_trace.U,
+            &self.secondary.relaxed_trace.W,
+        )?;
+
+        let (secondary_plonk_instance, _secondary_plonk_witness) =
+            self.secondary_prev_td.run_sps_protocol(
+                pp.secondary.ck(),
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant.clone()),
+                self.secondary_prev_td
+                    .plonk_structure()
+                    .unwrap()
+                    .num_challenges,
+            )?;
+
+        (self.secondary.relaxed_trace, self.primary.z_next) = {
+            let step = self.step;
+
+            let (primary_config, mut primary_td) =
+                pp.primary.prepare_td(&[C1::Scalar::ZERO, C1::Scalar::ZERO]);
+
+            let mut layouter =
+                SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?;
+
+            let primary_assigned_z_0: [_; A1] = layouter.assign_region(
+                || format!("assigned_z{step}_primary"),
+                |region| {
+                    primary_config
+                        .main_gate_config
+                        .advice_cycle_assigner()
+                        .assign_all_advice(
+                            &mut RegionCtx::new(region, 0),
+                            || format!("z{step}_primary"),
+                            self.primary.z_0.iter().copied(),
+                        )
+                        .map(|inp| inp.try_into().unwrap())
+                },
+            )?;
+            debug!("primary z0 assigned");
+
+            let primary_assigned_z_i: [_; A1] = layouter.assign_region(
+                || format!("assigned_z{step}_primary"),
+                |region| {
+                    primary_config
+                        .main_gate_config
+                        .advice_cycle_assigner()
+                        .assign_all_advice(
+                            &mut RegionCtx::new(region, 0),
+                            || format!("z{step}_primary"),
+                            self.primary.z_next.iter().copied(),
+                        )
+                        .map(|inp| inp.try_into().unwrap())
+                },
+            )?;
+            debug!("primary z{step} assigned");
+            debug!("start primary synthesize");
+
+            let StepSynthesisResult {
+                z_output: primary_assigned_z_output,
+                // Not used in zero step, only in verify-step, when folding is over
+                output_hash: _primary_output_hash,
+                // Not used in zero step, only in verify-step, when folding is over
+                X1: _primary_X1,
+            } = self.primary.step_circuit.synthesize(
+                primary_config,
+                &mut layouter,
+                step_circuit::StepInputs {
+                    step_public_params: pp.primary.params(),
+                    public_params_hash: pp.digest().map_err(Error::WhileHash)?,
+                    step: C1::Scalar::from_u128(self.step as u128),
+                    z_0: primary_assigned_z_0.clone(),
+                    z_i: primary_assigned_z_i.clone(),
+                    U: secondary_U.clone(),
+                    u: secondary_plonk_instance,
+                    cross_term_commits: secondary_cross_term_commits,
+                },
+            )?;
+
+            debug!("start primary td postpone");
+            primary_td.batch_invert_assigned();
+            debug!("primary synthesized, start sps");
+
+            (
+                RelaxedPlonkTrace {
+                    U: secondary_U,
+                    W: secondary_W,
+                },
+                primary_assigned_z_output.map(|cell| cell.value().unwrap().copied().unwrap()),
+            )
+        };
+
         // TODO #31
         todo!("Logic at `RecursiveSNARK::prove_step`")
     }
