@@ -1,4 +1,5 @@
 use super::*;
+use crate::nifs::vanilla::ProveResultCtx;
 use crate::nifs::{vanilla::VanillaFS, Error as NIFSError};
 use crate::plonk::{RelaxedPlonkInstance, RelaxedPlonkWitness};
 use crate::util::create_ro;
@@ -56,7 +57,13 @@ where
 
     let mut ro_acc_prover = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_acc_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
-    let (nifs, (U_from_prove, W)) = VanillaFS::prove(
+
+    let ProveResultCtx {
+        U: U_from_prove,
+        nifs,
+        W,
+        ..
+    } = VanillaFS::prove(
         ck,
         pp_digest,
         &mut ro_nark_prover,
@@ -87,7 +94,12 @@ where
         .unwrap();
     assert_eq!(S.is_sat(ck, &mut ro_nark_decider, &U1, &W1).err(), None);
 
-    let (nifs, (U_from_prove, _W)) = VanillaFS::prove(
+    let ProveResultCtx {
+        U: U_from_prove,
+        nifs,
+        W,
+        ..
+    } = VanillaFS::prove(
         ck,
         pp_digest,
         &mut ro_nark_prover,
@@ -96,6 +108,7 @@ where
         &f_U,
         &f_W,
     )?;
+
     let U_from_verify = nifs
         .verify(
             pp_digest,
@@ -108,7 +121,7 @@ where
     assert_eq!(U_from_prove, U_from_verify);
 
     f_U = U_from_verify;
-    f_W = _W;
+    f_W = W;
     assert_eq!(S.is_sat_relaxed(ck, &f_U, &f_W).err(), None);
     assert_eq!(S.is_sat_perm(&f_U, &f_W).err(), None);
     Ok(())

@@ -13,7 +13,7 @@ use crate::{
         step_circuit::{StepCircuitExt, StepInputs, StepSynthesisResult},
     },
     main_gate::{AdviceCyclicAssignor, MainGateConfig, RegionCtx},
-    nifs::{self, vanilla::VanillaFS},
+    nifs,
     plonk::{PlonkInstance, RelaxedPlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
@@ -337,13 +337,14 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        let (
-            VanillaFS {
-                cross_term_commits: secondary_cross_term_commits,
-                ..
-            },
-            (secondary_U, secondary_W),
-        ) = nifs::vanilla::VanillaFS::prove(
+        let nifs::vanilla::ProveResultCtx {
+            S: _,
+            w: _,
+            u: secondary_plonk_instance,
+            U: secondary_U,
+            W: secondary_W,
+            nifs,
+        } = nifs::vanilla::VanillaFS::prove(
             pp.secondary.ck(),
             &pp.digest().map_err(Error::WhileHash)?,
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant.clone()),
@@ -352,16 +353,6 @@ where
             &self.secondary.relaxed_trace.U,
             &self.secondary.relaxed_trace.W,
         )?;
-
-        let (secondary_plonk_instance, _secondary_plonk_witness) =
-            self.secondary_prev_td.run_sps_protocol(
-                pp.secondary.ck(),
-                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant.clone()),
-                self.secondary_prev_td
-                    .plonk_structure()
-                    .unwrap()
-                    .num_challenges,
-            )?;
 
         (self.secondary.relaxed_trace, self.primary.z_next) = {
             let step = self.step;
@@ -422,7 +413,7 @@ where
                     z_i: primary_assigned_z_i.clone(),
                     U: secondary_U.clone(),
                     u: secondary_plonk_instance,
-                    cross_term_commits: secondary_cross_term_commits,
+                    cross_term_commits: nifs.cross_term_commits,
                 },
             )?;
 

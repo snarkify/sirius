@@ -1,3 +1,5 @@
+use std::ops;
+
 use super::*;
 use crate::commitment::CommitmentKey;
 use crate::concat_vec;
@@ -30,6 +32,15 @@ pub struct PlonkAccumulator<C: CurveAffine> {
     pub(crate) witness: RelaxedPlonkWitness<C::ScalarExt>,
 }
 
+pub struct ProveResultCtx<C: CurveAffine, RO: ROTrait<C::Base>> {
+    pub nifs: VanillaFS<C, RO>,
+    pub S: PlonkStructure<C::ScalarExt>,
+    pub u: PlonkInstance<C>,
+    pub w: PlonkWitness<C::ScalarExt>,
+    pub U: RelaxedPlonkInstance<C>,
+    pub W: RelaxedPlonkWitness<C::ScalarExt>,
+}
+
 /// VanillaFS: Vanilla version of Non Interactive Folding Scheme
 ///
 /// Given a polynomial relation `P(x_1,...,x_n)` with polynomial degree `d.
@@ -43,7 +54,14 @@ pub struct PlonkAccumulator<C: CurveAffine> {
 #[derive(Clone, Debug)]
 pub struct VanillaFS<C: CurveAffine, RO: ROTrait<C::Base>> {
     pub(crate) cross_term_commits: CrossTermCommits<C>,
-    _marker: PhantomData<RO>,
+    pub(crate) _marker: PhantomData<RO>,
+}
+
+impl<C: CurveAffine, RO: ROTrait<C::Base>> ops::Deref for VanillaFS<C, RO> {
+    type Target = CrossTermCommits<C>;
+    fn deref(&self) -> &Self::Target {
+        &self.cross_term_commits
+    }
 }
 
 impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
@@ -161,13 +179,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
         td: &TableData<C::ScalarExt>,
         U1: &RelaxedPlonkInstance<C>,
         W1: &RelaxedPlonkWitness<C::ScalarExt>,
-    ) -> Result<
-        (
-            Self,
-            (RelaxedPlonkInstance<C>, RelaxedPlonkWitness<C::ScalarExt>),
-        ),
-        Error,
-    > {
+    ) -> Result<ProveResultCtx<C, RO>, Error> {
         let S = td.plonk_structure().unwrap();
 
         let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges)?;
@@ -177,13 +189,17 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
 
         let U = U1.fold(&U2, &cross_term_commits, &r);
         let W = W1.fold(&W2, &cross_terms, &r);
-        Ok((
-            Self {
+        Ok(ProveResultCtx {
+            S,
+            u: U2,
+            w: W2,
+            U,
+            W,
+            nifs: Self {
                 cross_term_commits,
                 _marker: PhantomData,
             },
-            (U, W),
-        ))
+        })
     }
 
     /// Verifies the correctness of the folding using the NIFS protocol.
