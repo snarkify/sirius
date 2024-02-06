@@ -135,7 +135,7 @@ impl<F: PrimeField> TableData<F> {
     ///     ConcreteCircuit::configure(cs)
     /// });
     /// ```
-    pub(crate) fn prepare_assembly<C>(
+    pub(crate) fn configure<C>(
         &mut self,
         configure: impl FnOnce(&mut ConstraintSystem<F>) -> C,
     ) -> C {
@@ -154,17 +154,26 @@ impl<F: PrimeField> TableData<F> {
         config
     }
 
-    // TODO Change design
-    pub(crate) fn postpone_assembly(&mut self) {
-        self.fixed_columns = batch_invert_assigned(&self.fixed);
-        self.advice_columns = batch_invert_assigned(&self.advice);
+    pub(crate) fn batch_invert_assigned(&mut self) {
+        let Self {
+            advice_columns,
+            fixed_columns,
+            fixed,
+            advice,
+            ..
+        } = self;
+
+        rayon::join(
+            || *fixed_columns = batch_invert_assigned(fixed),
+            || *advice_columns = batch_invert_assigned(advice),
+        );
     }
 
     pub fn assembly<ConcreteCircuit: Circuit<F>>(
         &mut self,
         circuit: &ConcreteCircuit,
     ) -> Result<(), Error> {
-        let config = self.prepare_assembly(ConcreteCircuit::configure);
+        let config = self.configure(ConcreteCircuit::configure);
 
         ConcreteCircuit::FloorPlanner::synthesize(
             self,
@@ -173,7 +182,7 @@ impl<F: PrimeField> TableData<F> {
             vec![], // TODO: make sure constants not needed
         )?;
 
-        self.postpone_assembly();
+        self.batch_invert_assigned();
 
         Ok(())
     }

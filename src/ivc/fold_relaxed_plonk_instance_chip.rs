@@ -1096,7 +1096,7 @@ mod tests {
     fn get_table_data() -> (TableData<Base>, MainGateConfig<T>) {
         let mut td = TableData::new(K, vec![]);
         let _ = td.cs.instance_column();
-        let config = td.prepare_assembly(MainGate::<Base, T>::configure);
+        let config = td.configure(MainGate::<Base, T>::configure);
 
         (td, config)
     }
@@ -1773,7 +1773,7 @@ mod tests {
 
         let mut ro = PoseidonHash::new(spec.clone());
         let mut td = TableData::<ScalarExt>::new(K as u32, vec![]);
-        let _config = td.prepare_assembly(MainGate::<ScalarExt, T>::configure);
+        let _config = td.configure(MainGate::<ScalarExt, T>::configure);
 
         VanillaFS::generate_challenge(pp_hash, &mut ro, relaxed, input, cross_term_commits).unwrap()
     }

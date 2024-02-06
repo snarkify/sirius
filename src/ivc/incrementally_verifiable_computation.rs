@@ -218,7 +218,7 @@ where
             )?;
 
             debug!("start primary td postpone");
-            primary_td.postpone_assembly();
+            primary_td.batch_invert_assigned();
             debug!("primary synthesized, start sps");
 
             let (primary_plonk_instance, primary_plonk_witness) = primary_td.run_sps_protocol(
@@ -286,7 +286,7 @@ where
             )?;
 
             debug!("start secondary td postpone");
-            secondary_td.postpone_assembly();
+            secondary_td.batch_invert_assigned();
             debug!("secondary synthesized");
 
             let (secondary_plonk_instance, secondary_plonk_witness) = secondary_td

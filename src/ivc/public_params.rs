@@ -79,7 +79,7 @@ where
 
         let mut td = TableData::new(k_table_size, vec![C::Scalar::ZERO, C::Scalar::ZERO]);
 
-        let (X0, config) = td.prepare_assembly(|cs| {
+        let (X0, config) = td.configure(|cs| {
             let X0 = cs.instance_column();
 
             (
