@@ -141,7 +141,12 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
     ///
     /// # Arguments
     /// * `ck`: The commitment key.
-    /// * `ro`: A mutable reference to the random oracle.
+    /// * `ro_acc`: The random oracle for the accumulation scheme. Used to securely combine
+    ///             multiple verification steps or proofs into a single, updated accumulator.
+    /// * `ro_nark`: The random oracle used within the non-interactive argument of knowledge (NARK)
+    ///              system. Facilitates the Fiat-Shamir transformation, converting interactive
+    ///              proofs to non-interactive by deterministically generating challenges based
+    ///              on the protocol's messages.
     /// * `td`: Table data associated with the (strict not relaxed) plonk instance to be folded
     /// * `U1`: The first relaxed Plonk instance.
     /// * `W1`: The witness for the first relaxed Plonk instance.
