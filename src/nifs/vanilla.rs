@@ -37,8 +37,8 @@ pub type CrossTermCommits<C> = Vec<C>;
 /// Please refer to: [notes](https://hackmd.io/@chaosma/BJvWmnw_h#31-NIFS)
 // TODO Replace links to either the documentation right here, or the official Snarkify resource
 #[derive(Clone, Debug)]
-pub struct VanillaFS<C: CurveAffine, RO: ROTrait<C::Base>> {
-    _marker: PhantomData<(C, RO)>,
+pub struct VanillaFS<C: CurveAffine> {
+    _marker: PhantomData<C>,
 }
 
 pub struct VanillaFSProverParam<C: CurveAffine> {
@@ -47,7 +47,7 @@ pub struct VanillaFSProverParam<C: CurveAffine> {
     pp_digest: C,
 }
 
-impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
+impl<C: CurveAffine> VanillaFS<C> {
     /// Commits to the cross terms between two Plonk instance-witness pairs.
     ///
     /// This method calculates the cross terms and their commitments, which
@@ -118,7 +118,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
     }
 
     /// Absorb all fields into RandomOracle `RO` & generate challenge based on that
-    pub(crate) fn generate_challenge(
+    pub(crate) fn generate_challenge<RO: ROTrait<C::Base>>(
         pp_digest: &C,
         ro_acc: &mut RO,
         U1: &RelaxedPlonkInstance<C>,
@@ -136,7 +136,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
     }
 }
 
-impl<C: CurveAffine, RO: ROTrait<C::Base>> FoldingScheme<C, RO> for VanillaFS<C, RO> {
+impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     type ProverParam = VanillaFSProverParam<C>;
     type VerifierParam = C;
     type Accumulator = RelaxedPlonkTrace<C>;
@@ -152,7 +152,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> FoldingScheme<C, RO> for VanillaFS<C,
         Ok((pp, pp_digest))
     }
 
-    fn generate_plonk_trace(
+    fn generate_plonk_trace<RO: ROTrait<C::Base>>(
         ck: &CommitmentKey<C>,
         td: &TableData<<C as CurveAffine>::ScalarExt>,
         pp: &VanillaFSProverParam<C>,
@@ -177,7 +177,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> FoldingScheme<C, RO> for VanillaFS<C,
     ///
     /// # Returns
     /// A tuple containing folded accumulator and proof for the folding scheme verifier
-    fn prove(
+    fn prove<RO: ROTrait<C::Base>>(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
         ro_acc: &mut RO,
@@ -216,7 +216,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> FoldingScheme<C, RO> for VanillaFS<C,
     ///
     /// # Returns
     /// The folded relaxed Plonk instance.
-    fn verify(
+    fn verify<RO: ROTrait<C::Base>>(
         vp: &Self::VerifierParam,
         ro_nark: &mut RO,
         ro_acc: &mut RO,

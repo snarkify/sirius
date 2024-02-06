@@ -20,7 +20,7 @@ use rayon::prelude::*;
 pub mod vanilla;
 
 /// Trait representing the NIFS folding scheme.
-pub trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
+pub trait FoldingScheme<C: CurveAffine> {
     /// Metadata for prover including hash of public params
     type ProverParam;
 
@@ -41,7 +41,7 @@ pub trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
         td: &TableData<C::ScalarExt>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 
-    fn generate_plonk_trace(
+    fn generate_plonk_trace<RO: ROTrait<C::Base>>(
         ck: &CommitmentKey<C>,
         td: &TableData<<C as CurveAffine>::ScalarExt>,
         pp: &Self::ProverParam,
@@ -49,7 +49,7 @@ pub trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
     ) -> Result<PlonkTrace<C>, Error>;
 
     /// Perform the folding operation as a prover.
-    fn prove(
+    fn prove<RO: ROTrait<C::Base>>(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
         ro_acc: &mut RO,
@@ -58,7 +58,7 @@ pub trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
     ) -> Result<(Self::Accumulator, Self::Proof), Error>;
 
     /// Perform the folding operation as a verifier.
-    fn verify(
+    fn verify<RO: ROTrait<C::Base>>(
         vp: &Self::VerifierParam,
         ro_nark: &mut RO,
         ro_acc: &mut RO,

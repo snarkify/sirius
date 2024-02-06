@@ -45,7 +45,6 @@ where
     let mut f_U =
         RelaxedPlonkInstance::new(td1.instance.len(), S.num_challenges, S.round_sizes.len());
     let mut f_W = RelaxedPlonkWitness::new(td1.k, &S.round_sizes);
-    let mut ro_nark_prover = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_nark_prepare = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_nark_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_nark_decider = create_ro::<C::Base, T, RATE, R_F, R_P>();
@@ -54,19 +53,25 @@ where
 
     let (pp1, vp1) = VanillaFS::setup_params(*pp_digest, td1)?;
     let PlonkTrace { u: U1, w: W1 } =
-        VanillaFS::generate_plonk_trace(ck, &td1, &pp1, &mut ro_nark_prepare)?;
+        VanillaFS::generate_plonk_trace(ck, td1, &pp1, &mut ro_nark_prepare)?;
     assert_eq!(S.is_sat(ck, &mut ro_nark_decider, &U1, &W1).err(), None);
 
     let (RelaxedPlonkTrace { U: U_from_prove, W }, cross_term_commits) = VanillaFS::prove(
         ck,
         &pp1,
         &mut ro_acc_prover,
-        &RelaxedPlonkTrace { U: f_U, W: f_W },
-        &PlonkTrace { u: U1, w: W1 },
+        &RelaxedPlonkTrace {
+            U: f_U.clone(),
+            W: f_W.clone(),
+        },
+        &PlonkTrace {
+            u: U1.clone(),
+            w: W1.clone(),
+        },
     )?;
 
     let U_from_verify = VanillaFS::verify(
-        pp_digest,
+        &vp1,
         &mut ro_nark_verifier,
         &mut ro_acc_verifier,
         &f_U,
@@ -83,7 +88,7 @@ where
 
     let (pp2, vp2) = VanillaFS::setup_params(*pp_digest, td2)?;
     let PlonkTrace { u: U1, w: W1 } =
-        VanillaFS::generate_plonk_trace(ck, &td2, &pp2, &mut ro_nark_prepare)?;
+        VanillaFS::generate_plonk_trace(ck, td2, &pp2, &mut ro_nark_prepare)?;
     assert_eq!(S.is_sat(ck, &mut ro_nark_decider, &U1, &W1).err(), None);
 
     let (
@@ -96,12 +101,18 @@ where
         ck,
         &pp2,
         &mut ro_acc_prover,
-        &RelaxedPlonkTrace { U: f_U, W: f_W },
-        &PlonkTrace { u: U1, w: W1 },
+        &RelaxedPlonkTrace {
+            U: f_U.clone(),
+            W: f_W,
+        },
+        &PlonkTrace {
+            u: U1.clone(),
+            w: W1,
+        },
     )?;
 
     let U_from_verify = VanillaFS::verify(
-        pp_digest,
+        &vp2,
         &mut ro_nark_verifier,
         &mut ro_acc_verifier,
         &f_U,
