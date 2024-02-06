@@ -118,9 +118,9 @@ impl<C: CurveAffine> VanillaFS<C> {
     }
 
     /// Absorb all fields into RandomOracle `RO` & generate challenge based on that
-    pub(crate) fn generate_challenge<RO: ROTrait<C::Base>>(
+    pub(crate) fn generate_challenge(
         pp_digest: &C,
-        ro_acc: &mut RO,
+        ro_acc: &mut impl ROTrait<C::Base>,
         U1: &RelaxedPlonkInstance<C>,
         U2: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
@@ -148,8 +148,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         td: &TableData<<C as CurveAffine>::ScalarExt>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
         let S = td.plonk_structure().ok_or(Error::ParamNotSetup)?;
-        let pp = VanillaFSProverParam { S, pp_digest };
-        Ok((pp, pp_digest))
+        Ok((VanillaFSProverParam { S, pp_digest }, pp_digest))
     }
 
     fn generate_plonk_trace<RO: ROTrait<C::Base>>(
