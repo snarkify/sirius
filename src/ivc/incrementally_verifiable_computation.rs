@@ -338,11 +338,14 @@ where
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
         let step = self.step;
+        debug!("start fold step: {step}");
 
         let (primary_config, mut primary_td) =
             pp.primary.prepare_td(&[C1::Scalar::ZERO, C1::Scalar::ZERO]);
 
         (self.secondary.relaxed_trace, self.primary.z_next) = {
+            debug!("start off-circuit part: nifs::prove");
+
             let nifs::vanilla::ProveResultCtx {
                 S: _,
                 w: _,
@@ -359,6 +362,8 @@ where
                 &self.secondary.relaxed_trace.U,
                 &self.secondary.relaxed_trace.W,
             )?;
+            debug!("nifs processed");
+            debug!("start on-circuit part");
 
             let mut layouter =
                 SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?;
