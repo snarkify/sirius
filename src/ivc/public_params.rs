@@ -1,4 +1,4 @@
-use std::{fmt, num::NonZeroUsize};
+use std::{fmt, io, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
@@ -250,7 +250,7 @@ where
 
     /// This method calculate digest of [`PublicParams`], but ignore [`CircuitPublicParams::ck`]
     /// from both step circuits params
-    pub fn digest<C: CurveAffine>(&self) -> Result<C, crate::ivc::Error> {
+    pub fn digest<C: CurveAffine>(&self) -> Result<C, io::Error> {
         calc_digest::<C1, C2, C, RP1, RP2>(
             &self.primary.params,
             &self
@@ -273,7 +273,7 @@ pub fn calc_digest<C1: CurveAffine, C2: CurveAffine, CO: CurveAffine, RP1, RP2>(
     primary_plonk_struct: &PlonkStructure<C1::Scalar>,
     secondary_params: &SynthesizeStepParams<C2::Scalar, RP2::OnCircuit>,
     secondary_plonk_struct: &PlonkStructure<C2::Scalar>,
-) -> Result<CO, crate::ivc::Error>
+) -> Result<CO, io::Error>
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
@@ -309,7 +309,6 @@ where
         primary_params,
         secondary_params,
     })
-    .map_err(crate::ivc::Error::WhileHash)
 }
 
 #[cfg(test)]
