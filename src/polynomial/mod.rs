@@ -8,6 +8,8 @@ use std::{
 
 use ff::PrimeField;
 use halo2_proofs::{plonk::Expression as PE, poly::Rotation};
+use log::*;
+use rayon::prelude::*;
 use serde::Serialize;
 
 use crate::util::trim_leading_zeros;
@@ -624,14 +626,16 @@ impl<F: PrimeField> MultiPolynomial<F> {
     pub fn homogeneous(&self, offset: usize) -> Self {
         let u_index = self.num_challenges();
         let degree = self.degree_for_folding(offset);
-        let monos = self
+
+        let monomials = self
             .monomials
-            .iter()
+            .par_iter()
             .map(|f| f.homogeneous(degree, offset, u_index))
             .collect();
+
         Self {
             arity: self.arity + 1,
-            monomials: monos,
+            monomials,
         }
     }
 
@@ -670,14 +674,22 @@ impl<F: PrimeField> MultiPolynomial<F> {
 
         let mut poly = Self::new(self.arity - 1);
 
-        for mono in self.monomials.iter() {
-            if mono.exponents[*index] == degree {
-                let mut exponents = mono.exponents.clone();
-                exponents.remove(*index);
-                let tmp = Monomial::new(index_to_poly.clone(), mono.coeff, exponents);
-                poly.monomials.push(tmp);
-            }
-        }
+        debug!("monomials len {}", self.monomials.len());
+
+        poly.monomials = self
+            .monomials
+            .par_iter()
+            .filter_map(|mono| {
+                if mono.exponents[*index] == degree {
+                    let mut exponents = mono.exponents.clone();
+                    exponents.remove(*index);
+                    Some(Monomial::new(index_to_poly.clone(), mono.coeff, exponents))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         poly
     }
 

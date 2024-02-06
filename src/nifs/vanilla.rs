@@ -1,19 +1,23 @@
-use std::ops;
+use std::{marker::PhantomData, ops};
+
+use halo2_proofs::arithmetic::CurveAffine;
+use log::*;
+
+use crate::{
+    commitment::CommitmentKey,
+    concat_vec,
+    constants::NUM_CHALLENGE_BITS,
+    plonk::{
+        eval::{Error as EvalError, Eval, PlonkEvalDomain},
+        PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
+    },
+    polynomial::ColumnIndex,
+    poseidon::{AbsorbInRO, ROTrait},
+    sps::SpecialSoundnessVerifier,
+    table::TableData,
+};
 
 use super::*;
-use crate::commitment::CommitmentKey;
-use crate::concat_vec;
-use crate::constants::NUM_CHALLENGE_BITS;
-use crate::plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain};
-use crate::plonk::{
-    PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
-};
-use crate::polynomial::ColumnIndex;
-use crate::poseidon::{AbsorbInRO, ROTrait};
-use crate::sps::SpecialSoundnessVerifier;
-use crate::table::TableData;
-use halo2_proofs::arithmetic::CurveAffine;
-use std::marker::PhantomData;
 
 /// Represent intermediate polynomial terms that arise when folding
 /// two polynomial relations into one.
@@ -95,11 +99,15 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
         W2: &PlonkWitness<C::ScalarExt>,
     ) -> Result<(CrossTerms<C>, CrossTermCommits<C>), Error> {
         let offset = S.num_non_fold_vars();
+        debug!("offset {offset}");
+
         let num_row = if !S.fixed_columns.is_empty() {
             S.fixed_columns[0].len()
         } else {
             S.selectors[0].len()
         };
+        debug!("num row {num_row}");
+
         let data = PlonkEvalDomain {
             num_advice: S.num_advice_columns,
             num_lookup: S.num_lookups(),
@@ -111,16 +119,25 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
         };
 
         let normalized = S.poly.fold_transform(offset, S.num_fold_vars());
+        debug!("normalized");
         let r_index = normalized.num_challenges() - 1;
+        debug!("r_index: {r_index}");
         let degree = S.poly.degree_for_folding(offset);
+        debug!("degree: {degree}");
+
         let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
+            .par_bridge()
             .map(|k| {
-                normalized.coeff_of(
+                let coeff = normalized.coeff_of(
                     ColumnIndex::Challenge {
                         column_index: r_index,
                     },
                     k,
-                )
+                );
+
+                debug!("coeff found");
+
+                coeff
             })
             .map(|multipoly| {
                 (0..num_row)
@@ -129,8 +146,14 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
                     .collect::<Result<Vec<C::ScalarExt>, EvalError>>()
             })
             .collect::<Result<Vec<Vec<C::ScalarExt>>, EvalError>>()?;
-        let cross_term_commits: Vec<C> =
-            cross_terms.iter().map(|v| ck.commit(v).unwrap()).collect();
+
+        debug!("cross terms calculated");
+
+        let cross_term_commits: Vec<C> = cross_terms
+            .par_iter()
+            .map(|v| ck.commit(v).unwrap())
+            .collect();
+
         Ok((cross_terms, cross_term_commits))
     }
 
@@ -181,14 +204,21 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
         W1: &RelaxedPlonkWitness<C::ScalarExt>,
     ) -> Result<ProveResultCtx<C, RO>, Error> {
         let S = td.plonk_structure().unwrap();
+        debug!("plonk structure calculated");
 
         let (U2, W2) = td.run_sps_protocol(ck, ro_nark, S.num_challenges)?;
+        debug!("sps protocol finished");
         let (cross_terms, cross_term_commits) = Self::commit_cross_terms(ck, &S, U1, W1, &U2, &W2)?;
+        debug!("cross term commited");
 
         let r = Self::generate_challenge(*pp_digest, ro_acc, U1, &U2, &cross_term_commits)?;
+        debug!("challenge generated");
 
         let U = U1.fold(&U2, &cross_term_commits, &r);
+        debug!("U folded");
         let W = W1.fold(&W2, &cross_terms, &r);
+        debug!("W folded");
+
         Ok(ProveResultCtx {
             S,
             u: U2,

@@ -487,6 +487,7 @@ impl<F: PrimeField> TableData<F> {
             return Err(SpsError::LackOfAdvices);
         }
 
+        debug!("run sps with challenges: {num_challenges}");
         match num_challenges {
             0 => self.run_sps_protocol_0(ck),
             1 => self.run_sps_protocol_1(ck, ro_nark),
