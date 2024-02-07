@@ -181,13 +181,7 @@ where
         debug!("cross term commits len: primary={primary_cross_term_commits_len}, secondary={secondary_cross_term_commits_len}");
 
         let (primary_ctx, primary_plonk_instance) = {
-            debug!("primary step circuit configured");
-            let mut layouter =
-                SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?;
-
-            debug!("primary z{step} assigned");
             debug!("start primary synthesize");
-
             let StepSynthesisResult {
                 z_output: primary_assigned_z_output,
                 // Not used in zero step, only in verify-step, when folding is over
@@ -196,7 +190,7 @@ where
                 new_X0: primary_new_X0,
             } = primary.synthesize(
                 primary_config,
-                &mut layouter,
+                &mut SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?,
                 step_circuit::StepInputs {
                     step_public_params: pp.primary.params(),
                     public_params_hash: primary_public_params_hash,
@@ -243,9 +237,6 @@ where
         debug!("primary ctx ready");
 
         let (secondary_ctx, secondary_prev_td) = {
-            let mut layouter =
-                SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?;
-
             debug!("start secondary synthesize");
             let StepSynthesisResult {
                 z_output: secondary_assigned_z_output,
@@ -255,7 +246,7 @@ where
                 new_X0: secondary_new_X0,
             } = secondary.synthesize(
                 secondary_config,
-                &mut layouter,
+                &mut SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
                 StepInputs {
                     step_public_params: pp.secondary.params(),
                     public_params_hash: secondary_public_params_hash,
