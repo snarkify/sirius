@@ -2,7 +2,7 @@ use std::io;
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
-use halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter};
+use halo2_proofs::circuit::floor_planner::single_pass::SingleChipLayouter;
 use halo2curves::CurveAffine;
 use log::*;
 use serde::Serialize;
@@ -12,7 +12,7 @@ use crate::{
         public_params::{self, PublicParams},
         step_circuit::{StepCircuitExt, StepInputs, StepSynthesisResult},
     },
-    main_gate::{AdviceCyclicAssignor, MainGateConfig, RegionCtx},
+    main_gate::MainGateConfig,
     nifs,
     plonk::{PlonkInstance, RelaxedPlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
@@ -142,11 +142,11 @@ where
         info!("start ivc base case");
         let step = 0;
 
-        let (primary_config, mut primary_td, primary_instance_col) =
+        let (primary_config, mut primary_td) =
             pp.primary.prepare_td(&[C1::Scalar::ZERO, C1::Scalar::ZERO]);
         debug!("primary step circuit configured");
 
-        let (secondary_config, mut secondary_td, secondary_instance_col) = pp
+        let (secondary_config, mut secondary_td) = pp
             .secondary
             .prepare_td(&[C2::Scalar::ZERO, C2::Scalar::ZERO]);
         debug!("secondary step circuit configured");
@@ -185,20 +185,6 @@ where
             let mut layouter =
                 SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?;
 
-            let primary_assigned_z0: [_; A1] = layouter.assign_region(
-                || format!("assigned_z{step}_primary"),
-                |region| {
-                    primary_config
-                        .main_gate_config
-                        .advice_cycle_assigner()
-                        .assign_all_advice(
-                            &mut RegionCtx::new(region, 0),
-                            || format!("z{step}_primary"),
-                            z0_primary.iter().copied(),
-                        )
-                        .map(|inp| inp.try_into().unwrap())
-                },
-            )?;
             debug!("primary z{step} assigned");
             debug!("start primary synthesize");
 
@@ -215,8 +201,8 @@ where
                     step_public_params: pp.primary.params(),
                     public_params_hash: primary_public_params_hash,
                     step: C1::Scalar::from_u128(step),
-                    z_0: primary_assigned_z0.clone(),
-                    z_i: primary_assigned_z0.clone(),
+                    z_0: z0_primary,
+                    z_i: z0_primary,
                     // Can be any
                     U: PlonkInstance::default().to_relax(),
                     // Can be any
@@ -224,9 +210,6 @@ where
                     cross_term_commits: vec![C2::identity(); primary_cross_term_commits_len],
                 },
             )?;
-
-            layouter.constrain_instance(primary_new_X0.cell(), primary_instance_col, 0)?;
-            layouter.constrain_instance(primary_new_X1.cell(), primary_instance_col, 1)?;
 
             primary_td.instance = vec![
                 *primary_new_X0.value().unwrap().unwrap(),
@@ -263,23 +246,7 @@ where
             let mut layouter =
                 SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?;
 
-            let secondary_assigned_z0: [_; A2] = layouter.assign_region(
-                || "assigned_z{step}_secondary",
-                |region| {
-                    secondary_config
-                        .main_gate_config
-                        .advice_cycle_assigner()
-                        .assign_all_advice(
-                            &mut RegionCtx::new(region, 0),
-                            || "z{step}_secondary",
-                            z0_secondary.iter().copied(),
-                        )
-                        .map(|inp| inp.try_into().unwrap())
-                },
-            )?;
-            debug!("secondary z{step} assigned");
             debug!("start secondary synthesize");
-
             let StepSynthesisResult {
                 z_output: secondary_assigned_z_output,
                 // Not used in zero step, only in verify-step, when folding is over
@@ -293,17 +260,14 @@ where
                     step_public_params: pp.secondary.params(),
                     public_params_hash: secondary_public_params_hash,
                     step: C2::Scalar::from_u128(step),
-                    z_0: secondary_assigned_z0.clone(),
-                    z_i: secondary_assigned_z0.clone(),
+                    z_0: z0_secondary,
+                    z_i: z0_secondary,
                     // Can be any
                     U: primary_plonk_instance.to_relax(),
                     u: primary_plonk_instance.clone(),
                     cross_term_commits: vec![C1::identity(); secondary_cross_term_commits_len],
                 },
             )?;
-
-            layouter.constrain_instance(secondary_new_X0.cell(), secondary_instance_col, 0)?;
-            layouter.constrain_instance(secondary_new_X1.cell(), secondary_instance_col, 1)?;
 
             secondary_td.instance = vec![
                 *secondary_new_X0.value().unwrap().unwrap(),
@@ -356,7 +320,7 @@ where
         let step = self.step;
         debug!("start fold step: {step}");
 
-        let (primary_config, mut primary_td, primary_instance_col) =
+        let (primary_config, mut primary_td) =
             pp.primary.prepare_td(&[C1::Scalar::ZERO, C1::Scalar::ZERO]);
 
         (self.secondary.relaxed_trace, self.primary.z_next) = {
@@ -381,42 +345,7 @@ where
             debug!("nifs processed");
             debug!("start on-circuit part");
 
-            let mut layouter =
-                SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?;
-
-            let primary_assigned_z_0: [_; A1] = layouter.assign_region(
-                || format!("assigned_z{step}_primary"),
-                |region| {
-                    primary_config
-                        .main_gate_config
-                        .advice_cycle_assigner()
-                        .assign_all_advice(
-                            &mut RegionCtx::new(region, 0),
-                            || format!("z{step}_primary"),
-                            self.primary.z_0.iter().copied(),
-                        )
-                        .map(|inp| inp.try_into().unwrap())
-                },
-            )?;
-            debug!("primary z0 assigned");
-
-            let primary_assigned_z_i: [_; A1] = layouter.assign_region(
-                || format!("assigned_z{step}_primary"),
-                |region| {
-                    primary_config
-                        .main_gate_config
-                        .advice_cycle_assigner()
-                        .assign_all_advice(
-                            &mut RegionCtx::new(region, 0),
-                            || format!("z{step}_primary"),
-                            self.primary.z_next.iter().copied(),
-                        )
-                        .map(|inp| inp.try_into().unwrap())
-                },
-            )?;
-            debug!("primary z{step} assigned");
             debug!("start primary synthesize");
-
             let StepSynthesisResult {
                 z_output: primary_assigned_z_output,
                 // Not used in zero step, only in verify-step, when folding is over
@@ -425,21 +354,18 @@ where
                 new_X0: primary_new_X0,
             } = self.primary.step_circuit.synthesize(
                 primary_config,
-                &mut layouter,
+                &mut SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?,
                 step_circuit::StepInputs {
                     step_public_params: pp.primary.params(),
                     public_params_hash: pp.digest().map_err(Error::WhileHash)?,
                     step: C1::Scalar::from_u128(self.step as u128),
-                    z_0: primary_assigned_z_0.clone(),
-                    z_i: primary_assigned_z_i.clone(),
+                    z_0: self.primary.z_0,
+                    z_i: self.primary.z_next,
                     U: secondary_U.clone(),
                     u: secondary_plonk_instance,
                     cross_term_commits: secondary_nifs.cross_term_commits,
                 },
             )?;
-
-            layouter.constrain_instance(primary_new_X0.cell(), primary_instance_col, 0)?;
-            layouter.constrain_instance(primary_new_X1.cell(), primary_instance_col, 1)?;
 
             primary_td.instance = vec![
                 *primary_new_X0.value().unwrap().unwrap(),
@@ -464,7 +390,7 @@ where
             self.secondary.z_next,
             self.secondary_prev_td,
         ) = {
-            let (secondary_config, mut secondary_td, secondary_instance_col) = pp
+            let (secondary_config, mut secondary_td) = pp
                 .secondary
                 .prepare_td(&[C2::Scalar::ZERO, C2::Scalar::ZERO]);
 
@@ -485,40 +411,6 @@ where
                 &self.primary.relaxed_trace.W,
             )?;
 
-            let mut layouter =
-                SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?;
-
-            let secondary_assigned_z_0: [_; A2] = layouter.assign_region(
-                || format!("assigned_z{step}_secondary"),
-                |region| {
-                    secondary_config
-                        .main_gate_config
-                        .advice_cycle_assigner()
-                        .assign_all_advice(
-                            &mut RegionCtx::new(region, 0),
-                            || format!("z{step}_primary"),
-                            self.secondary.z_0.iter().copied(),
-                        )
-                        .map(|inp| inp.try_into().unwrap())
-                },
-            )?;
-            debug!("secondary z0 assigned");
-
-            let secondary_assigned_z_i: [_; A2] = layouter.assign_region(
-                || format!("assigned_z{step}_secondary"),
-                |region| {
-                    secondary_config
-                        .main_gate_config
-                        .advice_cycle_assigner()
-                        .assign_all_advice(
-                            &mut RegionCtx::new(region, 0),
-                            || format!("z{step}_primary"),
-                            self.secondary.z_next.iter().copied(),
-                        )
-                        .map(|inp| inp.try_into().unwrap())
-                },
-            )?;
-            debug!("secondary z{step} assigned");
             debug!("start secondary synthesize");
 
             let StepSynthesisResult {
@@ -529,21 +421,21 @@ where
                 new_X0: secondary_new_X0,
             } = self.secondary.step_circuit.synthesize(
                 secondary_config,
-                &mut layouter,
+                &mut SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
                 step_circuit::StepInputs {
                     step_public_params: pp.secondary.params(),
                     public_params_hash: pp.digest().map_err(Error::WhileHash)?,
                     step: C2::Scalar::from_u128(self.step as u128),
-                    z_0: secondary_assigned_z_0.clone(),
-                    z_i: secondary_assigned_z_i.clone(),
+                    z_0: self.secondary.z_0,
+                    z_i: self.secondary.z_next,
                     U: primary_U.clone(),
                     u: primary_plonk_instance,
                     cross_term_commits: primary_nifs.cross_term_commits,
                 },
             )?;
 
-            layouter.constrain_instance(secondary_new_X0.cell(), secondary_instance_col, 0)?;
-            layouter.constrain_instance(secondary_new_X1.cell(), secondary_instance_col, 1)?;
+            //layouter.constrain_instance(secondary_new_X0.cell(), secondary_instance_col, 0)?;
+            //layouter.constrain_instance(secondary_new_X1.cell(), secondary_instance_col, 1)?;
 
             secondary_td.instance = vec![
                 *secondary_new_X0.value().unwrap().unwrap(),

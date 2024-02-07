@@ -3,7 +3,7 @@ use std::{fmt, num::NonZeroUsize};
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
-    plonk::ConstraintSystem,
+    plonk::{Column, ConstraintSystem, Instance},
 };
 use halo2curves::CurveAffine;
 use itertools::Itertools;
@@ -12,7 +12,9 @@ use serde::Serialize;
 use crate::{
     constants::NUM_CHALLENGE_BITS,
     ivc::fold_relaxed_plonk_instance_chip::FoldRelaxedPlonkInstanceChip,
-    main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
+    main_gate::{
+        AdviceCyclicAssignor, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue,
+    },
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
 };
@@ -148,9 +150,9 @@ where
     pub public_params_hash: C,
     pub step: C::Base,
 
-    pub z_0: [AssignedValue<C::Base>; ARITY],
+    pub z_0: [C::Base; ARITY],
     /// Output of previous step & input of current one
-    pub z_i: [AssignedValue<C::Base>; ARITY],
+    pub z_i: [C::Base; ARITY],
 
     // TODO docs
     pub U: RelaxedPlonkInstance<C>,
@@ -166,6 +168,7 @@ pub struct StepConfig<const ARITY: usize, const T: usize, F: PrimeField, SP: Ste
 {
     pub step_config: SP::Config,
     pub main_gate_config: MainGateConfig<T>,
+    pub instance: Column<Instance>,
 }
 
 impl<const ARITY: usize, F: PrimeField + Clone, SP: StepCircuit<ARITY, F>, const T: usize> Clone
@@ -177,6 +180,7 @@ where
         Self {
             step_config: self.step_config.clone(),
             main_gate_config: self.main_gate_config.clone(),
+            instance: self.instance,
         }
     }
 }
@@ -190,6 +194,7 @@ where
         f.debug_struct("StepConfig")
             .field("step_config", &self.step_config)
             .field("main_gate_config", &self.main_gate_config)
+            .field("instance", &self.instance)
             .finish()
     }
 }
@@ -234,9 +239,13 @@ where
         let step_config = <Self as StepCircuit<ARITY, F>>::configure(cs);
 
         if before == cs.num_instance_columns() {
+            let instance = cs.instance_column();
+            cs.enable_equality(instance);
+
             Ok(StepConfig {
                 step_config,
                 main_gate_config,
+                instance,
             })
         } else {
             Err(ConfigureError::InstanceColumnNotAllowed)
@@ -253,7 +262,37 @@ where
         layouter: &mut impl Layouter<F>,
         input: StepInputs<ARITY, C, RO>,
     ) -> Result<StepSynthesisResult<ARITY, F>, SynthesisError> {
+        let assigned_z0: [_; ARITY] = layouter.assign_region(
+            || "assigned_z0_primary",
+            |region| {
+                config
+                    .main_gate_config
+                    .advice_cycle_assigner()
+                    .assign_all_advice(
+                        &mut RegionCtx::new(region, 0),
+                        || "z0",
+                        input.z_0.iter().copied(),
+                    )
+                    .map(|inp| inp.try_into().unwrap())
+            },
+        )?;
+
+        let assigned_z_i: [_; ARITY] = layouter.assign_region(
+            || "assigned_zi_primary",
+            |region| {
+                config
+                    .main_gate_config
+                    .advice_cycle_assigner()
+                    .assign_all_advice(
+                        &mut RegionCtx::new(region, 0),
+                        || "zi",
+                        input.z_i.iter().copied(),
+                    )
+                    .map(|inp| inp.try_into().unwrap())
+            },
+        )?;
         // Synthesize the circuit for the base case and get the new running instance
+        //
         let U_new_base = self.synthesize_step_base_case(
             layouter,
             input.step_public_params,
@@ -292,10 +331,9 @@ where
                     assigned_is_zero_step.clone(),
                 )?;
 
-                let assigned_input: [_; ARITY] = input
-                    .z_0
+                let assigned_input: [_; ARITY] = assigned_z0
                     .iter()
-                    .zip_eq(input.z_i.iter())
+                    .zip_eq(assigned_z_i.iter())
                     .map(|(z_0, z_i)| {
                         gate.conditional_select(&mut region, z_0, z_i, &assigned_is_zero_step)
                     })
@@ -322,7 +360,7 @@ where
                     &assigned_input_witness.public_params_hash,
                 ))
                 .absorb_base(WrapValue::Assigned(assigned_next_step_i.clone()))
-                .absorb_iter(input.z_0.iter())
+                .absorb_iter(assigned_z0.iter())
                 .absorb_iter(z_output.iter().cloned())
                 .absorb_iter(assigned_new_U.iter_wrap_values())
                 .squeeze_n_bits(&mut ctx, NUM_CHALLENGE_BITS)?;
@@ -331,7 +369,7 @@ where
             },
         )?;
 
-        Ok(StepSynthesisResult {
+        let result = StepSynthesisResult {
             z_output,
             new_X0: assigned_input_witness
                 .input_instances
@@ -339,7 +377,12 @@ where
                 .and_then(|inst| inst.get(1).cloned())
                 .unwrap(),
             new_X1: output_hash,
-        })
+        };
+
+        layouter.constrain_instance(result.new_X0.cell(), config.instance, 0)?;
+        layouter.constrain_instance(result.new_X1.cell(), config.instance, 1)?;
+
+        Ok(result)
     }
 
     fn synthesize_step_base_case<

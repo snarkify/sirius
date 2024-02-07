@@ -2,7 +2,6 @@ use std::{fmt, io, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
-use halo2_proofs::plonk::{Column, Instance};
 use halo2curves::CurveAffine;
 use log::*;
 use serde::Serialize;
@@ -38,7 +37,6 @@ where
     params: SynthesizeStepParams<C::Scalar, RP::OnCircuit>,
 
     td: TableData<C::Scalar>,
-    X0: Column<Instance>,
     config: StepConfig<ARITY, MAIN_GATE_T, C::Scalar, SC>,
 }
 
@@ -79,19 +77,12 @@ where
 
         let mut td = TableData::new(k_table_size, vec![C::Scalar::ZERO, C::Scalar::ZERO]);
 
-        let (X0, config) = td.configure(|cs| {
-            let instance = cs.instance_column();
-            cs.enable_equality(instance);
-
-            (
-                instance,
-                <SC as StepCircuitExt<'_, ARITY, C::Scalar>>::configure::<MAIN_GATE_T>(cs),
-            )
+        let config = td.configure(|cs| {
+            <SC as StepCircuitExt<'_, ARITY, C::Scalar>>::configure::<MAIN_GATE_T>(cs)
         });
 
         Ok(Self {
             td,
-            X0,
             config: config?,
             ck: commitment_key,
             params: SynthesizeStepParams {
@@ -113,11 +104,10 @@ where
     ) -> (
         StepConfig<ARITY, MAIN_GATE_T, C::Scalar, SC>,
         TableData<C::Scalar>,
-        Column<Instance>,
     ) {
         let mut td = self.td.clone();
         td.instance = instance_columns.to_vec();
-        (self.config.clone(), td, self.X0)
+        (self.config.clone(), td)
     }
 
     pub fn params(&self) -> &SynthesizeStepParams<C::Scalar, RP::OnCircuit> {

@@ -680,13 +680,11 @@ impl<F: PrimeField> MultiPolynomial<F> {
             self.monomials
                 .par_iter()
                 .filter_map(|mono| {
-                    if mono.exponents[*index] == degree {
+                    mono.exponents.get(*index)?.eq(&degree).then(|| {
                         let mut exponents = mono.exponents.clone();
                         exponents.remove(*index);
-                        Some(Monomial::new(index_to_poly.clone(), mono.coeff, exponents))
-                    } else {
-                        None
-                    }
+                        Monomial::new(index_to_poly.clone(), mono.coeff, exponents)
+                    })
                 })
                 .collect::<Vec<_>>(),
         );
