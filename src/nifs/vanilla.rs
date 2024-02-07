@@ -126,18 +126,13 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> VanillaFS<C, RO> {
         debug!("degree: {degree}");
 
         let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
-            .par_bridge()
             .map(|k| {
-                let coeff = normalized.coeff_of(
+                normalized.coeff_of(
                     ColumnIndex::Challenge {
                         column_index: r_index,
                     },
                     k,
-                );
-
-                debug!("coeff found");
-
-                coeff
+                )
             })
             .map(|multipoly| {
                 (0..num_row)

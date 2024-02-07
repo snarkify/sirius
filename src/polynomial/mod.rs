@@ -676,19 +676,20 @@ impl<F: PrimeField> MultiPolynomial<F> {
 
         debug!("monomials len {}", self.monomials.len());
 
-        poly.monomials = self
-            .monomials
-            .par_iter()
-            .filter_map(|mono| {
-                if mono.exponents[*index] == degree {
-                    let mut exponents = mono.exponents.clone();
-                    exponents.remove(*index);
-                    Some(Monomial::new(index_to_poly.clone(), mono.coeff, exponents))
-                } else {
-                    None
-                }
-            })
-            .collect();
+        poly.monomials.extend(
+            self.monomials
+                .par_iter()
+                .filter_map(|mono| {
+                    if mono.exponents[*index] == degree {
+                        let mut exponents = mono.exponents.clone();
+                        exponents.remove(*index);
+                        Some(Monomial::new(index_to_poly.clone(), mono.coeff, exponents))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>(),
+        );
 
         poly
     }
