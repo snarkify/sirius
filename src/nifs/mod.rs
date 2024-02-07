@@ -41,27 +41,27 @@ pub trait FoldingScheme<C: CurveAffine> {
         td: &TableData<C::ScalarExt>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 
-    fn generate_plonk_trace<RO: ROTrait<C::Base>>(
+    fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
         td: &TableData<<C as CurveAffine>::ScalarExt>,
         pp: &Self::ProverParam,
-        ro_nark: &mut RO,
+        ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error>;
 
     /// Perform the folding operation as a prover.
-    fn prove<RO: ROTrait<C::Base>>(
+    fn prove(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
-        ro_acc: &mut RO,
+        ro_acc: &mut impl ROTrait<C::Base>,
         accumulator: &Self::Accumulator,
         incoming: &PlonkTrace<C>,
     ) -> Result<(Self::Accumulator, Self::Proof), Error>;
 
     /// Perform the folding operation as a verifier.
-    fn verify<RO: ROTrait<C::Base>>(
+    fn verify(
         vp: &Self::VerifierParam,
-        ro_nark: &mut RO,
-        ro_acc: &mut RO,
+        ro_nark: &mut impl ROTrait<C::Base>,
+        ro_acc: &mut impl ROTrait<C::Base>,
         accumulator: &Self::AccumulatorInstance,
         incoming: &PlonkInstance<C>,
         proof: &Self::Proof,

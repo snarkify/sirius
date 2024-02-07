@@ -151,11 +151,11 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         Ok((VanillaFSProverParam { S, pp_digest }, pp_digest))
     }
 
-    fn generate_plonk_trace<RO: ROTrait<C::Base>>(
+    fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
         td: &TableData<<C as CurveAffine>::ScalarExt>,
         pp: &VanillaFSProverParam<C>,
-        ro_nark: &mut RO,
+        ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
         let (u, w) = td.run_sps_protocol(ck, ro_nark, pp.S.num_challenges)?;
         Ok(PlonkTrace { u, w })
@@ -176,10 +176,10 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     ///
     /// # Returns
     /// A tuple containing folded accumulator and proof for the folding scheme verifier
-    fn prove<RO: ROTrait<C::Base>>(
+    fn prove(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
-        ro_acc: &mut RO,
+        ro_acc: &mut impl ROTrait<C::Base>,
         accumulator: &Self::Accumulator,
         incoming: &PlonkTrace<C>,
     ) -> Result<(Self::Accumulator, Self::Proof), Error> {
@@ -215,10 +215,10 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     ///
     /// # Returns
     /// The folded relaxed Plonk instance.
-    fn verify<RO: ROTrait<C::Base>>(
+    fn verify(
         vp: &Self::VerifierParam,
-        ro_nark: &mut RO,
-        ro_acc: &mut RO,
+        ro_nark: &mut impl ROTrait<C::Base>,
+        ro_acc: &mut impl ROTrait<C::Base>,
         U1: &Self::AccumulatorInstance,
         U2: &PlonkInstance<C>,
         cross_term_commits: &CrossTermCommits<C>,
