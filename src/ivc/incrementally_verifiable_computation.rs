@@ -142,11 +142,11 @@ where
         info!("start ivc base case");
         let step = 0;
 
-        let (primary_config, mut primary_td, _primary_instance_col) =
+        let (primary_config, mut primary_td, primary_instance_col) =
             pp.primary.prepare_td(&[C1::Scalar::ZERO, C1::Scalar::ZERO]);
         debug!("primary step circuit configured");
 
-        let (secondary_config, mut secondary_td, _secondary_instance_col) = pp
+        let (secondary_config, mut secondary_td, secondary_instance_col) = pp
             .secondary
             .prepare_td(&[C2::Scalar::ZERO, C2::Scalar::ZERO]);
         debug!("secondary step circuit configured");
@@ -225,14 +225,13 @@ where
                 },
             )?;
 
+            layouter.constrain_instance(primary_new_X0.cell(), primary_instance_col, 0)?;
+            layouter.constrain_instance(primary_new_X1.cell(), primary_instance_col, 1)?;
+
             primary_td.instance = vec![
                 *primary_new_X0.value().unwrap().unwrap(),
                 *primary_new_X1.value().unwrap().unwrap(),
             ];
-
-            // TODO How to
-            //layouter.constrain_instance(primary_new_X0.cell(), primary_instance_col, 0);
-            //layouter.constrain_instance(primary_new_X1.cell(), primary_instance_col, 1);
 
             debug!("start primary td postpone");
             primary_td.batch_invert_assigned();
@@ -303,14 +302,13 @@ where
                 },
             )?;
 
+            layouter.constrain_instance(secondary_new_X0.cell(), secondary_instance_col, 0)?;
+            layouter.constrain_instance(secondary_new_X1.cell(), secondary_instance_col, 1)?;
+
             secondary_td.instance = vec![
                 *secondary_new_X0.value().unwrap().unwrap(),
                 *secondary_new_X1.value().unwrap().unwrap(),
             ];
-
-            // TODO How to
-            //layouter.constrain_instance(secondary_new_X0.cell(), secondary_instance_col, 0);
-            //layouter.constrain_instance(secondary_new_X1.cell(), secondary_instance_col, 1);
 
             debug!("start secondary td postpone");
             secondary_td.batch_invert_assigned();
@@ -358,7 +356,7 @@ where
         let step = self.step;
         debug!("start fold step: {step}");
 
-        let (primary_config, mut primary_td, _) =
+        let (primary_config, mut primary_td, primary_instance_col) =
             pp.primary.prepare_td(&[C1::Scalar::ZERO, C1::Scalar::ZERO]);
 
         (self.secondary.relaxed_trace, self.primary.z_next) = {
@@ -440,6 +438,9 @@ where
                 },
             )?;
 
+            layouter.constrain_instance(primary_new_X0.cell(), primary_instance_col, 0)?;
+            layouter.constrain_instance(primary_new_X1.cell(), primary_instance_col, 1)?;
+
             primary_td.instance = vec![
                 *primary_new_X0.value().unwrap().unwrap(),
                 *primary_new_X1.value().unwrap().unwrap(),
@@ -463,7 +464,7 @@ where
             self.secondary.z_next,
             self.secondary_prev_td,
         ) = {
-            let (secondary_config, mut secondary_td, _) = pp
+            let (secondary_config, mut secondary_td, secondary_instance_col) = pp
                 .secondary
                 .prepare_td(&[C2::Scalar::ZERO, C2::Scalar::ZERO]);
 
@@ -540,6 +541,10 @@ where
                     cross_term_commits: primary_nifs.cross_term_commits,
                 },
             )?;
+
+            layouter.constrain_instance(secondary_new_X0.cell(), secondary_instance_col, 0)?;
+            layouter.constrain_instance(secondary_new_X1.cell(), secondary_instance_col, 1)?;
+
             secondary_td.instance = vec![
                 *secondary_new_X0.value().unwrap().unwrap(),
                 *secondary_new_X1.value().unwrap().unwrap(),

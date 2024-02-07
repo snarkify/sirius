@@ -80,10 +80,11 @@ where
         let mut td = TableData::new(k_table_size, vec![C::Scalar::ZERO, C::Scalar::ZERO]);
 
         let (X0, config) = td.configure(|cs| {
-            let X0 = cs.instance_column();
+            let instance = cs.instance_column();
+            cs.enable_equality(instance);
 
             (
-                X0,
+                instance,
                 <SC as StepCircuitExt<'_, ARITY, C::Scalar>>::configure::<MAIN_GATE_T>(cs),
             )
         });
