@@ -112,10 +112,11 @@ where
     ) -> (
         StepConfig<ARITY, MAIN_GATE_T, C::Scalar, SC>,
         TableData<C::Scalar>,
+        Column<Instance>,
     ) {
         let mut td = self.td.clone();
         td.instance = instance_columns.to_vec();
-        (self.config.clone(), td)
+        (self.config.clone(), td, self.X0)
     }
 
     pub fn params(&self) -> &SynthesizeStepParams<C::Scalar, RP::OnCircuit> {

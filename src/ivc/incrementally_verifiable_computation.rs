@@ -142,11 +142,11 @@ where
         info!("start ivc base case");
         let step = 0;
 
-        let (primary_config, mut primary_td) =
+        let (primary_config, mut primary_td, _primary_instance_col) =
             pp.primary.prepare_td(&[C1::Scalar::ZERO, C1::Scalar::ZERO]);
         debug!("primary step circuit configured");
 
-        let (secondary_config, mut secondary_td) = pp
+        let (secondary_config, mut secondary_td, _secondary_instance_col) = pp
             .secondary
             .prepare_td(&[C2::Scalar::ZERO, C2::Scalar::ZERO]);
         debug!("secondary step circuit configured");
@@ -205,9 +205,9 @@ where
             let StepSynthesisResult {
                 z_output: primary_assigned_z_output,
                 // Not used in zero step, only in verify-step, when folding is over
-                output_hash: _primary_output_hash,
+                new_X1: primary_new_X1,
                 // Not used in zero step, only in verify-step, when folding is over
-                X1: _primary_X1,
+                new_X0: primary_new_X0,
             } = primary.synthesize(
                 primary_config,
                 &mut layouter,
@@ -224,6 +224,15 @@ where
                     cross_term_commits: vec![C2::identity(); primary_cross_term_commits_len],
                 },
             )?;
+
+            primary_td.instance = vec![
+                *primary_new_X0.value().unwrap().unwrap(),
+                *primary_new_X1.value().unwrap().unwrap(),
+            ];
+
+            // TODO How to
+            //layouter.constrain_instance(primary_new_X0.cell(), primary_instance_col, 0);
+            //layouter.constrain_instance(primary_new_X1.cell(), primary_instance_col, 1);
 
             debug!("start primary td postpone");
             primary_td.batch_invert_assigned();
@@ -275,9 +284,9 @@ where
             let StepSynthesisResult {
                 z_output: secondary_assigned_z_output,
                 // Not used in zero step, only in verify-step, when folding is over
-                output_hash: _secondary_output_hash,
+                new_X1: secondary_new_X1,
                 // Not used in zero step, only in verify-step, when folding is over
-                X1: _secondary_X1,
+                new_X0: secondary_new_X0,
             } = secondary.synthesize(
                 secondary_config,
                 &mut layouter,
@@ -293,6 +302,15 @@ where
                     cross_term_commits: vec![C1::identity(); secondary_cross_term_commits_len],
                 },
             )?;
+
+            secondary_td.instance = vec![
+                *secondary_new_X0.value().unwrap().unwrap(),
+                *secondary_new_X1.value().unwrap().unwrap(),
+            ];
+
+            // TODO How to
+            //layouter.constrain_instance(secondary_new_X0.cell(), secondary_instance_col, 0);
+            //layouter.constrain_instance(secondary_new_X1.cell(), secondary_instance_col, 1);
 
             debug!("start secondary td postpone");
             secondary_td.batch_invert_assigned();
@@ -340,7 +358,7 @@ where
         let step = self.step;
         debug!("start fold step: {step}");
 
-        let (primary_config, mut primary_td) =
+        let (primary_config, mut primary_td, _) =
             pp.primary.prepare_td(&[C1::Scalar::ZERO, C1::Scalar::ZERO]);
 
         (self.secondary.relaxed_trace, self.primary.z_next) = {
@@ -404,9 +422,9 @@ where
             let StepSynthesisResult {
                 z_output: primary_assigned_z_output,
                 // Not used in zero step, only in verify-step, when folding is over
-                output_hash: _primary_output_hash,
-                // TODO Not used in zero step, only in verify-step, when folding is over
-                X1: _primary_X1,
+                new_X1: primary_new_X1,
+                // Not used in zero step, only in verify-step, when folding is over
+                new_X0: primary_new_X0,
             } = self.primary.step_circuit.synthesize(
                 primary_config,
                 &mut layouter,
@@ -421,6 +439,11 @@ where
                     cross_term_commits: secondary_nifs.cross_term_commits,
                 },
             )?;
+
+            primary_td.instance = vec![
+                *primary_new_X0.value().unwrap().unwrap(),
+                *primary_new_X1.value().unwrap().unwrap(),
+            ];
 
             debug!("start primary td postpone");
             primary_td.batch_invert_assigned();
@@ -440,7 +463,7 @@ where
             self.secondary.z_next,
             self.secondary_prev_td,
         ) = {
-            let (secondary_config, mut secondary_td) = pp
+            let (secondary_config, mut secondary_td, _) = pp
                 .secondary
                 .prepare_td(&[C2::Scalar::ZERO, C2::Scalar::ZERO]);
 
@@ -500,9 +523,9 @@ where
             let StepSynthesisResult {
                 z_output: secondary_assigned_z_output,
                 // Not used in zero step, only in verify-step, when folding is over
-                output_hash: _secondary_output_hash,
-                // TODO Not used in zero step, only in verify-step, when folding is over
-                X1: _secondary_X1,
+                new_X1: secondary_new_X1,
+                // Not used in zero step, only in verify-step, when folding is over
+                new_X0: secondary_new_X0,
             } = self.secondary.step_circuit.synthesize(
                 secondary_config,
                 &mut layouter,
@@ -517,6 +540,10 @@ where
                     cross_term_commits: primary_nifs.cross_term_commits,
                 },
             )?;
+            secondary_td.instance = vec![
+                *secondary_new_X0.value().unwrap().unwrap(),
+                *secondary_new_X1.value().unwrap().unwrap(),
+            ];
 
             debug!("start primary td postpone");
             primary_td.batch_invert_assigned();

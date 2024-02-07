@@ -197,8 +197,8 @@ where
 pub struct StepSynthesisResult<const ARITY: usize, F: PrimeField> {
     /// Output of current synthesis step
     pub z_output: [AssignedValue<F>; ARITY],
-    pub output_hash: AssignedValue<F>,
-    pub X1: Option<Vec<AssignedValue<F>>>,
+    pub new_X1: AssignedValue<F>,
+    pub new_X0: AssignedValue<F>,
 }
 
 /// Trait extends [`StepCircuit`] to represent the augmented function `F'` in the IVC scheme.
@@ -333,8 +333,12 @@ where
 
         Ok(StepSynthesisResult {
             z_output,
-            output_hash,
-            X1: assigned_input_witness.input_instances.get(1).cloned(),
+            new_X0: assigned_input_witness
+                .input_instances
+                .first()
+                .and_then(|inst| inst.get(1).cloned())
+                .unwrap(),
+            new_X1: output_hash,
         })
     }
 
