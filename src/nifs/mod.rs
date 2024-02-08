@@ -10,6 +10,7 @@
 //! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
 use crate::commitment::CommitmentKey;
 use crate::plonk::eval::Error as EvalError;
+use crate::plonk::{PlonkInstance, PlonkTrace};
 use crate::poseidon::ROTrait;
 use crate::sps::Error as SpsError;
 use crate::table::TableData;
@@ -19,7 +20,7 @@ use rayon::prelude::*;
 pub mod vanilla;
 
 /// Trait representing the NIFS folding scheme.
-pub trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
+pub trait FoldingScheme<C: CurveAffine> {
     /// Metadata for prover including hash of public params
     type ProverParam;
 
@@ -32,26 +33,38 @@ pub trait FoldingScheme<C: CurveAffine, RO: ROTrait<C::Base>> {
     /// The Instance of the Accumulator (e.g. [`RelaxedPlonkInstace`])
     type AccumulatorInstance;
 
+    /// The proof send from prover to verifier
+    type Proof;
+
     fn setup_params(
+        pp_digest: C,
         td: &TableData<C::ScalarExt>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
+
+    fn generate_plonk_trace(
+        ck: &CommitmentKey<C>,
+        td: &TableData<<C as CurveAffine>::ScalarExt>,
+        pp: &Self::ProverParam,
+        ro_nark: &mut impl ROTrait<C::Base>,
+    ) -> Result<PlonkTrace<C>, Error>;
 
     /// Perform the folding operation as a prover.
     fn prove(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
-        ro_acc: &mut RO,
-        accumulator: Self::Accumulator,
-        incoming: Self::Accumulator,
-    ) -> Result<Self::Accumulator, Error>;
+        ro_acc: &mut impl ROTrait<C::Base>,
+        accumulator: &Self::Accumulator,
+        incoming: &PlonkTrace<C>,
+    ) -> Result<(Self::Accumulator, Self::Proof), Error>;
 
     /// Perform the folding operation as a verifier.
     fn verify(
         vp: &Self::VerifierParam,
-        ro_nark: &mut RO,
-        ro_acc: &mut RO,
-        accumulator: Self::AccumulatorInstance,
-        incoming: Self::AccumulatorInstance,
+        ro_nark: &mut impl ROTrait<C::Base>,
+        ro_acc: &mut impl ROTrait<C::Base>,
+        accumulator: &Self::AccumulatorInstance,
+        incoming: &PlonkInstance<C>,
+        proof: &Self::Proof,
     ) -> Result<Self::AccumulatorInstance, Error>;
 }
 

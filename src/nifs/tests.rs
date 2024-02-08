@@ -1,6 +1,6 @@
 use super::*;
 use crate::nifs::{vanilla::VanillaFS, Error as NIFSError};
-use crate::plonk::{RelaxedPlonkInstance, RelaxedPlonkWitness};
+use crate::plonk::{PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness};
 use crate::util::create_ro;
 use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
@@ -45,36 +45,40 @@ where
     let mut f_U =
         RelaxedPlonkInstance::new(td1.instance.len(), S.num_challenges, S.round_sizes.len());
     let mut f_W = RelaxedPlonkWitness::new(td1.k, &S.round_sizes);
-    let mut ro_nark_prover = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_nark_prepare = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_nark_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_nark_decider = create_ro::<C::Base, T, RATE, R_F, R_P>();
-    let (U1, W1) = td1
-        .run_sps_protocol(ck, &mut ro_nark_prepare, S.num_challenges)
-        .unwrap();
-    assert_eq!(S.is_sat(ck, &mut ro_nark_decider, &U1, &W1).err(), None);
-
     let mut ro_acc_prover = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_acc_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
-    let (nifs, (U_from_prove, W)) = VanillaFS::prove(
+
+    let (pp1, vp1) = VanillaFS::setup_params(*pp_digest, td1)?;
+    let PlonkTrace { u: U1, w: W1 } =
+        VanillaFS::generate_plonk_trace(ck, td1, &pp1, &mut ro_nark_prepare)?;
+    assert_eq!(S.is_sat(ck, &mut ro_nark_decider, &U1, &W1).err(), None);
+
+    let (RelaxedPlonkTrace { U: U_from_prove, W }, cross_term_commits) = VanillaFS::prove(
         ck,
-        pp_digest,
-        &mut ro_nark_prover,
+        &pp1,
         &mut ro_acc_prover,
-        td1,
-        &f_U,
-        &f_W,
+        &RelaxedPlonkTrace {
+            U: f_U.clone(),
+            W: f_W.clone(),
+        },
+        &PlonkTrace {
+            u: U1.clone(),
+            w: W1.clone(),
+        },
     )?;
 
-    let U_from_verify = nifs
-        .verify(
-            pp_digest,
-            &mut ro_nark_verifier,
-            &mut ro_acc_verifier,
-            f_U,
-            U1,
-        )
-        .unwrap();
+    let U_from_verify = VanillaFS::verify(
+        &vp1,
+        &mut ro_nark_verifier,
+        &mut ro_acc_verifier,
+        &f_U,
+        &U1,
+        &cross_term_commits,
+    )
+    .unwrap();
     assert_eq!(U_from_prove, U_from_verify);
 
     f_U = U_from_verify;
@@ -82,29 +86,40 @@ where
     assert_eq!(S.is_sat_relaxed(ck, &f_U, &f_W).err(), None);
     assert_eq!(S.is_sat_perm(&f_U, &f_W).err(), None);
 
-    let (U1, W1) = td2
-        .run_sps_protocol(ck, &mut ro_nark_prepare, S.num_challenges)
-        .unwrap();
+    let (pp2, vp2) = VanillaFS::setup_params(*pp_digest, td2)?;
+    let PlonkTrace { u: U1, w: W1 } =
+        VanillaFS::generate_plonk_trace(ck, td2, &pp2, &mut ro_nark_prepare)?;
     assert_eq!(S.is_sat(ck, &mut ro_nark_decider, &U1, &W1).err(), None);
 
-    let (nifs, (U_from_prove, _W)) = VanillaFS::prove(
+    let (
+        RelaxedPlonkTrace {
+            U: U_from_prove,
+            W: _W,
+        },
+        cross_term_commits,
+    ) = VanillaFS::prove(
         ck,
-        pp_digest,
-        &mut ro_nark_prover,
+        &pp2,
         &mut ro_acc_prover,
-        td2,
-        &f_U,
-        &f_W,
+        &RelaxedPlonkTrace {
+            U: f_U.clone(),
+            W: f_W,
+        },
+        &PlonkTrace {
+            u: U1.clone(),
+            w: W1,
+        },
     )?;
-    let U_from_verify = nifs
-        .verify(
-            pp_digest,
-            &mut ro_nark_verifier,
-            &mut ro_acc_verifier,
-            f_U,
-            U1,
-        )
-        .unwrap();
+
+    let U_from_verify = VanillaFS::verify(
+        &vp2,
+        &mut ro_nark_verifier,
+        &mut ro_acc_verifier,
+        &f_U,
+        &U1,
+        &cross_term_commits,
+    )
+    .unwrap();
     assert_eq!(U_from_prove, U_from_verify);
 
     f_U = U_from_verify;
