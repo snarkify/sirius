@@ -41,6 +41,15 @@ use halo2_proofs::{
 use log::*;
 use std::collections::HashMap;
 
+// TODO: (1) separate TableData into 
+// TableData {
+//   CircuitInfo,
+//   WitnessData,
+// }
+// (2) separate assembly into assembly_circuit_info
+// which only collect circuit related info (e.g. custom gates, copy constraints info, lookup_arguments, fixed columns)
+// and assembly_witness_data (i.e. advice columns)
+// see TODO in CircuitPublicParams::new
 #[derive(Debug, Clone)]
 pub struct TableData<F: PrimeField> {
     // TODO: without usable_rows still safe?

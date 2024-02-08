@@ -9,22 +9,15 @@ use serde::Serialize;
 use crate::{
     commitment::CommitmentKey,
     digest::{self, DigestToCurve},
-    ivc::step_circuit::StepCircuitExt,
     plonk::PlonkStructure,
     poseidon::ROPair,
     table::TableData,
 };
 
 use super::{
-    step_circuit::{self, StepConfig, SynthesizeStepParams},
+    step_circuit::SynthesizeStepParams,
     StepCircuit,
 };
-
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("While configure table data: {0:?}")]
-    Configure(#[from] step_circuit::ConfigureError),
-}
 
 pub(crate) struct CircuitPublicParams<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, SC, RP>
 where
@@ -34,10 +27,10 @@ where
     RP: ROPair<C::Scalar>,
 {
     ck: &'key CommitmentKey<C>,
-    params: SynthesizeStepParams<C::Scalar, RP::OnCircuit>,
+    params: SynthesizeStepParams,
+    ro_constant: RP::Args,
 
     td: TableData<C::Scalar>,
-    config: StepConfig<ARITY, MAIN_GATE_T, C::Scalar, SC>,
 }
 
 impl<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, SC, RP> fmt::Debug
@@ -77,20 +70,21 @@ where
 
         let mut td = TableData::new(k_table_size, vec![C::Scalar::ZERO, C::Scalar::ZERO]);
 
-        let config = td.configure(|cs| {
-            <SC as StepCircuitExt<'_, ARITY, C::Scalar>>::configure::<MAIN_GATE_T>(cs)
-        });
+
+        // TODO: derive circuit information for primary_circuit and secondary_cirtuit
+        // let params = IVCStepCircuit::new();
+        // let primary_circuit = IVCStepCircuit::new(params);
+        // td.assembly_circuit_info(primary_circuit)
 
         Ok(Self {
             td,
-            config: config?,
             ck: commitment_key,
             params: SynthesizeStepParams {
                 limb_width,
                 limbs_count,
                 is_primary_circuit,
-                ro_constant,
             },
+            ro_constant,
         })
     }
 
@@ -98,19 +92,7 @@ where
         self.td.k
     }
 
-    pub fn prepare_td(
-        &self,
-        instance_columns: &[C::Scalar],
-    ) -> (
-        StepConfig<ARITY, MAIN_GATE_T, C::Scalar, SC>,
-        TableData<C::Scalar>,
-    ) {
-        let mut td = self.td.clone();
-        td.instance = instance_columns.to_vec();
-        (self.config.clone(), td)
-    }
-
-    pub fn params(&self) -> &SynthesizeStepParams<C::Scalar, RP::OnCircuit> {
+    pub fn params(&self) -> &SynthesizeStepParams {
         &self.params
     }
 
@@ -245,12 +227,14 @@ where
     pub fn digest<C: CurveAffine>(&self) -> Result<C, io::Error> {
         calc_digest::<C1, C2, C, RP1, RP2>(
             &self.primary.params,
+            &self.primary.ro_constant,
             &self
                 .primary
                 .td
                 .plonk_structure()
                 .expect("unrechable, prepared in constructor"),
             &self.secondary.params,
+            &self.secondary.ro_constant,
             &self
                 .secondary
                 .td
@@ -261,9 +245,11 @@ where
 }
 
 pub fn calc_digest<C1: CurveAffine, C2: CurveAffine, CO: CurveAffine, RP1, RP2>(
-    primary_params: &SynthesizeStepParams<C1::Scalar, RP1::OnCircuit>,
+    primary_params: &SynthesizeStepParams,
+    primary_ro_const: &RP1::Args,
     primary_plonk_struct: &PlonkStructure<C1::Scalar>,
-    secondary_params: &SynthesizeStepParams<C2::Scalar, RP2::OnCircuit>,
+    secondary_params: &SynthesizeStepParams,
+    secondary_ro_const: &RP2::Args,
     secondary_plonk_struct: &PlonkStructure<C2::Scalar>,
 ) -> Result<CO, io::Error>
 where
@@ -291,13 +277,17 @@ where
     {
         primary_plonk_struct: &'l PlonkStructure<C1::Scalar>,
         secondary_plonk_struct: &'l PlonkStructure<C2::Scalar>,
-        primary_params: &'l SynthesizeStepParams<C1::Scalar, RP1::OnCircuit>,
-        secondary_params: &'l SynthesizeStepParams<C2::Scalar, RP2::OnCircuit>,
+        primary_ro_const: &'l RP1::Args,
+        secondary_ro_const: &'l RP2::Args,
+        primary_params: &'l SynthesizeStepParams,
+        secondary_params: &'l SynthesizeStepParams,
     }
 
     digest::DefaultHasher::digest_to_curve(&SerializableWrapper::<'_, C1, C2, RP1, RP2> {
         primary_plonk_struct,
         secondary_plonk_struct,
+        primary_ro_const, 
+        secondary_ro_const, 
         primary_params,
         secondary_params,
     })

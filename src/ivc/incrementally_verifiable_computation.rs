@@ -1,4 +1,5 @@
 use std::io;
+use core::marker::PhantomData;
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
@@ -10,14 +11,13 @@ use serde::Serialize;
 use crate::{
     ivc::{
         public_params::{self, PublicParams},
-        step_circuit::{StepCircuitExt, StepInputs, StepSynthesisResult},
+        step_circuit::StepInputs,
     },
     main_gate::MainGateConfig,
     nifs,
     plonk::{PlonkInstance, RelaxedPlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
-    table::TableData,
 };
 
 pub use super::{
@@ -26,12 +26,10 @@ pub use super::{
 };
 
 // TODO #31 docs
-struct StepCircuitContext<const ARITY: usize, C, SC>
+struct StepCircuitContext<const ARITY: usize, C>
 where
     C: CurveAffine,
-    SC: StepCircuit<ARITY, C::Scalar>,
 {
-    pub step_circuit: SC,
     pub relaxed_trace: RelaxedPlonkTrace<C>,
     pub z_0: [C::Scalar; ARITY],
     pub z_next: [C::Scalar; ARITY],
@@ -40,8 +38,6 @@ where
 // TODO #31 docs
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error(transparent)]
-    StepConfigure(#[from] step_circuit::ConfigureError),
     #[error(transparent)]
     Plonk(#[from] halo2_proofs::plonk::Error),
     #[error(transparent)]
@@ -66,12 +62,11 @@ where
     SC1: StepCircuit<A1, C1::Scalar>,
     SC2: StepCircuit<A2, C2::Scalar>,
 {
-    primary: StepCircuitContext<A1, C1, SC1>,
-    secondary: StepCircuitContext<A2, C2, SC2>,
-
-    secondary_prev_td: TableData<C2::Scalar>,
+    primary: StepCircuitContext<A1, C1>,
+    secondary: StepCircuitContext<A2, C2>,
 
     step: usize,
+    _p: PhantomData<(SC1, SC2)>,
 }
 
 impl<const A1: usize, const A2: usize, C1, C2, SC1, SC2> IVC<A1, A2, C1, C2, SC1, SC2>
@@ -246,7 +241,7 @@ where
                 new_X0: secondary_new_X0,
             } = secondary.synthesize(
                 secondary_config,
-                &mut SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
+                &SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
                 StepInputs {
                     step_public_params: pp.secondary.params(),
                     public_params_hash: secondary_public_params_hash,
@@ -345,7 +340,7 @@ where
                 new_X0: primary_new_X0,
             } = self.primary.step_circuit.synthesize(
                 primary_config,
-                &mut SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?,
+                &SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?,
                 step_circuit::StepInputs {
                     step_public_params: pp.primary.params(),
                     public_params_hash: pp.digest().map_err(Error::WhileHash)?,
@@ -412,7 +407,7 @@ where
                 new_X0: secondary_new_X0,
             } = self.secondary.step_circuit.synthesize(
                 secondary_config,
-                &mut SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
+                &SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
                 step_circuit::StepInputs {
                     step_public_params: pp.secondary.params(),
                     public_params_hash: pp.digest().map_err(Error::WhileHash)?,
@@ -424,9 +419,6 @@ where
                     cross_term_commits: primary_nifs.cross_term_commits,
                 },
             )?;
-
-            //layouter.constrain_instance(secondary_new_X0.cell(), secondary_instance_col, 0)?;
-            //layouter.constrain_instance(secondary_new_X1.cell(), secondary_instance_col, 1)?;
 
             secondary_td.instance = vec![
                 *secondary_new_X0.value().unwrap().unwrap(),

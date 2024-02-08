@@ -72,6 +72,28 @@ use crate::{
     util::{self, CellsValuesView},
 };
 
+/// Holds the assigned values and points of PlonkInstance
+pub(crate) struct AssignedPlonkInstance<C: CurveAffine> {
+    pub W_commitments: Vec<AssignedPoint<C>>,
+    pub challenges: Vec<AssignedValue<C::Base>>,
+    pub X0: AssignedValue<C::Base>,
+    pub X1: AssignedValue<C::Base>,
+}
+
+impl<C: CurveAffine> AssignedPlonkInstance<C> {
+    // This is a hack for now
+    pub fn to_instance(&self) -> PlonkInstance<C> {
+        let W_commitments = self.W_commitments.iter().map(|w| w.to_curve().unwrap()).collect::<Vec<_>>();
+        let instance = [self.X0.value().copied().unwrap(), self.X1.value().copied().unwrap()];
+        let challenges = self.challenges.iter().map(|cha| cha.value().copied().unwrap()).collect::<Vec<_>>();
+        PlonkInstance {
+            W_commitments,
+            instance,
+            challenges,
+        }
+    }
+}
+
 pub(crate) struct FoldRelaxedPlonkInstanceChip<const T: usize, C: CurveAffine>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
