@@ -12,7 +12,6 @@ use itertools::{EitherOrBoth, Itertools};
 use log::*;
 use num_bigint::BigUint as BigUintRaw;
 use num_traits::{One, ToPrimitive, Zero};
-use result_inspect::ResultInspectErr;
 
 use crate::{
     main_gate::{AssignAdviceFrom, MainGate, MainGateConfig, RegionCtx},

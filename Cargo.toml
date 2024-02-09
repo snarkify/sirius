@@ -23,7 +23,6 @@ log = "0.4.20"
 itertools = "0.11.0"
 bitter = "0.6.1"
 thiserror = "1.0.48"
-result-inspect = "0.3.0"
 serde_arrays = "0.1.0"
 
 [dev-dependencies]
