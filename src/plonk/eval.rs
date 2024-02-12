@@ -126,11 +126,6 @@ pub trait Eval<F: PrimeField> {
                                     0,
                                     0,
                                 ]));
-                                //                                for i in 1..(poly.degree()+1) {
-                                //                                    evals
-                                //                                        .entry((column_index.clone(), i))
-                                //                                        .or_insert(v1.pow([i as u64, 0, 0, 0]));
-                                //                                }
                                 Ok(*evals.get(&(column_index, *exp)).unwrap())
                             }
                         }
