@@ -33,8 +33,6 @@ where
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    StepConfigure(#[from] step_circuit::ConfigureError),
-    #[error(transparent)]
     Plonk(#[from] halo2_proofs::plonk::Error),
     #[error(transparent)]
     Step(#[from] step_circuit::SynthesisError),

@@ -89,7 +89,7 @@ pub fn fe_to_fe_safe<F1: PrimeField, F2: PrimeField>(fe: &F1) -> Option<F2> {
 }
 
 fn invert<F: Field>(
-    poly: &Vec<Assigned<F>>,
+    poly: &[Assigned<F>],
     inv_denoms: impl Iterator<Item = F> + ExactSizeIterator,
 ) -> Vec<F> {
     assert_eq!(inv_denoms.len(), poly.len());

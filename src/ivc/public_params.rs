@@ -1,8 +1,7 @@
-use std::{fmt, num::NonZeroUsize};
+use std::{fmt, marker::PhantomData, num::NonZeroUsize};
 
-use ff::{Field, FromUniformBytes, PrimeFieldBits};
+use ff::{FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
-use halo2_proofs::plonk::{Column, Instance};
 use halo2curves::CurveAffine;
 use log::*;
 use serde::Serialize;
@@ -10,62 +9,51 @@ use serde::Serialize;
 use crate::{
     commitment::CommitmentKey,
     digest::{self, DigestToCurve},
-    ivc::step_circuit::StepCircuitExt,
+    main_gate::MainGateConfig,
     plonk::PlonkStructure,
     poseidon::ROPair,
     table::TableData,
 };
 
-use super::{
-    step_circuit::{self, StepConfig, SynthesizeStepParams},
-    StepCircuit,
-};
+use super::{step_folding_circuit::StepParams, StepCircuit};
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("While configure table data: {0:?}")]
-    Configure(#[from] step_circuit::ConfigureError),
-}
+pub enum Error {}
 
-pub(crate) struct CircuitPublicParams<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, SC, RP>
+pub(crate) struct CircuitPublicParams<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, RP>
 where
     C: CurveAffine,
     C::Scalar: PrimeFieldBits + FromUniformBytes<64>,
-    SC: StepCircuit<ARITY, C::Scalar>,
     RP: ROPair<C::Scalar>,
 {
+    pub k_table_size: u32,
     pub ck: &'key CommitmentKey<C>,
-    pub params: SynthesizeStepParams<C::Scalar, RP::OnCircuit>,
-
-    td: TableData<C::Scalar>,
-    X0: Column<Instance>,
-    config: StepConfig<ARITY, C::Scalar, SC, MAIN_GATE_T>,
+    pub params: StepParams<C::Scalar, RP::OnCircuit>,
 }
 
-impl<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, SC, RP> fmt::Debug
-    for CircuitPublicParams<'key, ARITY, MAIN_GATE_T, C, SC, RP>
+impl<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, RP> fmt::Debug
+    for CircuitPublicParams<'key, ARITY, MAIN_GATE_T, C, RP>
 where
     C: fmt::Debug + CurveAffine,
-    C::ScalarExt: PrimeFieldBits + FromUniformBytes<64>,
-    SC: StepCircuit<ARITY, C::ScalarExt>,
-    RP: ROPair<C::ScalarExt>,
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C::Scalar: PrimeFieldBits + FromUniformBytes<64>,
+    RP: ROPair<C::Scalar>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CircuitPublicParams")
             .field("ck_len", &self.ck.len())
-            .field("td_k", &self.td.k)
             .field("params", &self.params)
             .finish()
     }
 }
 
-impl<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, SC, RP>
-    CircuitPublicParams<'key, ARITY, MAIN_GATE_T, C, SC, RP>
+impl<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, RP>
+    CircuitPublicParams<'key, ARITY, MAIN_GATE_T, C, RP>
 where
     C: fmt::Debug + CurveAffine,
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
     C::Scalar: PrimeFieldBits + FromUniformBytes<64>,
-    SC: StepCircuit<ARITY, C::Scalar>,
-    RP: ROPair<C::Scalar>,
+    RP: ROPair<C::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
 {
     fn new(
         k_table_size: u32,
@@ -77,35 +65,17 @@ where
     ) -> Result<Self, Error> {
         debug!("start creating circuit pp");
 
-        let mut td = TableData::new(k_table_size, vec![C::Scalar::ZERO, C::Scalar::ZERO]);
-
-        let (X0, config) = td.prepare_assembly(|cs| {
-            let X0 = cs.instance_column();
-
-            (
-                X0,
-                <SC as StepCircuitExt<'_, ARITY, C::Scalar>>::configure::<MAIN_GATE_T>(cs),
-            )
-        });
-
+        #[allow(unreachable_code)]
         Ok(Self {
-            td,
-            X0,
-            config: config?,
+            k_table_size,
             ck: commitment_key,
-            params: SynthesizeStepParams {
+            params: StepParams {
                 limb_width,
-                n_limbs,
+                limbs_count: n_limbs,
                 is_primary_circuit,
                 ro_constant,
             },
         })
-    }
-
-    pub fn prepare_td(&self, instance_columns: &[C::Scalar]) -> TableData<C::Scalar> {
-        let mut td = self.td.clone();
-        td.instance = instance_columns.to_vec();
-        td
     }
 }
 
@@ -133,8 +103,9 @@ pub struct PublicParams<
     RP1: ROPair<C1::Scalar>,
     RP2: ROPair<C2::Scalar>,
 {
-    pub(crate) primary: CircuitPublicParams<'key, A1, MAIN_GATE_T, C1, SC1, RP1>,
-    pub(crate) secondary: CircuitPublicParams<'key, A2, MAIN_GATE_T, C2, SC2, RP2>,
+    pub(crate) primary: CircuitPublicParams<'key, A1, MAIN_GATE_T, C1, RP1>,
+    pub(crate) secondary: CircuitPublicParams<'key, A2, MAIN_GATE_T, C2, RP2>,
+    _p: PhantomData<(SC1, SC2)>,
 }
 
 impl<
@@ -200,8 +171,8 @@ where
     SC1: StepCircuit<A1, C1::Scalar>,
     SC2: StepCircuit<A2, C2::Scalar>,
 
-    RP1: ROPair<C1::Scalar>,
-    RP2: ROPair<C2::Scalar>,
+    RP1: ROPair<C1::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
+    RP2: ROPair<C2::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
 {
     pub fn new(
         primary: CircuitPublicParamsInput<'key, C1, RP1::Args>,
@@ -227,6 +198,7 @@ where
                 limb_width,
                 limbs_count_limit,
             )?,
+            _p: PhantomData,
         })
     }
 
@@ -248,19 +220,39 @@ where
         {
             primary_plonk_struct: PlonkStructure<C1::Scalar>,
             secondary_plonk_struct: PlonkStructure<C2::Scalar>,
-            primary_params: &'l SynthesizeStepParams<C1::Scalar, RP1::OnCircuit>,
-            secondary_params: &'l SynthesizeStepParams<C2::Scalar, RP2::OnCircuit>,
+            primary_params: &'l StepParams<C1::Scalar, RP1::OnCircuit>,
+            secondary_params: &'l StepParams<C2::Scalar, RP2::OnCircuit>,
         }
 
+        let mut primary_td = TableData::new(self.primary.k_table_size, vec![]);
+        primary_td.prepare_assembly(
+            <crate::ivc::step_folding_circuit::StepFoldingCircuit<
+                '_,
+                A1,
+                C2,
+                SC1,
+                RP1::OnCircuit,
+                MAIN_GATE_T,
+            > as StepCircuit<A1, C1::Scalar>>::configure,
+        );
+
+        let mut secondary_td = TableData::new(self.secondary.k_table_size, vec![]);
+        secondary_td.prepare_assembly(
+            <crate::ivc::step_folding_circuit::StepFoldingCircuit<
+                '_,
+                A2,
+                C1,
+                SC2,
+                RP2::OnCircuit,
+                MAIN_GATE_T,
+            > as StepCircuit<A2, C2::Scalar>>::configure,
+        );
+
         digest::DefaultHasher::digest_to_curve(&Wrapper::<'_, C1, C2, RP1, RP2> {
-            primary_plonk_struct: self
-                .primary
-                .td
+            primary_plonk_struct: primary_td
                 .plonk_structure()
                 .expect("unrechable, prepared in constructor"),
-            secondary_plonk_struct: self
-                .secondary
-                .td
+            secondary_plonk_struct: secondary_td
                 .plonk_structure()
                 .expect("unrechable, prepared in constructor"),
             primary_params: &self.primary.params,

@@ -51,7 +51,6 @@ use halo2curves::{Coordinates, CurveAffine};
 use itertools::Itertools;
 use log::*;
 use num_traits::Num;
-use result_inspect::*;
 
 use crate::{
     constants::NUM_CHALLENGE_BITS,
@@ -309,7 +308,7 @@ pub(crate) struct AssignedWitness<C: CurveAffine> {
 
     /// Vector of vectors of assigned values for each limb of the input instances.
     /// Sourced directly from [`PlonkInstance::instance`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
-    input_instances: Vec<Vec<AssignedValue<C::Base>>>,
+    pub input_instance: Vec<(AssignedValue<C::Base>, Vec<AssignedValue<C::Base>>)>,
 
     /// Vector of vectors of assigned values for each limb of the input challenges.
     /// Sourced directly from [`PlonkInstance::challenges`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
@@ -735,7 +734,12 @@ where
         let [new_folded_X0, new_folded_X1] = Self::fold_instances(
             region,
             &self.bn_chip,
-            w.input_instances.clone().try_into().unwrap(),
+            w.input_instance
+                .iter()
+                .map(|instance| instance.1.clone())
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
             [w.folded_X0.clone(), w.folded_X1.clone()],
             &r.as_bn_limbs,
             &w.m_bn,
@@ -896,7 +900,7 @@ where
                     .bn_chip
                     .from_assigned_cell_to_limbs(region, &assigned_cell)?;
 
-                Result::<_, Error>::Ok(assigned_bn)
+                Result::<_, Error>::Ok((assigned_cell, assigned_bn))
             }};
         }
 
@@ -910,15 +914,20 @@ where
             .collect::<Result<Vec<_>, _>>()?;
         let assigned_E = assign_and_absorb_point!(&self.relaxed.E_commitment)?;
 
-        let assigned_X0 = assign_and_absorb_diff_field_as_bn!(&self.relaxed.instance[0], || "X0")?;
-        let assigned_X1 = assign_and_absorb_diff_field_as_bn!(&self.relaxed.instance[1], || "X1")?;
+        let assigned_X0 =
+            assign_and_absorb_diff_field_as_bn!(&self.relaxed.instance[0], || "X0")?.1;
+        let assigned_X1 =
+            assign_and_absorb_diff_field_as_bn!(&self.relaxed.instance[1], || "X1")?.1;
         assert_eq!(self.relaxed.instance.len(), 2);
 
         let assigned_challenges = self
             .relaxed
             .challenges
             .iter()
-            .map(|challenge| assign_and_absorb_diff_field_as_bn!(challenge, || "one of challanges"))
+            .map(|challenge| {
+                assign_and_absorb_diff_field_as_bn!(challenge, || "one of challanges")
+                    .map(|bn| bn.1)
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         let assigned_u = assign_and_absorb_diff_field!(&self.relaxed.u, || "relaxed u")?;
@@ -954,7 +963,7 @@ where
             .enumerate()
             .map(|(index, challenge)| {
                 let annot = format!("instance {index} value");
-                assign_and_absorb_diff_field_as_bn!(challenge, || annot.clone())
+                assign_and_absorb_diff_field_as_bn!(challenge, || annot.clone()).map(|bn| bn.1)
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -982,7 +991,7 @@ where
             assigned_relaxed,
             input_challenges: assigned_challanges_instance,
             input_W_commitments: assigned_instance_W_commitment_coordinates,
-            input_instances: assigned_input_instance,
+            input_instance: assigned_input_instance,
             cross_terms_commits: assigned_cross_term_commits,
             r,
             m_bn,
