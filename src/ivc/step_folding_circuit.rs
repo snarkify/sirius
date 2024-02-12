@@ -33,8 +33,6 @@ where
 {
     pub limb_width: NonZeroUsize,
     pub limbs_count: NonZeroUsize,
-    /// A boolean indicating if this is the primary circuit
-    pub is_primary_circuit: bool,
     pub ro_constant: RO::Args,
 }
 
@@ -47,7 +45,6 @@ where
         f.debug_struct("SynthesizeStepParams")
             .field("limb_width", &self.limb_width)
             .field("n_limbs", &self.limbs_count)
-            .field("is_primary_circuit", &self.is_primary_circuit)
             .field("ro_constant", &self.ro_constant)
             .finish()
     }
@@ -201,7 +198,7 @@ where
         let U_new_base = self.synthesize_step_base_case(
             layouter,
             self.input.step_pp,
-            &self.input.u,
+            &self.input.U,
             config.main_gate_config.clone(),
         )?;
 
@@ -329,29 +326,19 @@ where
         &self,
         layouter: &mut impl Layouter<C::Base>,
         public_params: &StepParams<C::Base, RO>,
-        u: &PlonkInstance<C>,
+        U: &RelaxedPlonkInstance<C>,
         config: MainGateConfig<T>,
     ) -> Result<AssignedRelaxedPlonkInstance<C>, SynthesisError> {
         let Unew_base = layouter.assign_region(
             || "synthesize_step_base_case",
             move |region| {
-                let chip = if public_params.is_primary_circuit {
-                    FoldRelaxedPlonkInstanceChip::new(
-                        RelaxedPlonkInstance::new(2, u.challenges.len(), u.W_commitments.len()),
-                        public_params.limb_width,
-                        public_params.limbs_count,
-                        config.clone(),
-                    )
-                } else {
-                    FoldRelaxedPlonkInstanceChip::new(
-                        u.clone().to_relax(),
-                        public_params.limb_width,
-                        public_params.limbs_count,
-                        config.clone(),
-                    )
-                };
-
-                Ok(chip.assign_current_relaxed(&mut RegionCtx::new(region, 0))?)
+                Ok(FoldRelaxedPlonkInstanceChip::new(
+                    U.clone(),
+                    public_params.limb_width,
+                    public_params.limbs_count,
+                    config.clone(),
+                )
+                .assign_current_relaxed(&mut RegionCtx::new(region, 0))?)
             },
         )?;
 

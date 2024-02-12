@@ -58,21 +58,18 @@ where
     fn new(
         k_table_size: u32,
         commitment_key: &'key CommitmentKey<C>,
-        is_primary_circuit: bool,
         ro_constant: RP::Args,
         limb_width: NonZeroUsize,
         n_limbs: NonZeroUsize,
     ) -> Result<Self, Error> {
         debug!("start creating circuit pp");
 
-        #[allow(unreachable_code)]
         Ok(Self {
             k_table_size,
             ck: commitment_key,
             params: StepParams {
                 limb_width,
                 limbs_count: n_limbs,
-                is_primary_circuit,
                 ro_constant,
             },
         })
@@ -185,7 +182,6 @@ where
             primary: CircuitPublicParams::new(
                 primary.k_table_size,
                 primary.commitment_key,
-                true,
                 primary.ro_constant,
                 limb_width,
                 limbs_count_limit,
@@ -193,7 +189,6 @@ where
             secondary: CircuitPublicParams::new(
                 secondary.k_table_size,
                 secondary.commitment_key,
-                false,
                 secondary.ro_constant,
                 limb_width,
                 limbs_count_limit,
