@@ -83,6 +83,7 @@ where
 }
 
 /// Holds the assigned values and points resulting from the folding process.
+#[derive(Debug, Clone)]
 pub(crate) struct AssignedRelaxedPlonkInstance<C: CurveAffine> {
     /// Assigned point representing the folded accumulator W.
     /// Derived from [`FoldRelaxedPlonkInstanceChip::W`]
@@ -293,13 +294,14 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
 }
 
 /// Holds the assigned values and points resulting from the folding process.
+#[derive(Clone)]
 pub(crate) struct AssignedWitness<C: CurveAffine> {
     /// Assigned value of the public parameters commitment.
     /// Sourced directly from the `public_params_hash` argument of [`FoldRelaxedPlonkInstanceChip::fold`].
     pub public_params_hash: AssignedPoint<C>,
 
     /// Assigned [`RelaxedPlonkInstance`]
-    assigned_relaxed: AssignedRelaxedPlonkInstance<C>,
+    pub assigned_relaxed: AssignedRelaxedPlonkInstance<C>,
 
     /// Assigned point representing the commitment to the `W` value of the input PLONK instance.
     /// Sourced directly from [`PlonkInstance::W_commitments`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
@@ -650,19 +652,9 @@ where
     pub fn fold(
         &self,
         region: &mut RegionCtx<C::Base>,
-        ro_circuit: impl ROCircuitTrait<C::Base>,
-        public_params_hash: &C,
-        input_plonk: &PlonkInstance<C>,
-        cross_term_commits: &[C],
+        w: AssignedWitness<C>,
+        r: Vec<AssignedBit<C::Base>>,
     ) -> Result<FoldResult<C>, Error> {
-        let (w, r) = self.assign_witness_with_challenge(
-            region,
-            ro_circuit,
-            public_params_hash,
-            input_plonk,
-            cross_term_commits,
-        )?;
-
         debug!("fold: Assigned & Generated challenge: {r:?}");
 
         let gate = MainGate::new(self.config.clone());
@@ -813,13 +805,13 @@ where
     ///
     /// The advice columns from `config: &MainGateConfig` are used for assignment in cycle.
     /// The number of rows required for this depends on the input.
-    fn assign_witness_with_challenge(
+    pub fn assign_witness_with_challenge(
         &self,
         region: &mut RegionCtx<C::Base>,
-        mut ro_circuit: impl ROCircuitTrait<C::Base>,
         public_params_hash: &C,
         input_plonk: &PlonkInstance<C>,
         cross_term_commits: &[C],
+        mut ro_circuit: impl ROCircuitTrait<C::Base>,
     ) -> Result<(AssignedWitness<C>, Vec<AssignedBit<C::Base>>), Error> {
         let mut advice_columns_assigner = self.config.advice_cycle_assigner();
 
@@ -1171,10 +1163,10 @@ mod tests {
                         let assigned_witness = chip
                             .assign_witness_with_challenge(
                                 &mut RegionCtx::new(region, 0),
-                                PoseidonChip::new(config.clone(), spec.clone()),
                                 &pp_hash,
                                 &plonk,
                                 &cross_term_commits,
+                                PoseidonChip::new(config.clone(), spec.clone()),
                             )
                             .unwrap();
                         Ok(assigned_witness)
@@ -1701,17 +1693,15 @@ mod tests {
                             config.clone(),
                         );
 
-                        let fold_result = chip
-                            .fold(
-                                &mut region,
-                                PoseidonChip::new(config.clone(), spec.clone()),
-                                &pp_hash,
-                                &input_plonk,
-                                &cross_term_commits,
-                            )
-                            .unwrap();
+                        let (w, r) = chip.assign_witness_with_challenge(
+                            &mut region,
+                            &pp_hash,
+                            &input_plonk,
+                            &cross_term_commits,
+                            PoseidonChip::new(config.clone(), spec.clone()),
+                        )?;
 
-                        Ok(fold_result)
+                        Ok(chip.fold(&mut region, w, r).unwrap())
                     },
                 )
                 .unwrap()
