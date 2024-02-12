@@ -73,50 +73,65 @@ pub trait Eval<F: PrimeField> {
 
     /// evaluate polynomial relation on specific row
     fn eval(&self, poly: &MultiPolynomial<F>, row: usize) -> Result<F, Error> {
-        let mut evals: HashMap<ColumnIndex, F> =
+        let mut evals: HashMap<(ColumnIndex, usize), F> =
             HashMap::with_capacity(poly.degree() * poly.arity());
         let row_size = self.row_size() as i32;
         poly.monomials
             .iter()
             .map(|mono| {
                 (0..mono.arity)
-                    .map(|i| {
-                        let column_index = mono.index_to_poly[i].clone();
-                        if let Some(vv) = evals.get(&column_index) {
-                            Ok(*vv)
+                    .zip(mono.exponents.iter())
+                    .map(|(i, exp)| {
+                        if *exp == 0 {
+                            Ok(F::ONE)
                         } else {
-                            let vv = match column_index {
-                                // evaluation for challenge variable
-                                ColumnIndex::Challenge { column_index } => {
-                                    self.eval_challenge(column_index)
+                            let column_index = mono.index_to_poly[i].clone();
+                            if let Some(vn) = evals.get(&(column_index.clone(), *exp)) {
+                                Ok(*vn)
+                            } else {
+                                let v1 = match column_index {
+                                    // evaluation for challenge variable
+                                    ColumnIndex::Challenge { column_index } => {
+                                        self.eval_challenge(column_index)
+                                    }
+                                    // evaluation for column polynomial variable
+                                    ColumnIndex::Polynominal {
+                                        rotation,
+                                        column_index,
+                                    } => {
+                                        let rotation_plus_row = rotation + (row as i32);
+                                        // TODO: double check how halo2 handle
+                                        // (1): row+rot < 0
+                                        // (2): row+rot >= row_size = 2^K
+                                        let row = if rotation_plus_row < 0 {
+                                            rotation_plus_row + row_size
+                                        } else if rotation_plus_row >= row_size {
+                                            rotation_plus_row - row_size
+                                        } else {
+                                            rotation_plus_row
+                                        };
+                                        self.eval_column_var(row as usize, column_index)
+                                    }
+                                }?;
+                                evals.entry((column_index.clone(), *exp)).or_insert(v1.pow([
+                                    *exp as u64,
+                                    0,
+                                    0,
+                                    0,
+                                ]));
+                                for i in 1..poly.degree() {
+                                    evals
+                                        .entry((column_index.clone(), i))
+                                        .or_insert(v1.pow([i as u64, 0, 0, 0]));
                                 }
-                                // evaluation for column polynomial variable
-                                ColumnIndex::Polynominal {
-                                    rotation,
-                                    column_index,
-                                } => {
-                                    let rotation_plus_row = rotation + (row as i32);
-                                    // TODO: double check how halo2 handle
-                                    // (1): row+rot < 0
-                                    // (2): row+rot >= row_size = 2^K
-                                    let row = if rotation_plus_row < 0 {
-                                        rotation_plus_row + row_size
-                                    } else if rotation_plus_row >= row_size {
-                                        rotation_plus_row - row_size
-                                    } else {
-                                        rotation_plus_row
-                                    };
-                                    self.eval_column_var(row as usize, column_index)
-                                }
-                            }?;
-                            evals.insert(column_index, vv);
-                            Ok(vv)
+                                Ok(*evals.get(&(column_index, *exp)).unwrap())
+                            }
                         }
                     })
-                    .zip(mono.exponents.iter())
-                    .try_fold(mono.coeff, |acc, (result_with_var, exp)| {
-                        Ok(acc * result_with_var?.pow([*exp as u64, 0, 0, 0]))
-                    })
+                    .try_fold(
+                        mono.coeff,
+                        |acc, result_with_var| Ok(acc * result_with_var?),
+                    )
             })
             .try_fold(F::ZERO, |acc, value| Ok(acc + value?))
     }
