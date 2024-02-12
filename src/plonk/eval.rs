@@ -1,5 +1,6 @@
 use crate::polynomial::{ColumnIndex, MultiPolynomial};
 use ff::PrimeField;
+use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -72,36 +73,44 @@ pub trait Eval<F: PrimeField> {
 
     /// evaluate polynomial relation on specific row
     fn eval(&self, poly: &MultiPolynomial<F>, row: usize) -> Result<F, Error> {
+        let mut evals: HashMap<ColumnIndex, F> =
+            HashMap::with_capacity(poly.degree() * poly.arity());
         let row_size = self.row_size() as i32;
         poly.monomials
             .iter()
             .map(|mono| {
                 (0..mono.arity)
                     .map(|i| {
-                        match mono.index_to_poly[i] {
-                            // evaluation for challenge variable
-                            ColumnIndex::Challenge { column_index } => {
-                                self.eval_challenge(column_index)
-                            }
-                            // evaluation for column polynomial variable
-                            ColumnIndex::Polynominal {
-                                rotation,
-                                column_index,
-                            } => {
-                                let rotation_plus_row = rotation + (row as i32);
-                                // TODO: double check how halo2 handle
-                                // (1): row+rot < 0
-                                // (2): row+rot >= row_size = 2^K
-                                let row = if rotation_plus_row < 0 {
-                                    rotation_plus_row + row_size
-                                } else if rotation_plus_row >= row_size {
-                                    rotation_plus_row - row_size
-                                } else {
-                                    rotation_plus_row
-                                };
-
-                                self.eval_column_var(row as usize, column_index)
-                            }
+                        let column_index = mono.index_to_poly[i].clone();
+                        if let Some(vv) = evals.get(&column_index) {
+                            Ok(*vv)
+                        } else {
+                            let vv = match column_index {
+                                // evaluation for challenge variable
+                                ColumnIndex::Challenge { column_index } => {
+                                    self.eval_challenge(column_index)
+                                }
+                                // evaluation for column polynomial variable
+                                ColumnIndex::Polynominal {
+                                    rotation,
+                                    column_index,
+                                } => {
+                                    let rotation_plus_row = rotation + (row as i32);
+                                    // TODO: double check how halo2 handle
+                                    // (1): row+rot < 0
+                                    // (2): row+rot >= row_size = 2^K
+                                    let row = if rotation_plus_row < 0 {
+                                        rotation_plus_row + row_size
+                                    } else if rotation_plus_row >= row_size {
+                                        rotation_plus_row - row_size
+                                    } else {
+                                        rotation_plus_row
+                                    };
+                                    self.eval_column_var(row as usize, column_index)
+                                }
+                            }?;
+                            evals.insert(column_index, vv);
+                            Ok(vv)
                         }
                     })
                     .zip(mono.exponents.iter())
