@@ -336,16 +336,15 @@ where
             || "synthesize_step_base_case",
             move |region| {
                 let chip = if public_params.is_primary_circuit {
-                    FoldRelaxedPlonkInstanceChip::new_default(
+                    FoldRelaxedPlonkInstanceChip::new(
+                        RelaxedPlonkInstance::new(2, u.challenges.len(), u.W_commitments.len()),
                         public_params.limb_width,
                         public_params.limbs_count,
-                        u.challenges.len(),
-                        u.W_commitments.len(),
                         config.clone(),
                     )
                 } else {
-                    FoldRelaxedPlonkInstanceChip::from_instance(
-                        u.clone(),
+                    FoldRelaxedPlonkInstanceChip::new(
+                        u.clone().to_relax(),
                         public_params.limb_width,
                         public_params.limbs_count,
                         config.clone(),
@@ -376,7 +375,7 @@ where
         Ok(layouter.assign_region(
             || "synthesize_step_non_base_case",
             move |region| {
-                let chip = FoldRelaxedPlonkInstanceChip::from_relaxed(
+                let chip = FoldRelaxedPlonkInstanceChip::new(
                     U.clone(),
                     input.step_pp.limb_width,
                     input.step_pp.limbs_count,

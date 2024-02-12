@@ -45,7 +45,7 @@
 
 use std::{iter, num::NonZeroUsize, ops};
 
-use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
+use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::circuit::AssignedCell;
 use halo2curves::{Coordinates, CurveAffine};
 use itertools::Itertools;
@@ -372,37 +372,7 @@ impl<const T: usize, C: CurveAffine> FoldRelaxedPlonkInstanceChip<T, C>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    pub fn new_default(
-        limb_width: NonZeroUsize,
-        limbs_count: NonZeroUsize,
-        num_challenges: usize,
-        num_witness: usize,
-        config: MainGateConfig<T>,
-    ) -> Self {
-        Self::from_relaxed(
-            RelaxedPlonkInstance {
-                W_commitments: vec![C::default(); num_witness],
-                E_commitment: C::default(),
-                instance: vec![C::ScalarExt::ZERO, C::ScalarExt::ZERO],
-                challenges: vec![C::ScalarExt::default(); num_challenges],
-                u: C::Scalar::ZERO,
-            },
-            limb_width,
-            limbs_count,
-            config,
-        )
-    }
-
-    pub fn from_instance(
-        plonk_instance: PlonkInstance<C>,
-        limb_width: NonZeroUsize,
-        limbs_count: NonZeroUsize,
-        config: MainGateConfig<T>,
-    ) -> Self {
-        Self::from_relaxed(plonk_instance.to_relax(), limb_width, limbs_count, config)
-    }
-
-    pub fn from_relaxed(
+    pub fn new(
         relaxed: RelaxedPlonkInstance<C>,
         limb_width: NonZeroUsize,
         limbs_count: NonZeroUsize,
@@ -1068,18 +1038,17 @@ pub struct FoldResult<C: CurveAffine> {
 
 #[cfg(test)]
 mod tests {
-    use crate::poseidon::Spec;
     use bitter::{BitReader, LittleEndianReader};
+    use ff::Field;
     use halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter, Value};
     use halo2curves::{bn256::G1Affine as C1, CurveAffine};
-    use rand::rngs::ThreadRng;
-    use rand::Rng;
+    use rand::{rngs::ThreadRng, Rng};
 
     use crate::{
         commitment::CommitmentKey,
         constants::MAX_BITS,
         nifs::vanilla::VanillaFS,
-        poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait},
+        poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
         table::TableData,
     };
 
@@ -1183,7 +1152,7 @@ mod tests {
 
         let (mut td, config) = get_table_data();
 
-        let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::from_relaxed(
+        let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new(
             relaxed.clone(),
             LIMB_WIDTH,
             LIMBS_COUNT,
@@ -1342,11 +1311,10 @@ mod tests {
 
         let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, 0);
 
-        let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new_default(
+        let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new(
+            RelaxedPlonkInstance::new(0, 0, 0),
             LIMB_WIDTH,
             LIMBS_COUNT,
-            0,
-            0,
             config.clone(),
         );
 
@@ -1730,7 +1698,7 @@ mod tests {
                     |region| {
                         let mut region = RegionCtx::new(region, 0);
 
-                        let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::from_relaxed(
+                        let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new(
                             relaxed.clone(),
                             LIMB_WIDTH,
                             LIMBS_COUNT,
