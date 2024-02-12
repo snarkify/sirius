@@ -88,6 +88,10 @@ pub trait Eval<F: PrimeField> {
                             let column_index = mono.index_to_poly[i].clone();
                             if let Some(vn) = evals.get(&(column_index.clone(), *exp)) {
                                 Ok(*vn)
+                            } else if let Some(v1) = evals.get(&(column_index.clone(), 1)) {
+                                let vn = v1.pow([*exp as u64, 0, 0, 0]);
+                                evals.insert((column_index.clone(), *exp), vn);
+                                Ok(vn)
                             } else {
                                 let v1 = match column_index {
                                     // evaluation for challenge variable
@@ -113,17 +117,20 @@ pub trait Eval<F: PrimeField> {
                                         self.eval_column_var(row as usize, column_index)
                                     }
                                 }?;
+                                evals
+                                    .entry((column_index.clone(), 1))
+                                    .or_insert(v1.pow([1, 0, 0, 0]));
                                 evals.entry((column_index.clone(), *exp)).or_insert(v1.pow([
                                     *exp as u64,
                                     0,
                                     0,
                                     0,
                                 ]));
-                                for i in 1..poly.degree() {
-                                    evals
-                                        .entry((column_index.clone(), i))
-                                        .or_insert(v1.pow([i as u64, 0, 0, 0]));
-                                }
+                                //                                for i in 1..(poly.degree()+1) {
+                                //                                    evals
+                                //                                        .entry((column_index.clone(), i))
+                                //                                        .or_insert(v1.pow([i as u64, 0, 0, 0]));
+                                //                                }
                                 Ok(*evals.get(&(column_index, *exp)).unwrap())
                             }
                         }
