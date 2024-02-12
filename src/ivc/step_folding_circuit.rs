@@ -194,20 +194,22 @@ where
             },
         )?;
 
-        // Synthesize the circuit for the base case and get the new running instance
-        let U_new_base = self.synthesize_step_base_case(
-            layouter,
-            self.input.step_pp,
-            &self.input.U,
+        let chip = FoldRelaxedPlonkInstanceChip::new(
+            self.input.U.clone(),
+            self.input.step_pp.limb_width,
+            self.input.step_pp.limbs_count,
             config.main_gate_config.clone(),
-        )?;
+        );
+
+        // Synthesize the circuit for the base case and get the new running instance
+        let U_new_base = self.synthesize_step_base_case(layouter, &chip)?;
 
         // Synthesize the circuit for the non-base case and get the new running
         // instance along with a boolean indicating if all checks have passed
         let FoldResult {
             assigned_input: assigned_input_witness,
             assigned_result_of_fold: U_new_non_base,
-        } = self.synthesize_step_non_base_case(&config, layouter, &self.input)?;
+        } = self.synthesize_step_non_base_case(&config, layouter, &self.input, &chip)?;
 
         let (assigned_next_step_i, assigned_new_U, assigned_input) = layouter.assign_region(
             || "generate input",
@@ -325,21 +327,11 @@ where
     fn synthesize_step_base_case(
         &self,
         layouter: &mut impl Layouter<C::Base>,
-        public_params: &StepParams<C::Base, RO>,
-        U: &RelaxedPlonkInstance<C>,
-        config: MainGateConfig<T>,
+        chip: &FoldRelaxedPlonkInstanceChip<T, C>,
     ) -> Result<AssignedRelaxedPlonkInstance<C>, SynthesisError> {
         let Unew_base = layouter.assign_region(
             || "synthesize_step_base_case",
-            move |region| {
-                Ok(FoldRelaxedPlonkInstanceChip::new(
-                    U.clone(),
-                    public_params.limb_width,
-                    public_params.limbs_count,
-                    config.clone(),
-                )
-                .assign_current_relaxed(&mut RegionCtx::new(region, 0))?)
-            },
+            move |region| Ok(chip.assign_current_relaxed(&mut RegionCtx::new(region, 0))?),
         )?;
 
         Ok(Unew_base)
@@ -350,9 +342,9 @@ where
         config: &StepConfig<ARITY, C::Base, SC, T>,
         layouter: &mut impl Layouter<C::Base>,
         input: &StepInputs<ARITY, C, RO>,
+        chip: &FoldRelaxedPlonkInstanceChip<T, C>,
     ) -> Result<FoldResult<C>, SynthesisError> {
         let StepInputs {
-            U,
             u,
             cross_term_commits,
             public_params_hash,
@@ -362,13 +354,6 @@ where
         Ok(layouter.assign_region(
             || "synthesize_step_non_base_case",
             move |region| {
-                let chip = FoldRelaxedPlonkInstanceChip::new(
-                    U.clone(),
-                    input.step_pp.limb_width,
-                    input.step_pp.limbs_count,
-                    config.main_gate_config.clone(),
-                );
-
                 let ro_circuit = RO::new(
                     config.main_gate_config.clone(),
                     input.step_pp.ro_constant.clone(),

@@ -65,7 +65,6 @@ use crate::{
         AdviceCyclicAssignor, AssignedBit, AssignedValue, FixedCyclicAssignor, MainGate,
         MainGateConfig, RegionCtx, WrapValue,
     },
-    nifs::vanilla::CrossTermCommits,
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
     util::{self, CellsValuesView},
@@ -654,12 +653,12 @@ where
 
     // TODO #32 rustdoc
     pub fn fold(
-        self,
+        &self,
         region: &mut RegionCtx<C::Base>,
         ro_circuit: impl ROCircuitTrait<C::Base>,
         public_params_hash: &C,
         input_plonk: &PlonkInstance<C>,
-        cross_term_commits: &CrossTermCommits<C>,
+        cross_term_commits: &[C],
     ) -> Result<FoldResult<C>, Error> {
         let w = self.assign_witness_with_challenge(
             region,
@@ -825,7 +824,7 @@ where
         mut ro_circuit: impl ROCircuitTrait<C::Base>,
         public_params_hash: &C,
         input_plonk: &PlonkInstance<C>,
-        cross_term_commits: &CrossTermCommits<C>,
+        cross_term_commits: &[C],
     ) -> Result<AssignedWitness<C>, Error> {
         let mut advice_columns_assigner = self.config.advice_cycle_assigner();
 
@@ -1743,7 +1742,7 @@ mod tests {
         pp_hash: C1,
         relaxed: &RelaxedPlonkInstance<C1>,
         input: &PlonkInstance<C1>,
-        cross_term_commits: &CrossTermCommits<C1>,
+        cross_term_commits: &[C1],
     ) -> ScalarExt {
         const K: usize = 5;
 
