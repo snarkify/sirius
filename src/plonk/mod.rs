@@ -365,6 +365,11 @@ impl<F: PrimeField> PlonkStructure<F> {
             true
         }
     }
+
+    pub fn get_degree_for_folding(&self) -> usize {
+        let offset = self.num_non_fold_vars();
+        self.poly.degree_for_folding(offset)
+    }
 }
 
 impl<C: CurveAffine> PlonkInstance<C> {
