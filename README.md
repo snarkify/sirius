@@ -32,14 +32,14 @@ The `Sirius` folding framework is designed with a three-tiered architecture.
 # Roadmap
 - [x] 2023Q4 - [halo2](https://github.com/privacy-scaling-explorations/halo2) frontend support
 - [x] 2023Q4 - folding scheme for plonkish custom gates
-- [ ] 2023Q4 - folding scheme for lookup arguments
-- [ ] 2023Q4 - IVC circuit
-- [ ] 2024Q1 - high-degree gate optimization from [Protostar](https://eprint.iacr.org/2023/620)
-- [ ] 2024Q1 - Benchmarks
+- [x] 2023Q4 - folding scheme for lookup arguments
+- [ ] 2024Q1 - IVC circuit
+- [ ] 2024Q1 - IVC Benchmarks
 - [ ] 2024Q1 - [Snarkify Cloud](https://cloud.snarkify.io/) integration and GPU acceleration
-- [ ] 2024Q2 - IOP + PCS SNARK support ([Spartan](https://eprint.iacr.org/2019/550) / [Hyperplonk](https://eprint.iacr.org/2022/1355))
-- [ ] 2024Q3 - on-chain verifier support
-- [ ] 2024Q3 - non-uniform circuit folding
+- [ ] 2024Q2 - Agg circuit
+- [ ] 2024Q2 - high-degree gates optimization from [Protogalaxy](https://eprint.iacr.org/2023/1106)
+- [ ] 2024Q3 - IOP + PCS SNARK support ([Spartan](https://eprint.iacr.org/2019/550) / [Hyperplonk](https://eprint.iacr.org/2022/1355))
+- [ ] 2024Q4 - on-chain verifier support
 
 _The estimated timeline is subject to change_.
 
