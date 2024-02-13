@@ -42,7 +42,7 @@ pub struct VanillaFS<C: CurveAffine> {
 }
 
 pub struct VanillaFSProverParam<C: CurveAffine> {
-    S: PlonkStructure<C::ScalarExt>,
+    pub(crate) S: PlonkStructure<C::ScalarExt>,
     /// digest of public parameter of IVC circuit
     pp_digest: C,
 }

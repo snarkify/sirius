@@ -82,7 +82,7 @@ where
     F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
     /// Argument for creating on-circuit & off-circuit versions of oracles
-    type Args: fmt::Debug + serde::Serialize;
+    type Args: fmt::Debug + serde::Serialize + Clone;
     type Config;
 
     type OffCircuit: ROTrait<F, Constants = Self::Args>;
