@@ -148,6 +148,7 @@ where
             primary_step_config,
             &mut SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?,
         )?;
+        primary_td.postpone_assembly();
 
         // Start secondary
         let (primary_off_circuit_pp, _primary_off_circuit_vp) =
@@ -185,6 +186,7 @@ where
             secondary_step_config,
             &mut SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
         )?;
+        secondary_td.postpone_assembly();
 
         let secondary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.secondary.ck,
