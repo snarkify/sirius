@@ -609,6 +609,17 @@ impl<F: PrimeField> MultiPolynomial<F> {
     pub fn arity(&self) -> usize {
         self.arity
     }
+
+    pub fn degree(&self) -> usize {
+        let mut deg = 0;
+        for monomial in self.monomials.iter() {
+            if deg < monomial.degree() {
+                deg = monomial.degree();
+            }
+        }
+        deg
+    }
+
     /// offset = num_fixed+num_selector, offset of variables to be folded
     pub fn degree_for_folding(&self, offset: usize) -> usize {
         let mut deg = 0;
