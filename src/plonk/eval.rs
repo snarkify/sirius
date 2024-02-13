@@ -71,63 +71,75 @@ pub trait Eval<F: PrimeField> {
         )
     }
 
-    /// evaluate polynomial relation on specific row
+    /// evaluate virtual multi-polynomial (i.e. custom gates, cross-term expressions etc) on specific row
+    /// to evaluate each monomial term of the form $c*x1[row]^{k1}*x2[row]^{k2}*\cdots$, we first lookup
+    /// the value of $x[row]$ from the EvaluationDomain, then calculate the value of monomial.
+    /// to speedup, we will save the x and x^k in a HashMap
     fn eval(&self, poly: &MultiPolynomial<F>, row: usize) -> Result<F, Error> {
-        let mut evals: HashMap<(ColumnIndex, usize), F> =
-            HashMap::with_capacity(poly.degree() * poly.arity());
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        struct Index<'l> {
+            column_index: &'l ColumnIndex,
+            exp: &'l usize,
+        }
+        let mut evals = HashMap::<Index<'_>, _>::with_capacity(poly.degree() * poly.arity());
+
         let row_size = self.row_size() as i32;
         poly.monomials
             .iter()
             .map(|mono| {
-                (0..mono.arity)
+                mono.index_to_poly
+                    .iter()
+                    .take(mono.arity)
                     .zip(mono.exponents.iter())
-                    .map(|(i, exp)| {
+                    .map(|(column_index, exp)| {
                         if *exp == 0 {
-                            Ok(F::ONE)
+                            return Ok(F::ONE);
+                        }
+                        if let Some(vn) = evals.get(&Index { column_index, exp }) {
+                            Ok(*vn)
+                        } else if let Some(v1) = evals.get(&Index {
+                            column_index,
+                            exp: &1,
+                        }) {
+                            let vn = v1.pow([*exp as u64, 0, 0, 0]);
+                            evals.insert(Index { column_index, exp }, vn);
+                            Ok(vn)
                         } else {
-                            let column_index = mono.index_to_poly[i].clone();
-                            if let Some(vn) = evals.get(&(column_index.clone(), *exp)) {
-                                Ok(*vn)
-                            } else if let Some(v1) = evals.get(&(column_index.clone(), 1)) {
-                                let vn = v1.pow([*exp as u64, 0, 0, 0]);
-                                evals.insert((column_index.clone(), *exp), vn);
-                                Ok(vn)
-                            } else {
-                                let v1 = match column_index {
-                                    // evaluation for challenge variable
-                                    ColumnIndex::Challenge { column_index } => {
-                                        self.eval_challenge(column_index)
-                                    }
-                                    // evaluation for column polynomial variable
-                                    ColumnIndex::Polynominal {
-                                        rotation,
-                                        column_index,
-                                    } => {
-                                        let rotation_plus_row = rotation + (row as i32);
-                                        // TODO: double check how halo2 handle
-                                        // (1): row+rot < 0
-                                        // (2): row+rot >= row_size = 2^K
-                                        let row = if rotation_plus_row < 0 {
-                                            rotation_plus_row + row_size
-                                        } else if rotation_plus_row >= row_size {
-                                            rotation_plus_row - row_size
-                                        } else {
-                                            rotation_plus_row
-                                        };
-                                        self.eval_column_var(row as usize, column_index)
-                                    }
-                                }?;
-                                evals
-                                    .entry((column_index.clone(), 1))
-                                    .or_insert(v1.pow([1, 0, 0, 0]));
-                                evals.entry((column_index.clone(), *exp)).or_insert(v1.pow([
-                                    *exp as u64,
-                                    0,
-                                    0,
-                                    0,
-                                ]));
-                                Ok(*evals.get(&(column_index, *exp)).unwrap())
-                            }
+                            let v1 = match column_index {
+                                // evaluation for challenge variable
+                                ColumnIndex::Challenge { column_index } => {
+                                    self.eval_challenge(*column_index)
+                                }
+                                // evaluation for column polynomial variable
+                                ColumnIndex::Polynominal {
+                                    rotation,
+                                    column_index,
+                                } => {
+                                    let rotation_plus_row = rotation + (row as i32);
+                                    // TODO: double check how halo2 handle
+                                    // (1): row+rot < 0
+                                    // (2): row+rot >= row_size = 2^K
+                                    let row = if rotation_plus_row < 0 {
+                                        rotation_plus_row + row_size
+                                    } else if rotation_plus_row >= row_size {
+                                        rotation_plus_row - row_size
+                                    } else {
+                                        rotation_plus_row
+                                    };
+                                    self.eval_column_var(row as usize, *column_index)
+                                }
+                            }?;
+
+                            evals
+                                .entry(Index {
+                                    column_index,
+                                    exp: &1,
+                                })
+                                .or_insert_with(|| v1.pow([1, 0, 0, 0]));
+
+                            Ok(*evals
+                                .entry(Index { column_index, exp })
+                                .or_insert_with(|| v1.pow([*exp as u64, 0, 0, 0])))
                         }
                     })
                     .try_fold(
