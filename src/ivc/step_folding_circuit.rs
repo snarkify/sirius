@@ -220,6 +220,49 @@ where
         // Synthesize the circuit for the base case and get the new running instance
         let U_new_base = w.assigned_relaxed.clone();
 
+        let (assigned_step, assigned_next_step) = layouter.assign_region(
+            || "generate input",
+            |region| {
+                let mut region = RegionCtx::new(region, 0);
+                let gate = MainGate::new(config.main_gate_config.clone());
+
+                let assigned_step = region.assign_advice(
+                    || "step",
+                    config.main_gate_config.input,
+                    Value::known(self.input.step),
+                )?;
+
+                let assigned_next_step =
+                    gate.add_with_const(&mut region, &assigned_step, C::Base::ONE)?;
+
+                Ok((assigned_step, assigned_next_step))
+            },
+        )?;
+
+        layouter.assign_region(
+            || "generate input hash",
+            |region| {
+                let mut ctx = RegionCtx::new(region, 0);
+
+                let bits = RO::new(
+                    config.main_gate_config.clone(),
+                    self.input.step_pp.ro_constant.clone(),
+                )
+                .absorb_point(WrapValue::from_assigned_point(&w.public_params_hash))
+                .absorb_base(WrapValue::Assigned(assigned_step.clone()))
+                .absorb_iter(assigned_z_0.iter())
+                .absorb_iter(assigned_z_i.iter().cloned())
+                .absorb_iter(w.assigned_relaxed.iter_wrap_values())
+                .squeeze_n_bits(&mut ctx, NUM_CHALLENGE_BITS)?;
+
+                let gate = MainGate::new(config.main_gate_config.clone());
+                let expected_X0 = gate.le_bits_to_num(&mut ctx, &bits)?;
+                ctx.constrain_equal(expected_X0.cell(), w.input_instance[0].0.cell())?;
+
+                Ok(())
+            },
+        )?;
+
         // Synthesize the circuit for the non-base case and get the new running
         // instance along with a boolean indicating if all checks have passed
         let FoldResult {
@@ -230,22 +273,14 @@ where
             |region| Ok(chip.fold(&mut RegionCtx::new(region, 0), w.clone(), r.clone())?),
         )?;
 
-        let (assigned_next_step_i, assigned_new_U, assigned_input) = layouter.assign_region(
+        let (assigned_new_U, assigned_input) = layouter.assign_region(
             || "generate input",
             |region| {
                 let mut region = RegionCtx::new(region, 0);
                 let gate = MainGate::new(config.main_gate_config.clone());
 
-                let assigned_step_i = region.assign_advice(
-                    || "step",
-                    config.main_gate_config.input,
-                    Value::known(self.input.step),
-                )?;
-
-                let next_step_i =
-                    gate.add_with_const(&mut region, &assigned_step_i, C::Base::ONE)?;
-
-                let assigned_is_zero_step = gate.is_zero_term(&mut region, assigned_step_i)?;
+                let assigned_is_zero_step =
+                    gate.is_zero_term(&mut region, assigned_step.clone())?;
 
                 let new_U = AssignedRelaxedPlonkInstance::<C>::conditional_select(
                     &mut region,
@@ -265,7 +300,7 @@ where
                     .try_into()
                     .unwrap();
 
-                Ok((next_step_i, new_U, assigned_input))
+                Ok((new_U, assigned_input))
             },
         )?;
 
@@ -274,7 +309,7 @@ where
                 .synthesize_step(config.step_config, layouter, &assigned_input)?;
 
         let output_hash = layouter.assign_region(
-            || "generate input",
+            || "generate output hash",
             |region| {
                 let mut ctx = RegionCtx::new(region, 0);
 
@@ -285,7 +320,7 @@ where
                 .absorb_point(WrapValue::from_assigned_point(
                     &assigned_input_witness.public_params_hash,
                 ))
-                .absorb_base(WrapValue::Assigned(assigned_next_step_i.clone()))
+                .absorb_base(WrapValue::Assigned(assigned_next_step.clone()))
                 .absorb_iter(assigned_z_0.iter())
                 .absorb_iter(z_output.iter().cloned())
                 .absorb_iter(assigned_new_U.iter_wrap_values())
