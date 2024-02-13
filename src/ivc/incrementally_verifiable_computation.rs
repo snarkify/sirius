@@ -97,12 +97,13 @@ where
             [C1::Scalar::ZERO, C1::Scalar::ZERO],
         );
 
-        // Prepare secondary constraint system for take some metadata for zero round of primary
-        // circuit
+        // Prepare secondary constraint system for folding
+        // & for take some metadata for zero round of primary circuit
         let (mut secondary_td, secondary_step_config) = Self::prepare_secondary_td::<T, RP2>(
             pp.secondary.k_table_size,
             [C2::Scalar::ZERO, C2::Scalar::ZERO],
         );
+        // For pp digest & for cross term commits lenght
         let pre_round_secondary_ps = secondary_td.plonk_structure().unwrap();
 
         let secondary_cross_term_commits = vec![
@@ -112,7 +113,7 @@ where
                 .saturating_sub(1)
         ];
 
-        // Not use `PublicParams::digest` for reuse calculated before plonk structure
+        // Not use `PublicParams::digest` for re-use calculated before plonk structures
         let pp_wrapper = public_params::PublicParamsDigestWrapper::<'_, C1, C2, RP1, RP2> {
             primary_plonk_struct: primary_td.plonk_structure().unwrap(),
             secondary_plonk_struct: pre_round_secondary_ps,
@@ -122,13 +123,11 @@ where
         let primary_public_params_hash = pp_wrapper.digest().map_err(Error::WhileHash)?;
         let secondary_public_params_hash = pp_wrapper.digest().map_err(Error::WhileHash)?;
 
-        let (secondary_pre_round_off_circuit_pp, _pre_round_secondary_off_circuit_vp) =
-            VanillaFS::setup_params(primary_public_params_hash, &secondary_td)?;
-
+        // For use as first version of `U` in primary circuit synthesize
         let pre_round_secondary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.secondary.ck,
             &secondary_td,
-            &secondary_pre_round_off_circuit_pp,
+            &VanillaFS::setup_params(primary_public_params_hash, &secondary_td)?.0,
             &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
         )?;
 
@@ -151,7 +150,6 @@ where
         )?;
 
         // Start secondary
-
         let (primary_off_circuit_pp, _primary_off_circuit_vp) =
             VanillaFS::setup_params(secondary_public_params_hash, &primary_td)?;
 
@@ -188,17 +186,15 @@ where
             &mut SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
         )?;
 
-        let (secondary_off_circuit_pp, _secondary_off_circuit_vp) =
-            VanillaFS::setup_params(primary_public_params_hash, &secondary_td)?;
-
         let secondary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.secondary.ck,
             &secondary_td,
-            &secondary_off_circuit_pp,
+            &VanillaFS::setup_params(primary_public_params_hash, &secondary_td)?.0,
             &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
         )?;
 
         Ok(Self {
+            step: 1,
             primary: StepCircuitContext {
                 step_circuit: primary,
                 z_0: primary_z_0,
@@ -211,7 +207,6 @@ where
                 z_i: secondary_z_output,
                 relaxed_trace: secondary_plonk_trace.to_relax(pp.secondary.k_table_size as usize),
             },
-            step: 1,
         })
     }
 
