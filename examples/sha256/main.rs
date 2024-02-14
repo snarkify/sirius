@@ -2,7 +2,7 @@
 
 use std::{array, fs, io, iter, marker::PhantomData, num::NonZeroUsize, path::Path};
 
-use ff::PrimeField;
+use ff::{FromUniformBytes, PrimeField};
 use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
@@ -273,7 +273,7 @@ const CIRCUIT_TABLE_SIZE1: usize = 22;
 const CIRCUIT_TABLE_SIZE2: usize = 22;
 const COMMITMENT_KEY_SIZE: usize = 27;
 
-impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
+impl<F: PrimeField + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
     type Config = Table16Config;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -323,6 +323,42 @@ impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
             values.as_ref(),
             &input,
         )?)
+    }
+
+    fn process_step(&self, z_i: &[F; ARITY]) -> [F; ARITY] {
+        use sha3::Digest;
+        let mut hasher = sha3::Sha3_256::default();
+
+        z_i.iter()
+            .map(|field_value| {
+                field_value
+                    .to_repr()
+                    .as_ref()
+                    .iter()
+                    .take(4)
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .cycle()
+            .take(BLOCK_SIZE)
+            .for_each(|b| hasher.update(b));
+
+        <[_; 32]>::from(hasher.finalize())
+            .chunks(4)
+            .map(|chunk| {
+                let input: [_; 64] = chunk
+                    .iter()
+                    .copied()
+                    .chain(iter::repeat(0))
+                    .take(64)
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap();
+                F::from_uniform_bytes(&input)
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
     }
 }
 

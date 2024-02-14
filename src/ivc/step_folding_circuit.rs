@@ -339,6 +339,10 @@ where
 
         Ok(z_output)
     }
+
+    fn process_step(&self, z_i: &[C::Base; ARITY]) -> [C::Base; ARITY] {
+        self.step_circuit.process_step(z_i)
+    }
 }
 
 impl<'link, const ARITY: usize, C, SC, RO, const T: usize>

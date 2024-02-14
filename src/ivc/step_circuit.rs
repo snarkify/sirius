@@ -81,12 +81,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     /// without using ConstraintSystem.
     ///
     /// By default, performs the step with a dummy `ConstraintSystem`
-    fn output(&self, z_i: &[F; ARITY]) -> [F; ARITY] {
-        todo!(
-            "Default impl with `Self::synthesize` wrap
-            and comment about when manual impl needed by {z_i:?}"
-        )
-    }
+    fn process_step(&self, z_i: &[F; ARITY]) -> [F; ARITY];
 }
 
 pub mod trivial {
@@ -145,6 +140,10 @@ pub mod trivial {
             z_i: &[AssignedCell<F, F>; ARITY],
         ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
             Ok(z_i.clone())
+        }
+
+        fn process_step(&self, z_i: &[F; ARITY]) -> [F; ARITY] {
+            *z_i
         }
     }
 }
