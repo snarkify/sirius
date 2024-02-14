@@ -123,7 +123,7 @@ impl<C: CurveAffine> VanillaFS<C> {
         ro_acc: &mut impl ROTrait<C::Base>,
         U1: &RelaxedPlonkInstance<C>,
         U2: &PlonkInstance<C>,
-        cross_term_commits: &CrossTermCommits<C>,
+        cross_term_commits: &[C],
     ) -> Result<<C as CurveAffine>::ScalarExt, Error> {
         ro_acc.absorb_point(pp_digest);
         U1.absorb_into(ro_acc);

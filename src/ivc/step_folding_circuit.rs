@@ -33,8 +33,6 @@ where
 {
     pub limb_width: NonZeroUsize,
     pub limbs_count: NonZeroUsize,
-    /// A boolean indicating if this is the primary circuit
-    pub is_primary_circuit: bool,
     pub ro_constant: RO::Args,
 }
 
@@ -47,7 +45,6 @@ where
         f.debug_struct("SynthesizeStepParams")
             .field("limb_width", &self.limb_width)
             .field("n_limbs", &self.limbs_count)
-            .field("is_primary_circuit", &self.is_primary_circuit)
             .field("ro_constant", &self.ro_constant)
             .finish()
     }
@@ -197,12 +194,73 @@ where
             },
         )?;
 
-        // Synthesize the circuit for the base case and get the new running instance
-        let U_new_base = self.synthesize_step_base_case(
-            layouter,
-            self.input.step_pp,
-            &self.input.u,
+        let chip = FoldRelaxedPlonkInstanceChip::new(
+            self.input.U.clone(),
+            self.input.step_pp.limb_width,
+            self.input.step_pp.limbs_count,
             config.main_gate_config.clone(),
+        );
+
+        let (w, r) = layouter.assign_region(
+            || "assign witness",
+            |region| {
+                Ok(chip.assign_witness_with_challenge(
+                    &mut RegionCtx::new(region, 0),
+                    &self.input.public_params_hash,
+                    &self.input.u,
+                    &self.input.cross_term_commits,
+                    RO::new(
+                        config.main_gate_config.clone(),
+                        self.input.step_pp.ro_constant.clone(),
+                    ),
+                )?)
+            },
+        )?;
+
+        // Synthesize the circuit for the base case and get the new running instance
+        let U_new_base = w.assigned_relaxed.clone();
+
+        let (assigned_step, assigned_next_step) = layouter.assign_region(
+            || "generate input",
+            |region| {
+                let mut region = RegionCtx::new(region, 0);
+                let gate = MainGate::new(config.main_gate_config.clone());
+
+                let assigned_step = region.assign_advice(
+                    || "step",
+                    config.main_gate_config.input,
+                    Value::known(self.input.step),
+                )?;
+
+                let assigned_next_step =
+                    gate.add_with_const(&mut region, &assigned_step, C::Base::ONE)?;
+
+                Ok((assigned_step, assigned_next_step))
+            },
+        )?;
+
+        layouter.assign_region(
+            || "generate input hash",
+            |region| {
+                let mut ctx = RegionCtx::new(region, 0);
+
+                let bits = RO::new(
+                    config.main_gate_config.clone(),
+                    self.input.step_pp.ro_constant.clone(),
+                )
+                .absorb_point(WrapValue::from_assigned_point(&w.public_params_hash))
+                .absorb_base(WrapValue::Assigned(assigned_step.clone()))
+                .absorb_iter(assigned_z_0.iter())
+                .absorb_iter(assigned_z_i.iter().cloned())
+                .absorb_iter(w.assigned_relaxed.iter_wrap_values())
+                .squeeze_n_bits(&mut ctx, NUM_CHALLENGE_BITS)?;
+
+                let gate = MainGate::new(config.main_gate_config.clone());
+                let expected_X0 = gate.le_bits_to_num(&mut ctx, &bits)?;
+                ctx.constrain_equal(expected_X0.cell(), w.input_instance[0].0.cell())?;
+
+                Ok(())
+            },
         )?;
 
         // Synthesize the circuit for the non-base case and get the new running
@@ -210,24 +268,19 @@ where
         let FoldResult {
             assigned_input: assigned_input_witness,
             assigned_result_of_fold: U_new_non_base,
-        } = self.synthesize_step_non_base_case(&config, layouter, &self.input)?;
+        } = layouter.assign_region(
+            || "synthesize_step_non_base_case",
+            |region| Ok(chip.fold(&mut RegionCtx::new(region, 0), w.clone(), r.clone())?),
+        )?;
 
-        let (assigned_next_step_i, assigned_new_U, assigned_input) = layouter.assign_region(
+        let (assigned_new_U, assigned_input) = layouter.assign_region(
             || "generate input",
             |region| {
                 let mut region = RegionCtx::new(region, 0);
                 let gate = MainGate::new(config.main_gate_config.clone());
 
-                let assigned_step_i = region.assign_advice(
-                    || "step",
-                    config.main_gate_config.input,
-                    Value::known(self.input.step),
-                )?;
-
-                let next_step_i =
-                    gate.add_with_const(&mut region, &assigned_step_i, C::Base::ONE)?;
-
-                let assigned_is_zero_step = gate.is_zero_term(&mut region, assigned_step_i)?;
+                let assigned_is_zero_step =
+                    gate.is_zero_term(&mut region, assigned_step.clone())?;
 
                 let new_U = AssignedRelaxedPlonkInstance::<C>::conditional_select(
                     &mut region,
@@ -247,7 +300,7 @@ where
                     .try_into()
                     .unwrap();
 
-                Ok((next_step_i, new_U, assigned_input))
+                Ok((new_U, assigned_input))
             },
         )?;
 
@@ -256,7 +309,7 @@ where
                 .synthesize_step(config.step_config, layouter, &assigned_input)?;
 
         let output_hash = layouter.assign_region(
-            || "generate input",
+            || "generate output hash",
             |region| {
                 let mut ctx = RegionCtx::new(region, 0);
 
@@ -267,7 +320,7 @@ where
                 .absorb_point(WrapValue::from_assigned_point(
                     &assigned_input_witness.public_params_hash,
                 ))
-                .absorb_base(WrapValue::Assigned(assigned_next_step_i.clone()))
+                .absorb_base(WrapValue::Assigned(assigned_next_step.clone()))
                 .absorb_iter(assigned_z_0.iter())
                 .absorb_iter(z_output.iter().cloned())
                 .absorb_iter(assigned_new_U.iter_wrap_values())
@@ -323,79 +376,5 @@ where
         )?;
 
         Ok(assigned_z_next.map(|cell| cell.value().unwrap().cloned().unwrap()))
-    }
-
-    fn synthesize_step_base_case(
-        &self,
-        layouter: &mut impl Layouter<C::Base>,
-        public_params: &StepParams<C::Base, RO>,
-        u: &PlonkInstance<C>,
-        config: MainGateConfig<T>,
-    ) -> Result<AssignedRelaxedPlonkInstance<C>, SynthesisError> {
-        let Unew_base = layouter.assign_region(
-            || "synthesize_step_base_case",
-            move |region| {
-                let chip = if public_params.is_primary_circuit {
-                    FoldRelaxedPlonkInstanceChip::new_default(
-                        public_params.limb_width,
-                        public_params.limbs_count,
-                        u.challenges.len(),
-                        u.W_commitments.len(),
-                        config.clone(),
-                    )
-                } else {
-                    FoldRelaxedPlonkInstanceChip::from_instance(
-                        u.clone(),
-                        public_params.limb_width,
-                        public_params.limbs_count,
-                        config.clone(),
-                    )
-                };
-
-                Ok(chip.assign_current_relaxed(&mut RegionCtx::new(region, 0))?)
-            },
-        )?;
-
-        Ok(Unew_base)
-    }
-
-    fn synthesize_step_non_base_case(
-        &self,
-        config: &StepConfig<ARITY, C::Base, SC, T>,
-        layouter: &mut impl Layouter<C::Base>,
-        input: &StepInputs<ARITY, C, RO>,
-    ) -> Result<FoldResult<C>, SynthesisError> {
-        let StepInputs {
-            U,
-            u,
-            cross_term_commits,
-            public_params_hash,
-            ..
-        } = input;
-
-        Ok(layouter.assign_region(
-            || "synthesize_step_non_base_case",
-            move |region| {
-                let chip = FoldRelaxedPlonkInstanceChip::from_relaxed(
-                    U.clone(),
-                    input.step_pp.limb_width,
-                    input.step_pp.limbs_count,
-                    config.main_gate_config.clone(),
-                );
-
-                let ro_circuit = RO::new(
-                    config.main_gate_config.clone(),
-                    input.step_pp.ro_constant.clone(),
-                );
-
-                Ok(chip.fold(
-                    &mut RegionCtx::new(region, 0),
-                    ro_circuit,
-                    public_params_hash,
-                    u,
-                    cross_term_commits,
-                )?)
-            },
-        )?)
     }
 }
