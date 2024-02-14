@@ -118,22 +118,26 @@ where
         }
     }
 
-    fn absorb_field(&mut self, base: F) {
+    fn absorb_field(&mut self, base: F) -> &mut Self {
         self.update(&[base]);
+        self
     }
 
-    fn absorb_point<C: CurveAffine<Base = F>>(&mut self, point: &C) {
+    fn absorb_point<C: CurveAffine<Base = F>>(&mut self, point: &C) -> &mut Self {
         let encoded = point.coordinates().map(|coordinates| {
             [coordinates.x(), coordinates.y()]
                 .into_iter()
                 .cloned()
                 .collect::<Vec<_>>()
         });
+
         if bool::from(encoded.is_some()) {
             self.update(&encoded.unwrap())
         } else {
             self.update(&[C::Base::ZERO, C::Base::ZERO]) // C is infinity
         }
+
+        self
     }
 
     fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {

@@ -25,10 +25,27 @@ pub trait ROTrait<F: PrimeField> {
     fn new(constants: Self::Constants) -> Self;
 
     /// Adds a base to the internal state
-    fn absorb_field(&mut self, base: F);
+    fn absorb_field(&mut self, base: F) -> &mut Self;
 
     /// Adds a point to the internal state
-    fn absorb_point<C: CurveAffine<Base = F>>(&mut self, p: &C);
+    fn absorb_point<C: CurveAffine<Base = F>>(&mut self, p: &C) -> &mut Self;
+
+    fn absorb_iter(&mut self, iter: impl Iterator<Item = F>) -> &mut Self {
+        iter.for_each(|val| {
+            self.absorb_field(val);
+        });
+        self
+    }
+
+    fn absorb_point_iter<'i, C: CurveAffine<Base = F>>(
+        &mut self,
+        iter: impl Iterator<Item = &'i C>,
+    ) -> &mut Self {
+        iter.for_each(|val| {
+            self.absorb_point(val);
+        });
+        self
+    }
 
     /// Returns a challenge by hashing the internal state
     fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar;
