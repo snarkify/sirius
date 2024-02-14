@@ -19,7 +19,8 @@ use crate::{
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx, WrapValue},
     plonk::{PlonkInstance, RelaxedPlonkInstance},
-    poseidon::ROCircuitTrait,
+    poseidon::{random_oracle::ROTrait, ROCircuitTrait, ROPair},
+    util,
 };
 
 use super::SimpleFloorPlanner;
@@ -354,6 +355,43 @@ where
     SC: StepCircuit<ARITY, C::Base> + Sized,
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
 {
+    pub fn calculate_consistency_hash<RP: ROPair<C::Base, OnCircuit = RO>>(
+        ro_constant: RP::Args,
+        pp_hash: &C,
+        step: usize,
+        z_0: [C::Base; ARITY],
+        z_i: [C::Base; ARITY],
+        U: &RelaxedPlonkInstance<C>,
+    ) -> C::Scalar {
+        let RelaxedPlonkInstance {
+            W_commitments,
+            E_commitment,
+            instance,
+            challenges, // TODO
+            u,          // TODO
+        } = &U;
+
+        RP::OffCircuit::new(ro_constant)
+            .absorb_point(pp_hash)
+            .absorb_field(C::Base::from_u128(step as u128))
+            .absorb_iter(z_0.iter().copied())
+            .absorb_iter(z_i.iter().copied())
+            .absorb_point_iter(W_commitments.iter())
+            .absorb_point(E_commitment)
+            .absorb_iter(
+                instance
+                    .iter()
+                    .map(|instance| util::fe_to_fe(instance).unwrap()),
+            )
+            .absorb_iter(
+                challenges
+                    .iter()
+                    .map(|challenge| util::fe_to_fe(challenge).unwrap()),
+            )
+            .absorb_field(util::fe_to_fe(u).unwrap())
+            .squeeze::<C>(NUM_CHALLENGE_BITS)
+    }
+
     pub fn synthesize(
         &self,
         config: StepConfig<ARITY, C::Base, SC, T>,

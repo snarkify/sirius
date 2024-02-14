@@ -15,10 +15,11 @@ use crate::{
     main_gate::MainGateConfig,
     nifs,
     nifs::{vanilla::VanillaFS, FoldingScheme},
-    plonk::RelaxedPlonkTrace,
+    plonk::{RelaxedPlonkInstance, RelaxedPlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
     table::TableData,
+    util,
 };
 
 pub use super::{
@@ -242,13 +243,58 @@ where
     }
 
     fn prepare_primary_td<const T: usize, RP1>(
-        k_table_size: u32,
-        instance: [C1::Scalar; 2],
+        pp_circuit: public_params::CircuitPublicParams<'_, A1, T, C1, RP1>,
+        pp_hash: &C2,
+        primary: &SC1,
+        step: usize,
+        z_0: [C1::Scalar; A1],
+        z_i: [C1::Scalar; A1],
+        prev_hash: C1::Scalar,
+        old_U: &RelaxedPlonkInstance<C2>,
+        new_U: &RelaxedPlonkInstance<C2>,
     ) -> (TableData<C1::Scalar>, StepConfig<A1, C1::Scalar, SC1, T>)
     where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
     {
-        let mut primary_td = TableData::new(k_table_size, instance.to_vec());
+        let expected_prev_hash: C1::Scalar =
+            util::fe_to_fe(&crate::ivc::step_folding_circuit::StepFoldingCircuit::<
+                '_,
+                A1,
+                C2,
+                SC1,
+                RP1::OnCircuit,
+                T,
+            >::calculate_consistency_hash::<RP1>(
+                pp_circuit.params.ro_constant,
+                &pp_hash,
+                step.saturating_sub(1),
+                z_0,
+                z_i,
+                old_U,
+            ))
+            .unwrap();
+
+        let next_hash: C1::Scalar =
+            util::fe_to_fe(&crate::ivc::step_folding_circuit::StepFoldingCircuit::<
+                '_,
+                A1,
+                C2,
+                SC1,
+                RP1::OnCircuit,
+                T,
+            >::calculate_consistency_hash::<RP1>(
+                pp_circuit.params.ro_constant,
+                &pp_hash,
+                step,
+                z_0,
+                primary.process_step(&z_i),
+                new_U,
+            ))
+            .unwrap();
+
+        let mut primary_td =
+            TableData::new(pp_circuit.k_table_size, vec![expected_prev_hash, next_hash]);
+
         let config = primary_td.prepare_assembly(
             <crate::ivc::step_folding_circuit::StepFoldingCircuit<
                 '_,
