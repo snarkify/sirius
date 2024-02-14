@@ -94,14 +94,14 @@ where
         // Prepare primary constraint system for folding
         let (mut primary_td, primary_step_config) = Self::prepare_primary_td::<T, RP1>(
             pp.primary.k_table_size,
-            [C1::Scalar::ZERO, C1::Scalar::ZERO],
+            [C1::Scalar::ZERO, C1::Scalar::ZERO], // TODO #154 #160
         );
 
         // Prepare secondary constraint system for folding
         // & for take some metadata for zero round of primary circuit
         let (mut secondary_td, secondary_step_config) = Self::prepare_secondary_td::<T, RP2>(
             pp.secondary.k_table_size,
-            [C2::Scalar::ZERO, C2::Scalar::ZERO],
+            [C2::Scalar::ZERO, C2::Scalar::ZERO], // TODO #154 #160
         );
         // For pp digest & for cross term commits lenght
         let pre_round_secondary_ps = secondary_td.plonk_structure().unwrap();
