@@ -225,12 +225,14 @@ mod tests {
         const R_P: usize = 3;
 
         type PH = PoseidonHash<<EpAffine as CurveAffine>::Base, T, RATE>;
-        let spec = Spec::<Fp, T, RATE>::new(R_F, R_P);
-        let mut poseidon = PH::new(spec);
-        poseidon.absorb_field_iter((0..5).map(|i| Fp::from(i as u64)));
-        let output = poseidon.squeeze::<EpAffine>(NonZeroUsize::new(128).unwrap());
-        // let out_hash = Fq::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();
-        let out_hash = Fq::from_str_vartime("277726250230731218669330566268314254439").unwrap();
-        assert_eq!(output, out_hash);
+
+        let output = PH::new(Spec::<Fp, T, RATE>::new(R_F, R_P))
+            .absorb_field_iter((0..5).map(|i| Fp::from(i as u64)))
+            .squeeze::<EpAffine>(NonZeroUsize::new(128).unwrap());
+
+        assert_eq!(
+            output,
+            Fq::from_str_vartime("277726250230731218669330566268314254439").unwrap()
+        );
     }
 }
