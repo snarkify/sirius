@@ -45,6 +45,8 @@ pub enum Error {
     Plonk(#[from] halo2_proofs::plonk::Error),
     #[error(transparent)]
     Step(#[from] step_circuit::SynthesisError),
+    #[error("IVC Param not match")]
+    IVCParamNotMatch,
     #[error("TODO")]
     WhileHash(io::Error),
     #[error("TODO")]
@@ -229,16 +231,26 @@ where
     pub fn verify<const T: usize, RP1, RP2>(
         &mut self,
         _pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
-        _steps_count: usize,
-        _z0_primary: [C1::Scalar; A1],
-        _z0_secondary: [C2::Scalar; A2],
+        num_steps: usize,
+        z0_primary: [C1::Scalar; A1],
+        z0_secondary: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
         RP1: ROPair<C1::Scalar>,
         RP2: ROPair<C2::Scalar>,
     {
-        // TODO #31
-        todo!("Logic at `RecursiveSNARK::verify`")
+        let is_step_zero = num_steps == 0;
+        let is_num_step_not_match = num_steps != self.step;
+        let is_inputs_match = self.primary.z_0 != z0_primary || self.secondary.z_0 != z0_secondary;
+        if is_step_zero || is_num_step_not_match || is_inputs_match {
+            return Err(Error::IVCParamNotMatch);
+        }
+
+        // check output hash
+
+        // check instance-witness pair satisfiability
+
+        Ok(())
     }
 
     fn prepare_primary_td<const T: usize, RP1>(

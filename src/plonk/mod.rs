@@ -42,7 +42,7 @@ pub mod permutation;
 pub mod util;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
-pub enum DeciderError {
+pub enum Error {
     #[error(transparent)]
     Sps(#[from] SpsError),
     #[error(transparent)]
@@ -221,7 +221,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         ro_nark: &mut RO,
         U: &PlonkInstance<C>,
         W: &PlonkWitness<F>,
-    ) -> Result<(), DeciderError>
+    ) -> Result<(), Error>
     where
         C: CurveAffine<ScalarExt = F>,
     {
@@ -253,12 +253,12 @@ impl<F: PrimeField> PlonkStructure<F> {
 
         match (res == 0, check_commitments == 0, is_h_equal_g) {
             (true, true, true) => Ok(()),
-            (false, _, _) => Err(DeciderError::EvaluationMismatch {
+            (false, _, _) => Err(Error::EvaluationMismatch {
                 mismatch_count: res,
                 total_row: nrow,
             }),
-            (_, _, false) => Err(DeciderError::LogDerivativeNotSat),
-            _ => Err(DeciderError::CommitmentMismatch),
+            (_, _, false) => Err(Error::LogDerivativeNotSat),
+            _ => Err(Error::CommitmentMismatch),
         }
     }
 
@@ -267,7 +267,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         ck: &CommitmentKey<C>,
         U: &RelaxedPlonkInstance<C>,
         W: &RelaxedPlonkWitness<F>,
-    ) -> Result<(), DeciderError>
+    ) -> Result<(), Error>
     where
         C: CurveAffine<ScalarExt = F>,
     {
@@ -304,12 +304,12 @@ impl<F: PrimeField> PlonkStructure<F> {
 
         match (res == 0, check_W_commitments == 0, is_E_equal, is_h_equal_g) {
             (true, true, true, true) => Ok(()),
-            (false, _, _, _) => Err(DeciderError::EvaluationMismatch {
+            (false, _, _, _) => Err(Error::EvaluationMismatch {
                 mismatch_count: res,
                 total_row: nrow,
             }),
-            (_, _, _, false) => Err(DeciderError::LogDerivativeNotSat),
-            _ => Err(DeciderError::CommitmentMismatch),
+            (_, _, _, false) => Err(Error::LogDerivativeNotSat),
+            _ => Err(Error::CommitmentMismatch),
         }
     }
 
@@ -318,7 +318,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         &self,
         U: &RelaxedPlonkInstance<C>,
         W: &RelaxedPlonkWitness<F>,
-    ) -> Result<(), DeciderError>
+    ) -> Result<(), Error>
     where
         C: CurveAffine<ScalarExt = F>,
     {
@@ -338,7 +338,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         if mismatch_count == 0 {
             Ok(())
         } else {
-            Err(DeciderError::PermCheckFail { mismatch_count })
+            Err(Error::PermCheckFail { mismatch_count })
         }
     }
 
