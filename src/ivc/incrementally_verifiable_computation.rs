@@ -1,4 +1,5 @@
 use std::io;
+use std::num::NonZeroUsize;
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
@@ -43,11 +44,15 @@ where
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    Plonk(#[from] halo2_proofs::plonk::Error),
+    Halo2(#[from] halo2_proofs::plonk::Error),
+    #[error(transparent)]
+    Plonk(#[from] crate::plonk::Error),
     #[error(transparent)]
     Step(#[from] step_circuit::SynthesisError),
-    #[error("IVC Param not match")]
-    IVCParamNotMatch,
+    #[error("number of steps is not match")]
+    NumStepNotMatch,
+    #[error("input hash not match")]
+    InputHashNotMatch,
     #[error("TODO")]
     WhileHash(io::Error),
     #[error("TODO")]
@@ -218,8 +223,8 @@ where
     pub fn prove_step<const T: usize, RP1, RP2>(
         &mut self,
         _pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
-        _z0_primary: [C1::Scalar; A1],
-        _z0_secondary: [C2::Scalar; A2],
+        _primary_z_0: [C1::Scalar; A1],
+        _secondary_z_0: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
         RP1: ROPair<C1::Scalar>,
@@ -232,26 +237,28 @@ where
     pub fn verify<const T: usize, RP1, RP2>(
         &mut self,
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
-        num_steps: usize,
-        z0_primary: [C1::Scalar; A1],
-        z0_secondary: [C2::Scalar; A2],
+        num_steps: NonZeroUsize,
+        primary_z_0: [C1::Scalar; A1],
+        secondary_z_0: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        let is_step_zero = num_steps == 0;
-        let is_num_step_not_match = num_steps != self.step;
-        let is_inputs_match = self.primary.z_0 != z0_primary || self.secondary.z_0 != z0_secondary;
-        if is_step_zero || is_num_step_not_match || is_inputs_match {
-            return Err(Error::IVCParamNotMatch);
+        if num_steps.get() != self.step {
+            return Err(Error::NumStepNotMatch);
+        }
+        if self.primary.z_0 != primary_z_0 || self.secondary.z_0 != secondary_z_0 {
+            return Err(Error::InputHashNotMatch);
         }
 
         // verify X0
         let ro1 = &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone());
-        ro1.absorb_point(&pp.digest::<C2>().unwrap());
-        ro1.absorb_field(C1::Scalar::from_u128(num_steps as u128));
-        z0_primary.iter().for_each(|val| {
+        // TODO: cache the result in IVC struct (?) so that we don't need to re-calculate it
+        let primary_hash = pp.digest::<C2>().map_err(Error::WhileHash)?;
+        ro1.absorb_point(&primary_hash);
+        ro1.absorb_field(C1::Scalar::from_u128(self.step as u128));
+        primary_z_0.iter().for_each(|val| {
             ro1.absorb_field(*val);
         });
         self.primary
@@ -265,9 +272,10 @@ where
 
         // verify X1
         let ro2 = &mut RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone());
-        ro2.absorb_point(&pp.digest::<C1>().unwrap());
-        ro2.absorb_field(C2::Scalar::from_u128(num_steps as u128));
-        z0_secondary.iter().for_each(|val| {
+        let secondary_hash = pp.digest::<C1>().map_err(Error::WhileHash)?;
+        ro2.absorb_point(&secondary_hash);
+        ro2.absorb_field(C2::Scalar::from_u128(self.step as u128));
+        secondary_z_0.iter().for_each(|val| {
             ro2.absorb_field(*val);
         });
         self.secondary
@@ -286,32 +294,24 @@ where
             [C1::Scalar::ZERO, C1::Scalar::ZERO],
         );
         let S1 = primary_td.plonk_structure().unwrap();
-        assert_eq!(
-            S1.is_sat_relaxed(
-                pp.primary.ck,
-                &self.primary.relaxed_trace.U,
-                &self.primary.relaxed_trace.W
-            )
-            .err(),
-            None
-        );
+        S1.is_sat_relaxed(
+            pp.primary.ck,
+            &self.primary.relaxed_trace.U,
+            &self.primary.relaxed_trace.W,
+        )?;
 
         let (secondary_td, _) = Self::prepare_secondary_td::<T, RP2>(
             pp.secondary.k_table_size,
             [C2::Scalar::ZERO, C2::Scalar::ZERO],
         );
         let S2 = secondary_td.plonk_structure().unwrap();
-        assert_eq!(
-            S2.is_sat_relaxed(
-                pp.secondary.ck,
-                &self.secondary.relaxed_trace.U,
-                &self.secondary.relaxed_trace.W
-            )
-            .err(),
-            None
-        );
+        S2.is_sat_relaxed(
+            pp.secondary.ck,
+            &self.secondary.relaxed_trace.U,
+            &self.secondary.relaxed_trace.W,
+        )?;
         // TODO: uncomment after adding secondary_trace in IVC
-        // assert_eq!(S2.is_sat(pp.secondary.ck, &self.secondary_trace.U, &self.secondary_trace.W).err(), None);
+        // S2.is_sat(pp.secondary.ck, &self.secondary_trace.U, &self.secondary_trace.W)?;
 
         Ok(())
     }
