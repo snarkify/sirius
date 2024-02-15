@@ -108,7 +108,7 @@ fn main() {
     info!("public params: {pp:?}");
 
     debug!("start ivc");
-    let _ivc = IVC::new(
+    let mut ivc = IVC::new(
         &pp,
         sc1,
         array::from_fn(|i| C1Scalar::from_u128(i as u128)),
@@ -116,6 +116,8 @@ fn main() {
         array::from_fn(|i| C2Scalar::from_u128(i as u128)),
     )
     .unwrap();
+
+    ivc.fold_step(&pp).unwrap();
 
     debug!("base case ready");
 }

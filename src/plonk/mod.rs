@@ -143,6 +143,7 @@ pub struct RelaxedPlonkTrace<C: CurveAffine> {
 }
 
 // TODO #31 docs
+#[derive(Debug, Clone)]
 pub struct PlonkTrace<C: CurveAffine> {
     pub u: PlonkInstance<C>,
     pub w: PlonkWitness<C::Scalar>,

@@ -15,9 +15,8 @@ use crate::{
         step_folding_circuit::{StepConfig, StepFoldingCircuit, StepInputs},
     },
     main_gate::MainGateConfig,
-    nifs,
-    nifs::{vanilla::VanillaFS, FoldingScheme},
-    plonk::RelaxedPlonkTrace,
+    nifs::{self, vanilla::VanillaFS, FoldingScheme},
+    plonk::{PlonkTrace, RelaxedPlonkTrace},
     poseidon::{random_oracle::ROTrait, AbsorbInRO, ROPair},
     sps,
     table::TableData,
@@ -75,6 +74,9 @@ where
     secondary: StepCircuitContext<A2, C2, SC2>,
 
     step: usize,
+    secondary_nifs_pp: <nifs::vanilla::VanillaFS<C2> as FoldingScheme<C2>>::ProverParam,
+    primary_nifs_pp: <nifs::vanilla::VanillaFS<C1> as FoldingScheme<C1>>::ProverParam,
+    secondary_trace: PlonkTrace<C2>,
 }
 
 impl<const A1: usize, const A2: usize, C1, C2, SC1, SC2> IVC<A1, A2, C1, C2, SC1, SC2>
@@ -159,23 +161,18 @@ where
         primary_td.postpone_assembly();
 
         // Start secondary
-        let (primary_off_circuit_pp, _primary_off_circuit_vp) =
+        let (primary_nifs_pp, _primary_off_circuit_vp) =
             VanillaFS::setup_params(secondary_public_params_hash, &primary_td)?;
 
         let primary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.primary.ck,
             &primary_td,
-            &primary_off_circuit_pp,
+            &primary_nifs_pp,
             &mut RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone()),
         )?;
 
-        let primary_cross_term_commits = vec![
-            C1::identity();
-            primary_off_circuit_pp
-                .S
-                .get_degree_for_folding()
-                .saturating_sub(1)
-        ];
+        let primary_cross_term_commits =
+            vec![C1::identity(); primary_nifs_pp.S.get_degree_for_folding().saturating_sub(1)];
 
         let secondary_z_output = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
             step_circuit: &secondary,
@@ -196,15 +193,20 @@ where
         )?;
         secondary_td.postpone_assembly();
 
+        let (secondary_nifs_pp, _nifs_vp) =
+            VanillaFS::setup_params(primary_public_params_hash, &secondary_td)?;
         let secondary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.secondary.ck,
             &secondary_td,
-            &VanillaFS::setup_params(primary_public_params_hash, &secondary_td)?.0,
+            &secondary_nifs_pp,
             &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
         )?;
 
         Ok(Self {
             step: 1,
+            secondary_nifs_pp,
+            primary_nifs_pp,
+            secondary_trace: secondary_plonk_trace.clone(),
             primary: StepCircuitContext {
                 step_circuit: primary,
                 z_0: primary_z_0,
@@ -220,18 +222,99 @@ where
         })
     }
 
-    pub fn prove_step<const T: usize, RP1, RP2>(
+    pub fn fold_step<const T: usize, RP1, RP2>(
         &mut self,
-        _pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
-        _primary_z_0: [C1::Scalar; A1],
-        _secondary_z_0: [C2::Scalar; A2],
+        pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
     ) -> Result<(), Error>
     where
-        RP1: ROPair<C1::Scalar>,
-        RP2: ROPair<C2::Scalar>,
+        RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
+        RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        // TODO #31
-        todo!("Logic at `RecursiveSNARK::prove_step`")
+        // === Fold secondary by primary ===
+
+        let (secondary_new_trace, secondary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
+            pp.secondary.ck,
+            &self.secondary_nifs_pp,
+            &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
+            &self.secondary.relaxed_trace,
+            &self.secondary_trace,
+        )?;
+
+        // Prepare primary constraint system for folding
+        let (mut primary_td, primary_step_config) = Self::prepare_primary_td::<T, RP1>(
+            pp.primary.k_table_size,
+            [C1::Scalar::ZERO, C1::Scalar::ZERO], // TODO #154 #160
+        );
+        let primary_step_folding_circuit = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
+            step_circuit: &self.primary.step_circuit,
+            input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
+                step: C2::Base::from_u128(self.step as u128),
+                step_pp: &pp.primary.params,
+                public_params_hash: pp.digest().map_err(Error::WhileHash)?,
+                z_0: self.primary.z_0,
+                z_i: self.primary.z_i,
+                U: secondary_new_trace.U,
+                u: self.secondary_trace.u.clone(),
+                cross_term_commits: secondary_cross_term_commits,
+            },
+        };
+        self.primary.z_i = primary_step_folding_circuit.synthesize(
+            primary_step_config,
+            &mut SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?,
+        )?;
+        primary_td.postpone_assembly();
+
+        let primary_plonk_trace = VanillaFS::generate_plonk_trace(
+            pp.primary.ck,
+            &primary_td,
+            &self.primary_nifs_pp,
+            &mut RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone()),
+        )?;
+
+        let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
+            pp.primary.ck,
+            &self.primary_nifs_pp,
+            &mut RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone()),
+            &self.primary.relaxed_trace,
+            &primary_plonk_trace,
+        )?;
+
+        // === Fold primary by secondary ===
+
+        // Prepare secondary constraint system for folding
+        let (mut secondary_td, secondary_step_config) = Self::prepare_secondary_td::<T, RP2>(
+            pp.secondary.k_table_size,
+            [C2::Scalar::ZERO, C2::Scalar::ZERO], // TODO #154 #160
+        );
+
+        let secondary_step_folding_circuit =
+            StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
+                step_circuit: &self.secondary.step_circuit,
+                input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
+                    step: C1::Base::from_u128(self.step as u128),
+                    step_pp: &pp.secondary.params,
+                    public_params_hash: pp.digest().map_err(Error::WhileHash)?,
+                    z_0: self.secondary.z_0,
+                    z_i: self.secondary.z_i,
+                    U: primary_new_trace.U,
+                    u: primary_plonk_trace.u.clone(),
+                    cross_term_commits: primary_cross_term_commits,
+                },
+            };
+        self.secondary.z_i = secondary_step_folding_circuit.synthesize(
+            secondary_step_config,
+            &mut SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
+        )?;
+        secondary_td.postpone_assembly();
+
+        self.secondary_trace = VanillaFS::generate_plonk_trace(
+            pp.secondary.ck,
+            &secondary_td,
+            &self.secondary_nifs_pp,
+            &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
+        )?;
+
+        Ok(())
     }
 
     pub fn verify<const T: usize, RP1, RP2>(
@@ -260,10 +343,9 @@ where
         primary_z_0.iter().for_each(|val| {
             ro1.absorb_field(*val);
         });
-        self.primary
-            .z_i
-            .iter()
-            .for_each(|val| ro1.absorb_field(*val));
+        self.primary.z_i.iter().for_each(|val| {
+            ro1.absorb_field(*val);
+        });
         self.secondary.relaxed_trace.U.absorb_into(ro1);
         let _hash_primary = ro1.squeeze::<C2>(NUM_CHALLENGE_BITS);
         // TODO: uncomment after adding secondary_trace field in IVC
@@ -277,10 +359,9 @@ where
         secondary_z_0.iter().for_each(|val| {
             ro2.absorb_field(*val);
         });
-        self.secondary
-            .z_i
-            .iter()
-            .for_each(|val| ro2.absorb_field(*val));
+        self.secondary.z_i.iter().for_each(|val| {
+            ro2.absorb_field(*val);
+        });
         self.primary.relaxed_trace.U.absorb_into(ro2);
         let _hash_secondary = ro2.squeeze::<C1>(NUM_CHALLENGE_BITS);
         // TODO: uncomment after adding secondary_trace field in IVC
