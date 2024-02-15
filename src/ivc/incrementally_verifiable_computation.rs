@@ -230,8 +230,9 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        // === Fold secondary by primary ===
+        debug!("start fold step with folding 'secondary' by 'primary'");
 
+        debug!("start prove secondary trace");
         let (secondary_new_trace, secondary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
             pp.secondary.ck,
             &self.secondary_nifs_pp,
@@ -240,6 +241,7 @@ where
             &self.secondary_trace,
         )?;
 
+        debug!("prepare primary td");
         // Prepare primary constraint system for folding
         let (mut primary_td, primary_step_config) = Self::prepare_primary_td::<T, RP1>(
             pp.primary.k_table_size,
@@ -258,12 +260,15 @@ where
                 cross_term_commits: secondary_cross_term_commits,
             },
         };
+        debug!("start synthesize of 'step_folding_circuit' for primary");
         self.primary.z_i = primary_step_folding_circuit.synthesize(
             primary_step_config,
             &mut SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?,
         )?;
+        debug!("start primary td postpone");
         primary_td.postpone_assembly();
 
+        debug!("start generate primary plonk trace");
         let primary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.primary.ck,
             &primary_td,
@@ -271,6 +276,7 @@ where
             &mut RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone()),
         )?;
 
+        debug!("start prove primary trace");
         let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
             pp.primary.ck,
             &self.primary_nifs_pp,
@@ -279,9 +285,9 @@ where
             &primary_plonk_trace,
         )?;
 
-        // === Fold primary by secondary ===
+        debug!("start fold step with folding 'primary' by 'secondary'");
 
-        // Prepare secondary constraint system for folding
+        debug!("prepare secondary td");
         let (mut secondary_td, secondary_step_config) = Self::prepare_secondary_td::<T, RP2>(
             pp.secondary.k_table_size,
             [C2::Scalar::ZERO, C2::Scalar::ZERO], // TODO #154 #160
@@ -301,12 +307,15 @@ where
                     cross_term_commits: primary_cross_term_commits,
                 },
             };
+        debug!("start synthesize of 'step_folding_circuit' for secondary");
         self.secondary.z_i = secondary_step_folding_circuit.synthesize(
             secondary_step_config,
             &mut SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
         )?;
+        debug!("start secondary td postpone");
         secondary_td.postpone_assembly();
 
+        debug!("start generate secondary plonk trace");
         self.secondary_trace = VanillaFS::generate_plonk_trace(
             pp.secondary.ck,
             &secondary_td,
