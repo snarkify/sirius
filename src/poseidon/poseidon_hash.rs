@@ -118,11 +118,12 @@ where
         }
     }
 
-    fn absorb_field(&mut self, base: F) {
+    fn absorb_field(&mut self, base: F) -> &mut Self {
         self.update(&[base]);
+        self
     }
 
-    fn absorb_point<C: CurveAffine<Base = F>>(&mut self, point: &C) {
+    fn absorb_point<C: CurveAffine<Base = F>>(&mut self, point: &C) -> &mut Self {
         let encoded = point.coordinates().map(|coordinates| {
             [coordinates.x(), coordinates.y()]
                 .into_iter()
@@ -134,6 +135,8 @@ where
         } else {
             self.update(&[C::Base::ZERO, C::Base::ZERO]) // C is infinity
         }
+
+        self
     }
 
     fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
@@ -224,9 +227,7 @@ mod tests {
         type PH = PoseidonHash<<EpAffine as CurveAffine>::Base, T, RATE>;
         let spec = Spec::<Fp, T, RATE>::new(R_F, R_P);
         let mut poseidon = PH::new(spec);
-        for i in 0..5 {
-            poseidon.absorb_field(Fp::from(i as u64));
-        }
+        poseidon.absorb_field_iter((0..5).map(|i| Fp::from(i as u64)));
         let output = poseidon.squeeze::<EpAffine>(NonZeroUsize::new(128).unwrap());
         // let out_hash = Fq::from_str_vartime("13037709793114148810823325920380362524528554380279235267325741570708489436263").unwrap();
         let out_hash = Fq::from_str_vartime("277726250230731218669330566268314254439").unwrap();

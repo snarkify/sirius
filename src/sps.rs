@@ -33,17 +33,19 @@ pub trait SpecialSoundnessVerifier<C: CurveAffine, RO: ROTrait<C::Base>> {
 impl<C: CurveAffine, RO: ROTrait<C::Base>> SpecialSoundnessVerifier<C, RO> for PlonkInstance<C> {
     fn sps_verify(&self, ro_nark: &mut RO) -> Result<(), Error> {
         let num_challenges = self.challenges.len();
+
         if num_challenges == 0 {
             return Ok(());
         }
 
-        self.instance.iter().for_each(|inst| {
-            ro_nark.absorb_field(fe_to_fe(inst).unwrap());
-        });
+        ro_nark.absorb_field_iter(self.instance.iter().map(|inst| fe_to_fe(inst).unwrap()));
+
         for i in 0..num_challenges {
-            ro_nark.absorb_point(&self.W_commitments[i]);
-            let r = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
-            if r != self.challenges[i] {
+            if ro_nark
+                .absorb_point(&self.W_commitments[i])
+                .squeeze::<C>(NUM_CHALLENGE_BITS)
+                .ne(&self.challenges[i])
+            {
                 return Err(Error::ChallengeNotMatch { challenge_index: i });
             }
         }

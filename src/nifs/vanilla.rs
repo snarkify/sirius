@@ -128,9 +128,7 @@ impl<C: CurveAffine> VanillaFS<C> {
         ro_acc.absorb_point(pp_digest);
         U1.absorb_into(ro_acc);
         U2.absorb_into(ro_acc);
-        cross_term_commits
-            .iter()
-            .for_each(|cm| ro_acc.absorb_point(cm));
+        ro_acc.absorb_point_iter(cross_term_commits.iter());
 
         Ok(ro_acc.squeeze::<C>(NUM_CHALLENGE_BITS))
     }
