@@ -8,7 +8,7 @@ use crate::plonk::{
 };
 use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
 use crate::polynomial::ColumnIndex;
-use crate::poseidon::{AbsorbInRO, ROTrait};
+use crate::poseidon::ROTrait;
 use crate::sps::SpecialSoundnessVerifier;
 use crate::table::TableData;
 use halo2_proofs::arithmetic::CurveAffine;
@@ -125,12 +125,12 @@ impl<C: CurveAffine> VanillaFS<C> {
         U2: &PlonkInstance<C>,
         cross_term_commits: &[C],
     ) -> Result<<C as CurveAffine>::ScalarExt, Error> {
-        ro_acc.absorb_point(pp_digest);
-        U1.absorb_into(ro_acc);
-        U2.absorb_into(ro_acc);
-        ro_acc.absorb_point_iter(cross_term_commits.iter());
-
-        Ok(ro_acc.squeeze::<C>(NUM_CHALLENGE_BITS))
+        Ok(ro_acc
+            .absorb_point(pp_digest)
+            .absorb(U1)
+            .absorb(U2)
+            .absorb_point_iter(cross_term_commits.iter())
+            .squeeze::<C>(NUM_CHALLENGE_BITS))
     }
 }
 

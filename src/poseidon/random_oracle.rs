@@ -24,6 +24,14 @@ pub trait ROTrait<F: PrimeField> {
     /// Initializes the hash function
     fn new(constants: Self::Constants) -> Self;
 
+    fn absorb(&mut self, value: &impl AbsorbInRO<F, Self>) -> &mut Self
+    where
+        Self: Sized,
+    {
+        value.absorb_into(self);
+        self
+    }
+
     /// Adds a base to the internal state
     fn absorb_field(&mut self, base: F) -> &mut Self;
 
