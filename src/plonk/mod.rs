@@ -148,6 +148,15 @@ pub struct PlonkTrace<C: CurveAffine> {
     pub w: PlonkWitness<C::Scalar>,
 }
 
+impl<C: CurveAffine> PlonkTrace<C> {
+    pub fn to_relax(&self, k: usize) -> RelaxedPlonkTrace<C> {
+        RelaxedPlonkTrace {
+            U: self.u.to_relax(),
+            W: self.w.to_relax(k),
+        }
+    }
+}
+
 impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for PlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
         for pt in self.W_commitments.iter() {
@@ -364,6 +373,11 @@ impl<F: PrimeField> PlonkStructure<F> {
         } else {
             true
         }
+    }
+
+    pub fn get_degree_for_folding(&self) -> usize {
+        let offset = self.num_non_fold_vars();
+        self.poly.degree_for_folding(offset)
     }
 }
 

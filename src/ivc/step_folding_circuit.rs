@@ -130,8 +130,8 @@ where
     SC: StepCircuit<ARITY, C::Base> + Sized,
     RO: ROCircuitTrait<C::Base>,
 {
-    step_circuit: SC,
-    input: StepInputs<'link, ARITY, C, RO>,
+    pub step_circuit: &'link SC,
+    pub input: StepInputs<'link, ARITY, C, RO>,
 }
 
 impl<'link, const ARITY: usize, C, SC, RO, const T: usize> StepCircuit<ARITY, C::Base>
