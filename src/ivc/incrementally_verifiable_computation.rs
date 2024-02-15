@@ -249,6 +249,7 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
     {
         let mut primary_td = TableData::new(k_table_size, instance.to_vec());
+        // TODO #146 Add information about fixed
         let config = primary_td.prepare_assembly(
             <crate::ivc::step_folding_circuit::StepFoldingCircuit<
                 '_,
@@ -272,6 +273,7 @@ where
     {
         let mut secondary_td = TableData::new(k_table_size, instance.to_vec());
 
+        // TODO #146 Add information about fixed
         let config = secondary_td.prepare_assembly(
             <crate::ivc::step_folding_circuit::StepFoldingCircuit<
                 '_,
