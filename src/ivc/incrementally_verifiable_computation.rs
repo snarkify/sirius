@@ -15,7 +15,7 @@ use crate::{
     },
     main_gate::MainGateConfig,
     nifs::{self, vanilla::VanillaFS, FoldingScheme},
-    plonk::{PlonkTrace, RelaxedPlonkTrace},
+    plonk::{PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
     table::TableData,
@@ -173,31 +173,24 @@ where
         )?;
 
         primary_td.instance = vec![
-            util::fe_to_fe(
-                &RP1::OffCircuit::new(pp.primary.params.ro_constant.clone())
-                    .absorb_point(&primary_public_params_hash)
-                    .absorb_field(C1::Scalar::ZERO)
-                    .absorb_field_iter(primary_z_0.iter().copied())
-                    .absorb_field_iter(primary_z_0.iter().copied())
-                    .absorb(&pre_round_secondary_plonk_trace.u.to_relax())
-                    .squeeze::<C2>(NUM_CHALLENGE_BITS),
-            )
-            .unwrap(),
-            util::fe_to_fe(
-                &RP1::OffCircuit::new(pp.primary.params.ro_constant.clone())
-                    .absorb_point(&primary_public_params_hash)
-                    .absorb_field(C1::Scalar::ONE)
-                    .absorb_field_iter(primary_z_0.iter().copied())
-                    .absorb_field_iter(
-                        primary
-                            .process_step(&primary_z_0, pp.primary.k_table_size)?
-                            .iter()
-                            .copied(),
-                    )
-                    .absorb(&pre_round_secondary_plonk_trace.u.to_relax())
-                    .squeeze::<C2>(NUM_CHALLENGE_BITS),
-            )
-            .unwrap(),
+            RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+                random_oracle_constant: pp.primary.params.ro_constant.clone(),
+                public_params_hash: &primary_public_params_hash,
+                step: 0,
+                z_0: &primary_z_0,
+                z_i: &primary_z_0,
+                relaxed: &pre_round_secondary_plonk_trace.u.to_relax(),
+            }
+            .generate(),
+            RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+                random_oracle_constant: pp.primary.params.ro_constant.clone(),
+                public_params_hash: &primary_public_params_hash,
+                step: 1,
+                z_0: &primary_z_0,
+                z_i: &primary.process_step(&primary_z_0, pp.primary.k_table_size)?,
+                relaxed: &pre_round_secondary_plonk_trace.u.to_relax(),
+            }
+            .generate(),
         ];
 
         let primary_z_output = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
@@ -234,22 +227,24 @@ where
             vec![C1::identity(); primary_nifs_pp.S.get_degree_for_folding().saturating_sub(1)];
 
         secondary_td.instance = vec![
-            util::fe_to_fe(&primary_td.instance[1]).unwrap(),
-            util::fe_to_fe(
-                &RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone())
-                    .absorb_point(&secondary_public_params_hash)
-                    .absorb_field(C2::Scalar::ZERO)
-                    .absorb_field_iter(secondary_z_0.iter().copied())
-                    .absorb_field_iter(
-                        secondary
-                            .process_step(&secondary_z_0, pp.secondary.k_table_size)?
-                            .iter()
-                            .copied(),
-                    )
-                    .absorb(&primary_plonk_trace.u.to_relax())
-                    .squeeze::<C1>(NUM_CHALLENGE_BITS),
-            )
-            .unwrap(),
+            RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+                random_oracle_constant: pp.secondary.params.ro_constant.clone(),
+                public_params_hash: &secondary_public_params_hash,
+                step: 0,
+                z_0: &secondary_z_0,
+                z_i: &secondary_z_0,
+                relaxed: &primary_plonk_trace.u.to_relax(),
+            }
+            .generate(),
+            RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+                random_oracle_constant: pp.secondary.params.ro_constant.clone(),
+                public_params_hash: &secondary_public_params_hash,
+                step: 1,
+                z_0: &secondary_z_0,
+                z_i: &secondary.process_step(&secondary_z_0, pp.primary.k_table_size)?,
+                relaxed: &primary_plonk_trace.u.to_relax(),
+            }
+            .generate(),
         ];
 
         let secondary_z_output = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
@@ -418,32 +413,34 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        // verify X0
-        if RP1::OffCircuit::new(pp.primary.params.ro_constant.clone())
-            .absorb_point(&pp.digest::<C2>().map_err(Error::WhileHash)?)
-            .absorb_field(C1::Scalar::from_u128(self.step as u128))
-            .absorb_field_iter(self.primary.z_0.iter().copied())
-            .absorb_field_iter(self.primary.z_i.iter().copied())
-            .absorb(&self.secondary.relaxed_trace.U)
-            .squeeze::<C2>(NUM_CHALLENGE_BITS)
-            .ne(&self.secondary.relaxed_trace.U.instance[0])
-        {
+        let expected_X0 = RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+            random_oracle_constant: pp.primary.params.ro_constant.clone(),
+            public_params_hash: &pp.digest().map_err(Error::WhileHash)?,
+            step: self.step,
+            z_0: &self.primary.z_0,
+            z_i: &self.primary.z_i,
+            relaxed: &self.secondary.relaxed_trace.U,
+        }
+        .generate::<C2::Scalar>();
+
+        if expected_X0 != self.secondary.relaxed_trace.U.instance[0] {
             return Err(Error::VerifyFailed(VerificationError::InstanceNotMatch {
                 index: 0,
                 is_primary: true,
             }));
         }
 
-        // verify X1
-        if RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone())
-            .absorb_point(&pp.digest::<C1>().map_err(Error::WhileHash)?)
-            .absorb_field(C2::Scalar::from_u128(self.step as u128))
-            .absorb_field_iter(self.secondary.z_0.iter().copied())
-            .absorb_field_iter(self.secondary.z_i.iter().copied())
-            .absorb(&self.primary.relaxed_trace.U)
-            .squeeze::<C1>(NUM_CHALLENGE_BITS)
-            .ne(&self.primary.relaxed_trace.U.instance[1])
-        {
+        let expected_X1 = RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+            random_oracle_constant: pp.secondary.params.ro_constant.clone(),
+            public_params_hash: &pp.digest().map_err(Error::WhileHash)?,
+            step: self.step,
+            z_0: &self.secondary.z_0,
+            z_i: &self.secondary.z_i,
+            relaxed: &self.primary.relaxed_trace.U,
+        }
+        .generate::<C1::Scalar>();
+
+        if expected_X1 != self.primary.relaxed_trace.U.instance[1] {
             return Err(Error::VerifyFailed(VerificationError::InstanceNotMatch {
                 index: 1,
                 is_primary: false,
@@ -532,5 +529,39 @@ where
         );
 
         (secondary_td, config)
+    }
+}
+
+struct RandomOracleComputationInstance<'l, const A: usize, C1, C2, RP>
+where
+    RP: ROTrait<C1::Scalar>,
+    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
+    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
+{
+    random_oracle_constant: RP::Constants,
+    public_params_hash: &'l C2,
+    step: usize,
+    z_0: &'l [C1::Scalar; A],
+    z_i: &'l [C1::Scalar; A],
+    relaxed: &'l RelaxedPlonkInstance<C2>,
+}
+
+impl<'l, C1, C2, RP, const A: usize> RandomOracleComputationInstance<'l, A, C1, C2, RP>
+where
+    RP: ROTrait<C1::Scalar>,
+    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
+    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
+{
+    fn generate<F: PrimeField>(self) -> F {
+        util::fe_to_fe(
+            &RP::new(self.random_oracle_constant)
+                .absorb_point(self.public_params_hash)
+                .absorb_field(C1::Scalar::from_u128(self.step as u128))
+                .absorb_field_iter(self.z_0.iter().copied())
+                .absorb_field_iter(self.z_0.iter().copied())
+                .absorb(self.relaxed)
+                .squeeze::<C2>(NUM_CHALLENGE_BITS),
+        )
+        .unwrap()
     }
 }
