@@ -1,8 +1,10 @@
 use ff::PrimeField;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter},
-    plonk::ConstraintSystem,
+    circuit::{floor_planner::single_pass::SingleChipLayouter, AssignedCell, Layouter, Value},
+    plonk::{Advice, Column, ConstraintSystem},
 };
+
+use crate::{main_gate::RegionCtx, table::TableData};
 
 use super::{floor_planner::FloorPlanner, fold_relaxed_plonk_instance_chip};
 
@@ -81,11 +83,38 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     /// without using ConstraintSystem.
     ///
     /// By default, performs the step with a dummy `ConstraintSystem`
-    fn output(&self, z_i: &[F; ARITY]) -> [F; ARITY] {
-        todo!(
-            "Default impl with `Self::synthesize` wrap
-            and comment about when manual impl needed by {z_i:?}"
-        )
+    fn process_step<const TABLE_SIZE: usize>(&self, z_i: &[F; ARITY]) -> [F; ARITY] {
+        let mut td = TableData::new(TABLE_SIZE as u32, vec![]);
+
+        let (input_advice, config) = td.prepare_assembly(|cs| -> (Column<Advice>, Self::Config) {
+            (cs.advice_column(), Self::configure(cs))
+        });
+
+        let mut layouter = SingleChipLayouter::<'_, F, _>::new(&mut td, vec![]).unwrap();
+
+        let assigned_z_i = layouter
+            .assign_region(
+                || "z_i",
+                |region| {
+                    let mut region = RegionCtx::new(region, 0);
+
+                    z_i.iter()
+                        .map(|value| {
+                            let assigned =
+                                region.assign_advice(|| "", input_advice, Value::known(*value))?;
+
+                            region.next();
+
+                            Ok(assigned)
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                },
+            )
+            .unwrap();
+
+        self.synthesize_step(config, &mut layouter, &assigned_z_i.try_into().unwrap())
+            .unwrap()
+            .map(|cell| cell.value().unwrap().copied().unwrap())
     }
 }
 
