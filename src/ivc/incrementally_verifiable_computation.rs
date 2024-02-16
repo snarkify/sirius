@@ -171,6 +171,21 @@ where
             &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
         )?;
 
+        let expected_X1 = RP1::OffCircuit::new(pp.primary.params.ro_constant.clone())
+            .absorb_point(&pp.digest::<C2>().map_err(Error::WhileHash)?)
+            .absorb_field(C1::Scalar::ZERO)
+            .absorb_field_iter(primary_z_0.iter().copied())
+            .absorb_field_iter(
+                primary
+                    .process_step(&primary_z_0, pp.secondary.k_table_size)?
+                    .iter()
+                    .copied(),
+            )
+            .absorb(&pre_round_secondary_plonk_trace.u.to_relax())
+            .squeeze::<C2>(NUM_CHALLENGE_BITS);
+
+        secondary_td.instance = vec![C2::Scalar::ZERO, expected_X1];
+
         let primary_z_output = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: &primary,
             input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {

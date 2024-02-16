@@ -89,11 +89,12 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     /// equal to that specified in the IVC fold call. However, if these calculations are long and resource
     /// intensive, it is possible to implement this logic off-circuit "honestly" with regular code, which may
     /// be more lightweight, but will require consistency testing.
-    fn process_step<const TABLE_SIZE: usize>(
+    fn process_step(
         &self,
         z_i: &[F; ARITY],
+        k_table_size: u32,
     ) -> Result<[F; ARITY], SynthesisError> {
-        let mut td = TableData::new(TABLE_SIZE as u32, vec![]);
+        let mut td = TableData::new(k_table_size, vec![]);
 
         let (input_advice, config) = td.prepare_assembly(|cs| -> (Column<Advice>, Self::Config) {
             (cs.advice_column(), Self::configure(cs))
