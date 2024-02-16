@@ -298,12 +298,9 @@ impl<F: PrimeField> TableData<F> {
     ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
         let (mut plonk_instance, plonk_witness) = self.run_sps_protocol_0(ck)?;
 
-        self.instance.iter().for_each(|inst| {
-            ro_nark.absorb_field(fe_to_fe(inst).unwrap());
-        });
-        plonk_instance.W_commitments.iter().for_each(|C| {
-            ro_nark.absorb_point(C);
-        });
+        ro_nark
+            .absorb_field_iter(self.instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
+            .absorb_point_iter(plonk_instance.W_commitments.iter());
 
         plonk_instance
             .challenges
@@ -352,11 +349,10 @@ impl<F: PrimeField> TableData<F> {
                 err,
             })?;
 
-        self.instance.iter().for_each(|inst| {
-            ro_nark.absorb_field(fe_to_fe(inst).unwrap());
-        });
-        ro_nark.absorb_point(&C1);
-        let r1 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
+        let r1 = ro_nark
+            .absorb_field_iter(self.instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
+            .absorb_point(&C1)
+            .squeeze::<C>(NUM_CHALLENGE_BITS);
 
         // round 2
         let lookup_coeff = lookup_coeff.evaluate_coefficient_2(r1);
@@ -372,8 +368,7 @@ impl<F: PrimeField> TableData<F> {
                 annotation: "W2",
                 err,
             })?;
-        ro_nark.absorb_point(&C2);
-        let r2 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
+        let r2 = ro_nark.absorb_point(&C2).squeeze::<C>(NUM_CHALLENGE_BITS);
 
         Ok((
             PlonkInstance {
@@ -398,9 +393,7 @@ impl<F: PrimeField> TableData<F> {
             return Err(SpsError::LackOfAdvices);
         }
 
-        self.instance.iter().for_each(|inst| {
-            ro_nark.absorb_field(fe_to_fe(inst).unwrap());
-        });
+        ro_nark.absorb_field_iter(self.instance.iter().map(|inst| fe_to_fe(inst).unwrap()));
 
         let k_power_of_2 = 2usize.pow(self.k);
 
@@ -412,8 +405,7 @@ impl<F: PrimeField> TableData<F> {
                 annotation: "W1",
                 err,
             })?;
-        ro_nark.absorb_point(&C1);
-        let r1 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
+        let r1 = ro_nark.absorb_point(&C1).squeeze::<C>(NUM_CHALLENGE_BITS);
 
         // round 2
         let lookup_coeff = self
@@ -433,8 +425,7 @@ impl<F: PrimeField> TableData<F> {
                 annotation: "W2",
                 err,
             })?;
-        ro_nark.absorb_point(&C2);
-        let r2 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
+        let r2 = ro_nark.absorb_point(&C2).squeeze::<C>(NUM_CHALLENGE_BITS);
 
         // round 3
         let lookup_coeff = lookup_coeff.evaluate_coefficient_2(r2);
@@ -450,8 +441,7 @@ impl<F: PrimeField> TableData<F> {
                 annotation: "W3",
                 err,
             })?;
-        ro_nark.absorb_point(&C3);
-        let r3 = ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS);
+        let r3 = ro_nark.absorb_point(&C3).squeeze::<C>(NUM_CHALLENGE_BITS);
 
         Ok((
             PlonkInstance {

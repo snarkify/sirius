@@ -159,31 +159,19 @@ impl<C: CurveAffine> PlonkTrace<C> {
 
 impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for PlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
-        for pt in self.W_commitments.iter() {
-            ro.absorb_point(pt);
-        }
-        for inst in self.instance.iter() {
-            ro.absorb_field(fe_to_fe(inst).unwrap());
-        }
-        for cha in self.challenges.iter() {
-            ro.absorb_field(fe_to_fe(cha).unwrap());
-        }
+        ro.absorb_point_iter(self.W_commitments.iter())
+            .absorb_field_iter(self.instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
+            .absorb_field_iter(self.challenges.iter().map(|cha| fe_to_fe(cha).unwrap()));
     }
 }
 
 impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
-        for pt in self.W_commitments.iter() {
-            ro.absorb_point(pt);
-        }
-        ro.absorb_point(&self.E_commitment);
-        for inst in self.instance.iter() {
-            ro.absorb_field(fe_to_fe(inst).unwrap());
-        }
-        for cha in self.challenges.iter() {
-            ro.absorb_field(fe_to_fe(cha).unwrap());
-        }
-        ro.absorb_field(fe_to_fe(&self.u).unwrap());
+        ro.absorb_point_iter(self.W_commitments.iter())
+            .absorb_point(&self.E_commitment)
+            .absorb_field_iter(self.instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
+            .absorb_field_iter(self.challenges.iter().map(|cha| fe_to_fe(cha).unwrap()))
+            .absorb_field(fe_to_fe(&self.u).unwrap());
     }
 }
 
