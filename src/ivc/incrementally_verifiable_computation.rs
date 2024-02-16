@@ -173,11 +173,20 @@ where
         )?;
 
         primary_td.instance = vec![
-            C1::Scalar::ZERO,
             util::fe_to_fe(
                 &RP1::OffCircuit::new(pp.primary.params.ro_constant.clone())
                     .absorb_point(&primary_public_params_hash)
                     .absorb_field(C1::Scalar::ZERO)
+                    .absorb_field_iter(primary_z_0.iter().copied())
+                    .absorb_field_iter(primary_z_0.iter().copied())
+                    .absorb(&pre_round_secondary_plonk_trace.u.to_relax())
+                    .squeeze::<C2>(NUM_CHALLENGE_BITS),
+            )
+            .unwrap(),
+            util::fe_to_fe(
+                &RP1::OffCircuit::new(pp.primary.params.ro_constant.clone())
+                    .absorb_point(&primary_public_params_hash)
+                    .absorb_field(C1::Scalar::ONE)
                     .absorb_field_iter(primary_z_0.iter().copied())
                     .absorb_field_iter(
                         primary
@@ -225,7 +234,7 @@ where
             vec![C1::identity(); primary_nifs_pp.S.get_degree_for_folding().saturating_sub(1)];
 
         secondary_td.instance = vec![
-            C2::Scalar::ZERO,
+            util::fe_to_fe(&primary_td.instance[1]).unwrap(),
             util::fe_to_fe(
                 &RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone())
                     .absorb_point(&secondary_public_params_hash)
