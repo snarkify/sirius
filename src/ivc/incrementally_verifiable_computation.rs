@@ -51,8 +51,8 @@ pub enum Error {
     Step(#[from] step_circuit::SynthesisError),
     #[error("number of steps is not match")]
     NumStepNotMatch,
-    #[error("input hash not match")]
-    InputHashNotMatch,
+    #[error("step circuit input not match")]
+    SCInputNotMatch,
     #[error("TODO")]
     WhileHash(io::Error),
     #[error("TODO")]
@@ -249,12 +249,11 @@ where
             return Err(Error::NumStepNotMatch);
         }
         if self.primary.z_0 != primary_z_0 || self.secondary.z_0 != secondary_z_0 {
-            return Err(Error::InputHashNotMatch);
+            return Err(Error::SCInputNotMatch);
         }
 
         // verify X0
         let ro1 = &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone());
-        // TODO: cache the result in IVC struct (?) so that we don't need to re-calculate it
         let primary_hash = pp.digest::<C2>().map_err(Error::WhileHash)?;
         ro1.absorb_point(&primary_hash);
         ro1.absorb_field(C1::Scalar::from_u128(self.step as u128));
