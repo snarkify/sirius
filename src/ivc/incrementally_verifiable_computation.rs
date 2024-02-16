@@ -255,11 +255,12 @@ where
                 public_params_hash: pp.digest().map_err(Error::WhileHash)?,
                 z_0: self.primary.z_0,
                 z_i: self.primary.z_i,
-                U: secondary_new_trace.U,
+                U: self.secondary.relaxed_trace.U.clone(),
                 u: self.secondary_trace.u.clone(),
                 cross_term_commits: secondary_cross_term_commits,
             },
         };
+
         debug!("start synthesize of 'step_folding_circuit' for primary");
         self.primary.z_i = primary_step_folding_circuit.synthesize(
             primary_step_config,
@@ -267,6 +268,8 @@ where
         )?;
         debug!("start primary td postpone");
         primary_td.postpone_assembly();
+
+        self.secondary.relaxed_trace = secondary_new_trace;
 
         debug!("start generate primary plonk trace");
         let primary_plonk_trace = VanillaFS::generate_plonk_trace(
@@ -302,11 +305,12 @@ where
                     public_params_hash: pp.digest().map_err(Error::WhileHash)?,
                     z_0: self.secondary.z_0,
                     z_i: self.secondary.z_i,
-                    U: primary_new_trace.U,
+                    U: self.primary.relaxed_trace.U.clone(),
                     u: primary_plonk_trace.u.clone(),
                     cross_term_commits: primary_cross_term_commits,
                 },
             };
+
         debug!("start synthesize of 'step_folding_circuit' for secondary");
         self.secondary.z_i = secondary_step_folding_circuit.synthesize(
             secondary_step_config,
@@ -314,6 +318,8 @@ where
         )?;
         debug!("start secondary td postpone");
         secondary_td.postpone_assembly();
+
+        self.primary.relaxed_trace = primary_new_trace;
 
         debug!("start generate secondary plonk trace");
         self.secondary_trace = VanillaFS::generate_plonk_trace(
