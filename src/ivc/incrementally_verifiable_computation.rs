@@ -1,5 +1,4 @@
 use std::io;
-use std::num::NonZeroUsize;
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
@@ -17,7 +16,7 @@ use crate::{
     main_gate::MainGateConfig,
     nifs::{self, vanilla::VanillaFS, FoldingScheme},
     plonk::{PlonkTrace, RelaxedPlonkTrace},
-    poseidon::{random_oracle::ROTrait, AbsorbInRO, ROPair},
+    poseidon::{random_oracle::ROTrait, ROPair},
     sps,
     table::TableData,
 };
@@ -58,6 +57,14 @@ pub enum Error {
     Sps(#[from] sps::Error),
     #[error("TODO")]
     NIFS(#[from] nifs::Error),
+    #[error("TODO")]
+    VerifyFailed(#[from] VerificationError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum VerificationError {
+    #[error("TODO")]
+    InstanceNotMatch { index: usize, is_primary: bool },
 }
 
 // TODO #31 docs
@@ -335,78 +342,76 @@ where
     pub fn verify<const T: usize, RP1, RP2>(
         &mut self,
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
-        num_steps: NonZeroUsize,
-        primary_z_0: [C1::Scalar; A1],
-        secondary_z_0: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        if num_steps.get() != self.step {
-            return Err(Error::NumStepNotMatch);
-        }
-        if self.primary.z_0 != primary_z_0 || self.secondary.z_0 != secondary_z_0 {
-            return Err(Error::SCInputNotMatch);
-        }
-
         // verify X0
-        let ro1 = &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone());
-        let primary_hash = pp.digest::<C2>().map_err(Error::WhileHash)?;
-        ro1.absorb_point(&primary_hash);
-        ro1.absorb_field(C1::Scalar::from_u128(self.step as u128));
-        primary_z_0.iter().for_each(|val| {
-            ro1.absorb_field(*val);
-        });
-        self.primary.z_i.iter().for_each(|val| {
-            ro1.absorb_field(*val);
-        });
-        self.secondary.relaxed_trace.U.absorb_into(ro1);
-        let _hash_primary = ro1.squeeze::<C2>(NUM_CHALLENGE_BITS);
-        // TODO: uncomment after adding secondary_trace field in IVC
-        // assert_eq!(hash_primary, self.secondary_trace.U.X0);
+        if RP1::OffCircuit::new(pp.primary.params.ro_constant.clone())
+            .absorb_point(&pp.digest::<C2>().map_err(Error::WhileHash)?)
+            .absorb_field(C1::Scalar::from_u128(self.step as u128))
+            .absorb_field_iter(self.primary.z_0.iter().copied())
+            .absorb_field_iter(self.primary.z_i.iter().copied())
+            .absorb(&self.secondary.relaxed_trace.U)
+            .squeeze::<C2>(NUM_CHALLENGE_BITS)
+            .ne(&self.secondary.relaxed_trace.U.instance[0])
+        {
+            return Err(Error::VerifyFailed(VerificationError::InstanceNotMatch {
+                index: 0,
+                is_primary: true,
+            }));
+        }
 
         // verify X1
-        let ro2 = &mut RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone());
-        let secondary_hash = pp.digest::<C1>().map_err(Error::WhileHash)?;
-        ro2.absorb_point(&secondary_hash);
-        ro2.absorb_field(C2::Scalar::from_u128(self.step as u128));
-        secondary_z_0.iter().for_each(|val| {
-            ro2.absorb_field(*val);
-        });
-        self.secondary.z_i.iter().for_each(|val| {
-            ro2.absorb_field(*val);
-        });
-        self.primary.relaxed_trace.U.absorb_into(ro2);
-        let _hash_secondary = ro2.squeeze::<C1>(NUM_CHALLENGE_BITS);
-        // TODO: uncomment after adding secondary_trace field in IVC
-        // assert_eq!(hash_secondary, self.secondary_trace.U.X1);
+        if RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone())
+            .absorb_point(&pp.digest::<C1>().map_err(Error::WhileHash)?)
+            .absorb_field(C2::Scalar::from_u128(self.step as u128))
+            .absorb_field_iter(self.secondary.z_0.iter().copied())
+            .absorb_field_iter(self.secondary.z_i.iter().copied())
+            .absorb(&self.primary.relaxed_trace.U)
+            .squeeze::<C1>(NUM_CHALLENGE_BITS)
+            .ne(&self.primary.relaxed_trace.U.instance[1])
+        {
+            return Err(Error::VerifyFailed(VerificationError::InstanceNotMatch {
+                index: 1,
+                is_primary: false,
+            }));
+        }
 
-        // check satisfiability
-        // TODO: avoid create PlonkStructure again
-        let (primary_td, _) = Self::prepare_primary_td::<T, RP1>(
+        Self::prepare_primary_td::<T, RP1>(
             pp.primary.k_table_size,
-            [C1::Scalar::ZERO, C1::Scalar::ZERO],
-        );
-        let S1 = primary_td.plonk_structure().unwrap();
-        S1.is_sat_relaxed(
+            [C1::Scalar::ZERO, C1::Scalar::ZERO], // TODO #154 #160
+        )
+        .0
+        .plonk_structure()
+        .expect("`TableData` already prepared")
+        .is_sat_relaxed(
             pp.primary.ck,
             &self.primary.relaxed_trace.U,
             &self.primary.relaxed_trace.W,
         )?;
 
-        let (secondary_td, _) = Self::prepare_secondary_td::<T, RP2>(
+        let S2 = Self::prepare_secondary_td::<T, RP2>(
             pp.secondary.k_table_size,
             [C2::Scalar::ZERO, C2::Scalar::ZERO],
-        );
-        let S2 = secondary_td.plonk_structure().unwrap();
+        )
+        .0
+        .plonk_structure()
+        .expect("`TableData` already prepared");
+
         S2.is_sat_relaxed(
             pp.secondary.ck,
             &self.secondary.relaxed_trace.U,
             &self.secondary.relaxed_trace.W,
         )?;
-        // TODO: uncomment after adding secondary_trace in IVC
-        // S2.is_sat(pp.secondary.ck, &self.secondary_trace.U, &self.secondary_trace.W)?;
+
+        S2.is_sat(
+            pp.secondary.ck,
+            &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
+            &self.secondary_trace.u,
+            &self.secondary_trace.w,
+        )?;
 
         Ok(())
     }
