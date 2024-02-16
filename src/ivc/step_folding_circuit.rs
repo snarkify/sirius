@@ -239,6 +239,7 @@ where
             },
         )?;
 
+        // Check X0 == input_params_hash
         layouter.assign_region(
             || "generate input hash",
             |region| {
@@ -257,6 +258,7 @@ where
 
                 let gate = MainGate::new(config.main_gate_config.clone());
                 let expected_X0 = gate.le_bits_to_num(&mut ctx, &bits)?;
+
                 ctx.constrain_equal(expected_X0.cell(), w.input_instance[0].0.cell())?;
 
                 Ok(())
@@ -330,11 +332,13 @@ where
             },
         )?;
 
+        // Check that old_X1 == new_X0
         layouter.constrain_instance(
             assigned_input_witness.input_instance[1].0.cell(),
             config.instance,
             0,
         )?;
+        // Check that new_X1 == output_hash
         layouter.constrain_instance(output_hash.cell(), config.instance, 1)?;
 
         Ok(z_output)
