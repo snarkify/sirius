@@ -83,38 +83,38 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     /// without using ConstraintSystem.
     ///
     /// By default, performs the step with a dummy `ConstraintSystem`
-    fn process_step<const TABLE_SIZE: usize>(&self, z_i: &[F; ARITY]) -> [F; ARITY] {
+    fn process_step<const TABLE_SIZE: usize>(
+        &self,
+        z_i: &[F; ARITY],
+    ) -> Result<[F; ARITY], SynthesisError> {
         let mut td = TableData::new(TABLE_SIZE as u32, vec![]);
 
         let (input_advice, config) = td.prepare_assembly(|cs| -> (Column<Advice>, Self::Config) {
             (cs.advice_column(), Self::configure(cs))
         });
 
-        let mut layouter = SingleChipLayouter::<'_, F, _>::new(&mut td, vec![]).unwrap();
+        let mut layouter = SingleChipLayouter::<'_, F, _>::new(&mut td, vec![])?;
 
-        let assigned_z_i = layouter
-            .assign_region(
-                || "z_i",
-                |region| {
-                    let mut region = RegionCtx::new(region, 0);
+        let assigned_z_i = layouter.assign_region(
+            || "z_i",
+            |region| {
+                let mut region = RegionCtx::new(region, 0);
 
-                    z_i.iter()
-                        .map(|value| {
-                            let assigned =
-                                region.assign_advice(|| "", input_advice, Value::known(*value))?;
+                z_i.iter()
+                    .map(|value| {
+                        let assigned =
+                            region.assign_advice(|| "", input_advice, Value::known(*value))?;
 
-                            region.next();
+                        region.next();
 
-                            Ok(assigned)
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                },
-            )
-            .unwrap();
+                        Ok(assigned)
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            },
+        )?;
 
         self.synthesize_step(config, &mut layouter, &assigned_z_i.try_into().unwrap())
-            .unwrap()
-            .map(|cell| cell.value().unwrap().copied().unwrap())
+            .map(|z_out| z_out.map(|cell| cell.value().unwrap().copied().unwrap()))
     }
 }
 
