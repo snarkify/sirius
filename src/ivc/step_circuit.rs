@@ -1,8 +1,10 @@
 use ff::PrimeField;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter},
-    plonk::ConstraintSystem,
+    circuit::{floor_planner::single_pass::SingleChipLayouter, AssignedCell, Layouter, Value},
+    plonk::{Advice, Column, ConstraintSystem},
 };
+
+use crate::{main_gate::RegionCtx, table::TableData};
 
 use super::{floor_planner::FloorPlanner, fold_relaxed_plonk_instance_chip};
 
@@ -77,15 +79,48 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
         z_i: &[AssignedCell<F, F>; ARITY],
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError>;
 
-    /// An auxiliary function that allows you to perform a calculation step
-    /// without using ConstraintSystem.
+    /// Off-circuit version of [`StepCircuit::synthesize_step`]
     ///
-    /// By default, performs the step with a dummy `ConstraintSystem`
-    fn output(&self, z_i: &[F; ARITY]) -> [F; ARITY] {
-        todo!(
-            "Default impl with `Self::synthesize` wrap
-            and comment about when manual impl needed by {z_i:?}"
-        )
+    /// As part of the IVC calculation, we need to know what the output of the step circuit will be
+    /// before performing on-circuit calculations. This method will be called to define `z_out` and
+    /// use it within the IVC algo.
+    ///
+    /// The default implementation includes calling step synthesis on `TableData` where table size is
+    /// equal to that specified in the IVC fold call. However, if these calculations are long and resource
+    /// intensive, it is possible to implement this logic off-circuit "honestly" with regular code, which may
+    /// be more lightweight, but will require consistency testing.
+    fn process_step<const TABLE_SIZE: usize>(
+        &self,
+        z_i: &[F; ARITY],
+    ) -> Result<[F; ARITY], SynthesisError> {
+        let mut td = TableData::new(TABLE_SIZE as u32, vec![]);
+
+        let (input_advice, config) = td.prepare_assembly(|cs| -> (Column<Advice>, Self::Config) {
+            (cs.advice_column(), Self::configure(cs))
+        });
+
+        let mut layouter = SingleChipLayouter::<'_, F, _>::new(&mut td, vec![])?;
+
+        let assigned_z_i = layouter.assign_region(
+            || "z_i",
+            |region| {
+                let mut region = RegionCtx::new(region, 0);
+
+                z_i.iter()
+                    .map(|value| {
+                        let assigned =
+                            region.assign_advice(|| "", input_advice, Value::known(*value))?;
+
+                        region.next();
+
+                        Ok(assigned)
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            },
+        )?;
+
+        self.synthesize_step(config, &mut layouter, &assigned_z_i.try_into().unwrap())
+            .map(|z_out| z_out.map(|cell| cell.value().unwrap().copied().unwrap()))
     }
 }
 
