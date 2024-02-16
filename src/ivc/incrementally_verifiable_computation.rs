@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
@@ -97,7 +97,30 @@ where
     C1::Base: PrimeFieldBits + FromUniformBytes<64>,
     C2::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    pub fn new<const T: usize, RP1, RP2>(
+    pub fn fold<const T: usize, RP1, RP2>(
+        pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
+        primary: SC1,
+        primary_z_0: [C1::Scalar; A1],
+        secondary: SC2,
+        secondary_z_0: [C2::Scalar; A2],
+        num_steps: NonZeroUsize,
+    ) -> Result<(), Error>
+    where
+        RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
+        RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
+    {
+        let mut ivc = IVC::new(pp, primary, primary_z_0, secondary, secondary_z_0)?;
+
+        for _step in 1..=num_steps.get() {
+            ivc.fold_step(pp)?;
+        }
+
+        ivc.verify(pp)?;
+
+        Ok(())
+    }
+
+    fn new<const T: usize, RP1, RP2>(
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
         primary: SC1,
         primary_z_0: [C1::Scalar; A1],
@@ -229,7 +252,7 @@ where
         })
     }
 
-    pub fn fold_step<const T: usize, RP1, RP2>(
+    fn fold_step<const T: usize, RP1, RP2>(
         &mut self,
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
     ) -> Result<(), Error>
@@ -339,7 +362,7 @@ where
         Ok(())
     }
 
-    pub fn verify<const T: usize, RP1, RP2>(
+    fn verify<const T: usize, RP1, RP2>(
         &mut self,
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
     ) -> Result<(), Error>
