@@ -79,10 +79,16 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
         z_i: &[AssignedCell<F, F>; ARITY],
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError>;
 
-    /// An auxiliary function that allows you to perform a calculation step
-    /// without using ConstraintSystem.
+    /// Off-circuit version of [`StepCircuit::synthesize_step`]
     ///
-    /// By default, performs the step with a dummy `ConstraintSystem`
+    /// As part of the IVC calculation, we need to know what the output of the step circuit will be
+    /// before performing on-circuit calculations. This method will be called to define `z_out` and
+    /// use it within the IVC algo.
+    ///
+    /// The default implementation includes calling step synthesis on `TableData` where table size is
+    /// equal to that specified in the IVC fold call. However, if these calculations are long and resource
+    /// intensive, it is possible to implement this logic off-circuit "honestly" with regular code, which may
+    /// be more lightweight, but will require consistency testing.
     fn process_step<const TABLE_SIZE: usize>(
         &self,
         z_i: &[F; ARITY],
