@@ -1,6 +1,7 @@
 use std::io;
+use std::num::NonZeroUsize;
 
-use ff::{Field, FromUniformBytes, PrimeFieldBits};
+use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2_proofs::circuit::floor_planner::single_pass::SingleChipLayouter;
 use halo2curves::CurveAffine;
@@ -8,6 +9,7 @@ use log::*;
 use serde::Serialize;
 
 use crate::{
+    constants::NUM_CHALLENGE_BITS,
     ivc::{
         public_params::{self, PublicParams},
         step_folding_circuit::{StepConfig, StepFoldingCircuit, StepInputs},
@@ -16,7 +18,7 @@ use crate::{
     nifs,
     nifs::{vanilla::VanillaFS, FoldingScheme},
     plonk::RelaxedPlonkTrace,
-    poseidon::{random_oracle::ROTrait, ROPair},
+    poseidon::{random_oracle::ROTrait, AbsorbInRO, ROPair},
     sps,
     table::TableData,
 };
@@ -42,9 +44,15 @@ where
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    Plonk(#[from] halo2_proofs::plonk::Error),
+    Halo2(#[from] halo2_proofs::plonk::Error),
+    #[error(transparent)]
+    Plonk(#[from] crate::plonk::Error),
     #[error(transparent)]
     Step(#[from] step_circuit::SynthesisError),
+    #[error("number of steps is not match")]
+    NumStepNotMatch,
+    #[error("step circuit input not match")]
+    SCInputNotMatch,
     #[error("TODO")]
     WhileHash(io::Error),
     #[error("TODO")]
@@ -215,8 +223,8 @@ where
     pub fn prove_step<const T: usize, RP1, RP2>(
         &mut self,
         _pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
-        _z0_primary: [C1::Scalar; A1],
-        _z0_secondary: [C2::Scalar; A2],
+        _primary_z_0: [C1::Scalar; A1],
+        _secondary_z_0: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
         RP1: ROPair<C1::Scalar>,
@@ -228,17 +236,83 @@ where
 
     pub fn verify<const T: usize, RP1, RP2>(
         &mut self,
-        _pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
-        _steps_count: usize,
-        _z0_primary: [C1::Scalar; A1],
-        _z0_secondary: [C2::Scalar; A2],
+        pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
+        num_steps: NonZeroUsize,
+        primary_z_0: [C1::Scalar; A1],
+        secondary_z_0: [C2::Scalar; A2],
     ) -> Result<(), Error>
     where
-        RP1: ROPair<C1::Scalar>,
-        RP2: ROPair<C2::Scalar>,
+        RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
+        RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        // TODO #31
-        todo!("Logic at `RecursiveSNARK::verify`")
+        if num_steps.get() != self.step {
+            return Err(Error::NumStepNotMatch);
+        }
+        if self.primary.z_0 != primary_z_0 || self.secondary.z_0 != secondary_z_0 {
+            return Err(Error::SCInputNotMatch);
+        }
+
+        // verify X0
+        let ro1 = &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone());
+        let primary_hash = pp.digest::<C2>().map_err(Error::WhileHash)?;
+        ro1.absorb_point(&primary_hash);
+        ro1.absorb_field(C1::Scalar::from_u128(self.step as u128));
+        primary_z_0.iter().for_each(|val| {
+            ro1.absorb_field(*val);
+        });
+        self.primary
+            .z_i
+            .iter()
+            .for_each(|val| ro1.absorb_field(*val));
+        self.secondary.relaxed_trace.U.absorb_into(ro1);
+        let _hash_primary = ro1.squeeze::<C2>(NUM_CHALLENGE_BITS);
+        // TODO: uncomment after adding secondary_trace field in IVC
+        // assert_eq!(hash_primary, self.secondary_trace.U.X0);
+
+        // verify X1
+        let ro2 = &mut RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone());
+        let secondary_hash = pp.digest::<C1>().map_err(Error::WhileHash)?;
+        ro2.absorb_point(&secondary_hash);
+        ro2.absorb_field(C2::Scalar::from_u128(self.step as u128));
+        secondary_z_0.iter().for_each(|val| {
+            ro2.absorb_field(*val);
+        });
+        self.secondary
+            .z_i
+            .iter()
+            .for_each(|val| ro2.absorb_field(*val));
+        self.primary.relaxed_trace.U.absorb_into(ro2);
+        let _hash_secondary = ro2.squeeze::<C1>(NUM_CHALLENGE_BITS);
+        // TODO: uncomment after adding secondary_trace field in IVC
+        // assert_eq!(hash_secondary, self.secondary_trace.U.X1);
+
+        // check satisfiability
+        // TODO: avoid create PlonkStructure again
+        let (primary_td, _) = Self::prepare_primary_td::<T, RP1>(
+            pp.primary.k_table_size,
+            [C1::Scalar::ZERO, C1::Scalar::ZERO],
+        );
+        let S1 = primary_td.plonk_structure().unwrap();
+        S1.is_sat_relaxed(
+            pp.primary.ck,
+            &self.primary.relaxed_trace.U,
+            &self.primary.relaxed_trace.W,
+        )?;
+
+        let (secondary_td, _) = Self::prepare_secondary_td::<T, RP2>(
+            pp.secondary.k_table_size,
+            [C2::Scalar::ZERO, C2::Scalar::ZERO],
+        );
+        let S2 = secondary_td.plonk_structure().unwrap();
+        S2.is_sat_relaxed(
+            pp.secondary.ck,
+            &self.secondary.relaxed_trace.U,
+            &self.secondary.relaxed_trace.W,
+        )?;
+        // TODO: uncomment after adding secondary_trace in IVC
+        // S2.is_sat(pp.secondary.ck, &self.secondary_trace.U, &self.secondary_trace.W)?;
+
+        Ok(())
     }
 
     fn prepare_primary_td<const T: usize, RP1>(
