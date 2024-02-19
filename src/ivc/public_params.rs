@@ -2,23 +2,29 @@ use std::{fmt, io, marker::PhantomData, num::NonZeroUsize};
 
 use ff::{FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
+use halo2_proofs::plonk::Error as Halo2Error;
 use halo2curves::CurveAffine;
 use log::*;
+use once_cell::sync::OnceCell;
 use serde::Serialize;
 
 use crate::{
     commitment::CommitmentKey,
     digest::{self, DigestToCurve},
+    ivc::{step_circuit::StepCircuit, step_folding_circuit::StepFoldingCircuit},
     main_gate::MainGateConfig,
     plonk::PlonkStructure,
     poseidon::ROPair,
     table::TableData,
 };
 
-use super::{step_folding_circuit::StepParams, StepCircuit};
+use super::step_folding_circuit::StepParams;
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error {}
+pub enum Error {
+    #[error(transparent)]
+    Plonk(#[from] Halo2Error),
+}
 
 pub(crate) struct CircuitPublicParams<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, RP>
 where
@@ -27,6 +33,7 @@ where
     RP: ROPair<C::Scalar>,
 {
     pub k_table_size: u32,
+    pub S: PlonkStructure<C::Scalar>,
     pub ck: &'key CommitmentKey<C>,
     pub params: StepParams<C::Scalar, RP::OnCircuit>,
 }
@@ -57,6 +64,7 @@ where
 {
     fn new(
         k_table_size: u32,
+        S: PlonkStructure<C::Scalar>,
         commitment_key: &'key CommitmentKey<C>,
         ro_constant: RP::Args,
         limb_width: NonZeroUsize,
@@ -66,6 +74,7 @@ where
 
         Ok(Self {
             k_table_size,
+            S,
             ck: commitment_key,
             params: StepParams {
                 limb_width,
@@ -102,6 +111,10 @@ pub struct PublicParams<
 {
     pub(crate) primary: CircuitPublicParams<'key, A1, MAIN_GATE_T, C1, RP1>,
     pub(crate) secondary: CircuitPublicParams<'key, A2, MAIN_GATE_T, C2, RP2>,
+    // TODO: change C1::Scalar after adding digest_to_scalar
+    // we only need one digest in scalar representation
+    pub(crate) digest1: OnceCell<C1>,
+    pub(crate) digest2: OnceCell<C2>,
     _p: PhantomData<(SC1, SC2)>,
 }
 
@@ -140,10 +153,15 @@ where
     }
 }
 
-pub struct CircuitPublicParamsInput<'key, C: CurveAffine, RPArgs> {
+pub struct CircuitPublicParamsInput<'key, const ARITY: usize, C, RPArgs, SC>
+where
+    C: CurveAffine,
+    SC: StepCircuit<ARITY, C::ScalarExt>,
+{
     pub commitment_key: &'key CommitmentKey<C>,
     pub k_table_size: u32,
     pub ro_constant: RPArgs,
+    pub circuit: SC,
 }
 
 impl<
@@ -172,15 +190,43 @@ where
     RP2: ROPair<C2::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
 {
     pub fn new(
-        primary: CircuitPublicParamsInput<'key, C1, RP1::Args>,
-        secondary: CircuitPublicParamsInput<'key, C2, RP2::Args>,
+        primary: CircuitPublicParamsInput<'key, A1, C1, RP1::Args, SC1>,
+        secondary: CircuitPublicParamsInput<'key, A2, C2, RP2::Args, SC2>,
         limb_width: NonZeroUsize,
         limbs_count_limit: NonZeroUsize,
     ) -> Result<Self, Error> {
         debug!("start creating pp");
+        let sp1 = StepParams {
+            limb_width,
+            limbs_count: limbs_count_limit,
+            ro_constant: primary.ro_constant.clone(),
+        };
+        let primary_circuit =
+            StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T>::new(
+                primary.k_table_size as usize,
+                &primary.circuit,
+                &sp1,
+            );
+
+        let sp2 = StepParams {
+            limb_width,
+            limbs_count: limbs_count_limit,
+            ro_constant: secondary.ro_constant.clone(),
+        };
+        let secondary_circuit =
+            StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T>::new(
+                secondary.k_table_size as usize,
+                &secondary.circuit,
+                &sp2,
+            );
+        let td1 = TableData::new(primary.k_table_size, primary_circuit, vec![]);
+        let S1 = td1.plonk_structure()?;
+        let td2 = TableData::new(secondary.k_table_size, secondary_circuit, vec![]);
+        let S2 = td2.plonk_structure()?;
         Ok(Self {
             primary: CircuitPublicParams::new(
                 primary.k_table_size,
+                S1,
                 primary.commitment_key,
                 primary.ro_constant,
                 limb_width,
@@ -188,53 +234,47 @@ where
             )?,
             secondary: CircuitPublicParams::new(
                 secondary.k_table_size,
+                S2,
                 secondary.commitment_key,
                 secondary.ro_constant,
                 limb_width,
                 limbs_count_limit,
             )?,
+            digest1: OnceCell::new(),
+            digest2: OnceCell::new(),
             _p: PhantomData,
         })
     }
 
     /// This method calculate digest of [`PublicParams`], but ignore [`CircuitPublicParams::ck`]
     /// from both step circuits params
-    pub fn digest<C: CurveAffine>(&self) -> Result<C, io::Error> {
-        let mut primary_td = TableData::new(self.primary.k_table_size, vec![]);
-        primary_td.prepare_assembly(
-            <crate::ivc::step_folding_circuit::StepFoldingCircuit<
-                '_,
-                A1,
-                C2,
-                SC1,
-                RP1::OnCircuit,
-                MAIN_GATE_T,
-            > as StepCircuit<A1, C1::Scalar>>::configure,
-        );
+    /// TODO: this is hacking for now;
+    /// modify it to digest_to_scalar instead
+    /// instead of two methods
+    pub fn digest1(&self) -> Result<C1, io::Error> {
+        let digest = self.digest1.get_or_try_init(|| {
+            PublicParamsDigestWrapper::<'_, C1, C2, RP1, RP2> {
+                primary_plonk_struct: &self.primary.S,
+                secondary_plonk_struct: &self.secondary.S,
+                primary_params: &self.primary.params,
+                secondary_params: &self.secondary.params,
+            }
+            .digest()
+        })?;
+        Ok(*digest)
+    }
 
-        let mut secondary_td = TableData::new(self.secondary.k_table_size, vec![]);
-        secondary_td.prepare_assembly(
-            <crate::ivc::step_folding_circuit::StepFoldingCircuit<
-                '_,
-                A2,
-                C1,
-                SC2,
-                RP2::OnCircuit,
-                MAIN_GATE_T,
-            > as StepCircuit<A2, C2::Scalar>>::configure,
-        );
-
-        PublicParamsDigestWrapper::<'_, C1, C2, RP1, RP2> {
-            primary_plonk_struct: primary_td
-                .plonk_structure()
-                .expect("unrechable, prepared in constructor"),
-            secondary_plonk_struct: secondary_td
-                .plonk_structure()
-                .expect("unrechable, prepared in constructor"),
-            primary_params: &self.primary.params,
-            secondary_params: &self.secondary.params,
-        }
-        .digest()
+    pub fn digest2(&self) -> Result<C2, io::Error> {
+        let digest = self.digest2.get_or_try_init(|| {
+            PublicParamsDigestWrapper::<'_, C1, C2, RP1, RP2> {
+                primary_plonk_struct: &self.primary.S,
+                secondary_plonk_struct: &self.secondary.S,
+                primary_params: &self.primary.params,
+                secondary_params: &self.secondary.params,
+            }
+            .digest()
+        })?;
+        Ok(*digest)
     }
 }
 
@@ -251,8 +291,8 @@ where
     RP1: ROPair<C1::Scalar>,
     RP2: ROPair<C2::Scalar>,
 {
-    pub primary_plonk_struct: PlonkStructure<C1::Scalar>,
-    pub secondary_plonk_struct: PlonkStructure<C2::Scalar>,
+    pub primary_plonk_struct: &'l PlonkStructure<C1::Scalar>,
+    pub secondary_plonk_struct: &'l PlonkStructure<C2::Scalar>,
     pub primary_params: &'l StepParams<C1::Scalar, RP1::OnCircuit>,
     pub secondary_params: &'l StepParams<C2::Scalar, RP2::OnCircuit>,
 }
@@ -303,6 +343,9 @@ mod pp_test {
         let spec1 = RandomOracleConstant::<5, 4, Scalar1>::new(10, 10);
         let spec2 = RandomOracleConstant::<5, 4, Scalar2>::new(10, 10);
 
+        let sc1 = step_circuit::trivial::Circuit::<1, _>::default();
+        let sc2 = step_circuit::trivial::Circuit::<1, _>::default();
+
         const K: usize = 5;
 
         PublicParams::<
@@ -321,17 +364,19 @@ mod pp_test {
                 k_table_size: K as u32,
                 commitment_key: &CommitmentKey::setup(K, b"1"),
                 ro_constant: spec1,
+                circuit: sc1,
             },
             CircuitPublicParamsInput {
                 k_table_size: K as u32,
                 commitment_key: &CommitmentKey::setup(K, b"2"),
                 ro_constant: spec2,
+                circuit: sc2,
             },
             LIMB_WIDTH,
             LIMBS_COUNT_LIMIT,
         )
         .unwrap()
-        .digest::<C1Affine>()
+        .digest1()
         .unwrap();
     }
 }

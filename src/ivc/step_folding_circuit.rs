@@ -3,8 +3,8 @@ use std::{fmt, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, Value},
-    plonk::{Column, ConstraintSystem, Instance},
+    circuit::{Layouter, SimpleFloorPlanner, Value},
+    plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
 };
 use halo2curves::CurveAffine;
 use itertools::Itertools;
@@ -16,14 +16,15 @@ use crate::{
         fold_relaxed_plonk_instance_chip::{
             AssignedRelaxedPlonkInstance, FoldRelaxedPlonkInstanceChip, FoldResult,
         },
-        StepCircuit, SynthesisError,
+        StepCircuit,
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
+    table::circuit_meta_info,
 };
 
-use super::{instance_computation::AssignedRandomOracleComputationInstance, SimpleFloorPlanner};
+use super::instance_computation::AssignedRandomOracleComputationInstance;
 
 #[derive(Serialize)]
 #[serde(bound(serialize = "RO::Args: Serialize"))]
@@ -135,7 +136,38 @@ where
     pub input: StepInputs<'link, ARITY, C, RO>,
 }
 
-impl<'link, const ARITY: usize, C, SC, RO, const T: usize> StepCircuit<ARITY, C::Base>
+impl<'link, const ARITY: usize, C, SC, RO, const T: usize>
+    StepFoldingCircuit<'link, ARITY, C, SC, RO, T>
+where
+    C: CurveAffine,
+    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    C::Scalar: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    SC: StepCircuit<ARITY, C::Base> + Sized,
+    RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
+{
+    /// create StepFoldingCircuit with default inputs
+    pub fn new(k: usize, step_circuit: &'link SC, step_pp: &'link StepParams<C::Base, RO>) -> Self {
+        let NUM_IO = 2; // our StepFoldingCircuit has instance [X0, X1]
+        let mut cs = ConstraintSystem::<C::Base>::default();
+        Self::configure(&mut cs);
+        let (num_challenges, num_rounds, folding_degree, _) = circuit_meta_info(k, &cs);
+        Self {
+            step_circuit,
+            input: StepInputs::<'_, ARITY, C, RO> {
+                step: C::Base::ZERO,
+                step_pp,
+                public_params_hash: C::identity(),
+                z_0: [C::Base::ZERO; ARITY],
+                z_i: [C::Base::ZERO; ARITY],
+                U: RelaxedPlonkInstance::new(NUM_IO, num_challenges, num_rounds.len()),
+                u: PlonkInstance::new(NUM_IO, num_challenges, num_rounds.len()),
+                cross_term_commits: vec![C::identity(); folding_degree.saturating_sub(1)],
+            },
+        }
+    }
+}
+
+impl<'link, const ARITY: usize, C, SC, RO, const T: usize> Circuit<C::Base>
     for StepFoldingCircuit<'link, ARITY, C, SC, RO, T>
 where
     C: CurveAffine,
@@ -146,6 +178,10 @@ where
 {
     type Config = StepConfig<ARITY, C::Base, SC, T>;
     type FloorPlanner = SimpleFloorPlanner;
+
+    fn without_witnesses(&self) -> Self {
+        unimplemented!()
+    }
 
     /// Configure the step circuit. This method initializes necessary
     /// fixed columns and advice columns, but does not create any instance
@@ -171,19 +207,28 @@ where
         }
     }
 
-    /// Sythesize the circuit for a computation step and return variable
-    /// that corresponds to the output of the step z_{i+1}
+    /// Sythesize the circuit for a computation step
     /// this method will be called when we synthesize the IVC_Circuit
-    ///
-    /// Return `z_out` result
-    fn synthesize_step(
+    fn synthesize(
         &self,
         config: Self::Config,
-        layouter: &mut impl Layouter<C::Base>,
-        assigned_z_i: &[AssignedCell<C::Base, C::Base>; ARITY],
-    ) -> Result<[AssignedCell<C::Base, C::Base>; ARITY], SynthesisError> {
+        mut layouter: impl Layouter<C::Base>,
+    ) -> Result<(), Error> {
         let assigned_z_0: [_; ARITY] = layouter.assign_region(
             || "assigned_z0_primary",
+            |region| {
+                let mut region = RegionCtx::new(region, 0);
+
+                config
+                    .main_gate_config
+                    .advice_cycle_assigner()
+                    .assign_all_advice(&mut region, || "z0_primary", self.input.z_0.iter().copied())
+                    .map(|inp| inp.try_into().unwrap())
+            },
+        )?;
+
+        let assigned_z_i: [_; ARITY] = layouter.assign_region(
+            || "assigned_zi",
             |region| {
                 let mut region = RegionCtx::new(region, 0);
 
@@ -251,7 +296,7 @@ where
                     public_params_hash: &w.public_params_hash,
                     step: &assigned_step,
                     z_0: &assigned_z_0,
-                    z_i: assigned_z_i,
+                    z_i: &assigned_z_i,
                     relaxed: &w.assigned_relaxed,
                 }
                 .generate(&mut ctx, config.main_gate_config.clone())?;
@@ -307,9 +352,11 @@ where
             },
         )?;
 
-        let z_output =
-            self.step_circuit
-                .synthesize_step(config.step_config, layouter, &assigned_input)?;
+        let z_output = self.step_circuit.synthesize_step(
+            config.step_config,
+            &mut layouter,
+            &assigned_input,
+        )?;
 
         let output_hash = layouter.assign_region(
             || "generate output hash",
@@ -340,44 +387,6 @@ where
         // Check that new_X1 == output_hash
         layouter.constrain_instance(output_hash.cell(), config.instance, 1)?;
 
-        Ok(z_output)
-    }
-}
-
-impl<'link, const ARITY: usize, C, SC, RO, const T: usize>
-    StepFoldingCircuit<'link, ARITY, C, SC, RO, T>
-where
-    C: CurveAffine,
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
-    C::Scalar: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
-    SC: StepCircuit<ARITY, C::Base> + Sized,
-    RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
-{
-    pub fn synthesize(
-        &self,
-        config: StepConfig<ARITY, C::Base, SC, T>,
-        layouter: &mut impl Layouter<C::Base>,
-    ) -> Result<[C::Base; ARITY], SynthesisError> {
-        let assigned_z_i: [_; ARITY] = layouter.assign_region(
-            || "assigned_zi",
-            |region| {
-                let mut region = RegionCtx::new(region, 0);
-
-                config
-                    .main_gate_config
-                    .advice_cycle_assigner()
-                    .assign_all_advice(&mut region, || "z0_primary", self.input.z_0.iter().copied())
-                    .map(|inp| inp.try_into().unwrap())
-            },
-        )?;
-
-        let assigned_z_next = <Self as StepCircuit<ARITY, C::Base>>::synthesize_step(
-            self,
-            config,
-            layouter,
-            &assigned_z_i,
-        )?;
-
-        Ok(assigned_z_next.map(|cell| cell.value().unwrap().cloned().unwrap()))
+        Ok(())
     }
 }

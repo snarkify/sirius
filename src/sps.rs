@@ -13,8 +13,6 @@ pub enum Error {
     ChallengeNotMatch { challenge_index: usize },
     #[error("For this challenges count table must have lookup aguments")]
     LackOfLookupArguments,
-    #[error("Lack of advices, should call `TableData::assembly` first")]
-    LackOfAdvices,
     #[error("Only 0..=3 num of challenges supported: {challenges_count} not")]
     UnsupportedChallengesCount { challenges_count: usize },
     #[error("Error while commit {annotation} with err: {err:?}")]

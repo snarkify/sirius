@@ -5,8 +5,8 @@ use std::{array, fs, io, iter, marker::PhantomData, num::NonZeroUsize, path::Pat
 use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, Value},
-    plonk::ConstraintSystem,
+    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
+    plonk::{ConstraintSystem, Error},
 };
 
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
@@ -17,10 +17,7 @@ use grumpkin::G1 as C2;
 use log::*;
 use sirius::{
     commitment::CommitmentKey,
-    ivc::{
-        step_circuit, CircuitPublicParamsInput, PublicParams, SimpleFloorPlanner, StepCircuit,
-        SynthesisError, IVC,
-    },
+    ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, IVC},
     poseidon::{self, ROPair},
 };
 
@@ -261,7 +258,7 @@ pub mod sha256 {
 
 pub use sha256::{BlockWord, Sha256, Table16Chip, Table16Config};
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 struct TestSha256Circuit<F: PrimeField> {
     _p: PhantomData<F>,
 }
@@ -286,7 +283,7 @@ impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
         config: Self::Config,
         layouter: &mut impl Layouter<F>,
         z_in: &[AssignedCell<F, F>; ARITY],
-    ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
+    ) -> Result<[AssignedCell<F, F>; ARITY], Error> {
         Table16Chip::load(config.clone(), layouter)?;
         let table16_chip = Table16Chip::construct(config);
 
@@ -399,11 +396,13 @@ fn main() {
             k_table_size: CIRCUIT_TABLE_SIZE1 as u32,
             commitment_key: &primary_commitment_key,
             ro_constant: primary_spec,
+            circuit: sc1.clone(),
         },
         CircuitPublicParamsInput {
             k_table_size: CIRCUIT_TABLE_SIZE2 as u32,
             commitment_key: &secondary_commitment_key,
             ro_constant: secondary_spec,
+            circuit: sc2.clone(),
         },
         LIMB_WIDTH,
         LIMBS_COUNT,

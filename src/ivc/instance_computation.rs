@@ -72,10 +72,10 @@ where
     pub limbs_count: NonZeroUsize,
 }
 
-impl<'l, C2, RP, const A: usize> RandomOracleComputationInstance<'l, A, C2, RP>
+impl<'l, C, RP, const A: usize> RandomOracleComputationInstance<'l, A, C, RP>
 where
-    RP: ROTrait<C2::Base>,
-    C2: CurveAffine + Serialize,
+    RP: ROTrait<C::Base>,
+    C: CurveAffine + Serialize,
 {
     pub fn generate<F: PrimeField>(self) -> F {
         pub struct RelaxedPlonkInstanceBigUintView<'l, C: CurveAffine> {
@@ -143,11 +143,11 @@ where
         util::fe_to_fe(
             &RP::new(self.random_oracle_constant)
                 .absorb_point(self.public_params_hash)
-                .absorb_field(C2::Base::from_u128(self.step as u128))
+                .absorb_field(C::Base::from_u128(self.step as u128))
                 .absorb_field_iter(self.z_0.iter().copied())
                 .absorb_field_iter(self.z_i.iter().copied())
                 .absorb(&relaxed)
-                .squeeze::<C2>(NUM_CHALLENGE_BITS),
+                .squeeze::<C>(NUM_CHALLENGE_BITS),
         )
         .unwrap()
     }
@@ -158,6 +158,7 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter};
+    use halo2_proofs::plonk::ConstraintSystem;
     use halo2curves::{bn256, grumpkin};
 
     type C1 = <bn256::G1 as halo2curves::group::prime::PrimeCurve>::Affine;
@@ -172,7 +173,7 @@ mod tests {
         },
         main_gate::AdviceCyclicAssignor,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, Spec},
-        table::TableData,
+        table::WitnessData,
     };
 
     use super::*;
@@ -211,9 +212,12 @@ mod tests {
         }
         .generate();
 
-        let mut td = TableData::new(15, vec![]);
-
-        let config = td.prepare_assembly(|cs| -> MainGateConfig<10> { MainGate::configure(cs) });
+        let mut td = WitnessData {
+            instance: vec![],
+            advice: vec![],
+        };
+        let mut cs = ConstraintSystem::default();
+        let config = MainGate::<Base, 10>::configure(&mut cs);
 
         let on_circuit_hash = SingleChipLayouter::<'_, Base, _>::new(&mut td, vec![])
             .unwrap()

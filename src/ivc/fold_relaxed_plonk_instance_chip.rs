@@ -1029,6 +1029,7 @@ mod tests {
     use bitter::{BitReader, LittleEndianReader};
     use ff::Field;
     use halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter, Value};
+    use halo2_proofs::plonk::ConstraintSystem;
     use halo2curves::{bn256::G1Affine as C1, CurveAffine};
     use rand::{rngs::ThreadRng, Rng};
 
@@ -1037,7 +1038,7 @@ mod tests {
         constants::MAX_BITS,
         nifs::vanilla::VanillaFS,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
-        table::TableData,
+        table::WitnessData,
     };
 
     use super::*;
@@ -1058,12 +1059,15 @@ mod tests {
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(64) };
     const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
-    fn get_table_data() -> (TableData<Base>, MainGateConfig<T>) {
-        let mut td = TableData::new(K, vec![]);
-        let _ = td.cs.instance_column();
-        let config = td.prepare_assembly(MainGate::<Base, T>::configure);
+    fn get_witness_collector() -> (WitnessData<Base>, MainGateConfig<T>) {
+        let witness = WitnessData {
+            instance: vec![],
+            advice: vec![],
+        };
+        let mut cs = ConstraintSystem::default();
+        let config = MainGate::<Base, T>::configure(&mut cs);
 
-        (td, config)
+        (witness, config)
     }
 
     fn random_curve_vec(mut rnd: impl Rng) -> Vec<C1> {
@@ -1094,7 +1098,7 @@ mod tests {
     /// Includes configured table data, a main gate config, random number generator, ECC and gate chips, and a random scalar.
     /// Used for setting up test scenarios, generating random inputs, and initializing necessary components for testing etc
     struct Fixture {
-        td: TableData<Base>,
+        td: WitnessData<Base>,
         config: MainGateConfig<T>,
         rnd: ThreadRng,
         ecc: EccChip<C1, Base, T>,
@@ -1104,7 +1108,7 @@ mod tests {
 
     impl Default for Fixture {
         fn default() -> Self {
-            let (td, config) = get_table_data();
+            let (td, config) = get_witness_collector();
             let mut rnd = rand::thread_rng();
 
             Self {
@@ -1138,7 +1142,7 @@ mod tests {
 
         let relaxed = generate_random_plonk_instance(&mut rnd).to_relax();
 
-        let (mut td, config) = get_table_data();
+        let (mut td, config) = get_witness_collector();
 
         let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new(
             relaxed.clone(),
@@ -1734,8 +1738,6 @@ mod tests {
         const K: usize = 5;
 
         let mut ro = PoseidonHash::new(spec.clone());
-        let mut td = TableData::<ScalarExt>::new(K as u32, vec![]);
-        let _config = td.prepare_assembly(MainGate::<ScalarExt, T>::configure);
 
         VanillaFS::generate_challenge(&pp_hash, &mut ro, relaxed, input, cross_term_commits)
             .unwrap()

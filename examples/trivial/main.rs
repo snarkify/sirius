@@ -95,11 +95,13 @@ fn main() {
             k_table_size: CIRCUIT_TABLE_SIZE1 as u32,
             commitment_key: &primary_commitment_key,
             ro_constant: primary_spec,
+            circuit: sc1.clone(),
         },
         CircuitPublicParamsInput {
             k_table_size: CIRCUIT_TABLE_SIZE2 as u32,
             commitment_key: &secondary_commitment_key,
             ro_constant: secondary_spec,
+            circuit: sc2.clone(),
         },
         LIMB_WIDTH,
         LIMBS_COUNT_LIMIT,

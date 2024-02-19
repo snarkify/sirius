@@ -1,8 +1,9 @@
+use crate::plonk::permutation::Assembly;
 use crate::polynomial::sparse::SparseMatrix;
 use crate::polynomial::Expression;
 use ff::PrimeField;
-use halo2_proofs::plonk::Expression as PE;
 use halo2_proofs::plonk::{Any, Column};
+use halo2_proofs::plonk::{ConstraintSystem, Expression as PE};
 use std::collections::HashSet;
 
 // Helper function to convert cell indices (column, row) to index in Z vector
@@ -105,4 +106,46 @@ pub(crate) fn compress_expression<F: PrimeField>(
     } else {
         exprs[0].clone()
     }
+}
+
+/// construct sparse matrix P (size N*N) from copy constraints
+/// since folding will change values of advice/instance column while keep fixed column values
+/// we don't allow fixed column to be in the copy constraint here
+/// suppose we have 1 instance column, n advice columns
+/// and there are total of r rows. notice the instance column only contains `num_io = io` items
+/// N = num_io + r*n. Let (i_1,...,i_{io}) be all values of the instance columns
+/// and (x_1,...,x_{n*r}) be concatenate of advice columns.
+/// define vector Z = (i_1,...,i_{io}, x_1,...,x_{n*r})
+/// This function is to find the permutation matrix P such that the copy constraints are
+/// equivalent to P * Z - Z = 0. This is invariant relation under our folding scheme
+pub(crate) fn permutation_matrix<F: PrimeField>(
+    k: usize,
+    num_io: usize,
+    cs: &ConstraintSystem<F>,
+    permutation: &Assembly,
+) -> SparseMatrix<F> {
+    let mut sparse_matrix_p = Vec::new();
+    let num_advice = cs.num_advice_columns();
+    let columns = &cs.permutation.columns;
+    let instance_column_idx = instance_column_index(columns);
+    let num_rows = 1 << k;
+
+    for (left_col, vec) in permutation.mapping.iter().enumerate() {
+        for (left_row, cycle) in vec.iter().enumerate() {
+            // skip rows that beyond the num_io in instance column
+            if let Some(idx) = instance_column_idx {
+                if left_col == idx && left_row >= num_io {
+                    continue;
+                }
+            }
+            let left_col = column_index(left_col, columns);
+            let right_col = column_index(cycle.0, columns);
+            let left_z_idx = cell_to_z_idx(left_col, left_row, num_rows, num_io);
+            let right_z_idx = cell_to_z_idx(right_col, cycle.1, num_rows, num_io);
+            sparse_matrix_p.push((left_z_idx, right_z_idx, F::ONE));
+        }
+    }
+
+    fill_sparse_matrix(&mut sparse_matrix_p, num_advice, num_rows, num_io, columns);
+    sparse_matrix_p
 }
