@@ -241,7 +241,7 @@ where
                 public_params_hash: &secondary_public_params_hash,
                 step: 1,
                 z_0: &secondary_z_0,
-                z_i: &secondary.process_step(&secondary_z_0, pp.primary.k_table_size)?,
+                z_i: &secondary.process_step(&secondary_z_0, pp.secondary.k_table_size)?,
                 relaxed: &primary_plonk_trace.u.to_relax(),
             }
             .generate(),
