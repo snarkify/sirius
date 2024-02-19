@@ -367,7 +367,12 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
     pub fn squeeze(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedValue<F>, Error> {
         //let buf = mem::take(&mut self.buf);
         let buf = self.buf.clone();
-        debug!("OFF_CIRCUIT_INPUT_OF_HASH: {buf:?}");
+        debug!(
+            "ON_CIRCUIT_INPUT_OF_HASH: {:?}",
+            buf.iter()
+                .map(|val| val.value().unwrap().unwrap())
+                .collect::<Box<[_]>>()
+        );
 
         let exact = buf.len() % RATE == 0;
         let state0: [F; T] = poseidon::State::default().words();
