@@ -3,6 +3,7 @@ use std::{iter, mem};
 
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2curves::group::ff::{FromUniformBytes, PrimeField};
+use log::*;
 use poseidon::{self, SparseMDSMatrix};
 
 use crate::poseidon::{ROConstantsTrait, ROTrait};
@@ -164,6 +165,7 @@ where
 
     fn output<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
         let buf = mem::take(&mut self.buf);
+        debug!("INPUT OF HASH: {buf:?}");
         let exact = buf.len() % RATE == 0;
 
         for chunk in buf.chunks(RATE) {
