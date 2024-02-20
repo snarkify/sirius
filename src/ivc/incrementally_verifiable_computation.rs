@@ -195,6 +195,7 @@ where
             }
             .generate(),
         ];
+        debug!("Primary off circuit instance: {:?}", &primary_td.instance);
 
         let primary_z_output = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: &primary,
@@ -253,6 +254,10 @@ where
             }
             .generate(),
         ];
+        debug!(
+            "Secondary off circuit instance: {:?}",
+            &secondary_td.instance
+        );
 
         let secondary_z_output = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
             step_circuit: &secondary,
@@ -485,7 +490,7 @@ where
             z_i: &self.primary.z_i,
             relaxed: &self.secondary.relaxed_trace.U,
             limb_width: pp.primary.params.limb_width,
-            limbs_count: pp.primary.params.limbs_count
+            limbs_count: pp.primary.params.limbs_count,
         }
         .generate::<C2::Scalar>();
 
@@ -504,7 +509,7 @@ where
             z_i: &self.secondary.z_i,
             relaxed: &self.primary.relaxed_trace.U,
             limb_width: pp.secondary.params.limb_width,
-            limbs_count: pp.secondary.params.limbs_count
+            limbs_count: pp.secondary.params.limbs_count,
         }
         .generate::<C1::Scalar>();
 
