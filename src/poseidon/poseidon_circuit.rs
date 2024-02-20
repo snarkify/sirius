@@ -5,6 +5,7 @@ use halo2_proofs::{
     circuit::{AssignedCell, Chip, Value},
     plonk::Error,
 };
+use log::*;
 use poseidon::{self};
 
 use crate::{
@@ -366,6 +367,14 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
     pub fn squeeze(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedValue<F>, Error> {
         //let buf = mem::take(&mut self.buf);
         let buf = self.buf.clone();
+        if let Some(buf) = buf
+            .iter()
+            .map(|val| *val.value().unwrap())
+            .collect::<Option<Vec<F>>>()
+        {
+            debug!("On circuit input of hash: {buf:?}",);
+        }
+
         let exact = buf.len() % RATE == 0;
         let state0: [F; T] = poseidon::State::default().words();
 

@@ -8,7 +8,6 @@ use log::*;
 use serde::Serialize;
 
 use crate::{
-    constants::NUM_CHALLENGE_BITS,
     ivc::{
         public_params::{self, PublicParams},
         step_folding_circuit::{StepConfig, StepFoldingCircuit, StepInputs},
@@ -21,6 +20,7 @@ use crate::{
     table::TableData,
 };
 
+use super::instance_computation::RandomOracleComputationInstance;
 pub use super::{
     floor_planner::{FloorPlanner, SimpleFloorPlanner},
     step_circuit::{self, StepCircuit, SynthesisError},
@@ -171,6 +171,27 @@ where
             &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
         )?;
 
+        primary_td.instance = vec![
+            RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+                random_oracle_constant: pp.primary.params.ro_constant.clone(),
+                public_params_hash: &primary_public_params_hash,
+                step: 0,
+                z_0: &primary_z_0,
+                z_i: &primary_z_0,
+                relaxed: &pre_round_secondary_plonk_trace.u.to_relax(),
+            }
+            .generate(),
+            RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+                random_oracle_constant: pp.primary.params.ro_constant.clone(),
+                public_params_hash: &primary_public_params_hash,
+                step: 1,
+                z_0: &primary_z_0,
+                z_i: &primary.process_step(&primary_z_0, pp.primary.k_table_size)?,
+                relaxed: &pre_round_secondary_plonk_trace.u.to_relax(),
+            }
+            .generate(),
+        ];
+
         let primary_z_output = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: &primary,
             input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
@@ -203,6 +224,27 @@ where
 
         let primary_cross_term_commits =
             vec![C1::identity(); primary_nifs_pp.S.get_degree_for_folding().saturating_sub(1)];
+
+        secondary_td.instance = vec![
+            RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+                random_oracle_constant: pp.secondary.params.ro_constant.clone(),
+                public_params_hash: &secondary_public_params_hash,
+                step: 0,
+                z_0: &secondary_z_0,
+                z_i: &secondary_z_0,
+                relaxed: &primary_plonk_trace.u.to_relax(),
+            }
+            .generate(),
+            RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+                random_oracle_constant: pp.secondary.params.ro_constant.clone(),
+                public_params_hash: &secondary_public_params_hash,
+                step: 1,
+                z_0: &secondary_z_0,
+                z_i: &secondary.process_step(&secondary_z_0, pp.secondary.k_table_size)?,
+                relaxed: &primary_plonk_trace.u.to_relax(),
+            }
+            .generate(),
+        ];
 
         let secondary_z_output = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
             step_circuit: &secondary,
@@ -272,10 +314,34 @@ where
         )?;
 
         debug!("prepare primary td");
+
+        let primary_public_params_hash = pp.digest().map_err(Error::WhileHash)?;
         // Prepare primary constraint system for folding
         let (mut primary_td, primary_step_config) = Self::prepare_primary_td::<T, RP1>(
             pp.primary.k_table_size,
-            [C1::Scalar::ZERO, C1::Scalar::ZERO], // TODO #154 #160
+            [
+                RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+                    random_oracle_constant: pp.primary.params.ro_constant.clone(),
+                    public_params_hash: &primary_public_params_hash,
+                    step: self.step,
+                    z_0: &self.primary.z_0,
+                    z_i: &self.primary.z_i,
+                    relaxed: &self.secondary.relaxed_trace.U,
+                }
+                .generate(),
+                RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+                    random_oracle_constant: pp.primary.params.ro_constant.clone(),
+                    public_params_hash: &primary_public_params_hash,
+                    step: self.step + 1,
+                    z_0: &self.primary.z_0,
+                    z_i: &self
+                        .primary
+                        .step_circuit
+                        .process_step(&self.primary.z_i, pp.primary.k_table_size)?,
+                    relaxed: &secondary_new_trace.U,
+                }
+                .generate(),
+            ],
         );
         let primary_step_folding_circuit = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: &self.primary.step_circuit,
@@ -321,9 +387,34 @@ where
         debug!("start fold step with folding 'primary' by 'secondary'");
 
         debug!("prepare secondary td");
+
+        let secondary_public_params_hash = pp.digest().map_err(Error::WhileHash)?;
+
         let (mut secondary_td, secondary_step_config) = Self::prepare_secondary_td::<T, RP2>(
             pp.secondary.k_table_size,
-            [C2::Scalar::ZERO, C2::Scalar::ZERO], // TODO #154 #160
+            [
+                RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+                    random_oracle_constant: pp.secondary.params.ro_constant.clone(),
+                    public_params_hash: &secondary_public_params_hash,
+                    step: self.step,
+                    z_0: &self.secondary.z_0,
+                    z_i: &self.secondary.z_i,
+                    relaxed: &self.primary.relaxed_trace.U,
+                }
+                .generate(),
+                RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+                    random_oracle_constant: pp.secondary.params.ro_constant.clone(),
+                    public_params_hash: &secondary_public_params_hash,
+                    step: self.step + 1,
+                    z_0: &self.secondary.z_0,
+                    z_i: &self
+                        .secondary
+                        .step_circuit
+                        .process_step(&self.secondary.z_i, pp.secondary.k_table_size)?,
+                    relaxed: &primary_new_trace.U,
+                }
+                .generate(),
+            ],
         );
 
         let secondary_step_folding_circuit =
@@ -370,32 +461,34 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        // verify X0
-        if RP1::OffCircuit::new(pp.primary.params.ro_constant.clone())
-            .absorb_point(&pp.digest::<C2>().map_err(Error::WhileHash)?)
-            .absorb_field(C1::Scalar::from_u128(self.step as u128))
-            .absorb_field_iter(self.primary.z_0.iter().copied())
-            .absorb_field_iter(self.primary.z_i.iter().copied())
-            .absorb(&self.secondary.relaxed_trace.U)
-            .squeeze::<C2>(NUM_CHALLENGE_BITS)
-            .ne(&self.secondary.relaxed_trace.U.instance[0])
-        {
+        let expected_X0 = RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+            random_oracle_constant: pp.primary.params.ro_constant.clone(),
+            public_params_hash: &pp.digest().map_err(Error::WhileHash)?,
+            step: self.step,
+            z_0: &self.primary.z_0,
+            z_i: &self.primary.z_i,
+            relaxed: &self.secondary.relaxed_trace.U,
+        }
+        .generate::<C2::Scalar>();
+
+        if expected_X0 != self.secondary.relaxed_trace.U.instance[0] {
             return Err(Error::VerifyFailed(VerificationError::InstanceNotMatch {
                 index: 0,
                 is_primary: true,
             }));
         }
 
-        // verify X1
-        if RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone())
-            .absorb_point(&pp.digest::<C1>().map_err(Error::WhileHash)?)
-            .absorb_field(C2::Scalar::from_u128(self.step as u128))
-            .absorb_field_iter(self.secondary.z_0.iter().copied())
-            .absorb_field_iter(self.secondary.z_i.iter().copied())
-            .absorb(&self.primary.relaxed_trace.U)
-            .squeeze::<C1>(NUM_CHALLENGE_BITS)
-            .ne(&self.primary.relaxed_trace.U.instance[1])
-        {
+        let expected_X1 = RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+            random_oracle_constant: pp.secondary.params.ro_constant.clone(),
+            public_params_hash: &pp.digest().map_err(Error::WhileHash)?,
+            step: self.step,
+            z_0: &self.secondary.z_0,
+            z_i: &self.secondary.z_i,
+            relaxed: &self.primary.relaxed_trace.U,
+        }
+        .generate::<C1::Scalar>();
+
+        if expected_X1 != self.primary.relaxed_trace.U.instance[1] {
             return Err(Error::VerifyFailed(VerificationError::InstanceNotMatch {
                 index: 1,
                 is_primary: false,

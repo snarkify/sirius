@@ -1,3 +1,4 @@
+/// Module name acronym `StepFoldingCircuit` -> `sfc`
 use std::{fmt, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
@@ -10,19 +11,18 @@ use itertools::Itertools;
 use serde::Serialize;
 
 use crate::{
-    constants::NUM_CHALLENGE_BITS,
     ivc::{
         fold_relaxed_plonk_instance_chip::{
             AssignedRelaxedPlonkInstance, FoldRelaxedPlonkInstanceChip, FoldResult,
         },
         StepCircuit, SynthesisError,
     },
-    main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx, WrapValue},
+    main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
 };
 
-use super::SimpleFloorPlanner;
+use super::{instance_computation::AssignedRandomOracleComputationInstance, SimpleFloorPlanner};
 
 #[derive(Serialize)]
 #[serde(bound(serialize = "RO::Args: Serialize"))]
@@ -239,24 +239,22 @@ where
             },
         )?;
 
+        // Check X0 == input_params_hash
         layouter.assign_region(
             || "generate input hash",
             |region| {
                 let mut ctx = RegionCtx::new(region, 0);
 
-                let bits = RO::new(
-                    config.main_gate_config.clone(),
-                    self.input.step_pp.ro_constant.clone(),
-                )
-                .absorb_point(WrapValue::from_assigned_point(&w.public_params_hash))
-                .absorb_base(WrapValue::Assigned(assigned_step.clone()))
-                .absorb_iter(assigned_z_0.iter())
-                .absorb_iter(assigned_z_i.iter().cloned())
-                .absorb_iter(w.assigned_relaxed.iter_wrap_values())
-                .squeeze_n_bits(&mut ctx, NUM_CHALLENGE_BITS)?;
+                let expected_X0 = AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
+                    random_oracle_constant: self.input.step_pp.ro_constant.clone(),
+                    public_params_hash: &w.public_params_hash,
+                    step: &assigned_step,
+                    z_0: &assigned_z_0,
+                    z_i: &assigned_z_0,
+                    relaxed: &w.assigned_relaxed,
+                }
+                .generate(&mut ctx, config.main_gate_config.clone())?;
 
-                let gate = MainGate::new(config.main_gate_config.clone());
-                let expected_X0 = gate.le_bits_to_num(&mut ctx, &bits)?;
                 ctx.constrain_equal(expected_X0.cell(), w.input_instance[0].0.cell())?;
 
                 Ok(())
@@ -311,30 +309,28 @@ where
         let output_hash = layouter.assign_region(
             || "generate output hash",
             |region| {
-                let mut ctx = RegionCtx::new(region, 0);
-
-                let bits = RO::new(
+                AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
+                    random_oracle_constant: self.input.step_pp.ro_constant.clone(),
+                    public_params_hash: &assigned_input_witness.public_params_hash,
+                    step: &assigned_next_step,
+                    z_0: &assigned_z_0,
+                    z_i: &z_output,
+                    relaxed: &assigned_new_U,
+                }
+                .generate(
+                    &mut RegionCtx::new(region, 0),
                     config.main_gate_config.clone(),
-                    self.input.step_pp.ro_constant.clone(),
                 )
-                .absorb_point(WrapValue::from_assigned_point(
-                    &assigned_input_witness.public_params_hash,
-                ))
-                .absorb_base(WrapValue::Assigned(assigned_next_step.clone()))
-                .absorb_iter(assigned_z_0.iter())
-                .absorb_iter(z_output.iter().cloned())
-                .absorb_iter(assigned_new_U.iter_wrap_values())
-                .squeeze_n_bits(&mut ctx, NUM_CHALLENGE_BITS)?;
-
-                MainGate::new(config.main_gate_config.clone()).le_bits_to_num(&mut ctx, &bits)
             },
         )?;
 
+        // Check that old_X1 == new_X0
         layouter.constrain_instance(
             assigned_input_witness.input_instance[1].0.cell(),
             config.instance,
             0,
         )?;
+        // Check that new_X1 == output_hash
         layouter.constrain_instance(output_hash.cell(), config.instance, 1)?;
 
         Ok(z_output)
