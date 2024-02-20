@@ -1,3 +1,4 @@
+/// Module name acronym `StepFoldingCircuit` -> `sfc`
 use std::{fmt, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
@@ -11,13 +12,16 @@ use serde::Serialize;
 
 use crate::{
     constants::NUM_CHALLENGE_BITS,
+    gadgets::ecc::AssignedPoint,
     ivc::{
         fold_relaxed_plonk_instance_chip::{
             AssignedRelaxedPlonkInstance, FoldRelaxedPlonkInstanceChip, FoldResult,
         },
         StepCircuit, SynthesisError,
     },
-    main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx, WrapValue},
+    main_gate::{
+        AdviceCyclicAssignor, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue,
+    },
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
 };
@@ -245,19 +249,15 @@ where
             |region| {
                 let mut ctx = RegionCtx::new(region, 0);
 
-                let bits = RO::new(
-                    config.main_gate_config.clone(),
-                    self.input.step_pp.ro_constant.clone(),
-                )
-                .absorb_point(WrapValue::from_assigned_point(&w.public_params_hash))
-                .absorb_base(WrapValue::Assigned(assigned_step.clone()))
-                .absorb_iter(assigned_z_0.iter())
-                .absorb_iter(assigned_z_i.iter().cloned())
-                .absorb_iter(w.assigned_relaxed.iter_wrap_values())
-                .squeeze_n_bits(&mut ctx, NUM_CHALLENGE_BITS)?;
-
-                let gate = MainGate::new(config.main_gate_config.clone());
-                let expected_X0 = gate.le_bits_to_num(&mut ctx, &bits)?;
+                let expected_X0 = AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
+                    random_oracle_constant: self.input.step_pp.ro_constant.clone(),
+                    public_params_hash: &w.public_params_hash,
+                    step: &assigned_step,
+                    z_0: &assigned_z_0,
+                    z_i: &assigned_z_0,
+                    relaxed: &w.assigned_relaxed,
+                }
+                .generate(&mut ctx, config.main_gate_config.clone())?;
 
                 ctx.constrain_equal(expected_X0.cell(), w.input_instance[0].0.cell())?;
 
@@ -313,22 +313,18 @@ where
         let output_hash = layouter.assign_region(
             || "generate output hash",
             |region| {
-                let mut ctx = RegionCtx::new(region, 0);
-
-                let bits = RO::new(
+                AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
+                    random_oracle_constant: self.input.step_pp.ro_constant.clone(),
+                    public_params_hash: &assigned_input_witness.public_params_hash,
+                    step: &assigned_next_step,
+                    z_0: &assigned_z_0,
+                    z_i: &z_output,
+                    relaxed: &assigned_new_U,
+                }
+                .generate(
+                    &mut RegionCtx::new(region, 0),
                     config.main_gate_config.clone(),
-                    self.input.step_pp.ro_constant.clone(),
                 )
-                .absorb_point(WrapValue::from_assigned_point(
-                    &assigned_input_witness.public_params_hash,
-                ))
-                .absorb_base(WrapValue::Assigned(assigned_next_step.clone()))
-                .absorb_iter(assigned_z_0.iter())
-                .absorb_iter(z_output.iter().cloned())
-                .absorb_iter(assigned_new_U.iter_wrap_values())
-                .squeeze_n_bits(&mut ctx, NUM_CHALLENGE_BITS)?;
-
-                MainGate::new(config.main_gate_config.clone()).le_bits_to_num(&mut ctx, &bits)
             },
         )?;
 
@@ -380,5 +376,46 @@ where
         )?;
 
         Ok(assigned_z_next.map(|cell| cell.value().unwrap().cloned().unwrap()))
+    }
+}
+
+struct AssignedRandomOracleComputationInstance<
+    'l,
+    RP,
+    const A: usize,
+    const T: usize,
+    C: CurveAffine,
+> where
+    C::Base: FromUniformBytes<64> + PrimeFieldBits,
+    RP: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
+{
+    random_oracle_constant: RP::Args,
+    public_params_hash: &'l AssignedPoint<C>,
+    step: &'l AssignedCell<C::Base, C::Base>,
+    z_0: &'l [AssignedCell<C::Base, C::Base>; A],
+    z_i: &'l [AssignedCell<C::Base, C::Base>; A],
+    relaxed: &'l AssignedRelaxedPlonkInstance<C>,
+}
+
+impl<'l, const A: usize, const T: usize, C: CurveAffine, RO>
+    AssignedRandomOracleComputationInstance<'l, RO, A, T, C>
+where
+    C::Base: FromUniformBytes<64> + PrimeFieldBits,
+    RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
+{
+    fn generate(
+        self,
+        ctx: &mut RegionCtx<'_, C::Base>,
+        config: MainGateConfig<T>,
+    ) -> Result<AssignedValue<C::Base>, halo2_proofs::plonk::Error> {
+        let bits = RO::new(config.clone(), self.random_oracle_constant)
+            .absorb_point(WrapValue::from_assigned_point(self.public_params_hash))
+            .absorb_base(WrapValue::Assigned(self.step.clone()))
+            .absorb_iter(self.z_0.iter())
+            .absorb_iter(self.z_i.iter().cloned())
+            .absorb_iter(self.relaxed.iter_wrap_values())
+            .squeeze_n_bits(ctx, NUM_CHALLENGE_BITS)?;
+
+        MainGate::new(config.clone()).le_bits_to_num(ctx, &bits)
     }
 }
