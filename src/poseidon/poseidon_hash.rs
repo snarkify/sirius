@@ -165,7 +165,8 @@ where
 
     fn output<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
         let buf = mem::take(&mut self.buf);
-        debug!("OFF_CIRCUIT_INPUT_OF_HASH: {buf:?}");
+        debug!("Off circuit input of hash: {buf:?}");
+
         let exact = buf.len() % RATE == 0;
 
         for chunk in buf.chunks(RATE) {
