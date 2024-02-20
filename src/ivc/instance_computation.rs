@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2curves::CurveAffine;
@@ -5,10 +7,10 @@ use serde::Serialize;
 
 use crate::{
     constants::NUM_CHALLENGE_BITS,
-    gadgets::ecc::AssignedPoint,
+    gadgets::{ecc::AssignedPoint, nonnative::bn::big_uint::BigUint},
     main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
     plonk::RelaxedPlonkInstance,
-    poseidon::{ROCircuitTrait, ROTrait},
+    poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
     util,
 };
 
@@ -67,6 +69,8 @@ where
     pub z_0: &'l [C1::Scalar; A],
     pub z_i: &'l [C1::Scalar; A],
     pub relaxed: &'l RelaxedPlonkInstance<C2>,
+    pub limb_width: NonZeroUsize,
+    pub limbs_count: NonZeroUsize,
 }
 
 impl<'l, C1, C2, RP, const A: usize> RandomOracleComputationInstance<'l, A, C1, C2, RP>
@@ -76,13 +80,75 @@ where
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
 {
     pub fn generate<F: PrimeField>(self) -> F {
+        pub struct RelaxedPlonkInstanceBigUintView<'l, C: CurveAffine> {
+            pub(crate) W_commitments: &'l Vec<C>,
+            pub(crate) E_commitment: &'l C,
+            pub(crate) instance: Vec<BigUint<C::Base>>,
+            pub(crate) challenges: Vec<BigUint<C::Base>>,
+            pub(crate) u: &'l C::ScalarExt,
+        }
+
+        impl<'l, C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO>
+            for RelaxedPlonkInstanceBigUintView<'l, C>
+        {
+            fn absorb_into(&self, ro: &mut RO) {
+                ro.absorb_point_iter(self.W_commitments.iter())
+                    .absorb_point(self.E_commitment)
+                    .absorb_field_iter(
+                        self.instance
+                            .iter()
+                            .flat_map(|bn| bn.limbs().iter())
+                            .copied(),
+                    )
+                    .absorb_field_iter(
+                        self.challenges
+                            .iter()
+                            .flat_map(|bn| bn.limbs().iter())
+                            .copied(),
+                    )
+                    .absorb_field(util::fe_to_fe(self.u).unwrap());
+            }
+        }
+
+        let relaxed = RelaxedPlonkInstanceBigUintView {
+            W_commitments: &self.relaxed.W_commitments,
+            E_commitment: &self.relaxed.E_commitment,
+            instance: self
+                .relaxed
+                .instance
+                .iter()
+                .map(|v| {
+                    BigUint::from_f(
+                        &util::fe_to_fe(v).unwrap(),
+                        self.limb_width,
+                        self.limbs_count,
+                    )
+                    .unwrap()
+                })
+                .collect(),
+            challenges: self
+                .relaxed
+                .challenges
+                .iter()
+                .map(|v| {
+                    BigUint::from_f(
+                        &util::fe_to_fe(v).unwrap(),
+                        self.limb_width,
+                        self.limbs_count,
+                    )
+                    .unwrap()
+                })
+                .collect(),
+            u: &self.relaxed.u,
+        };
+
         util::fe_to_fe(
             &RP::new(self.random_oracle_constant)
                 .absorb_point(self.public_params_hash)
                 .absorb_field(C1::Scalar::from_u128(self.step as u128))
                 .absorb_field_iter(self.z_0.iter().copied())
-                .absorb_field_iter(self.z_0.iter().copied())
-                .absorb(self.relaxed)
+                .absorb_field_iter(self.z_i.iter().copied())
+                .absorb(&relaxed)
                 .squeeze::<C2>(NUM_CHALLENGE_BITS),
         )
         .unwrap()
@@ -102,6 +168,7 @@ mod tests {
     type Scalar = <C1 as CurveAffine>::ScalarExt;
 
     use crate::{
+        commitment::CommitmentKey,
         ivc::fold_relaxed_plonk_instance_chip::{
             assign_next_advice_from_point, FoldRelaxedPlonkInstanceChip,
         },
@@ -121,7 +188,13 @@ mod tests {
         let step = 0x128;
         let z_0 = [Base::from_u128(0x1024); 10];
         let z_i = [Base::from_u128(0x2048); 10];
-        let relaxed = RelaxedPlonkInstance::new(2, 10, 10);
+        let relaxed = RelaxedPlonkInstance {
+            W_commitments: vec![CommitmentKey::<C1>::default_value(); 10],
+            E_commitment: CommitmentKey::<C1>::default_value(),
+            instance: vec![Scalar::from_u128(0x67899); 2],
+            challenges: vec![Scalar::from_u128(0x123456); 10],
+            u: Scalar::from_u128(u128::MAX),
+        };
 
         let off_circuit_hash: Base = RandomOracleComputationInstance::<
             '_,
@@ -136,6 +209,8 @@ mod tests {
             z_0: &z_0,
             z_i: &z_i,
             relaxed: &relaxed,
+            limb_width: NonZeroUsize::new(10).unwrap(),
+            limbs_count: NonZeroUsize::new(10).unwrap(),
         }
         .generate();
 

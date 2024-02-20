@@ -179,6 +179,8 @@ where
                 z_0: &primary_z_0,
                 z_i: &primary_z_0,
                 relaxed: &pre_round_secondary_plonk_trace.u.to_relax(),
+                limb_width: pp.primary.params.limb_width,
+                limbs_count: pp.primary.params.limbs_count,
             }
             .generate(),
             RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
@@ -188,6 +190,8 @@ where
                 z_0: &primary_z_0,
                 z_i: &primary.process_step(&primary_z_0, pp.primary.k_table_size)?,
                 relaxed: &pre_round_secondary_plonk_trace.u.to_relax(),
+                limb_width: pp.primary.params.limb_width,
+                limbs_count: pp.primary.params.limbs_count,
             }
             .generate(),
         ];
@@ -233,6 +237,8 @@ where
                 z_0: &secondary_z_0,
                 z_i: &secondary_z_0,
                 relaxed: &primary_plonk_trace.u.to_relax(),
+                limb_width: pp.secondary.params.limb_width,
+                limbs_count: pp.secondary.params.limbs_count,
             }
             .generate(),
             RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
@@ -242,6 +248,8 @@ where
                 z_0: &secondary_z_0,
                 z_i: &secondary.process_step(&secondary_z_0, pp.secondary.k_table_size)?,
                 relaxed: &primary_plonk_trace.u.to_relax(),
+                limb_width: pp.secondary.params.limb_width,
+                limbs_count: pp.secondary.params.limbs_count,
             }
             .generate(),
         ];
@@ -327,6 +335,8 @@ where
                     z_0: &self.primary.z_0,
                     z_i: &self.primary.z_i,
                     relaxed: &self.secondary.relaxed_trace.U,
+                    limb_width: pp.secondary.params.limb_width,
+                    limbs_count: pp.secondary.params.limbs_count,
                 }
                 .generate(),
                 RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
@@ -339,6 +349,8 @@ where
                         .step_circuit
                         .process_step(&self.primary.z_i, pp.primary.k_table_size)?,
                     relaxed: &secondary_new_trace.U,
+                    limb_width: pp.secondary.params.limb_width,
+                    limbs_count: pp.secondary.params.limbs_count,
                 }
                 .generate(),
             ],
@@ -400,6 +412,8 @@ where
                     z_0: &self.secondary.z_0,
                     z_i: &self.secondary.z_i,
                     relaxed: &self.primary.relaxed_trace.U,
+                    limb_width: pp.primary.params.limb_width,
+                    limbs_count: pp.primary.params.limbs_count,
                 }
                 .generate(),
                 RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
@@ -412,6 +426,8 @@ where
                         .step_circuit
                         .process_step(&self.secondary.z_i, pp.secondary.k_table_size)?,
                     relaxed: &primary_new_trace.U,
+                    limb_width: pp.primary.params.limb_width,
+                    limbs_count: pp.primary.params.limbs_count,
                 }
                 .generate(),
             ],
@@ -468,6 +484,8 @@ where
             z_0: &self.primary.z_0,
             z_i: &self.primary.z_i,
             relaxed: &self.secondary.relaxed_trace.U,
+            limb_width: pp.primary.params.limb_width,
+            limbs_count: pp.primary.params.limbs_count
         }
         .generate::<C2::Scalar>();
 
@@ -485,6 +503,8 @@ where
             z_0: &self.secondary.z_0,
             z_i: &self.secondary.z_i,
             relaxed: &self.primary.relaxed_trace.U,
+            limb_width: pp.secondary.params.limb_width,
+            limbs_count: pp.secondary.params.limbs_count
         }
         .generate::<C1::Scalar>();
 
