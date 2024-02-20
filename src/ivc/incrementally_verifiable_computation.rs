@@ -8,20 +8,19 @@ use log::*;
 use serde::Serialize;
 
 use crate::{
-    constants::NUM_CHALLENGE_BITS,
     ivc::{
         public_params::{self, PublicParams},
         step_folding_circuit::{StepConfig, StepFoldingCircuit, StepInputs},
     },
     main_gate::MainGateConfig,
     nifs::{self, vanilla::VanillaFS, FoldingScheme},
-    plonk::{PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace},
+    plonk::{PlonkTrace, RelaxedPlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
     table::TableData,
-    util,
 };
 
+use super::instance_computation::RandomOracleComputationInstance;
 pub use super::{
     floor_planner::{FloorPlanner, SimpleFloorPlanner},
     step_circuit::{self, StepCircuit, SynthesisError},
@@ -578,39 +577,5 @@ where
         );
 
         (secondary_td, config)
-    }
-}
-
-struct RandomOracleComputationInstance<'l, const A: usize, C1, C2, RP>
-where
-    RP: ROTrait<C1::Scalar>,
-    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
-    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
-{
-    random_oracle_constant: RP::Constants,
-    public_params_hash: &'l C2,
-    step: usize,
-    z_0: &'l [C1::Scalar; A],
-    z_i: &'l [C1::Scalar; A],
-    relaxed: &'l RelaxedPlonkInstance<C2>,
-}
-
-impl<'l, C1, C2, RP, const A: usize> RandomOracleComputationInstance<'l, A, C1, C2, RP>
-where
-    RP: ROTrait<C1::Scalar>,
-    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
-    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
-{
-    fn generate<F: PrimeField>(self) -> F {
-        util::fe_to_fe(
-            &RP::new(self.random_oracle_constant)
-                .absorb_point(self.public_params_hash)
-                .absorb_field(C1::Scalar::from_u128(self.step as u128))
-                .absorb_field_iter(self.z_0.iter().copied())
-                .absorb_field_iter(self.z_0.iter().copied())
-                .absorb(self.relaxed)
-                .squeeze::<C2>(NUM_CHALLENGE_BITS),
-        )
-        .unwrap()
     }
 }

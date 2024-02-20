@@ -11,22 +11,18 @@ use itertools::Itertools;
 use serde::Serialize;
 
 use crate::{
-    constants::NUM_CHALLENGE_BITS,
-    gadgets::ecc::AssignedPoint,
     ivc::{
         fold_relaxed_plonk_instance_chip::{
             AssignedRelaxedPlonkInstance, FoldRelaxedPlonkInstanceChip, FoldResult,
         },
         StepCircuit, SynthesisError,
     },
-    main_gate::{
-        AdviceCyclicAssignor, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue,
-    },
+    main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
 };
 
-use super::SimpleFloorPlanner;
+use super::{instance_computation::AssignedRandomOracleComputationInstance, SimpleFloorPlanner};
 
 #[derive(Serialize)]
 #[serde(bound(serialize = "RO::Args: Serialize"))]
@@ -376,46 +372,5 @@ where
         )?;
 
         Ok(assigned_z_next.map(|cell| cell.value().unwrap().cloned().unwrap()))
-    }
-}
-
-struct AssignedRandomOracleComputationInstance<
-    'l,
-    RP,
-    const A: usize,
-    const T: usize,
-    C: CurveAffine,
-> where
-    C::Base: FromUniformBytes<64> + PrimeFieldBits,
-    RP: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
-{
-    random_oracle_constant: RP::Args,
-    public_params_hash: &'l AssignedPoint<C>,
-    step: &'l AssignedCell<C::Base, C::Base>,
-    z_0: &'l [AssignedCell<C::Base, C::Base>; A],
-    z_i: &'l [AssignedCell<C::Base, C::Base>; A],
-    relaxed: &'l AssignedRelaxedPlonkInstance<C>,
-}
-
-impl<'l, const A: usize, const T: usize, C: CurveAffine, RO>
-    AssignedRandomOracleComputationInstance<'l, RO, A, T, C>
-where
-    C::Base: FromUniformBytes<64> + PrimeFieldBits,
-    RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
-{
-    fn generate(
-        self,
-        ctx: &mut RegionCtx<'_, C::Base>,
-        config: MainGateConfig<T>,
-    ) -> Result<AssignedValue<C::Base>, halo2_proofs::plonk::Error> {
-        let bits = RO::new(config.clone(), self.random_oracle_constant)
-            .absorb_point(WrapValue::from_assigned_point(self.public_params_hash))
-            .absorb_base(WrapValue::Assigned(self.step.clone()))
-            .absorb_iter(self.z_0.iter())
-            .absorb_iter(self.z_i.iter().cloned())
-            .absorb_iter(self.relaxed.iter_wrap_values())
-            .squeeze_n_bits(ctx, NUM_CHALLENGE_BITS)?;
-
-        MainGate::new(config.clone()).le_bits_to_num(ctx, &bits)
     }
 }
