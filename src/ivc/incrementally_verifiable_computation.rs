@@ -18,6 +18,7 @@ use crate::{
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
     table::TableData,
+    util,
 };
 
 use super::instance_computation::RandomOracleComputationInstance;
@@ -172,17 +173,7 @@ where
         )?;
 
         primary_td.instance = vec![
-            RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
-                random_oracle_constant: pp.primary.params.ro_constant.clone(),
-                public_params_hash: &primary_public_params_hash,
-                step: 0,
-                z_0: &primary_z_0,
-                z_i: &primary_z_0,
-                relaxed: &pre_round_secondary_plonk_trace.u.to_relax(),
-                limb_width: pp.primary.params.limb_width,
-                limbs_count: pp.primary.params.limbs_count,
-            }
-            .generate_with_inspect(|buf| debug!("primary X0 zero-step: {buf:?}")),
+            util::fe_to_fe(&pre_round_secondary_plonk_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
                 random_oracle_constant: pp.primary.params.ro_constant.clone(),
                 public_params_hash: &primary_public_params_hash,
@@ -231,17 +222,7 @@ where
             vec![C1::identity(); primary_nifs_pp.S.get_degree_for_folding().saturating_sub(1)];
 
         secondary_td.instance = vec![
-            RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
-                random_oracle_constant: pp.secondary.params.ro_constant.clone(),
-                public_params_hash: &secondary_public_params_hash,
-                step: 0,
-                z_0: &secondary_z_0,
-                z_i: &secondary_z_0,
-                relaxed: &primary_plonk_trace.u.to_relax(),
-                limb_width: pp.secondary.params.limb_width,
-                limbs_count: pp.secondary.params.limbs_count,
-            }
-            .generate_with_inspect(|buf| debug!("secondary X0 zero-step: {buf:?}")),
+            util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
                 random_oracle_constant: pp.secondary.params.ro_constant.clone(),
                 public_params_hash: &secondary_public_params_hash,
@@ -333,17 +314,7 @@ where
         let (mut primary_td, primary_step_config) = Self::prepare_primary_td::<T, RP1>(
             pp.primary.k_table_size,
             [
-                RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
-                    random_oracle_constant: pp.primary.params.ro_constant.clone(),
-                    public_params_hash: &primary_public_params_hash,
-                    step: self.step,
-                    z_0: &self.primary.z_0,
-                    z_i: &self.primary.z_i,
-                    relaxed: &self.secondary.relaxed_trace.U,
-                    limb_width: pp.secondary.params.limb_width,
-                    limbs_count: pp.secondary.params.limbs_count,
-                }
-                .generate(),
+                util::fe_to_fe(&self.secondary.relaxed_trace.U.instance[1]).unwrap(),
                 RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
                     random_oracle_constant: pp.primary.params.ro_constant.clone(),
                     public_params_hash: &primary_public_params_hash,
@@ -410,17 +381,7 @@ where
         let (mut secondary_td, secondary_step_config) = Self::prepare_secondary_td::<T, RP2>(
             pp.secondary.k_table_size,
             [
-                RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
-                    random_oracle_constant: pp.secondary.params.ro_constant.clone(),
-                    public_params_hash: &secondary_public_params_hash,
-                    step: self.step,
-                    z_0: &self.secondary.z_0,
-                    z_i: &self.secondary.z_i,
-                    relaxed: &self.primary.relaxed_trace.U,
-                    limb_width: pp.primary.params.limb_width,
-                    limbs_count: pp.primary.params.limbs_count,
-                }
-                .generate(),
+                util::fe_to_fe(&self.primary.relaxed_trace.U.instance[1]).unwrap(),
                 RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: pp.secondary.params.ro_constant.clone(),
                     public_params_hash: &secondary_public_params_hash,
