@@ -303,8 +303,8 @@ where
                 let new_U = AssignedRelaxedPlonkInstance::<C>::conditional_select(
                     &mut region,
                     &config.main_gate_config,
-                    &U_new_non_base,
                     &U_new_base,
+                    &U_new_non_base,
                     assigned_is_zero_step.clone(),
                 )?;
 
