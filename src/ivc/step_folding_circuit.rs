@@ -246,11 +246,12 @@ where
             |region| {
                 let mut ctx = RegionCtx::new(region, 0);
 
-                let base_case_input_check = ctx.assign_fixed(
+                let base_case_input_check = ctx.assign_advice(
                     || "base_case_input_check - always true",
-                    config.main_gate_config.rc,
-                    C::Base::ONE,
+                    config.main_gate_config.input,
+                    Value::known(C::Base::ONE),
                 )?;
+                ctx.next();
 
                 let expected_X0 = AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
                     random_oracle_constant: self.input.step_pp.ro_constant.clone(),
