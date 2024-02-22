@@ -44,7 +44,7 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
         self.update(&point)
     }
 
-    fn inspect(&self, scan: impl Fn(&[F])) {
+    fn inspect(&mut self, scan: impl FnOnce(&[F])) -> &mut Self {
         if let Some(buf) = self
             .buf
             .iter()
@@ -53,6 +53,7 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
         {
             scan(&buf)
         }
+        self
     }
 
     fn squeeze_n_bits(

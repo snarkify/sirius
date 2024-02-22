@@ -182,7 +182,7 @@ where
                 limb_width: pp.primary.params.limb_width,
                 limbs_count: pp.primary.params.limbs_count,
             }
-            .generate(),
+            .generate_with_inspect(|buf| debug!("primary X0 zero-step: {buf:?}")),
             RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
                 random_oracle_constant: pp.primary.params.ro_constant.clone(),
                 public_params_hash: &primary_public_params_hash,
@@ -193,7 +193,7 @@ where
                 limb_width: pp.primary.params.limb_width,
                 limbs_count: pp.primary.params.limbs_count,
             }
-            .generate(),
+            .generate_with_inspect(|buf| debug!("primary X1 zero-step: {buf:?}")),
         ];
         debug!("Primary off circuit instance: {:?}", &primary_td.instance);
 
@@ -241,7 +241,7 @@ where
                 limb_width: pp.secondary.params.limb_width,
                 limbs_count: pp.secondary.params.limbs_count,
             }
-            .generate(),
+            .generate_with_inspect(|buf| debug!("secondary X0 zero-step: {buf:?}")),
             RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
                 random_oracle_constant: pp.secondary.params.ro_constant.clone(),
                 public_params_hash: &secondary_public_params_hash,
@@ -252,7 +252,7 @@ where
                 limb_width: pp.secondary.params.limb_width,
                 limbs_count: pp.secondary.params.limbs_count,
             }
-            .generate(),
+            .generate_with_inspect(|buf| debug!("secondary X1 zero-step: {buf:?}")),
         ];
         debug!(
             "Secondary off circuit instance: {:?}",
