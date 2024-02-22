@@ -1,3 +1,4 @@
+/// Module name acronym `instance_computation` -> `icomp`
 use std::num::NonZeroUsize;
 
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
