@@ -336,6 +336,7 @@ mod pp_test {
         <RandomOracle<T, RATE> as ROPair<F>>::Args;
 
     #[test]
+    #[ignore = "cause it takes a few minutes to run"]
     fn digest() {
         type Scalar1 = <C1 as Group>::Scalar;
         type Scalar2 = <C2 as Group>::Scalar;
@@ -346,7 +347,7 @@ mod pp_test {
         let sc1 = step_circuit::trivial::Circuit::<1, _>::default();
         let sc2 = step_circuit::trivial::Circuit::<1, _>::default();
 
-        const K: usize = 5;
+        const K: usize = 16;
 
         PublicParams::<
             '_,

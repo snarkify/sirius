@@ -155,6 +155,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use ff::Field;
     use std::num::NonZeroUsize;
 
     use halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter};
@@ -212,12 +213,12 @@ mod tests {
         }
         .generate();
 
-        let mut td = WitnessData {
-            instance: vec![],
-            advice: vec![],
-        };
         let mut cs = ConstraintSystem::default();
         let config = MainGate::<Base, 10>::configure(&mut cs);
+        let mut td = WitnessData {
+            instance: vec![],
+            advice: vec![vec![Base::ZERO.into(); 1 << 15]; cs.num_advice_columns()],
+        };
 
         let on_circuit_hash = SingleChipLayouter::<'_, Base, _>::new(&mut td, vec![])
             .unwrap()

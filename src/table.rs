@@ -386,11 +386,7 @@ impl<F: PrimeField, CT: Circuit<F>> TableData<F, CT> {
     }
 
     fn circuit_info(&self) -> PlonkStructure<F> {
-        let (num_challenges, round_sizes, dd, poly) = circuit_meta_info(self.k as usize, &self.cs);
-        println!(
-            "hehe, num_challenges={}, round_sizes={:?}, dd={}, poly={}",
-            num_challenges, round_sizes, dd, &poly
-        );
+        let (num_challenges, round_sizes, _, poly) = circuit_meta_info(self.k as usize, &self.cs);
 
         PlonkStructure {
             k: self.k as usize,

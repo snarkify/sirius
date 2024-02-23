@@ -1060,12 +1060,12 @@ mod tests {
     const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
     fn get_witness_collector() -> (WitnessData<Base>, MainGateConfig<T>) {
-        let witness = WitnessData {
-            instance: vec![],
-            advice: vec![],
-        };
         let mut cs = ConstraintSystem::default();
         let config = MainGate::<Base, T>::configure(&mut cs);
+        let witness = WitnessData {
+            instance: vec![],
+            advice: vec![vec![Base::ZERO.into(); 1 << K]; cs.num_advice_columns()],
+        };
 
         (witness, config)
     }
