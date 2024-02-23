@@ -432,6 +432,8 @@ where
             &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
         )?;
 
+        self.step += 1;
+
         Ok(())
     }
 
