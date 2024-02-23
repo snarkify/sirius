@@ -2,7 +2,6 @@
 use std::num::NonZeroUsize;
 
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
-use group::prime::PrimeCurveAffine;
 use halo2curves::CurveAffine;
 use serde::Serialize;
 
@@ -58,27 +57,25 @@ where
     }
 }
 
-pub(crate) struct RandomOracleComputationInstance<'l, const A: usize, C1, C2, RP>
+pub(crate) struct RandomOracleComputationInstance<'l, const A: usize, C, RP>
 where
-    RP: ROTrait<C1::Scalar>,
-    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
-    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
+    RP: ROTrait<C::Base>,
+    C: CurveAffine + Serialize,
 {
     pub random_oracle_constant: RP::Constants,
-    pub public_params_hash: &'l C2,
+    pub public_params_hash: &'l C,
     pub step: usize,
-    pub z_0: &'l [C1::Scalar; A],
-    pub z_i: &'l [C1::Scalar; A],
-    pub relaxed: &'l RelaxedPlonkInstance<C2>,
+    pub z_0: &'l [C::Base; A],
+    pub z_i: &'l [C::Base; A],
+    pub relaxed: &'l RelaxedPlonkInstance<C>,
     pub limb_width: NonZeroUsize,
     pub limbs_count: NonZeroUsize,
 }
 
-impl<'l, C1, C2, RP, const A: usize> RandomOracleComputationInstance<'l, A, C1, C2, RP>
+impl<'l, C2, RP, const A: usize> RandomOracleComputationInstance<'l, A, C2, RP>
 where
-    RP: ROTrait<C1::Scalar>,
-    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
-    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
+    RP: ROTrait<C2::Base>,
+    C2: CurveAffine + Serialize,
 {
     pub fn generate<F: PrimeField>(self) -> F {
         pub struct RelaxedPlonkInstanceBigUintView<'l, C: CurveAffine> {
@@ -146,7 +143,7 @@ where
         util::fe_to_fe(
             &RP::new(self.random_oracle_constant)
                 .absorb_point(self.public_params_hash)
-                .absorb_field(C1::Scalar::from_u128(self.step as u128))
+                .absorb_field(C2::Base::from_u128(self.step as u128))
                 .absorb_field_iter(self.z_0.iter().copied())
                 .absorb_field_iter(self.z_i.iter().copied())
                 .absorb(&relaxed)
@@ -200,7 +197,6 @@ mod tests {
         let off_circuit_hash: Base = RandomOracleComputationInstance::<
             '_,
             10,
-            C2,
             C1,
             PoseidonHash<<C1 as CurveAffine>::Base, 10, 9>,
         > {
