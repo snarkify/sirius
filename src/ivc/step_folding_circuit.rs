@@ -8,6 +8,7 @@ use halo2_proofs::{
 };
 use halo2curves::CurveAffine;
 use itertools::Itertools;
+use log::*;
 use serde::Serialize;
 
 use crate::{
@@ -250,12 +251,16 @@ where
                     public_params_hash: &w.public_params_hash,
                     step: &assigned_step,
                     z_0: &assigned_z_0,
-                    z_i: &assigned_z_0,
+                    z_i: assigned_z_i,
                     relaxed: &w.assigned_relaxed,
                 }
                 .generate(&mut ctx, config.main_gate_config.clone())?;
 
+                debug!("expected X0: {expected_X0:?}");
+
                 ctx.constrain_equal(expected_X0.cell(), w.input_instance[0].0.cell())?;
+
+                debug!("input instance 0: {:?}", w.input_instance[0].0);
 
                 Ok(())
             },
@@ -323,6 +328,8 @@ where
                 )
             },
         )?;
+
+        debug!("output instance 0: {:?}", output_hash);
 
         // Check that old_X1 == new_X0
         layouter.constrain_instance(

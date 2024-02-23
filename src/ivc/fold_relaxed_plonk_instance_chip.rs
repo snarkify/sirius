@@ -987,7 +987,7 @@ fn scalar_module_as_limbs<C: CurveAffine>(
     .to_vec())
 }
 
-fn assign_next_advice_from_point<C: CurveAffine, AR: Into<String>>(
+pub(crate) fn assign_next_advice_from_point<C: CurveAffine, AR: Into<String>>(
     assignor: &mut impl AdviceCyclicAssignor<C::Base>,
     region: &mut RegionCtx<C::Base>,
     input: &C,

@@ -172,25 +172,30 @@ where
         )?;
 
         primary_td.instance = vec![
-            RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+            RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
                 random_oracle_constant: pp.primary.params.ro_constant.clone(),
                 public_params_hash: &primary_public_params_hash,
                 step: 0,
                 z_0: &primary_z_0,
                 z_i: &primary_z_0,
                 relaxed: &pre_round_secondary_plonk_trace.u.to_relax(),
+                limb_width: pp.primary.params.limb_width,
+                limbs_count: pp.primary.params.limbs_count,
             }
             .generate(),
-            RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+            RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
                 random_oracle_constant: pp.primary.params.ro_constant.clone(),
                 public_params_hash: &primary_public_params_hash,
                 step: 1,
                 z_0: &primary_z_0,
                 z_i: &primary.process_step(&primary_z_0, pp.primary.k_table_size)?,
                 relaxed: &pre_round_secondary_plonk_trace.u.to_relax(),
+                limb_width: pp.primary.params.limb_width,
+                limbs_count: pp.primary.params.limbs_count,
             }
             .generate(),
         ];
+        debug!("Primary off circuit instance: {:?}", &primary_td.instance);
 
         let primary_z_output = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: &primary,
@@ -226,25 +231,33 @@ where
             vec![C1::identity(); primary_nifs_pp.S.get_degree_for_folding().saturating_sub(1)];
 
         secondary_td.instance = vec![
-            RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+            RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
                 random_oracle_constant: pp.secondary.params.ro_constant.clone(),
                 public_params_hash: &secondary_public_params_hash,
                 step: 0,
                 z_0: &secondary_z_0,
                 z_i: &secondary_z_0,
                 relaxed: &primary_plonk_trace.u.to_relax(),
+                limb_width: pp.secondary.params.limb_width,
+                limbs_count: pp.secondary.params.limbs_count,
             }
             .generate(),
-            RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+            RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
                 random_oracle_constant: pp.secondary.params.ro_constant.clone(),
                 public_params_hash: &secondary_public_params_hash,
                 step: 1,
                 z_0: &secondary_z_0,
                 z_i: &secondary.process_step(&secondary_z_0, pp.secondary.k_table_size)?,
                 relaxed: &primary_plonk_trace.u.to_relax(),
+                limb_width: pp.secondary.params.limb_width,
+                limbs_count: pp.secondary.params.limbs_count,
             }
             .generate(),
         ];
+        debug!(
+            "Secondary off circuit instance: {:?}",
+            &secondary_td.instance
+        );
 
         let secondary_z_output = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
             step_circuit: &secondary,
@@ -320,16 +333,18 @@ where
         let (mut primary_td, primary_step_config) = Self::prepare_primary_td::<T, RP1>(
             pp.primary.k_table_size,
             [
-                RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+                RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
                     random_oracle_constant: pp.primary.params.ro_constant.clone(),
                     public_params_hash: &primary_public_params_hash,
                     step: self.step,
                     z_0: &self.primary.z_0,
                     z_i: &self.primary.z_i,
                     relaxed: &self.secondary.relaxed_trace.U,
+                    limb_width: pp.secondary.params.limb_width,
+                    limbs_count: pp.secondary.params.limbs_count,
                 }
                 .generate(),
-                RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+                RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
                     random_oracle_constant: pp.primary.params.ro_constant.clone(),
                     public_params_hash: &primary_public_params_hash,
                     step: self.step + 1,
@@ -339,6 +354,8 @@ where
                         .step_circuit
                         .process_step(&self.primary.z_i, pp.primary.k_table_size)?,
                     relaxed: &secondary_new_trace.U,
+                    limb_width: pp.secondary.params.limb_width,
+                    limbs_count: pp.secondary.params.limbs_count,
                 }
                 .generate(),
             ],
@@ -393,16 +410,18 @@ where
         let (mut secondary_td, secondary_step_config) = Self::prepare_secondary_td::<T, RP2>(
             pp.secondary.k_table_size,
             [
-                RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+                RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: pp.secondary.params.ro_constant.clone(),
                     public_params_hash: &secondary_public_params_hash,
                     step: self.step,
                     z_0: &self.secondary.z_0,
                     z_i: &self.secondary.z_i,
                     relaxed: &self.primary.relaxed_trace.U,
+                    limb_width: pp.primary.params.limb_width,
+                    limbs_count: pp.primary.params.limbs_count,
                 }
                 .generate(),
-                RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+                RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: pp.secondary.params.ro_constant.clone(),
                     public_params_hash: &secondary_public_params_hash,
                     step: self.step + 1,
@@ -412,6 +431,8 @@ where
                         .step_circuit
                         .process_step(&self.secondary.z_i, pp.secondary.k_table_size)?,
                     relaxed: &primary_new_trace.U,
+                    limb_width: pp.primary.params.limb_width,
+                    limbs_count: pp.primary.params.limbs_count,
                 }
                 .generate(),
             ],
@@ -461,13 +482,15 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        let expected_X0 = RandomOracleComputationInstance::<'_, A1, C1, _, RP1::OffCircuit> {
+        let expected_X0 = RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
             random_oracle_constant: pp.primary.params.ro_constant.clone(),
             public_params_hash: &pp.digest().map_err(Error::WhileHash)?,
             step: self.step,
             z_0: &self.primary.z_0,
             z_i: &self.primary.z_i,
             relaxed: &self.secondary.relaxed_trace.U,
+            limb_width: pp.primary.params.limb_width,
+            limbs_count: pp.primary.params.limbs_count,
         }
         .generate::<C2::Scalar>();
 
@@ -478,13 +501,15 @@ where
             }));
         }
 
-        let expected_X1 = RandomOracleComputationInstance::<'_, A2, C2, _, RP2::OffCircuit> {
+        let expected_X1 = RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
             random_oracle_constant: pp.secondary.params.ro_constant.clone(),
             public_params_hash: &pp.digest().map_err(Error::WhileHash)?,
             step: self.step,
             z_0: &self.secondary.z_0,
             z_i: &self.secondary.z_i,
             relaxed: &self.primary.relaxed_trace.U,
+            limb_width: pp.secondary.params.limb_width,
+            limbs_count: pp.secondary.params.limbs_count,
         }
         .generate::<C1::Scalar>();
 

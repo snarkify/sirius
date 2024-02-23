@@ -44,6 +44,17 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
         self.update(&point)
     }
 
+    fn inspect(&self, scan: impl Fn(&[F])) {
+        if let Some(buf) = self
+            .buf
+            .iter()
+            .map(|b| *b.value().unwrap())
+            .collect::<Option<Vec<_>>>()
+        {
+            scan(&buf)
+        }
+    }
+
     fn squeeze_n_bits(
         &mut self,
         ctx: &mut RegionCtx<'_, F>,

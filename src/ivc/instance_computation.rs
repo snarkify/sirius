@@ -1,14 +1,16 @@
+/// Module name acronym `instance_computation` -> `icomp`
+use std::num::NonZeroUsize;
+
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
-use group::prime::PrimeCurveAffine;
 use halo2curves::CurveAffine;
 use serde::Serialize;
 
 use crate::{
     constants::NUM_CHALLENGE_BITS,
-    gadgets::ecc::AssignedPoint,
+    gadgets::{ecc::AssignedPoint, nonnative::bn::big_uint::BigUint},
     main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
     plonk::RelaxedPlonkInstance,
-    poseidon::{ROCircuitTrait, ROTrait},
+    poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
     util,
 };
 
@@ -55,36 +57,226 @@ where
     }
 }
 
-pub(crate) struct RandomOracleComputationInstance<'l, const A: usize, C1, C2, RP>
+pub(crate) struct RandomOracleComputationInstance<'l, const A: usize, C, RP>
 where
-    RP: ROTrait<C1::Scalar>,
-    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
-    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
+    RP: ROTrait<C::Base>,
+    C: CurveAffine + Serialize,
 {
     pub random_oracle_constant: RP::Constants,
-    pub public_params_hash: &'l C2,
+    pub public_params_hash: &'l C,
     pub step: usize,
-    pub z_0: &'l [C1::Scalar; A],
-    pub z_i: &'l [C1::Scalar; A],
-    pub relaxed: &'l RelaxedPlonkInstance<C2>,
+    pub z_0: &'l [C::Base; A],
+    pub z_i: &'l [C::Base; A],
+    pub relaxed: &'l RelaxedPlonkInstance<C>,
+    pub limb_width: NonZeroUsize,
+    pub limbs_count: NonZeroUsize,
 }
 
-impl<'l, C1, C2, RP, const A: usize> RandomOracleComputationInstance<'l, A, C1, C2, RP>
+impl<'l, C2, RP, const A: usize> RandomOracleComputationInstance<'l, A, C2, RP>
 where
-    RP: ROTrait<C1::Scalar>,
-    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
-    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
+    RP: ROTrait<C2::Base>,
+    C2: CurveAffine + Serialize,
 {
     pub fn generate<F: PrimeField>(self) -> F {
+        pub struct RelaxedPlonkInstanceBigUintView<'l, C: CurveAffine> {
+            pub(crate) W_commitments: &'l Vec<C>,
+            pub(crate) E_commitment: &'l C,
+            pub(crate) instance: Vec<BigUint<C::Base>>,
+            pub(crate) challenges: Vec<BigUint<C::Base>>,
+            pub(crate) u: &'l C::ScalarExt,
+        }
+
+        impl<'l, C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO>
+            for RelaxedPlonkInstanceBigUintView<'l, C>
+        {
+            fn absorb_into(&self, ro: &mut RO) {
+                ro.absorb_point_iter(self.W_commitments.iter())
+                    .absorb_point(self.E_commitment)
+                    .absorb_field_iter(
+                        self.instance
+                            .iter()
+                            .flat_map(|bn| bn.limbs().iter())
+                            .copied(),
+                    )
+                    .absorb_field_iter(
+                        self.challenges
+                            .iter()
+                            .flat_map(|bn| bn.limbs().iter())
+                            .copied(),
+                    )
+                    .absorb_field(util::fe_to_fe(self.u).unwrap());
+            }
+        }
+
+        let relaxed = RelaxedPlonkInstanceBigUintView {
+            W_commitments: &self.relaxed.W_commitments,
+            E_commitment: &self.relaxed.E_commitment,
+            instance: self
+                .relaxed
+                .instance
+                .iter()
+                .map(|v| {
+                    BigUint::from_f(
+                        &util::fe_to_fe(v).unwrap(),
+                        self.limb_width,
+                        self.limbs_count,
+                    )
+                    .unwrap()
+                })
+                .collect(),
+            challenges: self
+                .relaxed
+                .challenges
+                .iter()
+                .map(|v| {
+                    BigUint::from_f(
+                        &util::fe_to_fe(v).unwrap(),
+                        self.limb_width,
+                        self.limbs_count,
+                    )
+                    .unwrap()
+                })
+                .collect(),
+            u: &self.relaxed.u,
+        };
+
         util::fe_to_fe(
             &RP::new(self.random_oracle_constant)
                 .absorb_point(self.public_params_hash)
-                .absorb_field(C1::Scalar::from_u128(self.step as u128))
+                .absorb_field(C2::Base::from_u128(self.step as u128))
                 .absorb_field_iter(self.z_0.iter().copied())
-                .absorb_field_iter(self.z_0.iter().copied())
-                .absorb(self.relaxed)
+                .absorb_field_iter(self.z_i.iter().copied())
+                .absorb(&relaxed)
                 .squeeze::<C2>(NUM_CHALLENGE_BITS),
         )
         .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+
+    use halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter};
+    use halo2curves::{bn256, grumpkin};
+
+    type C1 = <bn256::G1 as halo2curves::group::prime::PrimeCurve>::Affine;
+    type C2 = <grumpkin::G1 as halo2curves::group::prime::PrimeCurve>::Affine;
+    type Base = <C1 as CurveAffine>::Base;
+    type Scalar = <C1 as CurveAffine>::ScalarExt;
+
+    use crate::{
+        commitment::CommitmentKey,
+        ivc::fold_relaxed_plonk_instance_chip::{
+            assign_next_advice_from_point, FoldRelaxedPlonkInstanceChip,
+        },
+        main_gate::AdviceCyclicAssignor,
+        poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, Spec},
+        table::TableData,
+    };
+
+    use super::*;
+
+    #[test_log::test]
+    fn consistency() {
+        let random_oracle_constant = Spec::<Base, 10, 9>::new(10, 10);
+
+        let public_params_hash = C1::random(&mut rand::thread_rng());
+
+        let step = 0x128;
+        let z_0 = [Base::from_u128(0x1024); 10];
+        let z_i = [Base::from_u128(0x2048); 10];
+        let relaxed = RelaxedPlonkInstance {
+            W_commitments: vec![CommitmentKey::<C1>::default_value(); 10],
+            E_commitment: CommitmentKey::<C1>::default_value(),
+            instance: vec![Scalar::from_u128(0x67899); 2],
+            challenges: vec![Scalar::from_u128(0x123456); 10],
+            u: Scalar::from_u128(u128::MAX),
+        };
+
+        let off_circuit_hash: Base = RandomOracleComputationInstance::<
+            '_,
+            10,
+            C1,
+            PoseidonHash<<C1 as CurveAffine>::Base, 10, 9>,
+        > {
+            random_oracle_constant: random_oracle_constant.clone(),
+            public_params_hash: &public_params_hash,
+            step,
+            z_0: &z_0,
+            z_i: &z_i,
+            relaxed: &relaxed,
+            limb_width: NonZeroUsize::new(10).unwrap(),
+            limbs_count: NonZeroUsize::new(10).unwrap(),
+        }
+        .generate();
+
+        let mut td = TableData::new(15, vec![]);
+
+        let config = td.prepare_assembly(|cs| -> MainGateConfig<10> { MainGate::configure(cs) });
+
+        let on_circuit_hash = SingleChipLayouter::<'_, Base, _>::new(&mut td, vec![])
+            .unwrap()
+            .assign_region(
+                || "test",
+                |region| {
+                    let mut ctx = RegionCtx::new(region, 0);
+
+                    let mut advice_columns_assigner = config.advice_cycle_assigner();
+
+                    let public_params_hash = assign_next_advice_from_point(
+                        &mut advice_columns_assigner,
+                        &mut ctx,
+                        &public_params_hash,
+                        || "public_params",
+                    )
+                    .unwrap();
+
+                    let step = advice_columns_assigner
+                        .assign_next_advice(&mut ctx, || "step", Base::from_u128(step as u128))
+                        .unwrap();
+
+                    let assigned_z_0 = advice_columns_assigner
+                        .assign_all_advice(&mut ctx, || "z0", z_0.iter().copied())
+                        .map(|inp| inp.try_into().unwrap())
+                        .unwrap();
+
+                    let assigned_z_i = advice_columns_assigner
+                        .assign_all_advice(&mut ctx, || "zi", z_i.iter().copied())
+                        .map(|inp| inp.try_into().unwrap())
+                        .unwrap();
+
+                    let assigned_relaxed = FoldRelaxedPlonkInstanceChip::new(
+                        relaxed.clone(),
+                        NonZeroUsize::new(10).unwrap(),
+                        NonZeroUsize::new(10).unwrap(),
+                        config.clone(),
+                    )
+                    .assign_current_relaxed(&mut ctx)
+                    .unwrap();
+
+                    AssignedRandomOracleComputationInstance::<
+                            PoseidonChip<Base, 10, 9>,
+                            10,
+                            10,
+                            C1,
+                        > {
+                            random_oracle_constant: random_oracle_constant.clone(),
+                            public_params_hash: &public_params_hash,
+                            step: &step,
+                            z_0: &assigned_z_0,
+                            z_i: &assigned_z_i,
+                            relaxed: &assigned_relaxed,
+                        }
+                        .generate(&mut ctx, config.clone())
+                },
+            )
+            .unwrap()
+            .value()
+            .unwrap()
+            .copied()
+            .unwrap();
+
+        assert_eq!(on_circuit_hash, off_circuit_hash);
     }
 }
