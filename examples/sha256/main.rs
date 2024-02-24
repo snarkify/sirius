@@ -314,12 +314,12 @@ impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
             .map(|value| BlockWord(Value::known(value)))
             .collect::<Box<[BlockWord]>>();
 
-        Ok(Sha256::digest_cells(
+        Sha256::digest_cells(
             table16_chip,
             layouter.namespace(|| "'abc' * 2"),
             values.as_ref(),
             &input,
-        )?)
+        )
     }
 }
 

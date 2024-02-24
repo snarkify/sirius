@@ -62,8 +62,8 @@ use crate::{
         },
     },
     main_gate::{
-        AdviceCyclicAssignor, AssignedBit, AssignedValue, FixedCyclicAssignor, MainGate,
-        MainGateConfig, RegionCtx, WrapValue,
+        AdviceCyclicAssignor, AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx,
+        WrapValue,
     },
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
@@ -318,13 +318,8 @@ pub(crate) struct AssignedWitness<C: CurveAffine> {
     /// Vector of assigned points representing the commitments to the cross terms.
     /// Sourced directly from the `cross_term_commits` argument of [`FoldRelaxedPlonkInstanceChip::fold`].
     cross_terms_commits: Vec<AssignedPoint<C>>,
-
-    /// Vector of assigned values representing the modulus in big number form.
-    ///
-    /// Field modulus from another curve within the IVC scheme
-    /// Derived internally within the [`FoldRelaxedPlonkInstanceChip::fold`] method.
-    m_bn: Vec<AssignedValue<C::Base>>,
 }
+
 impl<C: CurveAffine> ops::Deref for AssignedWitness<C> {
     type Target = AssignedRelaxedPlonkInstance<C>;
     fn deref(&self) -> &Self::Target {
@@ -459,7 +454,7 @@ where
         folded_E: AssignedPoint<C>,
         cross_term_commits: &[AssignedPoint<C>],
         r: BigUintView<C::Base>,
-        m_bn: &[AssignedValue<C::Base>],
+        m_bn: &BigUint<C::Base>,
     ) -> Result<AssignedPoint<C>, Error> {
         debug!("Start calculate r^i from {r:?}");
 
@@ -520,15 +515,14 @@ where
         bn_chip: &BigUintMulModChip<C::Base>,
         input: &[AssignedValue<C::Base>],
         folded: Vec<AssignedValue<C::Base>>,
-        m_bn: &[AssignedValue<C::Base>],
+        m_bn: &BigUint<C::Base>,
         r_as_bn: &[AssignedValue<C::Base>],
         limb_width: NonZeroUsize,
     ) -> Result<Vec<AssignedCell<C::Base, C::Base>>, Error> {
         debug!(
-            "fold: via bn input: input = {:?} folded = {:?}, m = {:?}, r = {:?}",
+            "fold: via bn input: input = {:?} folded = {:?}, r = {:?}",
             CellsValuesView::from(input),
             CellsValuesView::from(folded.as_slice()),
-            CellsValuesView::from(m_bn),
             CellsValuesView::from(r_as_bn)
         );
         // Multiply the part of the instance by the randomized value
@@ -580,7 +574,7 @@ where
         input_instances: [Vec<AssignedValue<C::Base>>; 2],
         folded_instances: [Vec<AssignedValue<C::Base>>; 2],
         r_as_bn: &[AssignedCell<C::Base, C::Base>],
-        m_bn: &[AssignedCell<C::Base, C::Base>],
+        m_bn: &BigUint<C::Base>,
         limb_width: NonZeroUsize,
     ) -> Result<[Vec<AssignedCell<C::Base, C::Base>>; 2], Error> {
         let [input_X0, input_X1] = input_instances;
@@ -628,7 +622,7 @@ where
         input_challenges: Vec<Vec<AssignedValue<C::Base>>>,
         folded_challenges: Vec<Vec<AssignedValue<C::Base>>>,
         r_as_bn: &[AssignedValue<C::Base>],
-        m_bn: &[AssignedValue<C::Base>],
+        m_bn: &BigUint<C::Base>,
         limb_width: NonZeroUsize,
     ) -> Result<Vec<Vec<AssignedValue<C::Base>>>, Error> {
         folded_challenges
@@ -675,12 +669,14 @@ where
 
         debug!("fold: W folded: {new_folded_W:?}");
 
+        let m_bn = scalar_module_as_bn::<C>(self.limb_width, self.limbs_count).unwrap();
+
         let new_folded_E = self.fold_E(
             region,
             w.folded_E.clone(),
             &w.cross_terms_commits,
             r.clone(),
-            &w.m_bn,
+            &m_bn,
         )?;
         debug!("fold: E folded: {new_folded_W:?}");
 
@@ -698,7 +694,7 @@ where
                 .unwrap(),
             [w.folded_X0.clone(), w.folded_X1.clone()],
             &r.as_bn_limbs,
-            &w.m_bn,
+            &m_bn,
             self.limb_width,
         )
         .inspect_err(|err| error!("while fold instances: {err:?}"))?;
@@ -709,7 +705,7 @@ where
             w.input_challenges.clone(),
             w.folded_challenges.clone(),
             &r.as_bn_limbs,
-            &w.m_bn,
+            &m_bn,
             self.limb_width,
         )
         .inspect_err(|err| error!("while fold challenges: {err:?}"))?;
@@ -931,15 +927,6 @@ where
         region.next();
 
         let r = ro_circuit.squeeze_n_bits(region, NUM_CHALLENGE_BITS)?;
-
-        let m_bn = self.config.fixed_cycle_assigner().assign_all_fixed(
-            region,
-            || "m_bn",
-            scalar_module_as_limbs::<C>(self.limb_width, self.limbs_count)
-                .unwrap()
-                .into_iter(),
-        )?;
-
         region.next();
 
         Ok((
@@ -950,7 +937,6 @@ where
                 input_W_commitments: assigned_instance_W_commitment_coordinates,
                 input_instance: assigned_input_instance,
                 cross_terms_commits: assigned_cross_term_commits,
-                m_bn,
             },
             r,
         ))
@@ -968,6 +954,21 @@ impl<F: ff::Field> ops::Deref for BigUintView<F> {
     fn deref(&self) -> &Self::Target {
         &self.as_bits
     }
+}
+
+fn scalar_module_as_bn<C: CurveAffine>(
+    limb_width: NonZeroUsize,
+    limbs_count: NonZeroUsize,
+) -> Result<BigUint<C::Base>, big_uint::Error> {
+    BigUint::<C::Base>::from_biguint(
+        &num_bigint::BigUint::from_str_radix(
+            <C::Scalar as PrimeField>::MODULUS.trim_start_matches("0x"),
+            16,
+        )
+        .unwrap(),
+        limb_width,
+        limbs_count,
+    )
 }
 
 fn scalar_module_as_limbs<C: CurveAffine>(
@@ -1036,6 +1037,7 @@ mod tests {
     use crate::{
         commitment::CommitmentKey,
         constants::MAX_BITS,
+        main_gate::FixedCyclicAssignor,
         nifs::vanilla::VanillaFS,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
         table::WitnessData,
@@ -1338,13 +1340,14 @@ mod tests {
                         as_bits: r,
                     };
 
-                    let m_bn = config.fixed_cycle_assigner().assign_all_fixed(
+                    config.fixed_cycle_assigner().assign_all_fixed(
                         &mut ctx,
                         || "m_bn",
                         scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
                             .unwrap()
                             .into_iter(),
                     )?;
+                    let m_bn = scalar_module_as_bn::<C1>(LIMB_WIDTH, LIMBS_COUNT).unwrap();
 
                     Ok(chip
                         .fold_E(&mut ctx, folded_E, &cross_term_commits, r_vv, &m_bn)
@@ -1455,13 +1458,14 @@ mod tests {
                         .try_into()
                         .unwrap();
 
-                    let m_bn = config.fixed_cycle_assigner().assign_all_fixed(
+                    config.fixed_cycle_assigner().assign_all_fixed(
                         &mut ctx,
                         || "m_bn",
                         scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
                             .unwrap()
                             .into_iter(),
                     )?;
+                    let m_bn = scalar_module_as_bn::<C1>(LIMB_WIDTH, LIMBS_COUNT).unwrap();
 
                     ctx.next();
 
@@ -1597,7 +1601,7 @@ mod tests {
                         .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "input instance"))
                         .collect::<Result<Vec<_>, _>>()?;
 
-                    let m_bn = config.fixed_cycle_assigner().assign_all_fixed(
+                    config.fixed_cycle_assigner().assign_all_fixed(
                         &mut ctx,
                         || "m_bn",
                         scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
@@ -1610,6 +1614,8 @@ mod tests {
                     let r_as_bn = bn_chip
                         .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
                         .unwrap();
+
+                    let m_bn = scalar_module_as_bn::<C1>(LIMB_WIDTH, LIMBS_COUNT).unwrap();
 
                     Ok(FoldRelaxedPlonkInstanceChip::<T, C1>::fold_challenges(
                         &mut ctx,
