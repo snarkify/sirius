@@ -374,7 +374,8 @@ impl<F: PrimeField> PlonkStructure<F> {
     pub fn dry_run_sps_protocol<C: CurveAffine<ScalarExt = F>>(
         &self,
     ) -> (PlonkInstance<C>, PlonkWitness<F>) {
-        todo!()
+        (PlonkInstance::new(self.num_io, self.num_challenges, self.round_sizes.len()),
+         PlonkWitness::new(&self.round_sizes))
     }
 
     /// run special soundness protocol to generate witnesses and challenges
@@ -685,6 +686,14 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
 }
 
 impl<F: PrimeField> PlonkWitness<F> {
+    pub fn new(round_sizes: &[usize]) -> Self {
+        let mut W = Vec::new();
+        for sz in round_sizes.iter() {
+            let tmp = vec![F::ZERO; *sz];
+            W.push(tmp);
+        }
+        Self { W }
+    }
     pub fn to_relax(&self, k: usize) -> RelaxedPlonkWitness<F> {
         let E = vec![F::ZERO; 1 << k];
         RelaxedPlonkWitness {
