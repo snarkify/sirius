@@ -351,7 +351,6 @@ where
                 Ok((new_U, assigned_input))
             },
         )?;
-
         let z_output = self.step_circuit.synthesize_step(
             config.step_config,
             &mut layouter,

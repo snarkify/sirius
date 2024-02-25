@@ -1,6 +1,6 @@
 use std::{fmt, io, marker::PhantomData, num::NonZeroUsize};
 
-use ff::{FromUniformBytes, PrimeFieldBits};
+use ff::{Field, FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2_proofs::plonk::Error as Halo2Error;
 use halo2curves::CurveAffine;
@@ -219,9 +219,17 @@ where
                 &secondary.circuit,
                 &sp2,
             );
-        let td1 = TableData::new(primary.k_table_size, primary_circuit, vec![]);
+        let td1 = TableData::new(
+            primary.k_table_size,
+            primary_circuit,
+            vec![C1::ScalarExt::ZERO, C1::ScalarExt::ZERO],
+        );
         let S1 = td1.plonk_structure()?;
-        let td2 = TableData::new(secondary.k_table_size, secondary_circuit, vec![]);
+        let td2 = TableData::new(
+            secondary.k_table_size,
+            secondary_circuit,
+            vec![C2::ScalarExt::ZERO, C2::ScalarExt::ZERO],
+        );
         let S2 = td2.plonk_structure()?;
         Ok(Self {
             primary: CircuitPublicParams::new(

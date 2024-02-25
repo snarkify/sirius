@@ -75,14 +75,16 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     /// equal to that specified in the IVC fold call. However, if these calculations are long and resource
     /// intensive, it is possible to implement this logic off-circuit "honestly" with regular code, which may
     /// be more lightweight, but will require consistency testing.
-    fn process_step(&self, z_i: &[F; ARITY]) -> Result<[F; ARITY], Error> {
+    fn process_step(&self, z_i: &[F; ARITY], k_table_size: u32) -> Result<[F; ARITY], Error> {
+        let mut cs = ConstraintSystem::default();
+        let col = cs.advice_column();
+        let config = Self::configure(&mut cs);
+
         let mut witness = WitnessData {
-            instance: vec![],
-            advice: vec![],
+            instance: vec![F::ZERO, F::ZERO],
+            advice: vec![vec![F::ZERO.into(); 1 << k_table_size as usize]; cs.num_advice_columns()],
         };
         let mut layouter = SingleChipLayouter::<'_, F, _>::new(&mut witness, vec![])?;
-        let mut cs = ConstraintSystem::default();
-        let config = Self::configure(&mut cs);
 
         let assigned_z_i = layouter.assign_region(
             || "z_i",
@@ -91,11 +93,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
 
                 z_i.iter()
                     .map(|value| {
-                        let assigned = region.assign_advice(
-                            || "",
-                            cs.advice_column(),
-                            Value::known(*value),
-                        )?;
+                        let assigned = region.assign_advice(|| "", col, Value::known(*value))?;
 
                         region.next();
 

@@ -26,6 +26,8 @@ bitter = "0.6.1"
 thiserror = "1.0.48"
 serde_arrays = "0.1.0"
 
+ark-std = { version = "0.4", features = ["print-trace"] }
+
 [dev-dependencies]
 env_logger = "0.10.0"
 prettytable-rs = "0.10.0"

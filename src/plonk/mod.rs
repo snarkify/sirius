@@ -371,11 +371,11 @@ impl<F: PrimeField> PlonkStructure<F> {
         self.poly.degree_for_folding(offset)
     }
 
-    pub fn dry_run_sps_protocol<C: CurveAffine<ScalarExt = F>>(
-        &self,
-    ) -> (PlonkInstance<C>, PlonkWitness<F>) {
-        (PlonkInstance::new(self.num_io, self.num_challenges, self.round_sizes.len()),
-         PlonkWitness::new(&self.round_sizes))
+    pub fn dry_run_sps_protocol<C: CurveAffine<ScalarExt = F>>(&self) -> PlonkTrace<C> {
+        PlonkTrace {
+            u: PlonkInstance::new(self.num_io, self.num_challenges, self.round_sizes.len()),
+            w: PlonkWitness::new(&self.round_sizes),
+        }
     }
 
     /// run special soundness protocol to generate witnesses and challenges
