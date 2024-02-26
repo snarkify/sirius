@@ -975,17 +975,9 @@ fn scalar_module_as_limbs<C: CurveAffine>(
     limb_width: NonZeroUsize,
     limbs_count: NonZeroUsize,
 ) -> Result<Vec<C::Base>, big_uint::Error> {
-    Ok(BigUint::<C::Base>::from_biguint(
-        &num_bigint::BigUint::from_str_radix(
-            <C::Scalar as PrimeField>::MODULUS.trim_start_matches("0x"),
-            16,
-        )
-        .unwrap(),
-        limb_width,
-        limbs_count,
-    )?
-    .limbs()
-    .to_vec())
+    Ok(scalar_module_as_bn::<C>(limb_width, limbs_count)?
+        .limbs()
+        .to_vec())
 }
 
 pub(crate) fn assign_next_advice_from_point<C: CurveAffine, AR: Into<String>>(
@@ -1037,7 +1029,6 @@ mod tests {
     use crate::{
         commitment::CommitmentKey,
         constants::MAX_BITS,
-        main_gate::FixedCyclicAssignor,
         nifs::vanilla::VanillaFS,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
         table::WitnessData,
@@ -1340,13 +1331,6 @@ mod tests {
                         as_bits: r,
                     };
 
-                    config.fixed_cycle_assigner().assign_all_fixed(
-                        &mut ctx,
-                        || "m_bn",
-                        scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
-                            .unwrap()
-                            .into_iter(),
-                    )?;
                     let m_bn = scalar_module_as_bn::<C1>(LIMB_WIDTH, LIMBS_COUNT).unwrap();
 
                     Ok(chip
@@ -1458,13 +1442,6 @@ mod tests {
                         .try_into()
                         .unwrap();
 
-                    config.fixed_cycle_assigner().assign_all_fixed(
-                        &mut ctx,
-                        || "m_bn",
-                        scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
-                            .unwrap()
-                            .into_iter(),
-                    )?;
                     let m_bn = scalar_module_as_bn::<C1>(LIMB_WIDTH, LIMBS_COUNT).unwrap();
 
                     ctx.next();
@@ -1600,14 +1577,6 @@ mod tests {
                         .iter()
                         .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "input instance"))
                         .collect::<Result<Vec<_>, _>>()?;
-
-                    config.fixed_cycle_assigner().assign_all_fixed(
-                        &mut ctx,
-                        || "m_bn",
-                        scalar_module_as_limbs::<C1>(LIMB_WIDTH, LIMBS_COUNT)
-                            .unwrap()
-                            .into_iter(),
-                    )?;
 
                     ctx.next();
 
