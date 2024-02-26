@@ -130,7 +130,7 @@ pub mod trivial {
 
     use ff::PrimeField;
     use halo2_proofs::{
-        circuit::{AssignedCell, Layouter},
+        circuit::{AssignedCell, Layouter, Value},
         plonk::{Advice, Column, ConstraintSystem, Fixed},
     };
 
@@ -187,10 +187,20 @@ pub mod trivial {
         /// Return `z_out` result
         fn synthesize_step(
             &self,
-            _config: Self::Config,
-            _layouter: &mut impl Layouter<F>,
+            config: Self::Config,
+            layouter: &mut impl Layouter<F>,
             z_i: &[AssignedCell<F, F>; ARITY],
         ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
+            layouter.assign_region(
+                || "region",
+                |mut region| {
+                    region.assign_fixed(|| "", config.fixed, 0, || Value::known(F::ONE))?;
+                    region.assign_advice(|| "", config.advice, 0, || Value::known(F::ONE))?;
+
+                    Ok(())
+                },
+            )?;
+
             Ok(z_i.clone())
         }
     }
