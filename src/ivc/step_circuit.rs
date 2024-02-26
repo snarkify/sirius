@@ -131,7 +131,7 @@ pub mod trivial {
     use ff::PrimeField;
     use halo2_proofs::{
         circuit::{AssignedCell, Layouter},
-        plonk::ConstraintSystem,
+        plonk::{Advice, Column, ConstraintSystem, Fixed},
     };
 
     use crate::ivc::SimpleFloorPlanner;
@@ -144,6 +144,12 @@ pub mod trivial {
         _p: PhantomData<F>,
     }
 
+    #[derive(Clone)]
+    pub struct Config {
+        fixed: Column<Fixed>,
+        advice: Column<Advice>,
+    }
+
     impl<const ARITY: usize, F> StepCircuit<ARITY, F> for Circuit<ARITY, F>
     where
         F: PrimeField,
@@ -151,7 +157,7 @@ pub mod trivial {
         /// This is a configuration object that stores things like columns.
         ///
         /// TODO improve
-        type Config = ();
+        type Config = Config;
 
         /// The floor planner used for this circuit.
         /// This is an associated type of the `Circuit` trait because its
@@ -167,7 +173,12 @@ pub mod trivial {
         /// columns.
         ///
         /// This setup is crucial for the functioning of the IVC-based system.
-        fn configure(_cs: &mut ConstraintSystem<F>) -> Self::Config {}
+        fn configure(cs: &mut ConstraintSystem<F>) -> Self::Config {
+            Config {
+                fixed: cs.fixed_column(),
+                advice: cs.advice_column(),
+            }
+        }
 
         /// Sythesize the circuit for a computation step and return variable
         /// that corresponds to the output of the step z_{i+1}
