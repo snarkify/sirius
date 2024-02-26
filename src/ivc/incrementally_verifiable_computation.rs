@@ -393,6 +393,8 @@ where
             &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
         )?;
 
+        self.step += 1;
+
         Ok(())
     }
 
@@ -416,7 +418,7 @@ where
         }
         .generate::<C2::Scalar>();
 
-        if expected_X0 != self.secondary.relaxed_trace.U.instance[0] {
+        if expected_X0 != self.secondary_trace.u.instance[0] {
             return Err(Error::VerifyFailed(VerificationError::InstanceNotMatch {
                 index: 0,
                 is_primary: true,
@@ -435,7 +437,7 @@ where
         }
         .generate::<C1::Scalar>();
 
-        if expected_X1 != self.primary.relaxed_trace.U.instance[1] {
+        if expected_X1 != fe_to_fe(&self.secondary_trace.u.instance[1]).unwrap() {
             return Err(Error::VerifyFailed(VerificationError::InstanceNotMatch {
                 index: 1,
                 is_primary: false,
