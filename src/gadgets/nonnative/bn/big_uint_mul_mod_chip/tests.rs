@@ -132,6 +132,9 @@ mod mult_mod_tests {
                                 res
                             }));
 
+                        let module = BigUint::from_assigned_cells(&module, LIMB_WIDTH, LIMBS_COUNT)
+                            .unwrap()
+                            .unwrap_or(BigUint::from_u64(0, LIMB_WIDTH, LIMBS_COUNT).unwrap());
                         let ModOperationResult {
                             quotient,
                             remainder,
@@ -709,6 +712,9 @@ mod red_mod_tests {
                                 res
                             }));
 
+                        let module = BigUint::from_assigned_cells(&module, LIMB_WIDTH, LIMBS_COUNT)
+                            .unwrap()
+                            .unwrap_or(BigUint::from_u64(0, LIMB_WIDTH, LIMBS_COUNT).unwrap());
                         let ModOperationResult {
                             quotient,
                             remainder,
