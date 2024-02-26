@@ -242,6 +242,10 @@ impl<F: PrimeField> PlonkStructure<F> {
 
         let is_h_equal_g = self.is_sat_log_derivative(&W.W);
 
+        println!(
+            "hehe, is_sat, mismatch_count={}, total_row={}, is_h_equal_g={}",
+            res, nrow, is_h_equal_g
+        );
         match (res == 0, check_commitments == 0, is_h_equal_g) {
             (true, true, true) => Ok(()),
             (false, _, _) => Err(Error::EvaluationMismatch {
@@ -293,6 +297,10 @@ impl<F: PrimeField> PlonkStructure<F> {
         let is_E_equal = ck.commit(&W.E).unwrap().eq(&U.E_commitment);
         let is_h_equal_g = self.is_sat_log_derivative(&W.W);
 
+        println!(
+            "hehe, is_sat_relaxed, mismatch_count={}, total_row={}, is_E_equal={}, is_h_equal_g={}",
+            res, nrow, is_E_equal, is_h_equal_g
+        );
         match (res == 0, check_W_commitments == 0, is_E_equal, is_h_equal_g) {
             (true, true, true, true) => Ok(()),
             (false, _, _, _) => Err(Error::EvaluationMismatch {

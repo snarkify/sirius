@@ -444,24 +444,42 @@ where
             }));
         }
 
-        pp.primary.S.is_sat_relaxed(
-            pp.primary.ck,
-            &self.primary.relaxed_trace.U,
-            &self.primary.relaxed_trace.W,
-        )?;
+        println!(
+            "hehe1, {:?}",
+            pp.primary
+                .S
+                .is_sat_relaxed(
+                    pp.primary.ck,
+                    &self.primary.relaxed_trace.U,
+                    &self.primary.relaxed_trace.W,
+                )
+                .err()
+        );
 
-        pp.secondary.S.is_sat_relaxed(
-            pp.secondary.ck,
-            &self.secondary.relaxed_trace.U,
-            &self.secondary.relaxed_trace.W,
-        )?;
+        println!(
+            "hehe2, {:?}",
+            pp.secondary
+                .S
+                .is_sat_relaxed(
+                    pp.secondary.ck,
+                    &self.secondary.relaxed_trace.U,
+                    &self.secondary.relaxed_trace.W,
+                )
+                .err()
+        );
 
-        pp.secondary.S.is_sat(
-            pp.secondary.ck,
-            &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
-            &self.secondary_trace.u,
-            &self.secondary_trace.w,
-        )?;
+        println!(
+            "hehe3, {:?}",
+            pp.secondary
+                .S
+                .is_sat(
+                    pp.secondary.ck,
+                    &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
+                    &self.secondary_trace.u,
+                    &self.secondary_trace.w,
+                )
+                .err()
+        );
 
         Ok(())
     }
