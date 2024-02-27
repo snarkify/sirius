@@ -23,7 +23,6 @@ mod mult_mod_tests {
         main_gate_config: MainGateConfig<MAIN_GATE_T>,
         lhs: Column<Instance>,
         rhs: Column<Instance>,
-        module: Column<Instance>,
         quotient: Column<Instance>,
         remainder: Column<Instance>,
 
@@ -32,8 +31,10 @@ mod mult_mod_tests {
         formal_mod: Column<Advice>,
     }
 
-    #[derive(Debug, Default)]
-    struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits>(PhantomData<F>);
+    #[derive(Debug)]
+    struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits> {
+        modulus: BigUint<F>,
+    }
 
     impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
         type Config = Config;
@@ -49,9 +50,6 @@ mod mult_mod_tests {
 
             let rhs = meta.instance_column();
             meta.enable_equality(rhs);
-
-            let module = meta.instance_column();
-            meta.enable_equality(module);
 
             let quotient = meta.instance_column();
             meta.enable_equality(quotient);
@@ -71,7 +69,6 @@ mod mult_mod_tests {
             Config {
                 lhs,
                 rhs,
-                module,
                 quotient,
                 remainder,
                 formal_lhs,
@@ -98,7 +95,7 @@ mod mult_mod_tests {
                         let mut region = RegionCtx::new(region, 0);
 
                         let limbs_count = LIMBS_COUNT.get();
-                        let (lhs, rhs, module): (Vec<_>, Vec<_>, Vec<_>) =
+                        let (lhs, rhs): (Vec<_>, Vec<_>) =
                             itertools::multiunzip((0..limbs_count).map(|limb_index| {
                                 let res = (
                                     region
@@ -117,14 +114,6 @@ mod mult_mod_tests {
                                             limb_index,
                                         )
                                         .unwrap(),
-                                    region
-                                        .assign_advice_from_instance(
-                                            || format!("mod {limb_index}"),
-                                            config.formal_mod,
-                                            config.module,
-                                            limb_index,
-                                        )
-                                        .unwrap(),
                                 );
 
                                 region.next();
@@ -135,7 +124,9 @@ mod mult_mod_tests {
                         let ModOperationResult {
                             quotient,
                             remainder,
-                        } = chip.mult_mod(&mut region, &lhs, &rhs, &module).unwrap();
+                        } = chip
+                            .mult_mod(&mut region, &lhs, &rhs, &self.modulus)
+                            .unwrap();
 
                         Ok((quotient, remainder))
                     },
@@ -163,7 +154,6 @@ mod mult_mod_tests {
     #[test_log::test]
     fn test_mult_mod_bn() {
         const K: u32 = 11;
-        let ts = TestCircuit::<Fp>::default();
 
         let cases = [
             Context {
@@ -201,16 +191,14 @@ mod mult_mod_tests {
         for Context { lhs, rhs, modulus } in cases {
             let lhs = BigUintRaw::from_u128(lhs).unwrap();
             let rhs = BigUintRaw::from_u128(rhs).unwrap();
-            let modulus = BigUintRaw::from_u128(modulus).unwrap();
 
-            let quotient = (&lhs * &rhs) / &modulus;
-            let remainer = (&lhs * &rhs) % &modulus;
+            let quotient = (&lhs * &rhs) / modulus;
+            let remainer = (&lhs * &rhs) % modulus;
 
-            println!("{lhs} * {rhs} = {quotient} * {modulus} + {remainer}");
+            println!("{lhs} * {rhs} = {quotient} * {modulus:?} + {remainer}");
 
             let lhs = BigUint::from_biguint(&lhs, LIMB_WIDTH, LIMBS_COUNT).unwrap();
             let rhs = BigUint::from_biguint(&rhs, LIMB_WIDTH, LIMBS_COUNT).unwrap();
-            let modulus = BigUint::from_biguint(&modulus, LIMB_WIDTH, LIMBS_COUNT).unwrap();
 
             let quotient = BigUint::from_biguint(&quotient, LIMB_WIDTH, LIMBS_COUNT).unwrap();
             let remainer = BigUint::from_biguint(&remainer, LIMB_WIDTH, LIMBS_COUNT).unwrap();
@@ -218,11 +206,18 @@ mod mult_mod_tests {
             let public_inputs = vec![
                 lhs.limbs().to_vec(),
                 rhs.limbs().to_vec(),
-                modulus.limbs().to_vec(),
                 quotient.limbs().to_vec(),
                 remainer.limbs().to_vec(),
             ];
-            run_mock_prover_test!(K, ts, public_inputs);
+
+            let modulus = BigUint::from_biguint(
+                &BigUintRaw::from_u128(modulus).unwrap(),
+                LIMB_WIDTH,
+                LIMBS_COUNT,
+            )
+            .unwrap();
+
+            run_mock_prover_test!(K, TestCircuit::<Fp> { modulus }, public_inputs);
         }
     }
 }
@@ -598,8 +593,6 @@ mod components_tests {
 }
 
 mod red_mod_tests {
-    use std::marker::PhantomData;
-
     use crate::run_mock_prover_test;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
@@ -614,7 +607,6 @@ mod red_mod_tests {
     struct Config {
         main_gate_config: MainGateConfig<MAIN_GATE_T>,
         val: Column<Instance>,
-        module: Column<Instance>,
         quotient: Column<Instance>,
         remainder: Column<Instance>,
 
@@ -625,8 +617,10 @@ mod red_mod_tests {
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(Fp::S as usize) };
     const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
-    #[derive(Debug, Default)]
-    struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits>(PhantomData<F>);
+    #[derive(Debug)]
+    struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits> {
+        modulus: BigUint<F>,
+    }
 
     impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
         type Config = Config;
@@ -639,9 +633,6 @@ mod red_mod_tests {
         fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
             let val = meta.instance_column();
             meta.enable_equality(val);
-
-            let module = meta.instance_column();
-            meta.enable_equality(module);
 
             let quotient = meta.instance_column();
             meta.enable_equality(quotient);
@@ -657,7 +648,6 @@ mod red_mod_tests {
 
             Config {
                 val,
-                module,
                 quotient,
                 remainder,
                 formal_val,
@@ -683,31 +673,22 @@ mod red_mod_tests {
                         let mut region = RegionCtx::new(region, 0);
 
                         let limbs_count = LIMBS_COUNT.get();
-                        let (val, module): (Vec<_>, Vec<_>) =
-                            itertools::multiunzip((0..limbs_count).map(|limb_index| {
-                                let res = (
-                                    region
-                                        .assign_advice_from_instance(
-                                            || format!("lhs {limb_index}"),
-                                            config.formal_val,
-                                            config.val,
-                                            limb_index,
-                                        )
-                                        .unwrap(),
-                                    region
-                                        .assign_advice_from_instance(
-                                            || format!("mod {limb_index}"),
-                                            config.formal_mod,
-                                            config.module,
-                                            limb_index,
-                                        )
-                                        .unwrap(),
-                                );
+                        let val = (0..limbs_count)
+                            .map(|limb_index| {
+                                let res = region
+                                    .assign_advice_from_instance(
+                                        || format!("lhs {limb_index}"),
+                                        config.formal_val,
+                                        config.val,
+                                        limb_index,
+                                    )
+                                    .unwrap();
 
                                 region.next();
 
                                 res
-                            }));
+                            })
+                            .collect::<Vec<_>>();
 
                         let ModOperationResult {
                             quotient,
@@ -716,7 +697,7 @@ mod red_mod_tests {
                             .red_mod(
                                 &mut region,
                                 OverflowingBigUint::new(val, LIMB_WIDTH),
-                                &module,
+                                &self.modulus,
                             )
                             .unwrap();
 
@@ -745,7 +726,6 @@ mod red_mod_tests {
     #[test_log::test]
     fn test_red_mod_bn() {
         const K: u32 = 11;
-        let ts = TestCircuit::<Fp>::default();
 
         let cases = [
             Context {
@@ -791,10 +771,9 @@ mod red_mod_tests {
 
             run_mock_prover_test!(
                 K,
-                ts,
+                TestCircuit::<Fp> { modulus },
                 vec![
                     val.limbs().to_vec(),
-                    modulus.limbs().to_vec(),
                     quotient.limbs().to_vec(),
                     remainer.limbs().to_vec(),
                 ]
