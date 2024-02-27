@@ -1158,14 +1158,12 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         ctx: &mut RegionCtx<'_, F>,
         lhs: &[AssignedCell<F, F>],
         rhs: &[AssignedCell<F, F>],
-        modulus: &[AssignedCell<F, F>],
+        mod_bn: &BigUint<F>,
     ) -> Result<ModOperationResult<F>, Error> {
         // lhs * rhs = q * m + r
 
         let to_bn =
             |val| big_uint::BigUint::from_assigned_cells(val, self.limb_width, self.limbs_count);
-
-        let mod_bn = to_bn(modulus).inspect_err(|err| error!("while mod to bn: {err:?}"))?;
 
         let lhs_bi = to_bn(lhs)
             .inspect_err(|err| error!("while lhs to bn: {err:?}"))?
@@ -1173,17 +1171,16 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         let rhs_bi = to_bn(rhs)
             .inspect_err(|err| error!("while rhs to bn: {err:?}"))?
             .map(|bn| bn.into_bigint());
-        let mod_bi = mod_bn.as_ref().map(|bn| bn.into_bigint());
+        let mod_bi = mod_bn.into_bigint();
 
         let (q, r) = lhs_bi
             .as_ref()
             .zip(rhs_bi.as_ref())
-            .zip(mod_bi.as_ref())
-            .map(|((lhs_bi, rhs_bi), mod_bi)| {
+            .map(|(lhs_bi, rhs_bi)| {
                 let prod = lhs_bi * rhs_bi;
                 Result::<_, Error>::Ok((
-                    self.to_bignat(&(&prod / mod_bi))?,
-                    self.to_bignat(&(&prod % mod_bi))?,
+                    self.to_bignat(&(&prod / &mod_bi))?,
+                    self.to_bignat(&(&prod % &mod_bi))?,
                 ))
             })
             .transpose()?
@@ -1218,7 +1215,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         } = self.assign_mult(
             ctx,
             q.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
-            mod_bn.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
+            mod_bn.limbs(),
             &max_word_without_overflow,
             &max_word_without_overflow,
         )?;
@@ -1278,38 +1275,32 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         &self,
         ctx: &mut RegionCtx<'_, F>,
         val: OverflowingBigUint<F>,
-        modulus: &[AssignedCell<F, F>],
+        mod_bn: &BigUint<F>,
     ) -> Result<ModOperationResult<F>, Error> {
         // lhs * rhs = q * m + r
 
         let to_bn =
             |val| big_uint::BigUint::from_assigned_cells(val, self.limb_width, self.limbs_count);
 
-        let mod_bn = to_bn(modulus)?;
         debug!("red_mod: mod {mod_bn:?}");
 
         let val_bi = to_bn(&val.cells)?.map(|bn| bn.into_bigint());
         debug!("red_mod: val {val_bi:?}");
-        let mod_bi = mod_bn.as_ref().map(|bn| bn.into_bigint());
+        let mod_bi = mod_bn.into_bigint();
         debug!("red_mod: mod_bi {mod_bi:?}");
 
         let (q, r) = val_bi
             .as_ref()
-            .zip(mod_bi.as_ref())
-            .map(|(val_bi, mod_bi)| {
+            .map(|val_bi| {
                 Result::<_, Error>::Ok((
-                    self.to_bignat(&(val_bi / mod_bi))?,
-                    self.to_bignat(&(val_bi % mod_bi))?,
+                    self.to_bignat(&(val_bi / &mod_bi))?,
+                    self.to_bignat(&(val_bi % &mod_bi))?,
                 ))
             })
             .transpose()?
             .unzip();
 
-        debug!(
-            "
-            red_mod: {q:?} * {mod_bi:?} + {r:?} = {val_bi:?} mod {mod_bi:?}
-        "
-        );
+        debug!("red_mod: {q:?} * {mod_bi:?} + {r:?} = {val_bi:?} mod {mod_bi:?}");
 
         // lhs * rhs
 
@@ -1325,7 +1316,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         } = self.assign_mult(
             ctx,
             q.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
-            mod_bn.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
+            mod_bn.limbs(),
             &val.max_word,
             &val.max_word,
         )?;
