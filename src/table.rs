@@ -20,7 +20,7 @@ use crate::{
         self,
         util::{
             cell_to_z_idx, column_index, compress_expression, fill_sparse_matrix,
-            instance_column_index,
+            get_instance_column_index,
         },
         PlonkInstance, PlonkStructure, PlonkWitness,
     },
@@ -493,7 +493,7 @@ impl<F: PrimeField> TableData<F> {
         let num_rows = self.advice[0].len();
         let num_io = self.instance.len();
         let columns = &self.cs.permutation.columns;
-        let instance_column_idx = instance_column_index(columns);
+        let instance_column_idx = get_instance_column_index(columns);
 
         for (left_col, vec) in self
             .permutation
@@ -518,8 +518,7 @@ impl<F: PrimeField> TableData<F> {
             }
         }
 
-        fill_sparse_matrix(&mut sparse_matrix_p, num_advice, num_rows, num_io, columns);
-        sparse_matrix_p
+        fill_sparse_matrix(sparse_matrix_p, num_advice, num_rows, num_io, columns)
     }
 }
 
