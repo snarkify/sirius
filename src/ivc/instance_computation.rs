@@ -81,12 +81,12 @@ where
     pub limbs_count: NonZeroUsize,
 }
 
-impl<'l, C2, RP, const A: usize> RandomOracleComputationInstance<'l, A, C2, RP>
+impl<'l, C, RP, const A: usize> RandomOracleComputationInstance<'l, A, C, RP>
 where
-    RP: ROTrait<C2::Base>,
-    C2: CurveAffine + Serialize,
+    RP: ROTrait<C::Base>,
+    C: CurveAffine + Serialize,
 {
-    pub fn generate_with_inspect<F: PrimeField>(self, inspect: impl FnOnce(&[C2::Base])) -> F {
+    pub fn generate_with_inspect<F: PrimeField>(self, inspect: impl FnOnce(&[C::Base])) -> F {
         pub struct RelaxedPlonkInstanceBigUintView<'l, C: CurveAffine> {
             pub(crate) W_commitments: &'l Vec<C>,
             pub(crate) E_commitment: &'l C,
@@ -152,12 +152,12 @@ where
         util::fe_to_fe(
             &RP::new(self.random_oracle_constant)
                 .absorb_point(self.public_params_hash)
-                .absorb_field(C2::Base::from_u128(self.step as u128))
+                .absorb_field(C::Base::from_u128(self.step as u128))
                 .absorb_field_iter(self.z_0.iter().copied())
                 .absorb_field_iter(self.z_i.iter().copied())
                 .absorb(&relaxed)
                 .inspect(inspect)
-                .squeeze::<C2>(NUM_CHALLENGE_BITS),
+                .squeeze::<C>(NUM_CHALLENGE_BITS),
         )
         .unwrap()
     }
