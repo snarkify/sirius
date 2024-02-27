@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::{
     ivc::{
-        public_params::{self, PublicParams},
+        public_params::PublicParams,
         step_folding_circuit::{StepConfig, StepFoldingCircuit, StepInputs},
     },
     main_gate::MainGateConfig,
@@ -132,16 +132,10 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        // Prepare primary constraint system for folding
-        let (mut primary_td, primary_step_config) = Self::prepare_primary_td::<T, RP1>(
-            pp.primary.k_table_size,
-            [C1::Scalar::ZERO, C1::Scalar::ZERO], // TODO #154 #160
-        );
-
         // Prepare secondary constraint system for folding
         // & for take some metadata for zero round of primary circuit
         let (mut secondary_td, secondary_step_config) = Self::prepare_secondary_td::<T, RP2>(
-            pp.secondary.k_table_size,
+            pp.secondary.k_table_size(),
             [C2::Scalar::ZERO, C2::Scalar::ZERO], // TODO #154 #160
         );
         // For pp digest & for cross term commits lenght
@@ -155,44 +149,42 @@ where
         ];
 
         // Not use `PublicParams::digest` for re-use calculated before plonk structures
-        let pp_wrapper = public_params::PublicParamsDigestWrapper::<'_, C1, C2, RP1, RP2> {
-            primary_plonk_struct: primary_td.plonk_structure().unwrap(),
-            secondary_plonk_struct: pre_round_secondary_ps,
-            primary_params: &pp.primary.params,
-            secondary_params: &pp.secondary.params,
-        };
-        let primary_public_params_hash = pp_wrapper.digest().map_err(Error::WhileHash)?;
-        let secondary_public_params_hash = pp_wrapper.digest().map_err(Error::WhileHash)?;
+        let primary_public_params_hash = pp.digest_2().map_err(Error::WhileHash)?;
+        let secondary_public_params_hash = pp.digest_1().map_err(Error::WhileHash)?;
 
         // For use as first version of `U` in primary circuit synthesize
         let pre_round_secondary_plonk_trace = VanillaFS::generate_plonk_trace(
-            pp.secondary.ck,
+            pp.secondary.ck(),
             &secondary_td,
             &VanillaFS::setup_params(primary_public_params_hash, &secondary_td)?.0,
-            &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
+            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
         )?;
 
-        primary_td.instance = vec![
-            util::fe_to_fe(&pre_round_secondary_plonk_trace.u.instance[1]).unwrap(),
-            RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
-                random_oracle_constant: pp.primary.params.ro_constant.clone(),
-                public_params_hash: &primary_public_params_hash,
-                step: 1,
-                z_0: &primary_z_0,
-                z_i: &primary.process_step(&primary_z_0, pp.primary.k_table_size)?,
-                relaxed: &pre_round_secondary_plonk_trace.u.to_relax(),
-                limb_width: pp.primary.params.limb_width,
-                limbs_count: pp.primary.params.limbs_count,
-            }
-            .generate_with_inspect(|buf| debug!("primary X1 zero-step: {buf:?}")),
-        ];
+        // Prepare primary constraint system for folding
+        let (mut primary_td, primary_step_config) = Self::prepare_primary_td::<T, RP1>(
+            pp.primary.k_table_size(),
+            [
+                util::fe_to_fe(&pre_round_secondary_plonk_trace.u.instance[1]).unwrap(),
+                RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
+                    random_oracle_constant: pp.primary.params().ro_constant().clone(),
+                    public_params_hash: &primary_public_params_hash,
+                    step: 1,
+                    z_0: &primary_z_0,
+                    z_i: &primary.process_step(&primary_z_0, pp.primary.k_table_size())?,
+                    relaxed: &pre_round_secondary_plonk_trace.u.to_relax(),
+                    limb_width: pp.primary.params().limb_width(),
+                    limbs_count: pp.primary.params().limbs_count(),
+                }
+                .generate_with_inspect(|buf| debug!("primary X1 zero-step: {buf:?}")),
+            ],
+        );
         debug!("Primary off circuit instance: {:?}", &primary_td.instance);
 
         let primary_z_output = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: &primary,
             input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
                 step: C2::Base::ZERO,
-                step_pp: &pp.primary.params,
+                step_pp: pp.primary.params(),
                 public_params_hash: primary_public_params_hash,
                 z_0: primary_z_0,
                 z_i: primary_z_0,
@@ -212,10 +204,10 @@ where
             VanillaFS::setup_params(secondary_public_params_hash, &primary_td)?;
 
         let primary_plonk_trace = VanillaFS::generate_plonk_trace(
-            pp.primary.ck,
+            pp.primary.ck(),
             &primary_td,
             &primary_nifs_pp,
-            &mut RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone()),
+            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?;
 
         let primary_cross_term_commits =
@@ -224,14 +216,14 @@ where
         secondary_td.instance = vec![
             util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
-                random_oracle_constant: pp.secondary.params.ro_constant.clone(),
+                random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                 public_params_hash: &secondary_public_params_hash,
                 step: 1,
                 z_0: &secondary_z_0,
-                z_i: &secondary.process_step(&secondary_z_0, pp.secondary.k_table_size)?,
+                z_i: &secondary.process_step(&secondary_z_0, pp.secondary.k_table_size())?,
                 relaxed: &primary_plonk_trace.u.to_relax(),
-                limb_width: pp.secondary.params.limb_width,
-                limbs_count: pp.secondary.params.limbs_count,
+                limb_width: pp.secondary.params().limb_width(),
+                limbs_count: pp.secondary.params().limbs_count(),
             }
             .generate_with_inspect(|buf| debug!("secondary X1 zero-step: {buf:?}")),
         ];
@@ -244,7 +236,7 @@ where
             step_circuit: &secondary,
             input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
                 step: C1::Base::ZERO,
-                step_pp: &pp.secondary.params,
+                step_pp: pp.secondary.params(),
                 public_params_hash: secondary_public_params_hash,
                 z_0: secondary_z_0,
                 z_i: secondary_z_0,
@@ -262,10 +254,10 @@ where
         let (secondary_nifs_pp, _nifs_vp) =
             VanillaFS::setup_params(primary_public_params_hash, &secondary_td)?;
         let secondary_plonk_trace = VanillaFS::generate_plonk_trace(
-            pp.secondary.ck,
+            pp.secondary.ck(),
             &secondary_td,
             &secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
+            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
         )?;
 
         Ok(Self {
@@ -277,13 +269,13 @@ where
                 step_circuit: primary,
                 z_0: primary_z_0,
                 z_i: primary_z_output,
-                relaxed_trace: primary_plonk_trace.to_relax(pp.primary.k_table_size as usize),
+                relaxed_trace: primary_plonk_trace.to_relax(pp.primary.k_table_size() as usize),
             },
             secondary: StepCircuitContext {
                 step_circuit: secondary,
                 z_0: secondary_z_0,
                 z_i: secondary_z_output,
-                relaxed_trace: secondary_plonk_trace.to_relax(pp.secondary.k_table_size as usize),
+                relaxed_trace: secondary_plonk_trace.to_relax(pp.secondary.k_table_size() as usize),
             },
         })
     }
@@ -300,33 +292,33 @@ where
 
         debug!("start prove secondary trace");
         let (secondary_new_trace, secondary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
-            pp.secondary.ck,
+            pp.secondary.ck(),
             &self.secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
+            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
             &self.secondary.relaxed_trace,
             &self.secondary_trace,
         )?;
 
         debug!("prepare primary td");
 
-        let primary_public_params_hash = pp.digest().map_err(Error::WhileHash)?;
+        let primary_public_params_hash = pp.digest_2().map_err(Error::WhileHash)?;
         // Prepare primary constraint system for folding
         let (mut primary_td, primary_step_config) = Self::prepare_primary_td::<T, RP1>(
-            pp.primary.k_table_size,
+            pp.primary.k_table_size(),
             [
                 util::fe_to_fe(&self.secondary.relaxed_trace.U.instance[1]).unwrap(),
                 RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
-                    random_oracle_constant: pp.primary.params.ro_constant.clone(),
+                    random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &primary_public_params_hash,
                     step: self.step + 1,
                     z_0: &self.primary.z_0,
                     z_i: &self
                         .primary
                         .step_circuit
-                        .process_step(&self.primary.z_i, pp.primary.k_table_size)?,
+                        .process_step(&self.primary.z_i, pp.primary.k_table_size())?,
                     relaxed: &secondary_new_trace.U,
-                    limb_width: pp.secondary.params.limb_width,
-                    limbs_count: pp.secondary.params.limbs_count,
+                    limb_width: pp.secondary.params().limb_width(),
+                    limbs_count: pp.secondary.params().limbs_count(),
                 }
                 .generate(),
             ],
@@ -335,8 +327,8 @@ where
             step_circuit: &self.primary.step_circuit,
             input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
                 step: C2::Base::from_u128(self.step as u128),
-                step_pp: &pp.primary.params,
-                public_params_hash: pp.digest().map_err(Error::WhileHash)?,
+                step_pp: pp.primary.params(),
+                public_params_hash: pp.digest_2().map_err(Error::WhileHash)?,
                 z_0: self.primary.z_0,
                 z_i: self.primary.z_i,
                 U: self.secondary.relaxed_trace.U.clone(),
@@ -357,17 +349,17 @@ where
 
         debug!("start generate primary plonk trace");
         let primary_plonk_trace = VanillaFS::generate_plonk_trace(
-            pp.primary.ck,
+            pp.primary.ck(),
             &primary_td,
             &self.primary_nifs_pp,
-            &mut RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone()),
+            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?;
 
         debug!("start prove primary trace");
         let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
-            pp.primary.ck,
+            pp.primary.ck(),
             &self.primary_nifs_pp,
-            &mut RP2::OffCircuit::new(pp.secondary.params.ro_constant.clone()),
+            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
             &self.primary.relaxed_trace,
             &primary_plonk_trace,
         )?;
@@ -375,25 +367,22 @@ where
         debug!("start fold step with folding 'primary' by 'secondary'");
 
         debug!("prepare secondary td");
-
-        let secondary_public_params_hash = pp.digest().map_err(Error::WhileHash)?;
-
         let (mut secondary_td, secondary_step_config) = Self::prepare_secondary_td::<T, RP2>(
-            pp.secondary.k_table_size,
+            pp.secondary.k_table_size(),
             [
                 util::fe_to_fe(&self.primary.relaxed_trace.U.instance[1]).unwrap(),
                 RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
-                    random_oracle_constant: pp.secondary.params.ro_constant.clone(),
-                    public_params_hash: &secondary_public_params_hash,
+                    random_oracle_constant: pp.secondary.params().ro_constant().clone(),
+                    public_params_hash: &pp.digest_1().map_err(Error::WhileHash)?,
                     step: self.step + 1,
                     z_0: &self.secondary.z_0,
                     z_i: &self
                         .secondary
                         .step_circuit
-                        .process_step(&self.secondary.z_i, pp.secondary.k_table_size)?,
+                        .process_step(&self.secondary.z_i, pp.secondary.k_table_size())?,
                     relaxed: &primary_new_trace.U,
-                    limb_width: pp.primary.params.limb_width,
-                    limbs_count: pp.primary.params.limbs_count,
+                    limb_width: pp.primary.params().limb_width(),
+                    limbs_count: pp.primary.params().limbs_count(),
                 }
                 .generate(),
             ],
@@ -404,7 +393,7 @@ where
                 step_circuit: &self.secondary.step_circuit,
                 input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
                     step: C1::Base::from_u128(self.step as u128),
-                    step_pp: &pp.secondary.params,
+                    step_pp: pp.secondary.params(),
                     public_params_hash: pp.digest().map_err(Error::WhileHash)?,
                     z_0: self.secondary.z_0,
                     z_i: self.secondary.z_i,
@@ -426,10 +415,10 @@ where
 
         debug!("start generate secondary plonk trace");
         self.secondary_trace = VanillaFS::generate_plonk_trace(
-            pp.secondary.ck,
+            pp.secondary.ck(),
             &secondary_td,
             &self.secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
+            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
         )?;
 
         self.step += 1;
@@ -446,14 +435,14 @@ where
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
         let expected_X0 = RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
-            random_oracle_constant: pp.primary.params.ro_constant.clone(),
+            random_oracle_constant: pp.primary.params().ro_constant().clone(),
             public_params_hash: &pp.digest().map_err(Error::WhileHash)?,
             step: self.step,
             z_0: &self.primary.z_0,
             z_i: &self.primary.z_i,
             relaxed: &self.secondary.relaxed_trace.U,
-            limb_width: pp.primary.params.limb_width,
-            limbs_count: pp.primary.params.limbs_count,
+            limb_width: pp.primary.params().limb_width(),
+            limbs_count: pp.primary.params().limbs_count(),
         }
         .generate::<C2::Scalar>();
 
@@ -465,14 +454,14 @@ where
         }
 
         let expected_X1 = RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
-            random_oracle_constant: pp.secondary.params.ro_constant.clone(),
+            random_oracle_constant: pp.secondary.params().ro_constant().clone(),
             public_params_hash: &pp.digest().map_err(Error::WhileHash)?,
             step: self.step,
             z_0: &self.secondary.z_0,
             z_i: &self.secondary.z_i,
             relaxed: &self.primary.relaxed_trace.U,
-            limb_width: pp.secondary.params.limb_width,
-            limbs_count: pp.secondary.params.limbs_count,
+            limb_width: pp.secondary.params().limb_width(),
+            limbs_count: pp.secondary.params().limbs_count(),
         }
         .generate::<C1::Scalar>();
 
@@ -484,20 +473,20 @@ where
         }
 
         Self::prepare_primary_td::<T, RP1>(
-            pp.primary.k_table_size,
+            pp.primary.k_table_size(),
             [C1::Scalar::ZERO, C1::Scalar::ZERO], // TODO #154 #160
         )
         .0
         .plonk_structure()
         .expect("`TableData` already prepared")
         .is_sat_relaxed(
-            pp.primary.ck,
+            pp.primary.ck(),
             &self.primary.relaxed_trace.U,
             &self.primary.relaxed_trace.W,
         )?;
 
         let S2 = Self::prepare_secondary_td::<T, RP2>(
-            pp.secondary.k_table_size,
+            pp.secondary.k_table_size(),
             [C2::Scalar::ZERO, C2::Scalar::ZERO],
         )
         .0
@@ -505,14 +494,14 @@ where
         .expect("`TableData` already prepared");
 
         S2.is_sat_relaxed(
-            pp.secondary.ck,
+            pp.secondary.ck(),
             &self.secondary.relaxed_trace.U,
             &self.secondary.relaxed_trace.W,
         )?;
 
         S2.is_sat(
-            pp.secondary.ck,
-            &mut RP1::OffCircuit::new(pp.primary.params.ro_constant.clone()),
+            pp.secondary.ck(),
+            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
             &self.secondary_trace.u,
             &self.secondary_trace.w,
         )?;

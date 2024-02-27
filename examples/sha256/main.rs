@@ -395,16 +395,16 @@ fn main() {
         RandomOracle,
         RandomOracle,
     >::new(
-        CircuitPublicParamsInput {
-            k_table_size: CIRCUIT_TABLE_SIZE1 as u32,
-            commitment_key: &primary_commitment_key,
-            ro_constant: primary_spec,
-        },
-        CircuitPublicParamsInput {
-            k_table_size: CIRCUIT_TABLE_SIZE2 as u32,
-            commitment_key: &secondary_commitment_key,
-            ro_constant: secondary_spec,
-        },
+        CircuitPublicParamsInput::new(
+            CIRCUIT_TABLE_SIZE1 as u32,
+            &primary_commitment_key,
+            primary_spec,
+        ),
+        CircuitPublicParamsInput::new(
+            CIRCUIT_TABLE_SIZE2 as u32,
+            &secondary_commitment_key,
+            secondary_spec,
+        ),
         LIMB_WIDTH,
         LIMBS_COUNT,
     )
