@@ -140,8 +140,9 @@ where
         self
     }
 
-    fn inspect(&self, inspect: impl Fn(&[F])) {
-        inspect(&self.buf)
+    fn inspect(&mut self, inspect: impl FnOnce(&[F])) -> &mut Self {
+        inspect(&self.buf);
+        self
     }
 
     fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {

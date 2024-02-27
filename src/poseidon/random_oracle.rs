@@ -57,7 +57,7 @@ pub trait ROTrait<F: PrimeField> {
         self
     }
 
-    fn inspect(&self, scan: impl Fn(&[F]));
+    fn inspect(&mut self, scan: impl FnOnce(&[F])) -> &mut Self;
 
     /// Returns a challenge by hashing the internal state
     fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar;
@@ -96,7 +96,7 @@ pub trait ROCircuitTrait<F: PrimeFieldBits + FromUniformBytes<64>> {
         self
     }
 
-    fn inspect(&self, scan: impl Fn(&[F]));
+    fn inspect(&mut self, scan: impl FnOnce(&[F])) -> &mut Self;
 
     /// Returns a challenge of `num_bits` by hashing the internal state
     fn squeeze_n_bits(

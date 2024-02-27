@@ -254,7 +254,11 @@ where
                     z_i: assigned_z_i,
                     relaxed: &w.assigned_relaxed,
                 }
-                .generate(&mut ctx, config.main_gate_config.clone())?;
+                .generate_with_inspect(
+                    &mut ctx,
+                    config.main_gate_config.clone(),
+                    |buf| debug!("expected X0 {buf:?}"),
+                )?;
 
                 debug!("expected X0: {expected_X0:?}");
 
@@ -322,9 +326,10 @@ where
                     z_i: &z_output,
                     relaxed: &assigned_new_U,
                 }
-                .generate(
+                .generate_with_inspect(
                     &mut RegionCtx::new(region, 0),
                     config.main_gate_config.clone(),
+                    |buf| debug!("new X0 {buf:?}"),
                 )
             },
         )?;

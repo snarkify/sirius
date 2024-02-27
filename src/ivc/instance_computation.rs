@@ -40,10 +40,11 @@ where
     C::Base: FromUniformBytes<64> + PrimeFieldBits,
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
 {
-    pub fn generate(
+    pub fn generate_with_inspect(
         self,
         ctx: &mut RegionCtx<'_, C::Base>,
         config: MainGateConfig<T>,
+        inspect: impl FnOnce(&[C::Base]),
     ) -> Result<AssignedValue<C::Base>, halo2_proofs::plonk::Error> {
         let bits = RO::new(config.clone(), self.random_oracle_constant)
             .absorb_point(WrapValue::from_assigned_point(self.public_params_hash))
@@ -51,9 +52,17 @@ where
             .absorb_iter(self.z_0.iter())
             .absorb_iter(self.z_i.iter().cloned())
             .absorb_iter(self.relaxed.iter_wrap_values())
+            .inspect(inspect)
             .squeeze_n_bits(ctx, NUM_CHALLENGE_BITS)?;
 
         MainGate::new(config.clone()).le_bits_to_num(ctx, &bits)
+    }
+    pub fn generate(
+        self,
+        ctx: &mut RegionCtx<'_, C::Base>,
+        config: MainGateConfig<T>,
+    ) -> Result<AssignedValue<C::Base>, halo2_proofs::plonk::Error> {
+        self.generate_with_inspect(ctx, config, |_| {})
     }
 }
 
@@ -77,7 +86,7 @@ where
     RP: ROTrait<C2::Base>,
     C2: CurveAffine + Serialize,
 {
-    pub fn generate<F: PrimeField>(self) -> F {
+    pub fn generate_with_inspect<F: PrimeField>(self, inspect: impl FnOnce(&[C2::Base])) -> F {
         pub struct RelaxedPlonkInstanceBigUintView<'l, C: CurveAffine> {
             pub(crate) W_commitments: &'l Vec<C>,
             pub(crate) E_commitment: &'l C,
@@ -147,9 +156,14 @@ where
                 .absorb_field_iter(self.z_0.iter().copied())
                 .absorb_field_iter(self.z_i.iter().copied())
                 .absorb(&relaxed)
+                .inspect(inspect)
                 .squeeze::<C2>(NUM_CHALLENGE_BITS),
         )
         .unwrap()
+    }
+
+    pub fn generate<F: PrimeField>(self) -> F {
+        self.generate_with_inspect(|_| {})
     }
 }
 
