@@ -17,10 +17,7 @@ use grumpkin::G1 as C2;
 use log::*;
 use sirius::{
     commitment::CommitmentKey,
-    ivc::{
-        step_circuit, CircuitPublicParamsInput, PublicParams, SimpleFloorPlanner, StepCircuit,
-        SynthesisError, IVC,
-    },
+    ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
     poseidon::{self, ROPair},
 };
 
@@ -275,7 +272,6 @@ const COMMITMENT_KEY_SIZE: usize = 27;
 
 impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
     type Config = Table16Config;
-    type FloorPlanner = SimpleFloorPlanner;
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         Table16Chip::configure(meta)

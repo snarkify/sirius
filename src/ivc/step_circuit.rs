@@ -6,7 +6,7 @@ use halo2_proofs::{
 
 use crate::{main_gate::RegionCtx, table::TableData};
 
-use super::{floor_planner::FloorPlanner, fold_relaxed_plonk_instance_chip};
+use super::fold_relaxed_plonk_instance_chip;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SynthesisError {
@@ -50,15 +50,6 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     ///
     /// TODO improve
     type Config: Clone;
-
-    /// The floor planner used for this circuit.
-    /// This is an associated type of the `Circuit` trait because its
-    /// behaviour is circuit-critical.
-    ///
-    /// TODO improve
-    ///
-    /// If you don't understand what it is, just use [`super::floor_planner::SimpleStepFloorPlanner`]
-    type FloorPlanner: FloorPlanner;
 
     /// Configure the step circuit. This method initializes necessary
     /// fixed columns and advice columns, but does not create any instance
@@ -134,8 +125,6 @@ pub mod trivial {
         plonk::ConstraintSystem,
     };
 
-    use crate::ivc::SimpleFloorPlanner;
-
     use super::{StepCircuit, SynthesisError};
 
     /// A trivial step circuit that simply returns the input
@@ -152,15 +141,6 @@ pub mod trivial {
         ///
         /// TODO improve
         type Config = ();
-
-        /// The floor planner used for this circuit.
-        /// This is an associated type of the `Circuit` trait because its
-        /// behaviour is circuit-critical.
-        ///
-        /// TODO improve
-        ///
-        /// If you don't understand what it is, just use [`super::floor_planner::SimpleStepFloorPlanner`]
-        type FloorPlanner = SimpleFloorPlanner;
 
         /// Configure the step circuit. This method initializes necessary
         /// fixed columns and advice columns, but does not create any instance

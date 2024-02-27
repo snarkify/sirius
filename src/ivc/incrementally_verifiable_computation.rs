@@ -2,7 +2,7 @@ use std::{io, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
-use halo2_proofs::circuit::floor_planner::single_pass::SingleChipLayouter;
+use halo2_proofs::{circuit::floor_planner::single_pass::SingleChipLayouter, plonk::Circuit};
 use halo2curves::CurveAffine;
 use log::*;
 use serde::Serialize;
@@ -22,10 +22,7 @@ use crate::{
 };
 
 use super::instance_computation::RandomOracleComputationInstance;
-pub use super::{
-    floor_planner::{FloorPlanner, SimpleFloorPlanner},
-    step_circuit::{self, StepCircuit, SynthesisError},
-};
+pub use super::step_circuit::{self, StepCircuit, SynthesisError};
 
 // TODO #31 docs
 struct StepCircuitContext<const ARITY: usize, C, SC>
@@ -160,6 +157,7 @@ where
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
         )?;
 
+        let primary_z_output = primary.process_step(&primary_z_0, pp.primary.k_table_size())?;
         // Prepare primary constraint system for folding
         let (mut primary_td, primary_step_config) = Self::prepare_primary_td::<T, RP1>(
             pp.primary.k_table_size(),
@@ -170,7 +168,7 @@ where
                     public_params_hash: &primary_public_params_hash,
                     step: 1,
                     z_0: &primary_z_0,
-                    z_i: &primary.process_step(&primary_z_0, pp.primary.k_table_size())?,
+                    z_i: &primary_z_output,
                     relaxed: &pre_round_secondary_plonk_trace.u.to_relax(),
                     limb_width: pp.primary.params().limb_width(),
                     limbs_count: pp.primary.params().limbs_count(),
@@ -180,7 +178,7 @@ where
         );
         debug!("Primary off circuit instance: {:?}", &primary_td.instance);
 
-        let primary_z_output = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
+        StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: &primary,
             input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
                 step: C2::Base::ZERO,
@@ -195,7 +193,7 @@ where
         }
         .synthesize(
             primary_step_config,
-            &mut SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?,
+            SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?,
         )?;
         primary_td.postpone_assembly();
 
@@ -213,6 +211,9 @@ where
         let primary_cross_term_commits =
             vec![C1::identity(); primary_nifs_pp.S.get_degree_for_folding().saturating_sub(1)];
 
+        let secondary_z_output =
+            secondary.process_step(&secondary_z_0, pp.secondary.k_table_size())?;
+
         secondary_td.instance = vec![
             util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
@@ -220,7 +221,7 @@ where
                 public_params_hash: &secondary_public_params_hash,
                 step: 1,
                 z_0: &secondary_z_0,
-                z_i: &secondary.process_step(&secondary_z_0, pp.secondary.k_table_size())?,
+                z_i: &secondary_z_output,
                 relaxed: &primary_plonk_trace.u.to_relax(),
                 limb_width: pp.secondary.params().limb_width(),
                 limbs_count: pp.secondary.params().limbs_count(),
@@ -232,7 +233,7 @@ where
             &secondary_td.instance
         );
 
-        let secondary_z_output = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
+        StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
             step_circuit: &secondary,
             input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
                 step: C1::Base::ZERO,
@@ -247,7 +248,7 @@ where
         }
         .synthesize(
             secondary_step_config,
-            &mut SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
+            SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
         )?;
         secondary_td.postpone_assembly();
 
@@ -303,6 +304,10 @@ where
 
         let primary_public_params_hash = pp.digest_2().map_err(Error::WhileHash)?;
         // Prepare primary constraint system for folding
+        let next_primary_z_i = self
+            .primary
+            .step_circuit
+            .process_step(&self.primary.z_i, pp.primary.k_table_size())?;
         let (mut primary_td, primary_step_config) = Self::prepare_primary_td::<T, RP1>(
             pp.primary.k_table_size(),
             [
@@ -312,10 +317,7 @@ where
                     public_params_hash: &primary_public_params_hash,
                     step: self.step + 1,
                     z_0: &self.primary.z_0,
-                    z_i: &self
-                        .primary
-                        .step_circuit
-                        .process_step(&self.primary.z_i, pp.primary.k_table_size())?,
+                    z_i: &next_primary_z_i,
                     relaxed: &secondary_new_trace.U,
                     limb_width: pp.secondary.params().limb_width(),
                     limbs_count: pp.secondary.params().limbs_count(),
@@ -323,6 +325,7 @@ where
                 .generate(),
             ],
         );
+
         let primary_step_folding_circuit = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: &self.primary.step_circuit,
             input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
@@ -338,13 +341,14 @@ where
         };
 
         debug!("start synthesize of 'step_folding_circuit' for primary");
-        self.primary.z_i = primary_step_folding_circuit.synthesize(
+        primary_step_folding_circuit.synthesize(
             primary_step_config,
-            &mut SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?,
+            SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?,
         )?;
         debug!("start primary td postpone");
         primary_td.postpone_assembly();
 
+        self.primary.z_i = next_primary_z_i;
         self.secondary.relaxed_trace = secondary_new_trace;
 
         debug!("start generate primary plonk trace");
@@ -367,6 +371,12 @@ where
         debug!("start fold step with folding 'primary' by 'secondary'");
 
         debug!("prepare secondary td");
+
+        let next_secondary_z_i = self
+            .secondary
+            .step_circuit
+            .process_step(&self.secondary.z_i, pp.secondary.k_table_size())?;
+
         let (mut secondary_td, secondary_step_config) = Self::prepare_secondary_td::<T, RP2>(
             pp.secondary.k_table_size(),
             [
@@ -376,10 +386,7 @@ where
                     public_params_hash: &pp.digest_1().map_err(Error::WhileHash)?,
                     step: self.step + 1,
                     z_0: &self.secondary.z_0,
-                    z_i: &self
-                        .secondary
-                        .step_circuit
-                        .process_step(&self.secondary.z_i, pp.secondary.k_table_size())?,
+                    z_i: &next_secondary_z_i,
                     relaxed: &primary_new_trace.U,
                     limb_width: pp.primary.params().limb_width(),
                     limbs_count: pp.primary.params().limbs_count(),
@@ -404,13 +411,14 @@ where
             };
 
         debug!("start synthesize of 'step_folding_circuit' for secondary");
-        self.secondary.z_i = secondary_step_folding_circuit.synthesize(
+        secondary_step_folding_circuit.synthesize(
             secondary_step_config,
-            &mut SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
+            SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
         )?;
         debug!("start secondary td postpone");
         secondary_td.postpone_assembly();
 
+        self.secondary.z_i = next_secondary_z_i;
         self.primary.relaxed_trace = primary_new_trace;
 
         debug!("start generate secondary plonk trace");
