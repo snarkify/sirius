@@ -241,10 +241,17 @@ where
         )?;
 
         // Check X0 == input_params_hash
-        layouter.assign_region(
+        let (base_case_input_check, non_base_case_input_check) = layouter.assign_region(
             || "generate input hash",
             |region| {
                 let mut ctx = RegionCtx::new(region, 0);
+
+                let base_case_input_check = ctx.assign_advice(
+                    || "base_case_input_check - always true",
+                    config.main_gate_config.input,
+                    Value::known(C::Base::ONE),
+                )?;
+                ctx.next();
 
                 let expected_X0 = AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
                     random_oracle_constant: self.input.step_pp.ro_constant.clone(),
@@ -261,12 +268,16 @@ where
                 )?;
 
                 debug!("expected X0: {expected_X0:?}");
-
-                ctx.constrain_equal(expected_X0.cell(), w.input_instance[0].0.cell())?;
-
                 debug!("input instance 0: {:?}", w.input_instance[0].0);
 
-                Ok(())
+                Ok((
+                    base_case_input_check,
+                    MainGate::new(config.main_gate_config.clone()).is_equal_term(
+                        &mut ctx,
+                        &expected_X0,
+                        &w.input_instance[0].0,
+                    )?,
+                ))
             },
         )?;
 
@@ -292,10 +303,18 @@ where
                 let new_U = AssignedRelaxedPlonkInstance::<C>::conditional_select(
                     &mut region,
                     &config.main_gate_config,
-                    &U_new_non_base,
                     &U_new_base,
+                    &U_new_non_base,
                     assigned_is_zero_step.clone(),
                 )?;
+
+                let input_check = gate.conditional_select(
+                    &mut region,
+                    &base_case_input_check,
+                    &non_base_case_input_check,
+                    &assigned_is_zero_step,
+                )?;
+                gate.assert_equal_const(&mut region, input_check, C::Base::ONE)?;
 
                 let assigned_input: [_; ARITY] = assigned_z_0
                     .iter()
