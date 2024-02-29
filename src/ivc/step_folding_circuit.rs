@@ -32,9 +32,33 @@ where
     F: PrimeFieldBits + FromUniformBytes<64>,
     RO: ROCircuitTrait<F>,
 {
-    pub limb_width: NonZeroUsize,
-    pub limbs_count: NonZeroUsize,
-    pub ro_constant: RO::Args,
+    limb_width: NonZeroUsize,
+    limbs_count: NonZeroUsize,
+    ro_constant: RO::Args,
+}
+
+impl<F, RO> StepParams<F, RO>
+where
+    F: PrimeFieldBits + FromUniformBytes<64>,
+    RO: ROCircuitTrait<F>,
+{
+    pub fn new(limb_width: NonZeroUsize, limbs_count: NonZeroUsize, ro_constant: RO::Args) -> Self {
+        Self {
+            limb_width,
+            limbs_count,
+            ro_constant,
+        }
+    }
+
+    pub fn limb_width(&self) -> NonZeroUsize {
+        self.limb_width
+    }
+    pub fn limbs_count(&self) -> NonZeroUsize {
+        self.limbs_count
+    }
+    pub fn ro_constant(&self) -> &RO::Args {
+        &self.ro_constant
+    }
 }
 
 impl<F, RO> fmt::Debug for StepParams<F, RO>

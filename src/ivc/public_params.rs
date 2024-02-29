@@ -1,4 +1,4 @@
-use std::{fmt, io, marker::PhantomData, num::NonZeroUsize};
+use std::{cell::OnceCell, fmt, io, marker::PhantomData, num::NonZeroUsize};
 
 use ff::{FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
@@ -26,9 +26,27 @@ where
     C::Scalar: PrimeFieldBits + FromUniformBytes<64>,
     RP: ROPair<C::Scalar>,
 {
-    pub k_table_size: u32,
-    pub ck: &'key CommitmentKey<C>,
-    pub params: StepParams<C::Scalar, RP::OnCircuit>,
+    k_table_size: u32,
+    ck: &'key CommitmentKey<C>,
+    params: StepParams<C::Scalar, RP::OnCircuit>,
+}
+
+impl<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, RP>
+    CircuitPublicParams<'key, ARITY, MAIN_GATE_T, C, RP>
+where
+    C: CurveAffine,
+    C::Scalar: PrimeFieldBits + FromUniformBytes<64>,
+    RP: ROPair<C::Scalar>,
+{
+    pub fn k_table_size(&self) -> u32 {
+        self.k_table_size
+    }
+    pub fn ck(&self) -> &'key CommitmentKey<C> {
+        self.ck
+    }
+    pub fn params(&self) -> &StepParams<C::Scalar, RP::OnCircuit> {
+        &self.params
+    }
 }
 
 impl<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, RP> fmt::Debug
@@ -67,11 +85,7 @@ where
         Ok(Self {
             k_table_size,
             ck: commitment_key,
-            params: StepParams {
-                limb_width,
-                limbs_count: n_limbs,
-                ro_constant,
-            },
+            params: StepParams::new(limb_width, n_limbs, ro_constant),
         })
     }
 }
@@ -103,6 +117,9 @@ pub struct PublicParams<
     pub(crate) primary: CircuitPublicParams<'key, A1, MAIN_GATE_T, C1, RP1>,
     pub(crate) secondary: CircuitPublicParams<'key, A2, MAIN_GATE_T, C2, RP2>,
     _p: PhantomData<(SC1, SC2)>,
+
+    digest_1: OnceCell<C1>,
+    digest_2: OnceCell<C2>,
 }
 
 impl<
@@ -141,9 +158,23 @@ where
 }
 
 pub struct CircuitPublicParamsInput<'key, C: CurveAffine, RPArgs> {
-    pub commitment_key: &'key CommitmentKey<C>,
-    pub k_table_size: u32,
-    pub ro_constant: RPArgs,
+    commitment_key: &'key CommitmentKey<C>,
+    k_table_size: u32,
+    ro_constant: RPArgs,
+}
+
+impl<'key, C: CurveAffine, RPArgs> CircuitPublicParamsInput<'key, C, RPArgs> {
+    pub fn new(
+        k_table_size: u32,
+        commitment_key: &'key CommitmentKey<C>,
+        ro_constant: RPArgs,
+    ) -> Self {
+        Self {
+            commitment_key,
+            k_table_size,
+            ro_constant,
+        }
+    }
 }
 
 impl<
@@ -193,8 +224,32 @@ where
                 limb_width,
                 limbs_count_limit,
             )?,
+            digest_1: OnceCell::new(),
+            digest_2: OnceCell::new(),
             _p: PhantomData,
         })
+    }
+
+    pub fn digest_1(&self) -> Result<C1, io::Error> {
+        match self.digest_1.get() {
+            Some(d) => Ok(*d),
+            None => {
+                let d = self.digest()?;
+                _ = self.digest_1.set(d);
+                Ok(d)
+            }
+        }
+    }
+
+    pub fn digest_2(&self) -> Result<C2, io::Error> {
+        match self.digest_2.get() {
+            Some(d) => Ok(*d),
+            None => {
+                let d = self.digest()?;
+                _ = self.digest_2.set(d);
+                Ok(d)
+            }
+        }
     }
 
     /// This method calculate digest of [`PublicParams`], but ignore [`CircuitPublicParams::ck`]
@@ -251,10 +306,10 @@ where
     RP1: ROPair<C1::Scalar>,
     RP2: ROPair<C2::Scalar>,
 {
-    pub primary_plonk_struct: PlonkStructure<C1::Scalar>,
-    pub secondary_plonk_struct: PlonkStructure<C2::Scalar>,
-    pub primary_params: &'l StepParams<C1::Scalar, RP1::OnCircuit>,
-    pub secondary_params: &'l StepParams<C2::Scalar, RP2::OnCircuit>,
+    primary_plonk_struct: PlonkStructure<C1::Scalar>,
+    secondary_plonk_struct: PlonkStructure<C2::Scalar>,
+    primary_params: &'l StepParams<C1::Scalar, RP1::OnCircuit>,
+    secondary_params: &'l StepParams<C2::Scalar, RP2::OnCircuit>,
 }
 
 impl<'l, C1, C2, RP1, RP2> PublicParamsDigestWrapper<'l, C1, C2, RP1, RP2>
