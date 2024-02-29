@@ -871,7 +871,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
                             )
                             ?;
 
-                        let bit_coeff_cell = ctx
+                        ctx
                             .assign_fixed(
                                 || format!("bit {bit_index} coeff in sum"),
                                 *state_coeff,
@@ -879,7 +879,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
                             )
                             ?;
 
-                        Result::<_, Error>::Ok(current_chunk_sum + (bit_cell.value().map(|f| *f) * bit_coeff_cell.value()))
+                        Result::<_, Error>::Ok(current_chunk_sum + (bit_cell.value().map(|f| *f) * Value::known(bit_coeff)))
                     },
                 )?;
 
@@ -1055,21 +1055,18 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
                     Value::known(limb),
                 )?;
 
-                let shift = ctx
-                    .assign_fixed(
-                        || {
-                            format!(
-                                "previous limbs (to {:?}) sum selector",
-                                limb_index.checked_sub(1)
-                            )
-                        },
-                        *prev_selector,
-                        shift,
-                    )?
-                    .value()
-                    .copied();
+                ctx.assign_fixed(
+                    || {
+                        format!(
+                            "previous limbs (to {:?}) sum selector",
+                            limb_index.checked_sub(1)
+                        )
+                    },
+                    *prev_selector,
+                    shift,
+                )?;
 
-                let shifted_prev = shift
+                let shifted_prev = Value::known(shift)
                     * match &prev_partial_sum {
                         Some(prev_partial_sum) => ctx
                             .assign_advice_from(
@@ -1102,7 +1099,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
                 prev_partial_sum = Some(ctx.assign_advice(
                     || format!("sum of limbs from 0 to {limb_index}",),
                     *partial_sum_column,
-                    shifted_prev + limb_cell.value(),
+                    shifted_prev + Value::known(limb),
                 )?);
 
                 debug!(
