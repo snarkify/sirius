@@ -14,7 +14,7 @@ use crate::{
     },
     main_gate::MainGateConfig,
     nifs::{self, vanilla::VanillaFS, FoldingScheme},
-    plonk::{PlonkTrace, RelaxedPlonkTrace},
+    plonk::{self, PlonkTrace, RelaxedPlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
     table::TableData,
@@ -56,13 +56,19 @@ pub enum Error {
     #[error("TODO")]
     NIFS(#[from] nifs::Error),
     #[error("TODO")]
-    VerifyFailed(#[from] VerificationError),
+    VerifyFailed(Vec<VerificationError>),
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
     #[error("TODO")]
     InstanceNotMatch { index: usize, is_primary: bool },
+    #[error("TODO")]
+    NotSat {
+        err: plonk::Error,
+        is_primary: bool,
+        is_relaxed: bool,
+    },
 }
 
 // TODO #31 docs
@@ -322,7 +328,7 @@ where
                     limb_width: pp.secondary.params().limb_width(),
                     limbs_count: pp.secondary.params().limbs_count(),
                 }
-                .generate(),
+                .generate_with_inspect(|buf| debug!("primary X1 {}+1-step: {buf:?}", self.step)),
             ],
         );
 
@@ -391,7 +397,7 @@ where
                     limb_width: pp.primary.params().limb_width(),
                     limbs_count: pp.primary.params().limbs_count(),
                 }
-                .generate(),
+                .generate_with_inspect(|buf| debug!("secondary X1 {}+1-step: {buf:?}", self.step)),
             ],
         );
 
@@ -442,7 +448,9 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        let expected_X0 = RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
+        let mut errors = vec![];
+
+        RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
             random_oracle_constant: pp.primary.params().ro_constant().clone(),
             public_params_hash: &pp.digest().map_err(Error::WhileHash)?,
             step: self.step,
@@ -452,16 +460,18 @@ where
             limb_width: pp.primary.params().limb_width(),
             limbs_count: pp.primary.params().limbs_count(),
         }
-        .generate::<C2::Scalar>();
-
-        if expected_X0 != self.secondary.relaxed_trace.U.instance[0] {
-            return Err(Error::VerifyFailed(VerificationError::InstanceNotMatch {
+        .generate_with_inspect::<C1::Base>(|buf| {
+            debug!("primary X0 verify at {}-step: {buf:?}", self.step)
+        })
+        .ne(&self.secondary.relaxed_trace.U.instance[0])
+        .then(|| {
+            errors.push(VerificationError::InstanceNotMatch {
                 index: 0,
                 is_primary: true,
-            }));
-        }
+            })
+        });
 
-        let expected_X1 = RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
+        RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
             random_oracle_constant: pp.secondary.params().ro_constant().clone(),
             public_params_hash: &pp.digest().map_err(Error::WhileHash)?,
             step: self.step,
@@ -471,16 +481,18 @@ where
             limb_width: pp.secondary.params().limb_width(),
             limbs_count: pp.secondary.params().limbs_count(),
         }
-        .generate::<C1::Scalar>();
-
-        if expected_X1 != self.primary.relaxed_trace.U.instance[1] {
-            return Err(Error::VerifyFailed(VerificationError::InstanceNotMatch {
+        .generate_with_inspect::<C2::Base>(|buf| {
+            debug!("primary X1 verify at {}-step: {buf:?}", self.step)
+        })
+        .ne(&self.primary.relaxed_trace.U.instance[1])
+        .then(|| {
+            errors.push(VerificationError::InstanceNotMatch {
                 index: 1,
                 is_primary: false,
-            }));
-        }
+            });
+        });
 
-        Self::prepare_primary_td::<T, RP1>(
+        if let Err(err) = Self::prepare_primary_td::<T, RP1>(
             pp.primary.k_table_size(),
             [C1::Scalar::ZERO, C1::Scalar::ZERO], // TODO #154 #160
         )
@@ -491,7 +503,13 @@ where
             pp.primary.ck(),
             &self.primary.relaxed_trace.U,
             &self.primary.relaxed_trace.W,
-        )?;
+        ) {
+            errors.push(VerificationError::NotSat {
+                err,
+                is_primary: true,
+                is_relaxed: false,
+            })
+        }
 
         let S2 = Self::prepare_secondary_td::<T, RP2>(
             pp.secondary.k_table_size(),
@@ -501,20 +519,36 @@ where
         .plonk_structure()
         .expect("`TableData` already prepared");
 
-        S2.is_sat_relaxed(
+        if let Err(err) = S2.is_sat_relaxed(
             pp.secondary.ck(),
             &self.secondary.relaxed_trace.U,
             &self.secondary.relaxed_trace.W,
-        )?;
+        ) {
+            errors.push(VerificationError::NotSat {
+                err,
+                is_primary: false,
+                is_relaxed: true,
+            })
+        }
 
-        S2.is_sat(
+        if let Err(err) = S2.is_sat(
             pp.secondary.ck(),
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
             &self.secondary_trace.u,
             &self.secondary_trace.w,
-        )?;
+        ) {
+            errors.push(VerificationError::NotSat {
+                err,
+                is_primary: false,
+                is_relaxed: true,
+            })
+        }
 
-        Ok(())
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::VerifyFailed(errors))
+        }
     }
 
     fn prepare_primary_td<const T: usize, RP1>(
