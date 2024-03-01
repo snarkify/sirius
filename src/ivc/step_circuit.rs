@@ -4,7 +4,7 @@ use halo2_proofs::{
     plonk::{ConstraintSystem, Error, FloorPlanner},
 };
 
-use crate::{main_gate::RegionCtx, table::WitnessData};
+use crate::{main_gate::RegionCtx, table::WitnessCollector};
 
 /// The `StepCircuit` trait represents a step in incremental computation in
 /// Incrementally Verifiable Computation (IVC).
@@ -76,7 +76,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     /// intensive, it is possible to implement this logic off-circuit "honestly" with regular code, which may
     /// be more lightweight, but will require consistency testing.
     fn process_step(&self, z_i: &[F; ARITY]) -> Result<[F; ARITY], Error> {
-        let mut witness = WitnessData {
+        let mut witness = WitnessCollector {
             instance: vec![],
             advice: vec![],
         };

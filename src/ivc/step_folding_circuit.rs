@@ -21,7 +21,7 @@ use crate::{
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
-    table::circuit_meta_info,
+    table::ConstraintSystemMetainfo,
 };
 
 use super::instance_computation::AssignedRandomOracleComputationInstance;
@@ -150,7 +150,14 @@ where
         let NUM_IO = 2; // our StepFoldingCircuit has instance [X0, X1]
         let mut cs = ConstraintSystem::<C::Base>::default();
         Self::configure(&mut cs);
-        let (num_challenges, num_rounds, folding_degree, _) = circuit_meta_info(k, &cs);
+
+        let ConstraintSystemMetainfo {
+            num_challenges,
+            round_sizes: num_rounds,
+            folding_degree,
+            ..
+        } = ConstraintSystemMetainfo::build(k, &cs);
+
         Self {
             step_circuit,
             input: StepInputs::<'_, ARITY, C, RO> {

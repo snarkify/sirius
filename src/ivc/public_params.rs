@@ -15,7 +15,7 @@ use crate::{
     main_gate::MainGateConfig,
     plonk::PlonkStructure,
     poseidon::ROPair,
-    table::TableData,
+    table::CircuitRunner,
 };
 
 use super::step_folding_circuit::StepParams;
@@ -219,10 +219,10 @@ where
                 &secondary.circuit,
                 &sp2,
             );
-        let td1 = TableData::new(primary.k_table_size, primary_circuit, vec![]);
-        let S1 = td1.plonk_structure()?;
-        let td2 = TableData::new(secondary.k_table_size, secondary_circuit, vec![]);
-        let S2 = td2.plonk_structure()?;
+        let td1 = CircuitRunner::new(primary.k_table_size, primary_circuit, vec![]);
+        let S1 = td1.try_collect_plonk_structure()?;
+        let td2 = CircuitRunner::new(secondary.k_table_size, secondary_circuit, vec![]);
+        let S2 = td2.try_collect_plonk_structure()?;
         Ok(Self {
             primary: CircuitPublicParams::new(
                 primary.k_table_size,

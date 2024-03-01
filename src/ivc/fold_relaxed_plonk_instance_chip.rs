@@ -1031,7 +1031,7 @@ mod tests {
         constants::MAX_BITS,
         nifs::vanilla::VanillaFS,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
-        table::WitnessData,
+        table::WitnessCollector,
     };
 
     use super::*;
@@ -1052,10 +1052,10 @@ mod tests {
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(64) };
     const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
-    fn get_witness_collector() -> (WitnessData<Base>, MainGateConfig<T>) {
+    fn get_witness_collector() -> (WitnessCollector<Base>, MainGateConfig<T>) {
         let mut cs = ConstraintSystem::default();
         let config = MainGate::<Base, T>::configure(&mut cs);
-        let witness = WitnessData {
+        let witness = WitnessCollector {
             instance: vec![],
             advice: vec![vec![Base::ZERO.into(); 1 << K]; cs.num_advice_columns()],
         };
@@ -1091,7 +1091,7 @@ mod tests {
     /// Includes configured table data, a main gate config, random number generator, ECC and gate chips, and a random scalar.
     /// Used for setting up test scenarios, generating random inputs, and initializing necessary components for testing etc
     struct Fixture {
-        td: WitnessData<Base>,
+        td: WitnessCollector<Base>,
         config: MainGateConfig<T>,
         rnd: ThreadRng,
         ecc: EccChip<C1, Base, T>,

@@ -1,7 +1,7 @@
 use super::*;
 use crate::nifs::{vanilla::VanillaFS, Error as NIFSError};
 use crate::plonk::{PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness};
-use crate::table::TableData;
+use crate::table::CircuitRunner;
 use crate::util::create_ro;
 use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
@@ -40,17 +40,17 @@ where
     const R_F: usize = 4;
     const R_P: usize = 3;
 
-    let td1 = TableData::new(K, circuit1, public_inputs1.clone());
+    let td1 = CircuitRunner::new(K, circuit1, public_inputs1.clone());
     let num_lookup = td1.cs.lookups().len();
     let p1 = smallest_power(td1.cs.num_advice_columns() + 5 * num_lookup, K);
     let p2 = smallest_power(td1.cs.num_selectors() + td1.cs.num_fixed_columns(), K);
     let ck = CommitmentKey::<C>::setup(p1.max(p2), b"prepare_trace");
 
-    let S = td1.plonk_structure()?;
-    let W1 = td1.collect_witness()?;
+    let S = td1.try_collect_plonk_structure()?;
+    let W1 = td1.try_collect_witness()?;
 
-    let td2 = TableData::new(K, circuit2, public_inputs2.clone());
-    let W2 = td2.collect_witness()?;
+    let td2 = CircuitRunner::new(K, circuit2, public_inputs2.clone());
+    let W2 = td2.try_collect_witness()?;
 
     let mut ro_nark_prepare = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_nark_decider = create_ro::<C::Base, T, RATE, R_F, R_P>();

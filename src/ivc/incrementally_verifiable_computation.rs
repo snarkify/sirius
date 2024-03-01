@@ -16,7 +16,7 @@ use crate::{
     plonk::{PlonkTrace, RelaxedPlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
-    table::TableData,
+    table::CircuitRunner,
 };
 
 use super::instance_computation::RandomOracleComputationInstance;
@@ -172,12 +172,12 @@ where
             .generate(),
         );
 
-        let primary_td = TableData::new(
+        let primary_td = CircuitRunner::new(
             pp.primary.k_table_size,
             primary_step_folding_circuit,
             vec![primary_X0, primary_X1],
         );
-        let primary_witness = primary_td.collect_witness()?;
+        let primary_witness = primary_td.try_collect_witness()?;
         let primary_nifs_pp =
             VanillaFS::setup_params(primary_public_params_hash, pp.primary.S.clone())?.0;
         let primary_trace = VanillaFS::generate_plonk_trace(
@@ -233,12 +233,12 @@ where
             .generate(),
         );
 
-        let secondary_td = TableData::new(
+        let secondary_td = CircuitRunner::new(
             pp.secondary.k_table_size,
             secondary_step_folding_circuit,
             vec![secondary_X0, secondary_X1],
         );
-        let secondary_witness = secondary_td.collect_witness()?;
+        let secondary_witness = secondary_td.try_collect_witness()?;
         let secondary_nifs_pp =
             VanillaFS::setup_params(secondary_public_params_hash, pp.secondary.S.clone())?.0;
         let secondary_trace = VanillaFS::generate_plonk_trace(
@@ -329,12 +329,12 @@ where
         };
 
         debug!("start synthesize of 'step_folding_circuit' for primary");
-        let primary_td = TableData::new(
+        let primary_td = CircuitRunner::new(
             pp.primary.k_table_size,
             primary_step_folding_circuit,
             vec![primary_X0, primary_X1],
         );
-        let primary_witness = primary_td.collect_witness()?;
+        let primary_witness = primary_td.try_collect_witness()?;
         self.primary.z_i = primary_z_next;
         self.secondary.relaxed_trace = secondary_new_trace;
 
@@ -406,12 +406,12 @@ where
             };
 
         debug!("start synthesize of 'step_folding_circuit' for secondary");
-        let secondary_td = TableData::new(
+        let secondary_td = CircuitRunner::new(
             pp.secondary.k_table_size,
             secondary_step_folding_circuit,
             vec![secondary_X0, secondary_X1],
         );
-        let secondary_witness = secondary_td.collect_witness()?;
+        let secondary_witness = secondary_td.try_collect_witness()?;
         self.secondary.z_i = secondary_z_next;
         self.primary.relaxed_trace = primary_new_trace;
 

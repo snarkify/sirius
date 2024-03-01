@@ -174,7 +174,7 @@ mod tests {
         },
         main_gate::AdviceCyclicAssignor,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, Spec},
-        table::WitnessData,
+        table::WitnessCollector,
     };
 
     use super::*;
@@ -215,7 +215,7 @@ mod tests {
 
         let mut cs = ConstraintSystem::default();
         let config = MainGate::<Base, 10>::configure(&mut cs);
-        let mut td = WitnessData {
+        let mut td = WitnessCollector {
             instance: vec![],
             advice: vec![vec![Base::ZERO.into(); 1 << 15]; cs.num_advice_columns()],
         };
