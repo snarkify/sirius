@@ -1,6 +1,6 @@
 use std::{io, num::NonZeroUsize};
 
-use ff::{Field, FromUniformBytes, PrimeFieldBits};
+use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2curves::CurveAffine;
 use log::*;
@@ -268,156 +268,141 @@ where
 
     fn fold_step<const T: usize, RP1, RP2>(
         &mut self,
-        _pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
+        pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
     ) -> Result<(), Error>
     where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        todo!()
-        //debug!("start fold step with folding 'secondary' by 'primary'");
+        debug!("start fold step with folding 'secondary' by 'primary'");
 
-        //debug!("start prove secondary trace");
-        //let (secondary_new_trace, secondary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
-        //    pp.secondary.ck(),
-        //    &self.secondary_nifs_pp,
-        //    &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-        //    &self.secondary.relaxed_trace,
-        //    &self.secondary_trace,
-        //)?;
+        debug!("start prove secondary trace");
+        let (secondary_new_trace, secondary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
+            pp.secondary.ck(),
+            &self.secondary_nifs_pp,
+            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+            &self.secondary.relaxed_trace,
+            &self.secondary_trace,
+        )?;
 
-        //debug!("prepare primary td");
+        debug!("prepare primary td");
 
-        //let primary_public_params_hash = pp.digest_2().map_err(Error::WhileHash)?;
-        //// Prepare primary constraint system for folding
-        //let next_primary_z_i = self
-        //    .primary
-        //    .step_circuit
-        //    .process_step(&self.primary.z_i, pp.primary.k_table_size())?;
-        //let (mut primary_td, primary_step_config) = Self::prepare_primary_td::<T, RP1>(
-        //    pp.primary.k_table_size(),
-        //    [
-        //        util::fe_to_fe(&self.secondary.relaxed_trace.U.instance[1]).unwrap(),
-        //        RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
-        //            random_oracle_constant: pp.primary.params().ro_constant().clone(),
-        //            public_params_hash: &primary_public_params_hash,
-        //            step: self.step + 1,
-        //            z_0: &self.primary.z_0,
-        //            z_i: &next_primary_z_i,
-        //            relaxed: &secondary_new_trace.U,
-        //            limb_width: pp.secondary.params().limb_width(),
-        //            limbs_count: pp.secondary.params().limbs_count(),
-        //        }
-        //        .generate_with_inspect(|buf| debug!("primary X1 {}+1-step: {buf:?}", self.step)),
-        //    ],
-        //);
+        // Prepare primary constraint system for folding
+        let next_primary_z_i = self
+            .primary
+            .step_circuit
+            .process_step(&self.primary.z_i, pp.primary.k_table_size())?;
 
-        //let primary_step_folding_circuit = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
-        //    step_circuit: &self.primary.step_circuit,
-        //    input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
-        //        step: C2::Base::from_u128(self.step as u128),
-        //        step_pp: pp.primary.params(),
-        //        public_params_hash: pp.digest_2().map_err(Error::WhileHash)?,
-        //        z_0: self.primary.z_0,
-        //        z_i: self.primary.z_i,
-        //        U: self.secondary.relaxed_trace.U.clone(),
-        //        u: self.secondary_trace.u.clone(),
-        //        cross_term_commits: secondary_cross_term_commits,
-        //    },
-        //};
+        let primary_instance = [
+            util::fe_to_fe(&self.secondary.relaxed_trace.U.instance[1]).unwrap(),
+            RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
+                random_oracle_constant: pp.primary.params().ro_constant().clone(),
+                public_params_hash: &pp.digest_2(),
+                step: self.step + 1,
+                z_0: &self.primary.z_0,
+                z_i: &next_primary_z_i,
+                relaxed: &secondary_new_trace.U,
+                limb_width: pp.secondary.params().limb_width(),
+                limbs_count: pp.secondary.params().limbs_count(),
+            }
+            .generate_with_inspect(|buf| debug!("primary X1 {}+1-step: {buf:?}", self.step)),
+        ];
 
-        //debug!("start synthesize of 'step_folding_circuit' for primary");
-        //primary_step_folding_circuit.synthesize(
-        //    primary_step_config,
-        //    SingleChipLayouter::<'_, C1::Scalar, _>::new(&mut primary_td, vec![])?,
-        //)?;
-        //debug!("start primary td postpone");
-        //primary_td.postpone_assembly();
+        let primary_witness = CircuitRunner::new(
+            pp.primary.k_table_size(),
+            StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
+                step_circuit: &self.primary.step_circuit,
+                input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
+                    step: C2::Base::from_u128(self.step as u128),
+                    step_pp: pp.primary.params(),
+                    public_params_hash: pp.digest_2(),
+                    z_0: self.primary.z_0,
+                    z_i: self.primary.z_i,
+                    U: self.secondary.relaxed_trace.U.clone(),
+                    u: self.secondary_trace.u.clone(),
+                    cross_term_commits: secondary_cross_term_commits,
+                },
+            },
+            primary_instance.to_vec(),
+        )
+        .try_collect_witness()?;
 
-        //self.primary.z_i = next_primary_z_i;
-        //self.secondary.relaxed_trace = secondary_new_trace;
+        self.primary.z_i = next_primary_z_i;
+        self.secondary.relaxed_trace = secondary_new_trace;
 
-        //debug!("start generate primary plonk trace");
-        //let primary_plonk_trace = VanillaFS::generate_plonk_trace(
-        //    pp.primary.ck(),
-        //    &primary_td,
-        //    &self.primary_nifs_pp,
-        //    &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-        //)?;
+        let primary_plonk_trace = VanillaFS::generate_plonk_trace(
+            pp.primary.ck(),
+            &primary_instance,
+            &primary_witness,
+            &self.primary_nifs_pp,
+            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+        )?;
 
-        //debug!("start prove primary trace");
-        //let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
-        //    pp.primary.ck(),
-        //    &self.primary_nifs_pp,
-        //    &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-        //    &self.primary.relaxed_trace,
-        //    &primary_plonk_trace,
-        //)?;
+        debug!("start prove primary trace");
+        let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
+            pp.primary.ck(),
+            &self.primary_nifs_pp,
+            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+            &self.primary.relaxed_trace,
+            &primary_plonk_trace,
+        )?;
 
-        //debug!("start fold step with folding 'primary' by 'secondary'");
+        debug!("start fold step with folding 'primary' by 'secondary'");
+        debug!("prepare secondary td");
 
-        //debug!("prepare secondary td");
+        let next_secondary_z_i = self
+            .secondary
+            .step_circuit
+            .process_step(&self.secondary.z_i, pp.secondary.k_table_size())?;
 
-        //let next_secondary_z_i = self
-        //    .secondary
-        //    .step_circuit
-        //    .process_step(&self.secondary.z_i, pp.secondary.k_table_size())?;
+        let secondary_instance = [
+            util::fe_to_fe(&self.primary.relaxed_trace.U.instance[1]).unwrap(),
+            RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
+                random_oracle_constant: pp.secondary.params().ro_constant().clone(),
+                public_params_hash: &pp.digest_1(),
+                step: self.step + 1,
+                z_0: &self.secondary.z_0,
+                z_i: &next_secondary_z_i,
+                relaxed: &primary_new_trace.U,
+                limb_width: pp.primary.params().limb_width(),
+                limbs_count: pp.primary.params().limbs_count(),
+            }
+            .generate_with_inspect(|buf| debug!("secondary X1 {}+1-step: {buf:?}", self.step)),
+        ];
 
-        //let (mut secondary_td, secondary_step_config) = Self::prepare_secondary_td::<T, RP2>(
-        //    pp.secondary.k_table_size(),
-        //    [
-        //        util::fe_to_fe(&self.primary.relaxed_trace.U.instance[1]).unwrap(),
-        //        RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
-        //            random_oracle_constant: pp.secondary.params().ro_constant().clone(),
-        //            public_params_hash: &pp.digest_1().map_err(Error::WhileHash)?,
-        //            step: self.step + 1,
-        //            z_0: &self.secondary.z_0,
-        //            z_i: &next_secondary_z_i,
-        //            relaxed: &primary_new_trace.U,
-        //            limb_width: pp.primary.params().limb_width(),
-        //            limbs_count: pp.primary.params().limbs_count(),
-        //        }
-        //        .generate_with_inspect(|buf| debug!("secondary X1 {}+1-step: {buf:?}", self.step)),
-        //    ],
-        //);
+        let secondary_witness = CircuitRunner::new(
+            pp.secondary.k_table_size(),
+            StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
+                step_circuit: &self.secondary.step_circuit,
+                input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
+                    step: C1::Base::from_u128(self.step as u128),
+                    step_pp: pp.secondary.params(),
+                    public_params_hash: pp.digest().map_err(Error::WhileHash)?,
+                    z_0: self.secondary.z_0,
+                    z_i: self.secondary.z_i,
+                    U: self.primary.relaxed_trace.U.clone(),
+                    u: primary_plonk_trace.u.clone(),
+                    cross_term_commits: primary_cross_term_commits,
+                },
+            },
+            secondary_instance.to_vec(),
+        )
+        .try_collect_witness()?;
 
-        //let secondary_step_folding_circuit =
-        //    StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
-        //        step_circuit: &self.secondary.step_circuit,
-        //        input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
-        //            step: C1::Base::from_u128(self.step as u128),
-        //            step_pp: pp.secondary.params(),
-        //            public_params_hash: pp.digest().map_err(Error::WhileHash)?,
-        //            z_0: self.secondary.z_0,
-        //            z_i: self.secondary.z_i,
-        //            U: self.primary.relaxed_trace.U.clone(),
-        //            u: primary_plonk_trace.u.clone(),
-        //            cross_term_commits: primary_cross_term_commits,
-        //        },
-        //    };
+        self.secondary.z_i = next_secondary_z_i;
+        self.primary.relaxed_trace = primary_new_trace;
 
-        //debug!("start synthesize of 'step_folding_circuit' for secondary");
-        //secondary_step_folding_circuit.synthesize(
-        //    secondary_step_config,
-        //    SingleChipLayouter::<'_, C2::Scalar, _>::new(&mut secondary_td, vec![])?,
-        //)?;
-        //debug!("start secondary td postpone");
-        //secondary_td.postpone_assembly();
+        self.secondary_trace = VanillaFS::generate_plonk_trace(
+            pp.secondary.ck(),
+            &secondary_instance,
+            &secondary_witness,
+            &self.secondary_nifs_pp,
+            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+        )?;
 
-        //self.secondary.z_i = next_secondary_z_i;
-        //self.primary.relaxed_trace = primary_new_trace;
+        self.step += 1;
 
-        //debug!("start generate secondary plonk trace");
-        //self.secondary_trace = VanillaFS::generate_plonk_trace(
-        //    pp.secondary.ck(),
-        //    &secondary_td,
-        //    &self.secondary_nifs_pp,
-        //    &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-        //)?;
-
-        //self.step += 1;
-
-        //Ok(())
+        Ok(())
     }
 
     fn verify<const T: usize, RP1, RP2>(
