@@ -200,15 +200,6 @@ where
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?;
 
-        if let Err(err) = pp.primary.S().is_sat(
-            pp.primary.ck(),
-            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-            &primary_plonk_trace.u,
-            &primary_plonk_trace.w,
-        ) {
-            error!("After zero step primary trace is not sat: {err:?}");
-        }
-
         let secondary_z_output =
             secondary.process_step(&secondary_z_0, pp.secondary.k_table_size())?;
 
@@ -262,15 +253,6 @@ where
             &secondary_nifs_pp,
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
         )?;
-
-        if let Err(err) = pp.secondary.S().is_sat(
-            pp.secondary.ck(),
-            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-            &secondary_plonk_trace.u,
-            &secondary_plonk_trace.w,
-        ) {
-            error!("After zero step secondary trace is not sat: {err:?}");
-        }
 
         Ok(Self {
             step: 1,
