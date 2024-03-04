@@ -21,6 +21,7 @@ use crate::{
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
+    table::ConstraintSystemMetainfo,
 };
 
 use super::{instance_computation::AssignedRandomOracleComputationInstance, SimpleFloorPlanner};
@@ -97,6 +98,39 @@ where
 
     // TODO docs
     pub cross_term_commits: Vec<C>,
+}
+
+impl<'link, const ARITY: usize, C, RO> StepInputs<'link, ARITY, C, RO>
+where
+    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    C: CurveAffine,
+    RO: ROCircuitTrait<C::Base>,
+{
+    pub fn without_witness<SC: StepCircuit<ARITY, C::Base>>(
+        k_table_size: u32,
+        num_io: usize,
+        step_pp: &'link StepParams<C::Base, RO>,
+    ) -> Self {
+        let mut cs = ConstraintSystem::<C::Base>::default();
+        SC::configure(&mut cs);
+        let ConstraintSystemMetainfo {
+            num_challenges,
+            round_sizes,
+            folding_degree,
+            ..
+        } = ConstraintSystemMetainfo::build(k_table_size as usize, &cs);
+
+        Self {
+            step: C::Base::ZERO,
+            step_pp,
+            public_params_hash: C::identity(),
+            z_0: [C::Base::ZERO; ARITY],
+            z_i: [C::Base::ZERO; ARITY],
+            U: RelaxedPlonkInstance::new(num_io, num_challenges, round_sizes.len()),
+            u: PlonkInstance::new(num_io, num_challenges, round_sizes.len()),
+            cross_term_commits: vec![C::identity(); folding_degree.saturating_sub(1)],
+        }
+    }
 }
 
 pub struct StepConfig<const ARITY: usize, F: PrimeField, SP: StepCircuit<ARITY, F>, const T: usize>

@@ -106,7 +106,10 @@ pub(crate) fn compress_expression<F: PrimeField>(
                 )
             })
     } else {
-        exprs[0].clone()
+        exprs
+            .first()
+            .cloned()
+            .unwrap_or(Expression::Constant(F::ZERO))
     }
 }
 

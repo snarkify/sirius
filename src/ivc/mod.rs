@@ -10,3 +10,5 @@ mod public_params;
 pub use halo2_proofs::circuit::SimpleFloorPlanner;
 pub use incrementally_verifiable_computation::*;
 pub use public_params::{CircuitPublicParamsInput, PublicParams};
+
+pub const NUM_IO: usize = 2;

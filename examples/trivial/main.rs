@@ -95,11 +95,13 @@ fn main() {
             CIRCUIT_TABLE_SIZE1 as u32,
             &primary_commitment_key,
             primary_spec,
+            &sc1,
         ),
         CircuitPublicParamsInput::new(
             CIRCUIT_TABLE_SIZE2 as u32,
             &secondary_commitment_key,
             secondary_spec,
+            &sc2,
         ),
         LIMB_WIDTH,
         LIMBS_COUNT_LIMIT,

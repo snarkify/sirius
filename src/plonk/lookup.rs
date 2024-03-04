@@ -52,9 +52,9 @@ use crate::{
     plonk::{
         eval::{Error, Eval, LookupEvalDomain},
         util::compress_halo2_expression,
+        PlonkStructure,
     },
     polynomial::{Expression, Query},
-    table::TableData,
 };
 
 /// Lookup Argument
@@ -199,16 +199,25 @@ impl<F: PrimeField> Arguments<F> {
 
     /// evaluate each of the lookup expressions to get vector l_i
     /// where l_i = L_i(x_1,...,x_a)
-    fn evaluate_ls(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, Error> {
+    fn evaluate_ls(
+        &self,
+        circuit_data: &PlonkStructure<F>,
+        witness: &[Vec<F>],
+        r: F,
+    ) -> Result<Vec<Vec<F>>, Error> {
         let data = LookupEvalDomain {
-            num_lookup: table.num_lookups(),
+            num_lookup: circuit_data
+                .lookup_arguments
+                .as_ref()
+                .map(|arg| arg.lookup_polys.len())
+                .unwrap_or(0),
             challenges: vec![r],
-            selectors: &table.selector,
-            fixed: &table.fixed_columns,
-            advice: &table.advice_columns,
+            selectors: &circuit_data.selectors,
+            fixed: &circuit_data.fixed_columns,
+            advice: witness,
         };
 
-        let nrow = 2usize.pow(table.k);
+        let nrow = 1 << circuit_data.k;
         debug!("lookup_polys len: {} ", self.lookup_polys.len());
         self.lookup_polys
             .par_iter()
@@ -224,15 +233,24 @@ impl<F: PrimeField> Arguments<F> {
 
     /// evaluate each of the table expressions to get vector t_i
     /// where t_i = T(y1,...,y_b)
-    fn evaluate_ts(&self, table: &TableData<F>, r: F) -> Result<Vec<Vec<F>>, Error> {
+    fn evaluate_ts(
+        &self,
+        circuit_data: &PlonkStructure<F>,
+        witness: &[Vec<F>],
+        r: F,
+    ) -> Result<Vec<Vec<F>>, Error> {
         let data = LookupEvalDomain {
-            num_lookup: table.num_lookups(),
+            num_lookup: circuit_data
+                .lookup_arguments
+                .as_ref()
+                .map(|arg| arg.lookup_polys.len())
+                .unwrap_or(0),
             challenges: vec![r],
-            selectors: &table.selector,
-            fixed: &table.fixed_columns,
-            advice: &table.advice_columns,
+            selectors: &circuit_data.selectors,
+            fixed: &circuit_data.fixed_columns,
+            advice: witness,
         };
-        let nrow = 2usize.pow(table.k);
+        let nrow = 1 << circuit_data.k;
         self.table_polys
             .par_iter()
             .map(|expr| expr.expand())
@@ -292,13 +310,14 @@ impl<F: PrimeField> Arguments<F> {
 
     pub(crate) fn evaluate_coefficient_1(
         &self,
-        table: &TableData<F>,
+        circuit_data: &PlonkStructure<F>,
+        witness: &[Vec<F>],
         r: F,
     ) -> Result<ArgumentCoefficient1<F>, Error> {
         debug!("start evaluate_coefficient_1");
-        let ls = self.evaluate_ls(table, r)?;
+        let ls = self.evaluate_ls(circuit_data, witness, r)?;
         debug!("ls calculated: {}", ls.len());
-        let ts = self.evaluate_ts(table, r)?;
+        let ts = self.evaluate_ts(circuit_data, witness, r)?;
         debug!("ts calculated: {}", ts.len());
 
         let mut ms = Vec::with_capacity(ls.len());

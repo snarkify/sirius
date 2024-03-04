@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use super::*;
 use crate::commitment::CommitmentKey;
 use crate::concat_vec;
@@ -10,9 +12,7 @@ use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
 use crate::polynomial::ColumnIndex;
 use crate::poseidon::ROTrait;
 use crate::sps::SpecialSoundnessVerifier;
-use crate::table::TableData;
 use halo2_proofs::arithmetic::CurveAffine;
-use std::marker::PhantomData;
 
 /// Represent intermediate polynomial terms that arise when folding
 /// two polynomial relations into one.
@@ -143,19 +143,20 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
 
     fn setup_params(
         pp_digest: C,
-        td: &TableData<<C as CurveAffine>::ScalarExt>,
+        S: PlonkStructure<C::ScalarExt>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
-        let S = td.plonk_structure().ok_or(Error::ParamNotSetup)?;
         Ok((VanillaFSProverParam { S, pp_digest }, pp_digest))
     }
 
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
-        td: &TableData<<C as CurveAffine>::ScalarExt>,
+        instance: &[C::ScalarExt],
+        witness: &[Vec<C::ScalarExt>],
         pp: &VanillaFSProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
-        let (u, w) = td.run_sps_protocol(ck, ro_nark, pp.S.num_challenges)?;
+        let (u, w) =
+            pp.S.run_sps_protocol(ck, instance, witness, ro_nark, pp.S.num_challenges)?;
         Ok(PlonkTrace { u, w })
     }
 

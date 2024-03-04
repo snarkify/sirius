@@ -1,10 +1,10 @@
 use ff::PrimeField;
 use halo2_proofs::{
     circuit::{floor_planner::single_pass::SingleChipLayouter, AssignedCell, Layouter, Value},
-    plonk::{Advice, Column, ConstraintSystem},
+    plonk::ConstraintSystem,
 };
 
-use crate::{main_gate::RegionCtx, table::TableData};
+use crate::{main_gate::RegionCtx, table::WitnessCollector};
 
 use super::fold_relaxed_plonk_instance_chip;
 
@@ -85,13 +85,15 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
         z_i: &[F; ARITY],
         k_table_size: u32,
     ) -> Result<[F; ARITY], SynthesisError> {
-        let mut td = TableData::new(k_table_size, vec![]);
+        let mut cs = ConstraintSystem::default();
+        let col = cs.advice_column();
+        let config = Self::configure(&mut cs);
 
-        let (input_advice, config) = td.prepare_assembly(|cs| -> (Column<Advice>, Self::Config) {
-            (cs.advice_column(), Self::configure(cs))
-        });
-
-        let mut layouter = SingleChipLayouter::<'_, F, _>::new(&mut td, vec![])?;
+        let mut witness = WitnessCollector {
+            instance: vec![F::ZERO, F::ZERO],
+            advice: vec![vec![F::ZERO.into(); 1 << k_table_size as usize]; cs.num_advice_columns()],
+        };
+        let mut layouter = SingleChipLayouter::<'_, F, _>::new(&mut witness, vec![])?;
 
         let assigned_z_i = layouter.assign_region(
             || "z_i",
@@ -100,8 +102,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
 
                 z_i.iter()
                     .map(|value| {
-                        let assigned =
-                            region.assign_advice(|| "", input_advice, Value::known(*value))?;
+                        let assigned = region.assign_advice(|| "", col, Value::known(*value))?;
 
                         region.next();
 
