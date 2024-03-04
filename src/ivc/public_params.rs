@@ -37,7 +37,6 @@ where
     C::Scalar: PrimeFieldBits + FromUniformBytes<64> + Serialize,
     RP: ROPair<C::Scalar>,
 {
-    k_table_size: u32,
     S: PlonkStructure<C::Scalar>,
     ck: &'key CommitmentKey<C>,
     params: StepParams<C::Scalar, RP::OnCircuit>,
@@ -51,7 +50,7 @@ where
     RP: ROPair<C::Scalar>,
 {
     pub fn k_table_size(&self) -> u32 {
-        self.k_table_size
+        self.S.k as u32
     }
     pub fn ck(&self) -> &'key CommitmentKey<C> {
         self.ck
@@ -90,7 +89,6 @@ where
 {
     fn new(
         S: PlonkStructure<C::Scalar>,
-        k_table_size: u32,
         commitment_key: &'key CommitmentKey<C>,
         ro_constant: RP::Args,
         limb_width: NonZeroUsize,
@@ -101,7 +99,6 @@ where
         let params = StepParams::new(limb_width, n_limbs, ro_constant);
 
         Ok(Self {
-            k_table_size,
             S,
             ck: commitment_key,
             params,
@@ -275,7 +272,6 @@ where
         let mut self_ = Self {
             primary: CircuitPublicParams::new(
                 primary_S,
-                primary.k_table_size,
                 primary.commitment_key,
                 primary.ro_constant,
                 limb_width,
@@ -283,7 +279,6 @@ where
             )?,
             secondary: CircuitPublicParams::new(
                 secondary_S,
-                secondary.k_table_size,
                 secondary.commitment_key,
                 secondary.ro_constant,
                 limb_width,
