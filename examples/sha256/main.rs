@@ -283,7 +283,7 @@ impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
         layouter: &mut impl Layouter<F>,
         z_in: &[AssignedCell<F, F>; ARITY],
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
-        Table16Chip::load(config.clone(), layouter)?;
+        Table16Chip::load(config.clone(), layouter).map_err(SynthesisError::Halo2)?;
         let table16_chip = Table16Chip::construct(config);
 
         let input: [AssignedCell<F, F>; BLOCK_SIZE] = iter::repeat(z_in.iter())
@@ -313,12 +313,13 @@ impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
             .map(|value| BlockWord(Value::known(value)))
             .collect::<Box<[BlockWord]>>();
 
-        Ok(Sha256::digest_cells(
+        Sha256::digest_cells(
             table16_chip,
             layouter.namespace(|| "'abc' * 2"),
             values.as_ref(),
             &input,
-        )?)
+        )
+        .map_err(SynthesisError::Halo2)
     }
 }
 

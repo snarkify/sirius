@@ -19,8 +19,8 @@ use sirius::{
 
 const ARITY: usize = BLOCK_SIZE / 2;
 
-const CIRCUIT_TABLE_SIZE1: usize = 20;
-const CIRCUIT_TABLE_SIZE2: usize = 20;
+const CIRCUIT_TABLE_SIZE1: usize = 16;
+const CIRCUIT_TABLE_SIZE2: usize = 16;
 const COMMITMENT_KEY_SIZE: usize = 25;
 const T: usize = 5;
 const RATE: usize = 4;

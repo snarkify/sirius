@@ -113,10 +113,14 @@ where
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
         let mut ivc = IVC::new(pp, primary, primary_z_0, secondary, secondary_z_0)?;
+        trace!("IVC created");
 
-        for _step in 1..=num_steps.get() {
+        for step in 1..=num_steps.get() {
+            trace!("Start fold {step} step");
             ivc.fold_step(pp)?;
         }
+
+        trace!("Finish folding, start verify");
 
         ivc.verify(pp)?;
 
@@ -134,10 +138,12 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
+        debug!("start creation of IVC");
         // For use as first version of `U` in primary circuit synthesize
         let secondary_pre_round_plonk_trace = pp.secondary.S().dry_run_sps_protocol();
 
         let primary_z_output = primary.process_step(&primary_z_0, pp.primary.k_table_size())?;
+        debug!("primary z output calculated off-circuit");
 
         // Prepare primary constraint system for folding
         let primary_instance = [
@@ -154,6 +160,7 @@ where
             }
             .generate_with_inspect(|buf| debug!("primary X1 zero-step: {buf:?}")),
         ];
+        debug!("primary instance calculated");
 
         let primary_witness = CircuitRunner::new(
             pp.primary.k_table_size(),
@@ -179,6 +186,7 @@ where
             primary_instance.to_vec(),
         )
         .try_collect_witness()?;
+        debug!("primary witness calculated");
 
         // Start secondary
         let (primary_nifs_pp, _primary_off_circuit_vp) =

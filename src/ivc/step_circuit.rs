@@ -3,6 +3,7 @@ use halo2_proofs::{
     circuit::{floor_planner::single_pass::SingleChipLayouter, AssignedCell, Layouter, Value},
     plonk::ConstraintSystem,
 };
+use log::*;
 
 use crate::{main_gate::RegionCtx, table::WitnessCollector};
 
@@ -11,7 +12,7 @@ use super::fold_relaxed_plonk_instance_chip;
 #[derive(Debug, thiserror::Error)]
 pub enum SynthesisError {
     #[error(transparent)]
-    Halo2(#[from] halo2_proofs::plonk::Error),
+    Halo2(halo2_proofs::plonk::Error),
     #[error(transparent)]
     FoldError(#[from] fold_relaxed_plonk_instance_chip::Error),
 }
@@ -93,24 +94,34 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
             instance: vec![F::ZERO, F::ZERO],
             advice: vec![vec![F::ZERO.into(); 1 << k_table_size as usize]; cs.num_advice_columns()],
         };
-        let mut layouter = SingleChipLayouter::<'_, F, _>::new(&mut witness, vec![])?;
+        let mut layouter =
+            SingleChipLayouter::<'_, F, _>::new(&mut witness, vec![]).map_err(|err| {
+                error!("while creation of layouter in `process_step`: {err:?}");
+                SynthesisError::Halo2(err)
+            })?;
 
-        let assigned_z_i = layouter.assign_region(
-            || "z_i",
-            |region| {
-                let mut region = RegionCtx::new(region, 0);
+        let assigned_z_i = layouter
+            .assign_region(
+                || "z_i",
+                |region| {
+                    let mut region = RegionCtx::new(region, 0);
 
-                z_i.iter()
-                    .map(|value| {
-                        let assigned = region.assign_advice(|| "", col, Value::known(*value))?;
+                    z_i.iter()
+                        .map(|value| {
+                            let assigned =
+                                region.assign_advice(|| "", col, Value::known(*value))?;
 
-                        region.next();
+                            region.next();
 
-                        Ok(assigned)
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            },
-        )?;
+                            Ok(assigned)
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                },
+            )
+            .map_err(|err| {
+                error!("while assign z input: {err:?}");
+                SynthesisError::Halo2(err)
+            })?;
 
         self.synthesize_step(config, &mut layouter, &assigned_z_i.try_into().unwrap())
             .map(|z_out| z_out.map(|cell| cell.value().unwrap().copied().unwrap()))
