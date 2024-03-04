@@ -296,19 +296,19 @@ where
         debug!("prepare primary td");
 
         // Prepare primary constraint system for folding
-        let next_primary_z_i = self
+        let primary_z_next = self
             .primary
             .step_circuit
             .process_step(&self.primary.z_i, pp.primary.k_table_size())?;
 
         let primary_instance = [
-            util::fe_to_fe(&self.secondary.relaxed_trace.U.instance[1]).unwrap(),
+            util::fe_to_fe(&self.secondary_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
                 random_oracle_constant: pp.primary.params().ro_constant().clone(),
                 public_params_hash: &pp.digest_2(),
                 step: self.step + 1,
                 z_0: &self.primary.z_0,
-                z_i: &next_primary_z_i,
+                z_i: &primary_z_next,
                 relaxed: &secondary_new_trace.U,
                 limb_width: pp.secondary.params().limb_width(),
                 limbs_count: pp.secondary.params().limbs_count(),
@@ -335,7 +335,7 @@ where
         )
         .try_collect_witness()?;
 
-        self.primary.z_i = next_primary_z_i;
+        self.primary.z_i = primary_z_next;
         self.secondary.relaxed_trace = secondary_new_trace;
 
         let primary_plonk_trace = VanillaFS::generate_plonk_trace(
@@ -364,7 +364,7 @@ where
             .process_step(&self.secondary.z_i, pp.secondary.k_table_size())?;
 
         let secondary_instance = [
-            util::fe_to_fe(&self.primary.relaxed_trace.U.instance[1]).unwrap(),
+            util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
                 random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                 public_params_hash: &pp.digest_1(),
