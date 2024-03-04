@@ -200,6 +200,15 @@ where
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?;
 
+        if let Err(err) = pp.primary.S().is_sat(
+            pp.primary.ck(),
+            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+            &primary_plonk_trace.u,
+            &primary_plonk_trace.w,
+        ) {
+            error!("After zero step primary trace is not sat: {err:?}");
+        }
+
         let secondary_z_output =
             secondary.process_step(&secondary_z_0, pp.secondary.k_table_size())?;
 
@@ -253,6 +262,15 @@ where
             &secondary_nifs_pp,
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
         )?;
+
+        if let Err(err) = pp.secondary.S().is_sat(
+            pp.secondary.ck(),
+            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+            &secondary_plonk_trace.u,
+            &secondary_plonk_trace.w,
+        ) {
+            error!("After zero step secondary trace is not sat: {err:?}");
+        }
 
         Ok(Self {
             step: 1,
@@ -425,18 +443,18 @@ where
 
         RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
             random_oracle_constant: pp.primary.params().ro_constant().clone(),
-            public_params_hash: &pp.digest().map_err(Error::WhileHash)?,
+            public_params_hash: &pp.digest_2(),
             step: self.step,
             z_0: &self.primary.z_0,
             z_i: &self.primary.z_i,
             relaxed: &self.secondary.relaxed_trace.U,
-            limb_width: pp.primary.params().limb_width(),
-            limbs_count: pp.primary.params().limbs_count(),
+            limb_width: pp.secondary.params().limb_width(),
+            limbs_count: pp.secondary.params().limbs_count(),
         }
-        .generate_with_inspect::<C1::Base>(|buf| {
+        .generate_with_inspect::<C2::Scalar>(|buf| {
             debug!("primary X0 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&self.secondary.relaxed_trace.U.instance[0])
+        .ne(&self.secondary_trace.u.instance[0])
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 0,
@@ -446,7 +464,7 @@ where
 
         RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
             random_oracle_constant: pp.secondary.params().ro_constant().clone(),
-            public_params_hash: &pp.digest().map_err(Error::WhileHash)?,
+            public_params_hash: &pp.digest_1(),
             step: self.step,
             z_0: &self.secondary.z_0,
             z_i: &self.secondary.z_i,
@@ -454,10 +472,10 @@ where
             limb_width: pp.secondary.params().limb_width(),
             limbs_count: pp.secondary.params().limbs_count(),
         }
-        .generate_with_inspect::<C2::Base>(|buf| {
+        .generate_with_inspect::<C1::Scalar>(|buf| {
             debug!("primary X1 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&self.primary.relaxed_trace.U.instance[1])
+        .ne(&util::fe_to_fe(&self.secondary_trace.u.instance[1]).unwrap())
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 1,

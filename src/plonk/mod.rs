@@ -298,13 +298,12 @@ impl<F: PrimeField> PlonkStructure<F> {
         let res = (0..nrow)
             .into_par_iter()
             .map(|row| data.eval(&poly, row))
-            .collect::<Result<Vec<F>, _>>()
-            .map(|v| {
-                v.into_iter()
-                    .enumerate()
-                    .filter(|(i, v)| W.E[*i].ne(v))
-                    .count()
-            })?;
+            .collect::<Result<Vec<F>, _>>()?
+            .into_iter()
+            .enumerate()
+            .filter(|(i, v)| W.E[*i].ne(v))
+            .count();
+
         let is_E_equal = ck.commit(&W.E).unwrap().eq(&U.E_commitment);
         let is_h_equal_g = self.is_sat_log_derivative(&W.W);
 
