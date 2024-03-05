@@ -22,4 +22,4 @@ pub(crate) use constraint_system_metainfo::ConstraintSystemMetainfo;
 pub(crate) use witness_data::WitnessCollector;
 
 #[cfg(test)]
-mod new_tests;
+mod tests;
