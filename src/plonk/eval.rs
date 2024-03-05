@@ -157,7 +157,7 @@ pub struct LookupEvalDomain<'a, F: PrimeField> {
     pub(crate) challenges: Vec<F>,
     pub(crate) selectors: &'a Vec<Vec<bool>>,
     pub(crate) fixed: &'a Vec<Vec<F>>,
-    pub(crate) advice: &'a Vec<Vec<F>>,
+    pub(crate) advice: &'a [Vec<F>],
 }
 
 /// Used for evaluate cross terms T[i]

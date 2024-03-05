@@ -14,18 +14,19 @@
 //!
 //! Additionally, it defines a method is_sat on PlonkStructure to determine if
 //! a given Plonk instance and witness satisfy the circuit constraints.
-use std::iter;
-
-use ff::{Field, PrimeField};
-use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
 use itertools::Itertools;
 use log::*;
 use rayon::prelude::*;
 use serde::Serialize;
+use std::iter;
+
+use ff::{Field, PrimeField};
+use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
 
 use crate::{
     commitment::CommitmentKey,
     concat_vec,
+    constants::NUM_CHALLENGE_BITS,
     plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain},
     polynomial::{
         sparse::{matrix_multiply, SparseMatrix},
@@ -33,7 +34,7 @@ use crate::{
     },
     poseidon::{AbsorbInRO, ROTrait},
     sps::{Error as SpsError, SpecialSoundnessVerifier},
-    util::fe_to_fe,
+    util::{concatenate_with_padding, fe_to_fe},
 };
 
 pub mod eval;
@@ -67,6 +68,7 @@ pub enum Error {
 pub struct PlonkStructure<F: PrimeField> {
     /// k is a parameter such that 2^k is the total number of rows
     pub(crate) k: usize,
+    pub(crate) num_io: usize,
     pub(crate) selectors: Vec<Vec<bool>>,
     pub(crate) fixed_columns: Vec<Vec<F>>,
 
@@ -116,6 +118,21 @@ impl<C: CurveAffine> Default for PlonkInstance<C> {
 pub struct PlonkWitness<F: PrimeField> {
     /// length of W equals number of prover rounds, see [`PlonkStructure`]
     pub(crate) W: Vec<Vec<F>>,
+}
+
+impl<F: PrimeField> PlonkWitness<F> {
+    pub fn new(round_sizes: &[usize]) -> Self {
+        Self {
+            W: round_sizes.iter().map(|sz| vec![F::ZERO; *sz]).collect(),
+        }
+    }
+    pub fn to_relax(&self, k: usize) -> RelaxedPlonkWitness<F> {
+        let E = vec![F::ZERO; 1 << k];
+        RelaxedPlonkWitness {
+            W: self.W.clone(),
+            E,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -231,7 +248,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             W1s: &W.W,
             W2s: &vec![],
         };
-        let nrow = 2usize.pow(self.k as u32);
+        let nrow = 1 << self.k;
         let res = (0..nrow)
             .into_par_iter()
             .map(|row| data.eval(&self.poly, row))
@@ -267,7 +284,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
             .count();
 
-        let nrow = 2usize.pow(self.k as u32);
+        let nrow = 1 << self.k;
         let poly = self.poly.homogeneous(self.num_non_fold_vars());
         let data = PlonkEvalDomain {
             num_advice: self.num_advice_columns,
@@ -281,13 +298,12 @@ impl<F: PrimeField> PlonkStructure<F> {
         let res = (0..nrow)
             .into_par_iter()
             .map(|row| data.eval(&poly, row))
-            .collect::<Result<Vec<F>, _>>()
-            .map(|v| {
-                v.into_iter()
-                    .enumerate()
-                    .filter(|(i, v)| W.E[*i].ne(v))
-                    .count()
-            })?;
+            .collect::<Result<Vec<F>, _>>()?
+            .into_iter()
+            .enumerate()
+            .filter(|(i, v)| W.E[*i].ne(v))
+            .count();
+
         let is_E_equal = ck.commit(&W.E).unwrap().eq(&U.E_commitment);
         let is_h_equal_g = self.is_sat_log_derivative(&W.W);
 
@@ -315,7 +331,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             .instance
             .clone()
             .into_iter()
-            .chain(W.W[0][..2usize.pow(self.k as u32) * self.num_advice_columns].to_vec())
+            .chain(W.W[0][..(1 << self.k) * self.num_advice_columns].to_vec())
             .collect::<Vec<_>>();
         let y = matrix_multiply(&self.permutation_matrix, &Z[..]);
         let mismatch_count = y
@@ -333,7 +349,7 @@ impl<F: PrimeField> PlonkStructure<F> {
 
     /// check whether the log-derivative equation is satisfied
     pub fn is_sat_log_derivative(&self, W: &[Vec<F>]) -> bool {
-        let nrow = 2usize.pow(self.k as u32);
+        let nrow = 1 << self.k;
         let check_is_zero = |hs: &[Vec<F>], gs: &[Vec<F>]| -> bool {
             hs.iter().zip(gs).all(|(h, g)| {
                 // check sum_i h_i = sum_i g_i for each lookup
@@ -368,9 +384,236 @@ impl<F: PrimeField> PlonkStructure<F> {
         let offset = self.num_non_fold_vars();
         self.poly.degree_for_folding(offset)
     }
+
+    pub fn dry_run_sps_protocol<C: CurveAffine<ScalarExt = F>>(&self) -> PlonkTrace<C> {
+        PlonkTrace {
+            u: PlonkInstance::new(self.num_io, self.num_challenges, self.round_sizes.len()),
+            w: PlonkWitness::new(&self.round_sizes),
+        }
+    }
+
+    /// run special soundness protocol to generate witnesses and challenges
+    /// depending on whether we have multiple gates, lookup arguments and whether
+    /// we have vector lookup, we will call different sub-sps protocol
+    pub fn run_sps_protocol<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
+        &self,
+        ck: &CommitmentKey<C>,
+        instance: &[F],
+        advice: &[Vec<F>],
+        ro_nark: &mut RO,
+        num_challenges: usize,
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+        match num_challenges {
+            0 => self.run_sps_protocol_0(instance, advice, ck),
+            1 => self.run_sps_protocol_1(instance, advice, ck, ro_nark),
+            2 => self.run_sps_protocol_2(instance, advice, ck, ro_nark),
+            3 => self.run_sps_protocol_3(instance, advice, ck, ro_nark),
+            challenges_count => Err(SpsError::UnsupportedChallengesCount { challenges_count }),
+        }
+    }
+
+    /// run 0-round special soundness protocol
+    /// w.r.t single custom gate + no lookup
+    fn run_sps_protocol_0<C: CurveAffine<ScalarExt = F>>(
+        &self,
+        instance: &[F],
+        advice: &[Vec<F>],
+        ck: &CommitmentKey<C>,
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+        let W1 = concatenate_with_padding(advice, 1 << self.k);
+        let C1 = ck
+            .commit(&W1)
+            .map_err(|err| SpsError::WrongCommitmentSize {
+                annotation: "W1",
+                err,
+            })?;
+
+        Ok((
+            PlonkInstance {
+                W_commitments: vec![C1],
+                instance: instance.to_vec(),
+                challenges: vec![],
+            },
+            PlonkWitness { W: vec![W1] },
+        ))
+    }
+
+    /// run 1-round special soundness protocol to generate witnesses and challenges
+    /// notations: "[C]" absorb C; "]r[" squeeze r;
+    /// sequence of generating challenges:
+    /// [pi.instance] -> [C] -> ]r1[
+    /// w.r.t multiple gates + no lookup
+    fn run_sps_protocol_1<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
+        &self,
+        instance: &[F],
+        advice: &[Vec<F>],
+        ck: &CommitmentKey<C>,
+        ro_nark: &mut RO,
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+        let (mut plonk_instance, plonk_witness) = self.run_sps_protocol_0(instance, advice, ck)?;
+
+        ro_nark
+            .absorb_field_iter(instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
+            .absorb_point_iter(plonk_instance.W_commitments.iter());
+
+        plonk_instance
+            .challenges
+            .push(ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS));
+
+        Ok((plonk_instance, plonk_witness))
+    }
+
+    /// run 2-round special soundness protocol to generate witnesses and challenges
+    /// notations: "[C]" absorb C; "]r[" squeeze r;
+    /// sequence of generating challenges:
+    /// [pi.instance] -> [C1] -> ]r1[ -> [C2] -> ]r2[
+    /// w.r.t has lookup but no vector lookup
+    fn run_sps_protocol_2<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
+        &self,
+        instance: &[F],
+        advice: &[Vec<F>],
+        ck: &CommitmentKey<C>,
+        ro_nark: &mut RO,
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+        let k_power_of_2 = 1 << self.k;
+
+        // round 1
+        let lookup_coeff = self
+            .lookup_arguments
+            .as_ref()
+            .map(|la| la.evaluate_coefficient_1(self, advice, F::ZERO))
+            .transpose()?
+            .ok_or(SpsError::LackOfLookupArguments)?;
+
+        let W1 = [
+            concatenate_with_padding(advice, k_power_of_2),
+            concatenate_with_padding(
+                &concat_vec!(&lookup_coeff.ls, &lookup_coeff.ts, &lookup_coeff.ms),
+                k_power_of_2,
+            ),
+        ]
+        .concat();
+
+        let C1 = ck
+            .commit(&W1)
+            .map_err(|err| SpsError::WrongCommitmentSize {
+                annotation: "W1",
+                err,
+            })?;
+
+        let r1 = ro_nark
+            .absorb_field_iter(instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
+            .absorb_point(&C1)
+            .squeeze::<C>(NUM_CHALLENGE_BITS);
+
+        // round 2
+        let lookup_coeff = lookup_coeff.evaluate_coefficient_2(r1);
+
+        let W2 = concatenate_with_padding(
+            &concat_vec!(&lookup_coeff.hs, &lookup_coeff.gs),
+            k_power_of_2,
+        );
+
+        let C2 = ck
+            .commit(&W2)
+            .map_err(|err| SpsError::WrongCommitmentSize {
+                annotation: "W2",
+                err,
+            })?;
+        let r2 = ro_nark.absorb_point(&C2).squeeze::<C>(NUM_CHALLENGE_BITS);
+
+        Ok((
+            PlonkInstance {
+                W_commitments: vec![C1, C2],
+                instance: instance.to_vec(),
+                challenges: vec![r1, r2],
+            },
+            PlonkWitness { W: vec![W1, W2] },
+        ))
+    }
+
+    /// run 3-round special soundness protocol to generate witnesses and challenges
+    /// notations: "[C]" absorb C; "]r[" squeeze r;
+    /// sequence of generating challenges:
+    /// [pi.instance] -> [C1] -> ]r1[ -> [C2] -> ]r2[ -> [C3] -> ]r3[
+    fn run_sps_protocol_3<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
+        &self,
+        instance: &[F],
+        advice: &[Vec<F>],
+        ck: &CommitmentKey<C>,
+        ro_nark: &mut RO,
+    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+        ro_nark.absorb_field_iter(instance.iter().map(|inst| fe_to_fe(inst).unwrap()));
+
+        let k_power_of_2 = 1 << self.k;
+
+        // round 1
+        let W1 = concatenate_with_padding(advice, k_power_of_2);
+        let C1 = ck
+            .commit(&W1)
+            .map_err(|err| SpsError::WrongCommitmentSize {
+                annotation: "W1",
+                err,
+            })?;
+        let r1 = ro_nark.absorb_point(&C1).squeeze::<C>(NUM_CHALLENGE_BITS);
+
+        // round 2
+        let lookup_coeff = self
+            .lookup_arguments
+            .as_ref()
+            .map(|la| la.evaluate_coefficient_1(self, advice, r1))
+            .transpose()?
+            .ok_or(SpsError::LackOfLookupArguments)?;
+
+        let W2 = concatenate_with_padding(
+            &concat_vec!(&lookup_coeff.ls, &lookup_coeff.ts, &lookup_coeff.ms),
+            k_power_of_2,
+        );
+        let C2 = ck
+            .commit(&W2)
+            .map_err(|err| SpsError::WrongCommitmentSize {
+                annotation: "W2",
+                err,
+            })?;
+        let r2 = ro_nark.absorb_point(&C2).squeeze::<C>(NUM_CHALLENGE_BITS);
+
+        // round 3
+        let lookup_coeff = lookup_coeff.evaluate_coefficient_2(r2);
+
+        let W3 = concatenate_with_padding(
+            &concat_vec!(&lookup_coeff.hs, &lookup_coeff.gs),
+            k_power_of_2,
+        );
+
+        let C3 = ck
+            .commit(&W3)
+            .map_err(|err| SpsError::WrongCommitmentSize {
+                annotation: "W3",
+                err,
+            })?;
+        let r3 = ro_nark.absorb_point(&C3).squeeze::<C>(NUM_CHALLENGE_BITS);
+
+        Ok((
+            PlonkInstance {
+                W_commitments: vec![C1, C2, C3],
+                instance: instance.to_vec(),
+                challenges: vec![r1, r2, r3],
+            },
+            PlonkWitness {
+                W: vec![W1, W2, W3],
+            },
+        ))
+    }
 }
 
 impl<C: CurveAffine> PlonkInstance<C> {
+    pub fn new(num_io: usize, num_challenges: usize, num_witness: usize) -> Self {
+        Self {
+            W_commitments: vec![CommitmentKey::<C>::default_value(); num_witness],
+            instance: vec![C::ScalarExt::ZERO; num_io],
+            challenges: vec![C::ScalarExt::ZERO; num_challenges],
+        }
+    }
     pub fn to_relax(&self) -> RelaxedPlonkInstance<C> {
         RelaxedPlonkInstance {
             W_commitments: self.W_commitments.clone(),
@@ -456,29 +699,19 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
     }
 }
 
-impl<F: PrimeField> PlonkWitness<F> {
-    pub fn to_relax(&self, k: usize) -> RelaxedPlonkWitness<F> {
-        let E = vec![F::ZERO; 2usize.pow(k as u32)];
-        RelaxedPlonkWitness {
-            W: self.W.clone(),
-            E,
-        }
-    }
-}
-
 impl<F: PrimeField> RelaxedPlonkWitness<F> {
     /// round_sizes: specify the size of witness vector for each round
     /// in special soundness protocol.
     /// In current version, we have either one round (without lookup)
     /// or two rounds (with lookup)
-    pub fn new(k: u32, round_sizes: &[usize]) -> Self {
+    pub fn new(k: usize, round_sizes: &[usize]) -> Self {
         let mut W = Vec::new();
         let mut E = Vec::new();
         for sz in round_sizes.iter() {
             let tmp = vec![F::ZERO; *sz];
             W.push(tmp);
         }
-        E.resize(2usize.pow(k), F::ZERO);
+        E.resize(1 << k, F::ZERO);
         Self { W, E }
     }
 

@@ -1022,6 +1022,7 @@ mod tests {
     use bitter::{BitReader, LittleEndianReader};
     use ff::Field;
     use halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter, Value};
+    use halo2_proofs::plonk::ConstraintSystem;
     use halo2curves::{bn256::G1Affine as C1, CurveAffine};
     use rand::{rngs::ThreadRng, Rng};
 
@@ -1030,7 +1031,7 @@ mod tests {
         constants::MAX_BITS,
         nifs::vanilla::VanillaFS,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
-        table::TableData,
+        table::WitnessCollector,
     };
 
     use super::*;
@@ -1051,12 +1052,15 @@ mod tests {
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(64) };
     const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
-    fn get_table_data() -> (TableData<Base>, MainGateConfig<T>) {
-        let mut td = TableData::new(K, vec![]);
-        let _ = td.cs.instance_column();
-        let config = td.prepare_assembly(MainGate::<Base, T>::configure);
+    fn get_witness_collector() -> (WitnessCollector<Base>, MainGateConfig<T>) {
+        let mut cs = ConstraintSystem::default();
+        let config = MainGate::<Base, T>::configure(&mut cs);
+        let witness = WitnessCollector {
+            instance: vec![],
+            advice: vec![vec![Base::ZERO.into(); 1 << K]; cs.num_advice_columns()],
+        };
 
-        (td, config)
+        (witness, config)
     }
 
     fn random_curve_vec(mut rnd: impl Rng) -> Vec<C1> {
@@ -1087,7 +1091,7 @@ mod tests {
     /// Includes configured table data, a main gate config, random number generator, ECC and gate chips, and a random scalar.
     /// Used for setting up test scenarios, generating random inputs, and initializing necessary components for testing etc
     struct Fixture {
-        td: TableData<Base>,
+        ws: WitnessCollector<Base>,
         config: MainGateConfig<T>,
         rnd: ThreadRng,
         ecc: EccChip<C1, Base, T>,
@@ -1097,11 +1101,11 @@ mod tests {
 
     impl Default for Fixture {
         fn default() -> Self {
-            let (td, config) = get_table_data();
+            let (ws, config) = get_witness_collector();
             let mut rnd = rand::thread_rng();
 
             Self {
-                td,
+                ws,
                 r: ScalarExt::from_u128(rnd.gen()),
                 ecc: EccChip::<C1, Base, T>::new(config.clone()),
                 gate: MainGate::new(config.clone()),
@@ -1131,7 +1135,7 @@ mod tests {
 
         let relaxed = generate_random_plonk_instance(&mut rnd).to_relax();
 
-        let (mut td, config) = get_table_data();
+        let (mut ws, config) = get_witness_collector();
 
         let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new(
             relaxed.clone(),
@@ -1140,7 +1144,7 @@ mod tests {
             config.clone(),
         );
 
-        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+        let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
         let spec = Spec::<Base, T, 5>::new(10, 10);
 
@@ -1202,7 +1206,7 @@ mod tests {
     #[test_log::test]
     fn fold_W_test() {
         let Fixture {
-            mut td,
+            mut ws,
             config,
             mut rnd,
             ecc,
@@ -1212,7 +1216,7 @@ mod tests {
 
         let mut folded_W = vec![CommitmentKey::<C1>::default_value(); NUM_WITNESS];
 
-        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+        let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
         let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, NUM_WITNESS);
 
@@ -1278,7 +1282,7 @@ mod tests {
     #[test_log::test]
     fn fold_E_test() {
         let Fixture {
-            mut td,
+            mut ws,
             config,
             mut rnd,
             ecc,
@@ -1288,7 +1292,7 @@ mod tests {
 
         let mut folded_E = C1::default();
 
-        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+        let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
         let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, 0);
 
@@ -1364,14 +1368,14 @@ mod tests {
     #[test_log::test]
     fn fold_instances_test() {
         let Fixture {
-            mut td,
+            mut ws,
             config,
             mut rnd,
             r,
             ..
         } = Fixture::default();
 
-        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+        let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
         let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(2, 0, 0);
 
@@ -1501,14 +1505,14 @@ mod tests {
     #[test_log::test]
     fn fold_challenges_test() {
         let Fixture {
-            mut td,
+            mut ws,
             config,
             mut rnd,
             r,
             ..
         } = Fixture::default();
 
-        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+        let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
         let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(0, NUM_CHALLENGES, 0);
 
@@ -1574,13 +1578,13 @@ mod tests {
                         .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "input instance"))
                         .collect::<Result<Vec<_>, _>>()?;
 
-                    let m_bn = scalar_module_as_bn::<C1>(LIMB_WIDTH, LIMBS_COUNT).unwrap();
-
                     ctx.next();
 
                     let r_as_bn = bn_chip
                         .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
                         .unwrap();
+
+                    let m_bn = scalar_module_as_bn::<C1>(LIMB_WIDTH, LIMBS_COUNT).unwrap();
 
                     Ok(FoldRelaxedPlonkInstanceChip::<T, C1>::fold_challenges(
                         &mut ctx,
@@ -1639,12 +1643,12 @@ mod tests {
         const T: usize = 6;
 
         let Fixture {
-            mut td,
+            mut ws,
             config,
             mut rnd,
             ..
         } = Fixture::default();
-        let mut layouter = SingleChipLayouter::new(&mut td, vec![]).unwrap();
+        let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
         let spec = Spec::<Base, T, { T - 1 }>::new(10, 10);
 
@@ -1709,8 +1713,6 @@ mod tests {
         const K: usize = 5;
 
         let mut ro = PoseidonHash::new(spec.clone());
-        let mut td = TableData::<ScalarExt>::new(K as u32, vec![]);
-        let _config = td.prepare_assembly(MainGate::<ScalarExt, T>::configure);
 
         VanillaFS::generate_challenge(&pp_hash, &mut ro, relaxed, input, cross_term_commits)
             .unwrap()

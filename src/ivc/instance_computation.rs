@@ -171,13 +171,19 @@ where
 mod tests {
     use std::num::NonZeroUsize;
 
-    use halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter};
+    use ff::Field;
+    use halo2_proofs::{
+        circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter},
+        plonk::ConstraintSystem,
+    };
     use halo2curves::{bn256, grumpkin};
 
     type C1 = <bn256::G1 as halo2curves::group::prime::PrimeCurve>::Affine;
     type C2 = <grumpkin::G1 as halo2curves::group::prime::PrimeCurve>::Affine;
     type Base = <C1 as CurveAffine>::Base;
     type Scalar = <C1 as CurveAffine>::ScalarExt;
+
+    const K_TABLE_SIZE: usize = 15;
 
     use crate::{
         commitment::CommitmentKey,
@@ -186,7 +192,7 @@ mod tests {
         },
         main_gate::AdviceCyclicAssignor,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, Spec},
-        table::TableData,
+        table::WitnessCollector,
     };
 
     use super::*;
@@ -225,9 +231,13 @@ mod tests {
         }
         .generate();
 
-        let mut td = TableData::new(15, vec![]);
+        let mut cs = ConstraintSystem::default();
+        let config = MainGate::<Base, 10>::configure(&mut cs);
 
-        let config = td.prepare_assembly(|cs| -> MainGateConfig<10> { MainGate::configure(cs) });
+        let mut td = WitnessCollector {
+            instance: vec![],
+            advice: vec![vec![Base::ZERO.into(); 1 << K_TABLE_SIZE]; cs.num_advice_columns()],
+        };
 
         let on_circuit_hash = SingleChipLayouter::<'_, Base, _>::new(&mut td, vec![])
             .unwrap()

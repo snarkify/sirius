@@ -19,8 +19,8 @@ use sirius::{
 
 const ARITY: usize = BLOCK_SIZE / 2;
 
-const CIRCUIT_TABLE_SIZE1: usize = 20;
-const CIRCUIT_TABLE_SIZE2: usize = 20;
+const CIRCUIT_TABLE_SIZE1: usize = 16;
+const CIRCUIT_TABLE_SIZE2: usize = 16;
 const COMMITMENT_KEY_SIZE: usize = 25;
 const T: usize = 5;
 const RATE: usize = 4;
@@ -95,11 +95,13 @@ fn main() {
             CIRCUIT_TABLE_SIZE1 as u32,
             &primary_commitment_key,
             primary_spec,
+            &sc1,
         ),
         CircuitPublicParamsInput::new(
             CIRCUIT_TABLE_SIZE2 as u32,
             &secondary_commitment_key,
             secondary_spec,
+            &sc2,
         ),
         LIMB_WIDTH,
         LIMBS_COUNT_LIMIT,

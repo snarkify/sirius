@@ -8,14 +8,16 @@
 //! For more details look at:
 //! - Paragraph '3. Folding scheme' at [Nova whitepaper](https://eprint.iacr.org/2021/370)
 //! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
+use rayon::prelude::*;
+
+use halo2_proofs::arithmetic::CurveAffine;
+use halo2_proofs::plonk::Error as Halo2Error;
+
 use crate::commitment::CommitmentKey;
 use crate::plonk::eval::Error as EvalError;
-use crate::plonk::{PlonkInstance, PlonkTrace};
+use crate::plonk::{PlonkInstance, PlonkStructure, PlonkTrace};
 use crate::poseidon::ROTrait;
 use crate::sps::Error as SpsError;
-use crate::table::TableData;
-use halo2_proofs::arithmetic::CurveAffine;
-use rayon::prelude::*;
 
 pub mod vanilla;
 
@@ -38,12 +40,13 @@ pub trait FoldingScheme<C: CurveAffine> {
 
     fn setup_params(
         pp_digest: C,
-        td: &TableData<C::ScalarExt>,
+        S: PlonkStructure<C::ScalarExt>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
-        td: &TableData<<C as CurveAffine>::ScalarExt>,
+        instance: &[C::ScalarExt],
+        witness: &[Vec<C::ScalarExt>],
         pp: &Self::ProverParam,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error>;
@@ -76,6 +79,8 @@ pub enum Error {
     Eval(#[from] EvalError),
     #[error(transparent)]
     Sps(#[from] SpsError),
+    #[error(transparent)]
+    Plonk(#[from] Halo2Error),
 }
 
 #[cfg(test)]

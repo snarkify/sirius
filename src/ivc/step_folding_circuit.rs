@@ -21,6 +21,7 @@ use crate::{
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
     plonk::{PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
+    table::ConstraintSystemMetainfo,
 };
 
 use super::{instance_computation::AssignedRandomOracleComputationInstance, SimpleFloorPlanner};
@@ -97,6 +98,39 @@ where
 
     // TODO docs
     pub cross_term_commits: Vec<C>,
+}
+
+impl<'link, const ARITY: usize, C, RO> StepInputs<'link, ARITY, C, RO>
+where
+    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    C: CurveAffine,
+    RO: ROCircuitTrait<C::Base>,
+{
+    pub fn without_witness<SC: StepCircuit<ARITY, C::Base>>(
+        k_table_size: u32,
+        num_io: usize,
+        step_pp: &'link StepParams<C::Base, RO>,
+    ) -> Self {
+        let mut cs = ConstraintSystem::<C::Base>::default();
+        SC::configure(&mut cs);
+        let ConstraintSystemMetainfo {
+            num_challenges,
+            round_sizes,
+            folding_degree,
+            ..
+        } = ConstraintSystemMetainfo::build(k_table_size as usize, &cs);
+
+        Self {
+            step: C::Base::ZERO,
+            step_pp,
+            public_params_hash: C::identity(),
+            z_0: [C::Base::ZERO; ARITY],
+            z_i: [C::Base::ZERO; ARITY],
+            U: RelaxedPlonkInstance::new(num_io, num_challenges, round_sizes.len()),
+            u: PlonkInstance::new(num_io, num_challenges, round_sizes.len()),
+            cross_term_commits: vec![C::identity(); folding_degree.saturating_sub(1)],
+        }
+    }
 }
 
 pub struct StepConfig<const ARITY: usize, F: PrimeField, SP: StepCircuit<ARITY, F>, const T: usize>
@@ -205,18 +239,31 @@ where
         layouter: &mut impl Layouter<C::Base>,
         assigned_z_i: &[AssignedCell<C::Base, C::Base>; ARITY],
     ) -> Result<[AssignedCell<C::Base, C::Base>; ARITY], SynthesisError> {
-        let assigned_z_0: [_; ARITY] = layouter.assign_region(
-            || "assigned_z0_primary",
-            |region| {
-                let mut region = RegionCtx::new(region, 0);
+        debug!("start synthesize step");
 
-                config
-                    .main_gate_config
-                    .advice_cycle_assigner()
-                    .assign_all_advice(&mut region, || "z0_primary", self.input.z_0.iter().copied())
-                    .map(|inp| inp.try_into().unwrap())
-            },
-        )?;
+        let assigned_z_0: [_; ARITY] = layouter
+            .assign_region(
+                || "assigned_z0_primary",
+                |region| {
+                    let mut region = RegionCtx::new(region, 0);
+
+                    config
+                        .main_gate_config
+                        .advice_cycle_assigner()
+                        .assign_all_advice(
+                            &mut region,
+                            || "z0_primary",
+                            self.input.z_0.iter().copied(),
+                        )
+                        .map(|inp| inp.try_into().unwrap())
+                },
+            )
+            .map_err(|err| {
+                error!("while assigned_z0_primary: {err:?}");
+                SynthesisError::Halo2(err)
+            })?;
+
+        debug!("assigned z_0");
 
         let chip = FoldRelaxedPlonkInstanceChip::new(
             self.input.U.clone(),
@@ -225,167 +272,217 @@ where
             config.main_gate_config.clone(),
         );
 
-        let (w, r) = layouter.assign_region(
-            || "assign witness",
-            |region| {
-                Ok(chip.assign_witness_with_challenge(
-                    &mut RegionCtx::new(region, 0),
-                    &self.input.public_params_hash,
-                    &self.input.u,
-                    &self.input.cross_term_commits,
-                    RO::new(
-                        config.main_gate_config.clone(),
-                        self.input.step_pp.ro_constant.clone(),
-                    ),
-                )?)
-            },
-        )?;
+        let (w, r) = layouter
+            .assign_region(
+                || "assign witness",
+                |region| {
+                    Ok(chip.assign_witness_with_challenge(
+                        &mut RegionCtx::new(region, 0),
+                        &self.input.public_params_hash,
+                        &self.input.u,
+                        &self.input.cross_term_commits,
+                        RO::new(
+                            config.main_gate_config.clone(),
+                            self.input.step_pp.ro_constant.clone(),
+                        ),
+                    )?)
+                },
+            )
+            .map_err(|err| {
+                error!("while assigned witness: {err:?}");
+                SynthesisError::Halo2(err)
+            })?;
+
+        debug!("witness & challenge assigned");
 
         // Synthesize the circuit for the base case and get the new running instance
         let U_new_base = w.assigned_relaxed.clone();
 
-        let (assigned_step, assigned_next_step) = layouter.assign_region(
-            || "generate input",
-            |region| {
-                let mut region = RegionCtx::new(region, 0);
-                let gate = MainGate::new(config.main_gate_config.clone());
+        let (assigned_step, assigned_next_step) = layouter
+            .assign_region(
+                || "generate steps",
+                |region| {
+                    let mut ctx = RegionCtx::new(region, 0);
 
-                let assigned_step = region.assign_advice(
-                    || "step",
-                    config.main_gate_config.input,
-                    Value::known(self.input.step),
-                )?;
+                    ctx.assign_fixed(|| "1", config.main_gate_config.rc, C::Base::ONE)?;
 
-                let assigned_next_step =
-                    gate.add_with_const(&mut region, &assigned_step, C::Base::ONE)?;
+                    ctx.assign_fixed(|| "1", config.main_gate_config.q_i, C::Base::ONE)?;
+                    let assigned_step = ctx.assign_advice(
+                        || "step",
+                        config.main_gate_config.input,
+                        Value::known(self.input.step),
+                    )?;
 
-                Ok((assigned_step, assigned_next_step))
-            },
-        )?;
+                    ctx.assign_fixed(|| "-1", config.main_gate_config.q_o, -C::Base::ONE)?;
+                    let assigned_next_step = ctx.assign_advice(
+                        || "result for sum with const",
+                        config.main_gate_config.out,
+                        Value::known(self.input.step + C::Base::ONE),
+                    )?;
+
+                    Ok((assigned_step, assigned_next_step))
+                },
+            )
+            .map_err(|err| {
+                error!("while assign step & next step: {err:?}");
+                SynthesisError::Halo2(err)
+            })?;
 
         // Check X0 == input_params_hash
-        let (base_case_input_check, non_base_case_input_check) = layouter.assign_region(
-            || "generate input hash",
-            |region| {
-                let mut ctx = RegionCtx::new(region, 0);
+        let (base_case_input_check, non_base_case_input_check) = layouter
+            .assign_region(
+                || "generate input hash",
+                |region| {
+                    let mut ctx = RegionCtx::new(region, 0);
 
-                let base_case_input_check = ctx.assign_advice(
-                    || "base_case_input_check - always true",
-                    config.main_gate_config.input,
-                    Value::known(C::Base::ONE),
-                )?;
-                ctx.next();
+                    let base_case_input_check = ctx.assign_advice(
+                        || "base_case_input_check - always true",
+                        config.main_gate_config.input,
+                        Value::known(C::Base::ONE),
+                    )?;
+                    ctx.next();
 
-                let expected_X0 = AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
-                    random_oracle_constant: self.input.step_pp.ro_constant.clone(),
-                    public_params_hash: &w.public_params_hash,
-                    step: &assigned_step,
-                    z_0: &assigned_z_0,
-                    z_i: assigned_z_i,
-                    relaxed: &w.assigned_relaxed,
-                }
-                .generate_with_inspect(
-                    &mut ctx,
-                    config.main_gate_config.clone(),
-                    |buf| debug!("expected X0 {buf:?}"),
-                )?;
+                    let expected_X0 =
+                        AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
+                            random_oracle_constant: self.input.step_pp.ro_constant.clone(),
+                            public_params_hash: &w.public_params_hash,
+                            step: &assigned_step,
+                            z_0: &assigned_z_0,
+                            z_i: assigned_z_i,
+                            relaxed: &w.assigned_relaxed,
+                        }
+                        .generate_with_inspect(
+                            &mut ctx,
+                            config.main_gate_config.clone(),
+                            |buf| debug!("expected X0 {buf:?}"),
+                        )?;
 
-                debug!("expected X0: {expected_X0:?}");
-                debug!("input instance 0: {:?}", w.input_instance[0].0);
+                    debug!("expected X0: {expected_X0:?}");
+                    debug!("input instance 0: {:?}", w.input_instance[0].0);
 
-                Ok((
-                    base_case_input_check,
-                    MainGate::new(config.main_gate_config.clone()).is_equal_term(
-                        &mut ctx,
-                        &expected_X0,
-                        &w.input_instance[0].0,
-                    )?,
-                ))
-            },
-        )?;
+                    Ok((
+                        base_case_input_check,
+                        MainGate::new(config.main_gate_config.clone()).is_equal_term(
+                            &mut ctx,
+                            &expected_X0,
+                            &w.input_instance[0].0,
+                        )?,
+                    ))
+                },
+            )
+            .map_err(|err| {
+                error!("while generate input hash: {err:?}");
+                SynthesisError::Halo2(err)
+            })?;
 
         // Synthesize the circuit for the non-base case and get the new running
         // instance along with a boolean indicating if all checks have passed
         let FoldResult {
             assigned_input: assigned_input_witness,
             assigned_result_of_fold: U_new_non_base,
-        } = layouter.assign_region(
-            || "synthesize_step_non_base_case",
-            |region| Ok(chip.fold(&mut RegionCtx::new(region, 0), w.clone(), r.clone())?),
-        )?;
+        } = layouter
+            .assign_region(
+                || "synthesize_step_non_base_case",
+                |region| Ok(chip.fold(&mut RegionCtx::new(region, 0), w.clone(), r.clone())?),
+            )
+            .map_err(|err| {
+                error!("while synthesize_step_non_base_case: {err:?}");
+                SynthesisError::Halo2(err)
+            })?;
 
-        let (assigned_new_U, assigned_input) = layouter.assign_region(
-            || "generate input",
-            |region| {
-                let mut region = RegionCtx::new(region, 0);
-                let gate = MainGate::new(config.main_gate_config.clone());
+        let (assigned_new_U, assigned_input) = layouter
+            .assign_region(
+                || "make folding",
+                |region| {
+                    let mut region = RegionCtx::new(region, 0);
+                    let gate = MainGate::new(config.main_gate_config.clone());
 
-                let assigned_is_zero_step =
-                    gate.is_zero_term(&mut region, assigned_step.clone())?;
+                    let assigned_is_zero_step =
+                        gate.is_zero_term(&mut region, assigned_step.clone())?;
 
-                let new_U = AssignedRelaxedPlonkInstance::<C>::conditional_select(
-                    &mut region,
-                    &config.main_gate_config,
-                    &U_new_base,
-                    &U_new_non_base,
-                    assigned_is_zero_step.clone(),
-                )?;
+                    let new_U = AssignedRelaxedPlonkInstance::<C>::conditional_select(
+                        &mut region,
+                        &config.main_gate_config,
+                        &U_new_base,
+                        &U_new_non_base,
+                        assigned_is_zero_step.clone(),
+                    )?;
 
-                let input_check = gate.conditional_select(
-                    &mut region,
-                    &base_case_input_check,
-                    &non_base_case_input_check,
-                    &assigned_is_zero_step,
-                )?;
-                gate.assert_equal_const(&mut region, input_check, C::Base::ONE)?;
+                    let input_check = gate.conditional_select(
+                        &mut region,
+                        &base_case_input_check,
+                        &non_base_case_input_check,
+                        &assigned_is_zero_step,
+                    )?;
+                    gate.assert_equal_const(&mut region, input_check, C::Base::ONE)?;
 
-                let assigned_input: [_; ARITY] = assigned_z_0
-                    .iter()
-                    .zip_eq(assigned_z_i.iter())
-                    .map(|(z_0, z_i)| {
-                        gate.conditional_select(&mut region, z_0, z_i, &assigned_is_zero_step)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
-                    .try_into()
-                    .unwrap();
+                    let assigned_input: [_; ARITY] = assigned_z_0
+                        .iter()
+                        .zip_eq(assigned_z_i.iter())
+                        .map(|(z_0, z_i)| {
+                            gate.conditional_select(&mut region, z_0, z_i, &assigned_is_zero_step)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                        .try_into()
+                        .unwrap();
 
-                Ok((new_U, assigned_input))
-            },
-        )?;
+                    Ok((new_U, assigned_input))
+                },
+            )
+            .map_err(|err| {
+                error!("while folding: {err:?}");
+                SynthesisError::Halo2(err)
+            })?;
 
         let z_output =
             self.step_circuit
                 .synthesize_step(config.step_config, layouter, &assigned_input)?;
 
-        let output_hash = layouter.assign_region(
-            || "generate output hash",
-            |region| {
-                AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
-                    random_oracle_constant: self.input.step_pp.ro_constant.clone(),
-                    public_params_hash: &assigned_input_witness.public_params_hash,
-                    step: &assigned_next_step,
-                    z_0: &assigned_z_0,
-                    z_i: &z_output,
-                    relaxed: &assigned_new_U,
-                }
-                .generate_with_inspect(
-                    &mut RegionCtx::new(region, 0),
-                    config.main_gate_config.clone(),
-                    |buf| debug!("new X0 {buf:?}"),
-                )
-            },
-        )?;
+        let output_hash = layouter
+            .assign_region(
+                || "generate output hash",
+                |region| {
+                    AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
+                        random_oracle_constant: self.input.step_pp.ro_constant.clone(),
+                        public_params_hash: &assigned_input_witness.public_params_hash,
+                        step: &assigned_next_step,
+                        z_0: &assigned_z_0,
+                        z_i: &z_output,
+                        relaxed: &assigned_new_U,
+                    }
+                    .generate_with_inspect(
+                        &mut RegionCtx::new(region, 0),
+                        config.main_gate_config.clone(),
+                        |buf| debug!("new X0 {buf:?}"),
+                    )
+                },
+            )
+            .map_err(|err| {
+                error!("while generate output hash: {err:?}");
+                SynthesisError::Halo2(err)
+            })?;
 
         debug!("output instance 0: {:?}", output_hash);
 
         // Check that old_X1 == new_X0
-        layouter.constrain_instance(
-            assigned_input_witness.input_instance[1].0.cell(),
-            config.instance,
-            0,
-        )?;
+        layouter
+            .constrain_instance(
+                assigned_input_witness.input_instance[1].0.cell(),
+                config.instance,
+                0,
+            )
+            .map_err(|err| {
+                error!("while check that old_X1 == new_X0: {err:?}");
+                SynthesisError::Halo2(err)
+            })?;
+
         // Check that new_X1 == output_hash
-        layouter.constrain_instance(output_hash.cell(), config.instance, 1)?;
+        layouter
+            .constrain_instance(output_hash.cell(), config.instance, 1)
+            .map_err(|err| {
+                error!("while check that new_X1 == output_hash: {err:?}");
+                SynthesisError::Halo2(err)
+            })?;
 
         Ok(z_output)
     }
@@ -428,6 +525,7 @@ where
                     .map(|inp| inp.try_into().unwrap())
             },
         )?;
+        debug!("assigned z_i");
 
         let _assigned_z_next = <Self as StepCircuit<ARITY, C::Base>>::synthesize_step(
             self,
@@ -436,7 +534,7 @@ where
             &assigned_z_i,
         )
         .map_err(|err| {
-            error!("downcast error to `halo2_proofs::plonk::Error::Synthesis` {err:?}");
+            error!("downcast to `halo2_proofs::plonk::Error::Synthesis` from {err:?}");
             halo2_proofs::plonk::Error::Synthesis
         })?;
 
