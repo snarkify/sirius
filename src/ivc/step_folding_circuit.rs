@@ -3,7 +3,7 @@ use std::{fmt, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, Value},
+    circuit::{Layouter, Value},
     plonk::{Circuit, Column, ConstraintSystem, Instance},
 };
 use halo2curves::CurveAffine;
@@ -16,7 +16,7 @@ use crate::{
         fold_relaxed_plonk_instance_chip::{
             AssignedRelaxedPlonkInstance, FoldRelaxedPlonkInstanceChip, FoldResult,
         },
-        StepCircuit, SynthesisError,
+        StepCircuit,
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
     plonk::{PlonkInstance, RelaxedPlonkInstance},
@@ -193,7 +193,7 @@ where
     pub input: StepInputs<'link, ARITY, C, RO>,
 }
 
-impl<'link, const ARITY: usize, C, SC, RO, const T: usize> StepCircuit<ARITY, C::Base>
+impl<'link, const ARITY: usize, C, SC, RO, const T: usize> Circuit<C::Base>
     for StepFoldingCircuit<'link, ARITY, C, SC, RO, T>
 where
     C: CurveAffine,
@@ -203,12 +203,12 @@ where
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
 {
     type Config = StepConfig<ARITY, C::Base, SC, T>;
+    type FloorPlanner = SimpleFloorPlanner;
 
-    /// Configure the step circuit. This method initializes necessary
-    /// fixed columns and advice columns, but does not create any instance
-    /// columns.
-    ///
-    /// This setup is crucial for the functioning of the IVC-based system.
+    fn without_witnesses(&self) -> Self {
+        todo!("`without_witnesses` not implemented yet")
+    }
+
     fn configure(cs: &mut ConstraintSystem<C::Base>) -> Self::Config {
         let before = cs.num_instance_columns();
 
@@ -228,18 +228,24 @@ where
         }
     }
 
-    /// Sythesize the circuit for a computation step and return variable
-    /// that corresponds to the output of the step z_{i+1}
-    /// this method will be called when we synthesize the IVC_Circuit
-    ///
-    /// Return `z_out` result
-    fn synthesize_step(
+    fn synthesize(
         &self,
-        config: Self::Config,
-        layouter: &mut impl Layouter<C::Base>,
-        assigned_z_i: &[AssignedCell<C::Base, C::Base>; ARITY],
-    ) -> Result<[AssignedCell<C::Base, C::Base>; ARITY], SynthesisError> {
-        debug!("start synthesize step");
+        config: StepConfig<ARITY, C::Base, SC, T>,
+        mut layouter: impl Layouter<C::Base>,
+    ) -> Result<(), halo2_proofs::plonk::Error> {
+        let assigned_z_i: [_; ARITY] = layouter.assign_region(
+            || "assigned_zi",
+            |region| {
+                let mut region = RegionCtx::new(region, 0);
+
+                config
+                    .main_gate_config
+                    .advice_cycle_assigner()
+                    .assign_all_advice(&mut region, || "z0_primary", self.input.z_0.iter().copied())
+                    .map(|inp| inp.try_into().unwrap())
+            },
+        )?;
+        debug!("assigned z_i");
 
         let assigned_z_0: [_; ARITY] = layouter
             .assign_region(
@@ -260,7 +266,7 @@ where
             )
             .map_err(|err| {
                 error!("while assigned_z0_primary: {err:?}");
-                SynthesisError::Halo2(err)
+                halo2_proofs::plonk::Error::Synthesis
             })?;
 
         debug!("assigned z_0");
@@ -290,7 +296,7 @@ where
             )
             .map_err(|err| {
                 error!("while assigned witness: {err:?}");
-                SynthesisError::Halo2(err)
+                halo2_proofs::plonk::Error::Synthesis
             })?;
 
         debug!("witness & challenge assigned");
@@ -325,7 +331,7 @@ where
             )
             .map_err(|err| {
                 error!("while assign step & next step: {err:?}");
-                SynthesisError::Halo2(err)
+                halo2_proofs::plonk::Error::Synthesis
             })?;
 
         // Check X0 == input_params_hash
@@ -348,7 +354,7 @@ where
                             public_params_hash: &w.public_params_hash,
                             step: &assigned_step,
                             z_0: &assigned_z_0,
-                            z_i: assigned_z_i,
+                            z_i: &assigned_z_i,
                             relaxed: &w.assigned_relaxed,
                         }
                         .generate_with_inspect(
@@ -372,7 +378,7 @@ where
             )
             .map_err(|err| {
                 error!("while generate input hash: {err:?}");
-                SynthesisError::Halo2(err)
+                halo2_proofs::plonk::Error::Synthesis
             })?;
 
         // Synthesize the circuit for the non-base case and get the new running
@@ -387,7 +393,7 @@ where
             )
             .map_err(|err| {
                 error!("while synthesize_step_non_base_case: {err:?}");
-                SynthesisError::Halo2(err)
+                halo2_proofs::plonk::Error::Synthesis
             })?;
 
         let (assigned_new_U, assigned_input) = layouter
@@ -431,12 +437,16 @@ where
             )
             .map_err(|err| {
                 error!("while folding: {err:?}");
-                SynthesisError::Halo2(err)
+                halo2_proofs::plonk::Error::Synthesis
             })?;
 
-        let z_output =
-            self.step_circuit
-                .synthesize_step(config.step_config, layouter, &assigned_input)?;
+        let z_output = self
+            .step_circuit
+            .synthesize_step(config.step_config, &mut layouter, &assigned_input)
+            .map_err(|err| {
+                error!("while synthesize_step: {err:?}");
+                halo2_proofs::plonk::Error::Synthesis
+            })?;
 
         let output_hash = layouter
             .assign_region(
@@ -459,7 +469,7 @@ where
             )
             .map_err(|err| {
                 error!("while generate output hash: {err:?}");
-                SynthesisError::Halo2(err)
+                halo2_proofs::plonk::Error::Synthesis
             })?;
 
         debug!("output instance 0: {:?}", output_hash);
@@ -473,7 +483,7 @@ where
             )
             .map_err(|err| {
                 error!("while check that old_X1 == new_X0: {err:?}");
-                SynthesisError::Halo2(err)
+                halo2_proofs::plonk::Error::Synthesis
             })?;
 
         // Check that new_X1 == output_hash
@@ -481,62 +491,8 @@ where
             .constrain_instance(output_hash.cell(), config.instance, 1)
             .map_err(|err| {
                 error!("while check that new_X1 == output_hash: {err:?}");
-                SynthesisError::Halo2(err)
+                halo2_proofs::plonk::Error::Synthesis
             })?;
-
-        Ok(z_output)
-    }
-}
-
-impl<'link, const ARITY: usize, C, SC, RO, const T: usize> Circuit<C::Base>
-    for StepFoldingCircuit<'link, ARITY, C, SC, RO, T>
-where
-    C: CurveAffine,
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
-    C::Scalar: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
-    SC: StepCircuit<ARITY, C::Base> + Sized,
-    RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
-{
-    type Config = StepConfig<ARITY, C::Base, SC, T>;
-    type FloorPlanner = SimpleFloorPlanner;
-
-    fn without_witnesses(&self) -> Self {
-        todo!("`without_witnesses` not implemented yet")
-    }
-
-    fn configure(meta: &mut ConstraintSystem<C::Base>) -> Self::Config {
-        <Self as StepCircuit<ARITY, C::Base>>::configure(meta)
-    }
-
-    fn synthesize(
-        &self,
-        config: StepConfig<ARITY, C::Base, SC, T>,
-        mut layouter: impl Layouter<C::Base>,
-    ) -> Result<(), halo2_proofs::plonk::Error> {
-        let assigned_z_i: [_; ARITY] = layouter.assign_region(
-            || "assigned_zi",
-            |region| {
-                let mut region = RegionCtx::new(region, 0);
-
-                config
-                    .main_gate_config
-                    .advice_cycle_assigner()
-                    .assign_all_advice(&mut region, || "z0_primary", self.input.z_0.iter().copied())
-                    .map(|inp| inp.try_into().unwrap())
-            },
-        )?;
-        debug!("assigned z_i");
-
-        let _assigned_z_next = <Self as StepCircuit<ARITY, C::Base>>::synthesize_step(
-            self,
-            config,
-            &mut layouter,
-            &assigned_z_i,
-        )
-        .map_err(|err| {
-            error!("downcast to `halo2_proofs::plonk::Error::Synthesis` from {err:?}");
-            halo2_proofs::plonk::Error::Synthesis
-        })?;
 
         Ok(())
     }
