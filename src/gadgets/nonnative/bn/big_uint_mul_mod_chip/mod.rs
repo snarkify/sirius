@@ -374,12 +374,9 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         &self,
         ctx: &mut RegionCtx<'_, F>,
         bignat_cells: OverflowingBigUint<F>,
+        limbs_per_group: NonZeroUsize,
     ) -> Result<GroupedBigUint<F>, Error> {
         trace!("Group {} limbs: {:?}", bignat_cells.len(), bignat_cells);
-
-        let carry_bits =
-            calc_carry_bits(&big_uint::f_to_nat(&bignat_cells.max_word), self.limb_width)?;
-        let limbs_per_group = calc_limbs_per_group::<F>(carry_bits, self.limb_width)?;
 
         let group_count = bignat_cells
             .cells
@@ -392,7 +389,6 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             "group {bignat_cells:?}:
             limbs_count: {}
             limb_width: {limb_width},
-            carry_bits: {carry_bits:?},
             limbs_per_group: {limbs_per_group},
             group_count: {group_count}",
             bignat_cells.cells.len(),
@@ -1248,9 +1244,19 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             r.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
         )?;
 
+        let max_word_bn: BigUintRaw = cmp::max(
+            big_uint::f_to_nat(&left.max_word),
+            big_uint::f_to_nat(&right.max_word),
+        );
+
+        let carry_bits =
+            calc_carry_bits(&max_word_bn, self.limb_width)?;
+        let limbs_per_group = calc_limbs_per_group::<F>(carry_bits, self.limb_width)?;
+
+
         // q * m + r
-        let grouped_left = self.group_limbs(ctx, left)?;
-        let grouped_right = self.group_limbs(ctx, right)?;
+        let grouped_left = self.group_limbs(ctx, left, limbs_per_group)?;
+        let grouped_right = self.group_limbs(ctx, right, limbs_per_group)?;
 
         self.is_equal(ctx, grouped_left, grouped_right)?;
 
@@ -1355,8 +1361,17 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             max_word: val.max_word,
         };
 
-        let grouped_left = self.group_limbs(ctx, left)?;
-        let grouped_right = self.group_limbs(ctx, right)?;
+        let max_word_bn: BigUintRaw = cmp::max(
+            big_uint::f_to_nat(&left.max_word),
+            big_uint::f_to_nat(&right.max_word),
+        );
+
+        let carry_bits =
+            calc_carry_bits(&max_word_bn, self.limb_width)?;
+        let limbs_per_group = calc_limbs_per_group::<F>(carry_bits, self.limb_width)?;
+
+        let grouped_left = self.group_limbs(ctx, left, limbs_per_group)?;
+        let grouped_right = self.group_limbs(ctx, right, limbs_per_group)?;
 
         self.is_equal(ctx, grouped_left, grouped_right)?;
 
