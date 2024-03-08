@@ -34,6 +34,13 @@ pub enum Error {
     ZeroLimbsPerGroup,
     #[error("Carry bits equal capacity of `Curve::Base`")]
     CarryBitsEqualCapacity,
+    #[error(
+        "Two grouped big uints with different limb width are presented for equality comparison"
+    )]
+    DifferentLimbWidthForGrouped {
+        lhs_limb_width: NonZeroUsize,
+        rhs_limb_width: NonZeroUsize,
+    },
 }
 
 pub const MAIN_GATE_T: usize = 4;
@@ -372,9 +379,14 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
 
         let carry_bits =
             calc_carry_bits(&big_uint::f_to_nat(&bignat_cells.max_word), self.limb_width)?;
-        let limbs_per_group = calc_limbs_per_group::<F>(carry_bits, self.limb_width)?.get();
+        let limbs_per_group = calc_limbs_per_group::<F>(carry_bits, self.limb_width)?;
 
-        let group_count = bignat_cells.cells.len().sub(1).div(limbs_per_group).add(1);
+        let group_count = bignat_cells
+            .cells
+            .len()
+            .sub(1)
+            .div(limbs_per_group.get())
+            .add(1);
 
         debug!(
             "group {bignat_cells:?}:
@@ -402,7 +414,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         let grouped = bignat_cells
             .iter()
             .enumerate() // add `limb_index`
-            .chunks(limbs_per_group) // group limbs 
+            .chunks(limbs_per_group.get()) // group limbs 
             .into_iter()
             .enumerate() // add `group_index`
             .map(|(group_index, limbs_for_group)| {
@@ -465,7 +477,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             .collect::<Result<Vec<_>, _>>()?;
 
         let grouped_max_word: BigUintRaw =
-            (0..limbs_per_group).fold(BigUintRaw::zero(), |mut acc, i| {
+            (0..limbs_per_group.get()).fold(BigUintRaw::zero(), |mut acc, i| {
                 acc.set_bit((i * self.limb_width.get()) as u64, true);
                 acc
             });
@@ -473,6 +485,8 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         Ok(GroupedBigUint {
             cells: grouped,
             max_word: big_uint::nat_to_f::<F>(&grouped_max_word).unwrap() * bignat_cells.max_word,
+            limb_width: NonZeroUsize::new(self.limb_width.get() * limbs_per_group.get())
+                .expect("NonZero * NonZero != 0"),
         })
     }
 
@@ -511,8 +525,8 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
     /// ```
     ///
     /// We express the expression above through main_gate:
-    /// `lhs[k] - rhs[k] - m_i + max_ord + carry[k-1] - carry[k] * target_base`
-    /// `state[0] - state[1] + state[3] + state[4] + prev_carry - carry * target_base`
+    /// `lhs[k]   - rhs[k]   - m_i      + max_ord  + carry[k-1] - carry[k] * target_base`
+    /// `state[0] - state[1] - state[3] + state[4] + prev_carry - carry    * target_base`
     ///
     /// - `target_base` - is the maximum word for the original limb length plus one (`1 << limb_width`)
     /// - `m_i` is calculated according to the following rules:
@@ -536,7 +550,14 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         lhs: GroupedBigUint<F>,
         rhs: GroupedBigUint<F>,
     ) -> Result<(), Error> {
-        let limb_width = self.limb_width.get();
+        let limb_width = if rhs.limb_width.eq(&lhs.limb_width) {
+            Ok(lhs.limb_width.get())
+        } else {
+            Err(Error::DifferentLimbWidthForGrouped {
+                lhs_limb_width: lhs.limb_width,
+                rhs_limb_width: rhs.limb_width,
+            })
+        }?;
 
         let max_word_bn: BigUintRaw = cmp::max(
             big_uint::f_to_nat(&lhs.max_word),
@@ -726,6 +747,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             prev_carry_cell.expect("Always assigned, because limbs not empty"),
         )?;
         let _m_n = ctx.assign_advice(
+            // FIXME Maybe fixed, not advice
             || "`m_n` for equal check",
             *m_i_column,
             Value::known(big_uint::nat_to_f(&accumulated_extra).unwrap()),
@@ -946,6 +968,7 @@ impl<F: ff::PrimeField> Deref for OverflowingBigUint<F> {
 struct GroupedBigUint<F: ff::PrimeField> {
     cells: Vec<AssignedCell<F, F>>,
     max_word: F,
+    limb_width: NonZeroUsize,
 }
 impl<F: ff::PrimeField> Deref for GroupedBigUint<F> {
     type Target = [AssignedCell<F, F>];
