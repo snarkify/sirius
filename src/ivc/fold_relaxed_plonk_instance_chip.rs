@@ -848,6 +848,7 @@ where
             ($input:expr, $annot:expr) => {{
                 let assigned_cell = assign_and_absorb_diff_field!($input, $annot)?;
 
+                region.next();
                 let assigned_bn = self
                     .bn_chip
                     .from_assigned_cell_to_limbs(region, &assigned_cell)?;
