@@ -543,21 +543,32 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
     fn is_equal(
         &self,
         ctx: &mut RegionCtx<'_, F>,
-        lhs: GroupedBigUint<F>,
-        rhs: GroupedBigUint<F>,
+        input_lhs: OverflowingBigUint<F>,
+        input_rhs: OverflowingBigUint<F>,
     ) -> Result<(), Error> {
-        let limb_width = if rhs.limb_width.eq(&lhs.limb_width) {
-            Ok(lhs.limb_width.get())
+        let max_word_bn: BigUintRaw = cmp::max(
+            big_uint::f_to_nat(&input_lhs.max_word),
+            big_uint::f_to_nat(&input_rhs.max_word),
+        );
+
+        let carry_bits = calc_carry_bits(&max_word_bn, self.limb_width)?;
+        let limbs_per_group = calc_limbs_per_group::<F>(carry_bits, self.limb_width)?;
+
+        let grouped_lhs = self.group_limbs(ctx, input_lhs, limbs_per_group)?;
+        let grouped_rhs = self.group_limbs(ctx, input_rhs, limbs_per_group)?;
+
+        let limb_width = if grouped_rhs.limb_width.eq(&grouped_lhs.limb_width) {
+            Ok(grouped_lhs.limb_width.get())
         } else {
             Err(Error::DifferentLimbWidthForGrouped {
-                lhs_limb_width: lhs.limb_width,
-                rhs_limb_width: rhs.limb_width,
+                lhs_limb_width: grouped_lhs.limb_width,
+                rhs_limb_width: grouped_rhs.limb_width,
             })
         }?;
 
         let max_word_bn: BigUintRaw = cmp::max(
-            big_uint::f_to_nat(&lhs.max_word),
-            big_uint::f_to_nat(&rhs.max_word),
+            big_uint::f_to_nat(&grouped_lhs.max_word),
+            big_uint::f_to_nat(&grouped_rhs.max_word),
         );
         let max_word: F = big_uint::nat_to_f(&max_word_bn).unwrap();
 
@@ -589,12 +600,13 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
         let carry_column = &self.config().out;
         let carry_coeff = &self.config().q_o;
 
-        let max_cells_len = cmp::max(lhs.cells.len(), rhs.cells.len());
+        let max_cells_len = cmp::max(grouped_lhs.cells.len(), grouped_rhs.cells.len());
 
         // TODO Add check about last carry cell
-        lhs.cells
+        grouped_lhs
+            .cells
             .into_iter()
-            .zip_longest(rhs.cells.into_iter())
+            .zip_longest(grouped_rhs.cells.into_iter())
             .enumerate()
             .map(|(limb_index, cells)| -> Result<(), Error> {
                 debug!("for limb_index {limb_index} & row offset: {}", ctx.offset);
@@ -1244,21 +1256,8 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             r.as_ref().map(|bn| bn.limbs()).unwrap_or(&empty),
         )?;
 
-        let max_word_bn: BigUintRaw = cmp::max(
-            big_uint::f_to_nat(&left.max_word),
-            big_uint::f_to_nat(&right.max_word),
-        );
-
-        let carry_bits =
-            calc_carry_bits(&max_word_bn, self.limb_width)?;
-        let limbs_per_group = calc_limbs_per_group::<F>(carry_bits, self.limb_width)?;
-
-
         // q * m + r
-        let grouped_left = self.group_limbs(ctx, left, limbs_per_group)?;
-        let grouped_right = self.group_limbs(ctx, right, limbs_per_group)?;
-
-        self.is_equal(ctx, grouped_left, grouped_right)?;
+        self.is_equal(ctx, left, right)?;
 
         Ok(ModOperationResult {
             quotient: assigned_q,
@@ -1361,19 +1360,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             max_word: val.max_word,
         };
 
-        let max_word_bn: BigUintRaw = cmp::max(
-            big_uint::f_to_nat(&left.max_word),
-            big_uint::f_to_nat(&right.max_word),
-        );
-
-        let carry_bits =
-            calc_carry_bits(&max_word_bn, self.limb_width)?;
-        let limbs_per_group = calc_limbs_per_group::<F>(carry_bits, self.limb_width)?;
-
-        let grouped_left = self.group_limbs(ctx, left, limbs_per_group)?;
-        let grouped_right = self.group_limbs(ctx, right, limbs_per_group)?;
-
-        self.is_equal(ctx, grouped_left, grouped_right)?;
+        self.is_equal(ctx, left, right)?;
 
         Ok(ModOperationResult {
             quotient: assigned_q,

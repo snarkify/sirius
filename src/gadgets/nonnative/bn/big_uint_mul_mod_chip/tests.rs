@@ -423,7 +423,7 @@ mod components_tests {
                         )
                         .unwrap();
 
-                        chip.is_equal(&mut region, grouped_mult.clone(), grouped_mult.clone())
+                        chip.is_equal(&mut region, mult.res.clone(), mult.res.clone())
                             .unwrap();
 
                         Ok((mult.res.cells, sum.res.cells, grouped_mult.cells))
