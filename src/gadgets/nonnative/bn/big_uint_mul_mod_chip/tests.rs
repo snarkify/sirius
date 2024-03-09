@@ -364,7 +364,15 @@ mod components_tests {
                             )
                             .unwrap();
 
-                        let grouped_mult = chip.group_limbs(&mut region, mult.res.clone()).unwrap();
+                        let max_word_bn: BigUintRaw = big_uint::f_to_nat(&mult.res.max_word);
+
+                        let carry_bits = calc_carry_bits(&max_word_bn, LIMB_WIDTH).unwrap();
+                        let limbs_per_group =
+                            calc_limbs_per_group::<F>(carry_bits, LIMB_WIDTH).unwrap();
+
+                        let grouped_mult = chip
+                            .group_limbs(&mut region, mult.res.clone(), limbs_per_group)
+                            .unwrap();
 
                         // TODO Move to separate test
                         for bytes in [
@@ -415,7 +423,7 @@ mod components_tests {
                         )
                         .unwrap();
 
-                        chip.is_equal(&mut region, grouped_mult.clone(), grouped_mult.clone())
+                        chip.is_equal(&mut region, mult.res.clone(), mult.res.clone())
                             .unwrap();
 
                         Ok((mult.res.cells, sum.res.cells, grouped_mult.cells))
