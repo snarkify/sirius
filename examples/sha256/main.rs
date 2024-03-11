@@ -410,7 +410,7 @@ fn main() {
     .unwrap();
     info!("public params: {pp:?}");
 
-    IVC::fold(
+    IVC::fold_with_debug_mode(
         &pp,
         sc1,
         array::from_fn(|i| C1Scalar::from_u128(i as u128)),
