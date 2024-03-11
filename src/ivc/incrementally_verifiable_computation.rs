@@ -2,6 +2,7 @@ use std::{io, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
+use halo2_proofs::dev::MockProver;
 use halo2curves::CurveAffine;
 use log::*;
 use serde::Serialize;
@@ -58,6 +59,17 @@ pub enum Error {
     VerifyFailed(Vec<VerificationError>),
 }
 
+impl Error {
+    fn from_mock_verify(errors: Vec<halo2_proofs::dev::VerifyFailure>, is_primary: bool) -> Self {
+        Self::VerifyFailed(
+            errors
+                .into_iter()
+                .map(|err| VerificationError::MockRunFailed { err, is_primary })
+                .collect(),
+        )
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
     #[error("TODO")]
@@ -67,6 +79,11 @@ pub enum VerificationError {
         err: plonk::Error,
         is_primary: bool,
         is_relaxed: bool,
+    },
+    #[error("TODO")]
+    MockRunFailed {
+        err: halo2_proofs::dev::VerifyFailure,
+        is_primary: bool,
     },
 }
 
@@ -87,6 +104,8 @@ where
     secondary_nifs_pp: <nifs::vanilla::VanillaFS<C2> as FoldingScheme<C2>>::ProverParam,
     primary_nifs_pp: <nifs::vanilla::VanillaFS<C1> as FoldingScheme<C1>>::ProverParam,
     secondary_trace: PlonkTrace<C2>,
+
+    debug_mode: bool,
 }
 
 impl<const A1: usize, const A2: usize, C1, C2, SC1, SC2> IVC<A1, A2, C1, C2, SC1, SC2>
@@ -100,6 +119,32 @@ where
     C1::Base: PrimeFieldBits + FromUniformBytes<64>,
     C2::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
+    pub fn fold_with_debug_mode<const T: usize, RP1, RP2>(
+        pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
+        primary: SC1,
+        primary_z_0: [C1::Scalar; A1],
+        secondary: SC2,
+        secondary_z_0: [C2::Scalar; A2],
+        num_steps: NonZeroUsize,
+    ) -> Result<(), Error>
+    where
+        RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
+        RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
+    {
+        let mut ivc = Self::new(pp, primary, primary_z_0, secondary, secondary_z_0, true)?;
+        trace!("IVC created");
+
+        for step in 1..=num_steps.get() {
+            trace!("Start fold {step} step");
+            ivc.fold_step(pp)?;
+        }
+
+        trace!("Finish folding, start verify");
+
+        ivc.verify(pp)?;
+
+        Ok(())
+    }
     pub fn fold<const T: usize, RP1, RP2>(
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
         primary: SC1,
@@ -112,7 +157,7 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        let mut ivc = IVC::new(pp, primary, primary_z_0, secondary, secondary_z_0)?;
+        let mut ivc = Self::new(pp, primary, primary_z_0, secondary, secondary_z_0, false)?;
         trace!("IVC created");
 
         for step in 1..=num_steps.get() {
@@ -133,6 +178,7 @@ where
         primary_z_0: [C1::Scalar; A1],
         secondary: SC2,
         secondary_z_0: [C2::Scalar; A2],
+        debug_mode: bool,
     ) -> Result<Self, Error>
     where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
@@ -165,27 +211,36 @@ where
         ];
         debug!("primary instance calculated");
 
+        let primary_sfc = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
+            step_circuit: &primary,
+            input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
+                step: C2::Base::ZERO,
+                step_pp: pp.primary.params(),
+                public_params_hash: pp.digest_2(),
+                z_0: primary_z_0,
+                z_i: primary_z_0,
+                U: secondary_relaxed_trace.U.clone(),
+                u: secondary_pre_round_plonk_trace.u,
+                cross_term_commits: vec![
+                    C2::identity();
+                    pp.secondary.S().get_degree_for_folding().saturating_sub(1)
+                ],
+            },
+        };
+
+        if debug_mode {
+            MockProver::run(
+                pp.primary.k_table_size(),
+                &primary_sfc,
+                vec![primary_instance.to_vec()],
+            )?
+            .verify()
+            .map_err(|err| Error::from_mock_verify(err, true))?;
+        }
+
         let primary_witness = CircuitRunner::new(
             pp.primary.k_table_size(),
-            StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
-                step_circuit: &primary,
-                input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
-                    step: C2::Base::ZERO,
-                    step_pp: pp.primary.params(),
-                    public_params_hash: pp.digest_2(),
-                    z_0: primary_z_0,
-                    z_i: primary_z_0,
-                    U: secondary_relaxed_trace.U.clone(),
-                    u: secondary_pre_round_plonk_trace.u,
-                    cross_term_commits: vec![
-                        C2::identity();
-                        pp.secondary
-                            .S()
-                            .get_degree_for_folding()
-                            .saturating_sub(1)
-                    ],
-                },
-            },
+            primary_sfc,
             primary_instance.to_vec(),
         )
         .try_collect_witness()?;
@@ -224,27 +279,39 @@ where
             .generate_with_inspect(|buf| debug!("secondary X1 zero-step: {buf:?}")),
         ];
 
+        let secondary_sfc = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
+            step_circuit: &secondary,
+            input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
+                step: C1::Base::ZERO,
+                step_pp: pp.secondary.params(),
+                public_params_hash: pp.digest_1(),
+                z_0: secondary_z_0,
+                z_i: secondary_z_0,
+                U: primary_relaxed_trace.U.clone(),
+                u: primary_plonk_trace.u.clone(),
+                cross_term_commits: vec![
+                    C1::identity();
+                    primary_nifs_pp
+                        .S
+                        .get_degree_for_folding()
+                        .saturating_sub(1)
+                ],
+            },
+        };
+
+        if debug_mode {
+            MockProver::run(
+                pp.secondary.k_table_size(),
+                &secondary_sfc,
+                vec![secondary_instance.to_vec()],
+            )?
+            .verify()
+            .map_err(|err| Error::from_mock_verify(err, false))?;
+        }
+
         let secondary_witness = CircuitRunner::new(
             pp.secondary.k_table_size(),
-            StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
-                step_circuit: &secondary,
-                input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
-                    step: C1::Base::ZERO,
-                    step_pp: pp.secondary.params(),
-                    public_params_hash: pp.digest_1(),
-                    z_0: secondary_z_0,
-                    z_i: secondary_z_0,
-                    U: primary_relaxed_trace.U.clone(),
-                    u: primary_plonk_trace.u.clone(),
-                    cross_term_commits: vec![
-                        C1::identity();
-                        primary_nifs_pp
-                            .S
-                            .get_degree_for_folding()
-                            .saturating_sub(1)
-                    ],
-                },
-            },
+            secondary_sfc,
             secondary_instance.to_vec(),
         )
         .try_collect_witness()?;
@@ -262,6 +329,7 @@ where
 
         Ok(Self {
             step: 1,
+            debug_mode: false,
             secondary_nifs_pp,
             primary_nifs_pp,
             secondary_trace: secondary_plonk_trace.clone(),
@@ -322,21 +390,33 @@ where
             .generate_with_inspect(|buf| debug!("primary X1 {}+1-step: {buf:?}", self.step)),
         ];
 
+        let primary_sfc = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
+            step_circuit: &self.primary.step_circuit,
+            input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
+                step: C2::Base::from_u128(self.step as u128),
+                step_pp: pp.primary.params(),
+                public_params_hash: pp.digest_2(),
+                z_0: self.primary.z_0,
+                z_i: self.primary.z_i,
+                U: self.secondary.relaxed_trace.U.clone(),
+                u: self.secondary_trace.u.clone(),
+                cross_term_commits: secondary_cross_term_commits,
+            },
+        };
+
+        if self.debug_mode {
+            MockProver::run(
+                pp.primary.k_table_size(),
+                &primary_sfc,
+                vec![primary_instance.to_vec()],
+            )?
+            .verify()
+            .map_err(|err| Error::from_mock_verify(err, true))?;
+        }
+
         let primary_witness = CircuitRunner::new(
             pp.primary.k_table_size(),
-            StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
-                step_circuit: &self.primary.step_circuit,
-                input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
-                    step: C2::Base::from_u128(self.step as u128),
-                    step_pp: pp.primary.params(),
-                    public_params_hash: pp.digest_2(),
-                    z_0: self.primary.z_0,
-                    z_i: self.primary.z_i,
-                    U: self.secondary.relaxed_trace.U.clone(),
-                    u: self.secondary_trace.u.clone(),
-                    cross_term_commits: secondary_cross_term_commits,
-                },
-            },
+            primary_sfc,
             primary_instance.to_vec(),
         )
         .try_collect_witness()?;
@@ -384,21 +464,33 @@ where
             .generate_with_inspect(|buf| debug!("secondary X1 {}+1-step: {buf:?}", self.step)),
         ];
 
+        let secondary_sfc = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
+            step_circuit: &self.secondary.step_circuit,
+            input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
+                step: C1::Base::from_u128(self.step as u128),
+                step_pp: pp.secondary.params(),
+                public_params_hash: pp.digest().map_err(Error::WhileHash)?,
+                z_0: self.secondary.z_0,
+                z_i: self.secondary.z_i,
+                U: self.primary.relaxed_trace.U.clone(),
+                u: primary_plonk_trace.u.clone(),
+                cross_term_commits: primary_cross_term_commits,
+            },
+        };
+
+        if self.debug_mode {
+            MockProver::run(
+                pp.secondary.k_table_size(),
+                &secondary_sfc,
+                vec![secondary_instance.to_vec()],
+            )?
+            .verify()
+            .map_err(|err| Error::from_mock_verify(err, false))?;
+        }
+
         let secondary_witness = CircuitRunner::new(
             pp.secondary.k_table_size(),
-            StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
-                step_circuit: &self.secondary.step_circuit,
-                input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
-                    step: C1::Base::from_u128(self.step as u128),
-                    step_pp: pp.secondary.params(),
-                    public_params_hash: pp.digest().map_err(Error::WhileHash)?,
-                    z_0: self.secondary.z_0,
-                    z_i: self.secondary.z_i,
-                    U: self.primary.relaxed_trace.U.clone(),
-                    u: primary_plonk_trace.u.clone(),
-                    cross_term_commits: primary_cross_term_commits,
-                },
-            },
+            secondary_sfc,
             secondary_instance.to_vec(),
         )
         .try_collect_witness()?;
