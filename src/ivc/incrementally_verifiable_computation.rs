@@ -145,6 +145,9 @@ where
         let primary_z_output = primary.process_step(&primary_z_0, pp.primary.k_table_size())?;
         debug!("primary z output calculated off-circuit");
 
+        // Will be used as input & output `U` of zero-step of IVC
+        let secondary_relaxed_trace =
+            secondary_pre_round_plonk_trace.to_relax(pp.secondary.k_table_size() as usize);
         // Prepare primary constraint system for folding
         let primary_instance = [
             util::fe_to_fe(&secondary_pre_round_plonk_trace.u.instance[1]).unwrap(),
@@ -154,7 +157,7 @@ where
                 step: 1,
                 z_0: &primary_z_0,
                 z_i: &primary_z_output,
-                relaxed: &secondary_pre_round_plonk_trace.u.to_relax(),
+                relaxed: &secondary_relaxed_trace.U,
                 limb_width: pp.primary.params().limb_width(),
                 limbs_count: pp.primary.params().limbs_count(),
             }
@@ -172,7 +175,7 @@ where
                     public_params_hash: pp.digest_2(),
                     z_0: primary_z_0,
                     z_i: primary_z_0,
-                    U: secondary_pre_round_plonk_trace.u.to_relax(),
+                    U: secondary_relaxed_trace.U.clone(),
                     u: secondary_pre_round_plonk_trace.u,
                     cross_term_commits: vec![
                         C2::identity();
@@ -203,6 +206,9 @@ where
         let secondary_z_output =
             secondary.process_step(&secondary_z_0, pp.secondary.k_table_size())?;
 
+        // Will be used as input & output `U` of zero-step of IVC
+        let primary_relaxed_trace =
+            primary_plonk_trace.to_relax(pp.primary.k_table_size() as usize);
         let secondary_instance = [
             util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
@@ -211,7 +217,7 @@ where
                 step: 1,
                 z_0: &secondary_z_0,
                 z_i: &secondary_z_output,
-                relaxed: &primary_plonk_trace.u.to_relax(),
+                relaxed: &primary_relaxed_trace.U,
                 limb_width: pp.secondary.params().limb_width(),
                 limbs_count: pp.secondary.params().limbs_count(),
             }
@@ -228,7 +234,7 @@ where
                     public_params_hash: pp.digest_1(),
                     z_0: secondary_z_0,
                     z_i: secondary_z_0,
-                    U: primary_plonk_trace.u.to_relax(),
+                    U: primary_relaxed_trace.U.clone(),
                     u: primary_plonk_trace.u.clone(),
                     cross_term_commits: vec![
                         C1::identity();
@@ -263,13 +269,13 @@ where
                 step_circuit: primary,
                 z_0: primary_z_0,
                 z_i: primary_z_output,
-                relaxed_trace: primary_plonk_trace.to_relax(pp.primary.k_table_size() as usize),
+                relaxed_trace: primary_relaxed_trace,
             },
             secondary: StepCircuitContext {
                 step_circuit: secondary,
                 z_0: secondary_z_0,
                 z_i: secondary_z_output,
-                relaxed_trace: secondary_plonk_trace.to_relax(pp.secondary.k_table_size() as usize),
+                relaxed_trace: secondary_relaxed_trace,
             },
         })
     }
