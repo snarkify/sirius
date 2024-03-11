@@ -233,43 +233,29 @@ where
         config: StepConfig<ARITY, C::Base, SC, T>,
         mut layouter: impl Layouter<C::Base>,
     ) -> Result<(), halo2_proofs::plonk::Error> {
-        let assigned_z_i: [_; ARITY] = layouter.assign_region(
-            || "assigned_zi",
-            |region| {
-                let mut region = RegionCtx::new(region, 0);
-
-                config
-                    .main_gate_config
-                    .advice_cycle_assigner()
-                    .assign_all_advice(&mut region, || "z0_primary", self.input.z_0.iter().copied())
-                    .map(|inp| inp.try_into().unwrap())
-            },
-        )?;
-        debug!("assigned z_i");
-
-        let assigned_z_0: [_; ARITY] = layouter
+        let (assigned_z_0, assigned_z_i): ([_; ARITY], [_; ARITY]) = layouter
             .assign_region(
-                || "assigned_z0_primary",
+                || "assign z_0 & z_i",
                 |region| {
                     let mut region = RegionCtx::new(region, 0);
 
-                    config
-                        .main_gate_config
-                        .advice_cycle_assigner()
-                        .assign_all_advice(
-                            &mut region,
-                            || "z0_primary",
-                            self.input.z_0.iter().copied(),
-                        )
-                        .map(|inp| inp.try_into().unwrap())
+                    let mut assigner = config.main_gate_config.advice_cycle_assigner();
+
+                    let z_0 = assigner
+                        .assign_all_advice(&mut region, || "z_0", self.input.z_0.iter().copied())
+                        .map(|inp| inp.try_into().unwrap())?;
+
+                    let z_i = assigner
+                        .assign_all_advice(&mut region, || "z_i", self.input.z_i.iter().copied())
+                        .map(|inp| inp.try_into().unwrap())?;
+
+                    Ok((z_0, z_i))
                 },
             )
             .map_err(|err| {
-                error!("while assigned_z0_primary: {err:?}");
+                error!("while assign z_0 & z_i: {err:?}");
                 halo2_proofs::plonk::Error::Synthesis
             })?;
-
-        debug!("assigned z_0");
 
         let chip = FoldRelaxedPlonkInstanceChip::new(
             self.input.U.clone(),
