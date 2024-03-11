@@ -60,11 +60,19 @@ pub enum Error {
 }
 
 impl Error {
-    fn from_mock_verify(errors: Vec<halo2_proofs::dev::VerifyFailure>, is_primary: bool) -> Self {
+    fn from_mock_verify(
+        errors: Vec<halo2_proofs::dev::VerifyFailure>,
+        is_primary: bool,
+        step: usize,
+    ) -> Self {
         Self::VerifyFailed(
             errors
                 .into_iter()
-                .map(|err| VerificationError::MockRunFailed { err, is_primary })
+                .map(|err| VerificationError::MockRunFailed {
+                    err,
+                    is_primary,
+                    step,
+                })
                 .collect(),
         )
     }
@@ -84,6 +92,7 @@ pub enum VerificationError {
     MockRunFailed {
         err: halo2_proofs::dev::VerifyFailure,
         is_primary: bool,
+        step: usize,
     },
 }
 
@@ -235,7 +244,7 @@ where
                 vec![primary_instance.to_vec()],
             )?
             .verify()
-            .map_err(|err| Error::from_mock_verify(err, true))?;
+            .map_err(|err| Error::from_mock_verify(err, true, 0))?;
         }
 
         let primary_witness = CircuitRunner::new(
@@ -306,7 +315,7 @@ where
                 vec![secondary_instance.to_vec()],
             )?
             .verify()
-            .map_err(|err| Error::from_mock_verify(err, false))?;
+            .map_err(|err| Error::from_mock_verify(err, false, 0))?;
         }
 
         let secondary_witness = CircuitRunner::new(
@@ -411,7 +420,7 @@ where
                 vec![primary_instance.to_vec()],
             )?
             .verify()
-            .map_err(|err| Error::from_mock_verify(err, true))?;
+            .map_err(|err| Error::from_mock_verify(err, true, self.step))?;
         }
 
         let primary_witness = CircuitRunner::new(
@@ -485,7 +494,7 @@ where
                 vec![secondary_instance.to_vec()],
             )?
             .verify()
-            .map_err(|err| Error::from_mock_verify(err, false))?;
+            .map_err(|err| Error::from_mock_verify(err, false, self.step))?;
         }
 
         let secondary_witness = CircuitRunner::new(
