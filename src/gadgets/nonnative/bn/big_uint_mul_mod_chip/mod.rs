@@ -9,9 +9,9 @@ use bitter::{BitReader, LittleEndianReader};
 use ff::PrimeField;
 use halo2_proofs::circuit::{AssignedCell, Chip, Value};
 use itertools::{EitherOrBoth, Itertools};
-use log::*;
 use num_bigint::BigUint as BigUintRaw;
 use num_traits::{One, ToPrimitive, Zero};
+use tracing::*;
 
 use crate::{
     main_gate::{AssignAdviceFrom, MainGate, MainGateConfig, RegionCtx},

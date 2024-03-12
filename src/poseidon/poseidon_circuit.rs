@@ -5,8 +5,8 @@ use halo2_proofs::{
     circuit::{AssignedCell, Chip, Value},
     plonk::Error,
 };
-use log::*;
 use poseidon::{self};
+use tracing::*;
 
 use crate::{
     constants::MAX_BITS,

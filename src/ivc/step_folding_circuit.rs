@@ -8,8 +8,8 @@ use halo2_proofs::{
 };
 use halo2curves::CurveAffine;
 use itertools::Itertools;
-use log::*;
 use serde::Serialize;
+use tracing::*;
 
 use crate::{
     ivc::{

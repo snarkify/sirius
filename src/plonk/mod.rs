@@ -15,10 +15,10 @@
 //! Additionally, it defines a method is_sat on PlonkStructure to determine if
 //! a given Plonk instance and witness satisfy the circuit constraints.
 use itertools::Itertools;
-use log::*;
 use rayon::prelude::*;
 use serde::Serialize;
 use std::iter;
+use tracing::*;
 
 use ff::{Field, PrimeField};
 use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};

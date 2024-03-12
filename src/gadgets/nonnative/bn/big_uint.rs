@@ -5,9 +5,9 @@ use halo2_proofs::{
     circuit::{AssignedCell, Value},
     plonk::{Advice, Column},
 };
-use log::*;
 use num_bigint::BigUint as BigUintRaw;
 use num_traits::{identities::One, Zero};
+use tracing::*;
 
 use crate::{error::Halo2PlonkError, main_gate::RegionCtx};
 

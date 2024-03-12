@@ -3,8 +3,8 @@ use std::{iter, mem};
 
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2curves::group::ff::{FromUniformBytes, PrimeField};
-use log::*;
 use poseidon::{self, SparseMDSMatrix};
+use tracing::*;
 
 use crate::poseidon::{ROConstantsTrait, ROTrait};
 use crate::util::{bits_to_fe_le, fe_to_bits_le};

@@ -9,10 +9,10 @@ use std::{
 use digest::{ExtendableOutput, Update};
 use group::Curve;
 use halo2_proofs::arithmetic::{best_multiexp, CurveAffine, CurveExt};
-use log::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha3::Shake256;
+use tracing::*;
 
 use crate::util::parallelize;
 

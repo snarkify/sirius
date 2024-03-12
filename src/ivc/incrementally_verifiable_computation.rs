@@ -4,8 +4,8 @@ use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2_proofs::dev::MockProver;
 use halo2curves::CurveAffine;
-use log::*;
 use serde::Serialize;
+use tracing::*;
 
 use crate::{
     ivc::{

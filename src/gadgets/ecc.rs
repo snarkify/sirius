@@ -5,8 +5,8 @@ use halo2_proofs::{
     circuit::{Chip, Value},
     plonk::Error,
 };
-use log::*;
 use std::cmp;
+use tracing::*;
 
 // assume point is not infinity
 #[derive(Clone, Debug)]
