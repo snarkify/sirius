@@ -447,7 +447,7 @@ where
 
         Ok(Self {
             step: 1,
-            debug_mode: false,
+            debug_mode,
             secondary_nifs_pp,
             primary_nifs_pp,
             secondary_trace: secondary_plonk_trace.clone(),
