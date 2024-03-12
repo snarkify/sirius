@@ -61,7 +61,13 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 }
 
 fn main() {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .event_format(
+            tracing_subscriber::fmt::format()
+                .with_file(true)
+                .with_line_number(true),
+        )
+        .init();
 
     info!("Start");
     // C1
@@ -117,7 +123,7 @@ fn main() {
         array::from_fn(|i| C1Scalar::from_u128(i as u128)),
         sc2,
         array::from_fn(|i| C2Scalar::from_u128(i as u128)),
-        NonZeroUsize::new(5).unwrap(),
+        NonZeroUsize::new(1).unwrap(),
     )
     .unwrap();
 }
