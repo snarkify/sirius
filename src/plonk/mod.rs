@@ -251,7 +251,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         let nrow = 1 << self.k;
         let res = (0..nrow)
             .into_par_iter()
-            .map(|row| data.eval(&self.poly, row))
+            .map(|row| data.eval(&self.poly, row, false))
             .collect::<Result<Vec<F>, _>>()
             .map(|v| v.into_iter().filter(|v| F::ZERO.ne(v)).count())?;
 
@@ -297,7 +297,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         };
         let res = (0..nrow)
             .into_par_iter()
-            .map(|row| data.eval(&poly, row))
+            .map(|row| data.eval(&poly, row, false))
             .collect::<Result<Vec<F>, _>>()?
             .into_iter()
             .enumerate()

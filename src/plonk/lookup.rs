@@ -225,7 +225,7 @@ impl<F: PrimeField> Arguments<F> {
             .map(|poly| {
                 (0..nrow)
                     .into_par_iter()
-                    .map(|row| data.eval(&poly, row))
+                    .map(|row| data.eval(&poly, row, false))
                     .collect::<Result<Vec<F>, Error>>()
             })
             .collect()
@@ -257,7 +257,7 @@ impl<F: PrimeField> Arguments<F> {
             .map(|poly| {
                 (0..nrow)
                     .into_par_iter()
-                    .map(|row| data.eval(&poly, row))
+                    .map(|row| data.eval(&poly, row, false))
                     .collect::<Result<Vec<_>, Error>>()
             })
             .collect()

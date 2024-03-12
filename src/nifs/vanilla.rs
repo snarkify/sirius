@@ -108,7 +108,7 @@ impl<C: CurveAffine> VanillaFS<C> {
             .map(|multipoly| {
                 (0..num_row)
                     .into_par_iter()
-                    .map(|row| data.eval(&multipoly, row))
+                    .map(|row| data.eval(&multipoly, row, false))
                     .collect::<Result<Vec<C::ScalarExt>, EvalError>>()
             })
             .collect::<Result<Vec<Vec<C::ScalarExt>>, EvalError>>()?;

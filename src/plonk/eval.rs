@@ -1,5 +1,6 @@
 use crate::polynomial::{ColumnIndex, MultiPolynomial};
 use ff::PrimeField;
+use log::*;
 use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -75,7 +76,7 @@ pub trait Eval<F: PrimeField> {
     /// to evaluate each monomial term of the form $c*x1[row]^{k1}*x2[row]^{k2}*\cdots$, we first lookup
     /// the value of $x[row]$ from the EvaluationDomain, then calculate the value of monomial.
     /// to speedup, we will save the x and x^k in a HashMap
-    fn eval(&self, poly: &MultiPolynomial<F>, row: usize) -> Result<F, Error> {
+    fn eval(&self, poly: &MultiPolynomial<F>, row: usize, inspect: bool) -> Result<F, Error> {
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         struct Index<'l> {
             column_index: &'l ColumnIndex,
@@ -136,6 +137,13 @@ pub trait Eval<F: PrimeField> {
                                     exp: &1,
                                 })
                                 .or_insert_with(|| v1.pow([1, 0, 0, 0]));
+
+                            if inspect {
+                                debug!(
+                                    "Polynomial Value Inspection, row = {}, col={:?}, val = {:?}",
+                                    row, &column_index, &v1
+                                );
+                            }
 
                             Ok(*evals
                                 .entry(Index { column_index, exp })
