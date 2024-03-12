@@ -206,17 +206,36 @@ where
             secondary_pre_round_plonk_trace.to_relax(pp.secondary.k_table_size() as usize);
 
         if debug_mode {
+            let mut errors = vec![];
+
             if let Err(err) = pp.secondary.S().is_sat_relaxed(
                 pp.secondary.ck(),
                 &secondary_relaxed_trace.U,
                 &secondary_relaxed_trace.W,
             ) {
-                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
+                errors.push(VerificationError::NotSat {
                     err,
                     is_primary: false,
                     is_relaxed: true,
                     step: 0,
-                }]));
+                });
+            }
+
+            if let Err(err) = pp
+                .secondary
+                .S()
+                .is_sat_perm(&secondary_relaxed_trace.U, &secondary_relaxed_trace.W)
+            {
+                errors.push(VerificationError::NotSat {
+                    err,
+                    is_primary: false,
+                    is_relaxed: true,
+                    step: 0,
+                });
+            }
+
+            if !errors.is_empty() {
+                return Err(Error::VerifyFailed(errors));
             }
         }
 
@@ -308,17 +327,36 @@ where
             primary_plonk_trace.to_relax(pp.primary.k_table_size() as usize);
 
         if debug_mode {
+            let mut errors = vec![];
+
             if let Err(err) = pp.primary.S().is_sat_relaxed(
                 pp.primary.ck(),
                 &primary_relaxed_trace.U,
                 &primary_relaxed_trace.W,
             ) {
-                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
+                errors.push(VerificationError::NotSat {
                     err,
                     is_primary: false,
                     is_relaxed: false,
                     step: 0,
-                }]));
+                });
+            }
+
+            if let Err(err) = pp
+                .primary
+                .S()
+                .is_sat_perm(&primary_relaxed_trace.U, &primary_relaxed_trace.W)
+            {
+                errors.push(VerificationError::NotSat {
+                    err,
+                    is_primary: false,
+                    is_relaxed: false,
+                    step: 0,
+                });
+            }
+
+            if !errors.is_empty() {
+                return Err(Error::VerifyFailed(errors));
             }
         }
 
@@ -443,17 +481,35 @@ where
             )?;
 
         if self.debug_mode {
+            let mut errors = vec![];
+
             if let Err(err) = pp.secondary.S().is_sat_relaxed(
                 pp.secondary.ck(),
                 &secondary_new_relaxed_trace.U,
                 &secondary_new_relaxed_trace.W,
             ) {
-                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
+                errors.push(VerificationError::NotSat {
                     err,
                     is_primary: false,
                     is_relaxed: true,
                     step: self.step,
-                }]));
+                });
+            }
+
+            if let Err(err) = pp.secondary.S().is_sat_perm(
+                &secondary_new_relaxed_trace.U,
+                &secondary_new_relaxed_trace.W,
+            ) {
+                errors.push(VerificationError::NotSat {
+                    err,
+                    is_primary: false,
+                    is_relaxed: true,
+                    step: self.step,
+                });
+            }
+
+            if !errors.is_empty() {
+                return Err(Error::VerifyFailed(errors));
             }
         }
 
@@ -549,17 +605,35 @@ where
             )?;
 
         if self.debug_mode {
+            let mut errors = vec![];
+
             if let Err(err) = pp.primary.S().is_sat_relaxed(
                 pp.primary.ck(),
                 &primary_new_relaxed_trace.U,
                 &primary_new_relaxed_trace.W,
             ) {
-                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
+                errors.push(VerificationError::NotSat {
                     err,
                     is_primary: false,
                     is_relaxed: false,
                     step: self.step,
-                }]));
+                });
+            }
+            if let Err(err) = pp
+                .primary
+                .S()
+                .is_sat_perm(&primary_new_relaxed_trace.U, &primary_new_relaxed_trace.W)
+            {
+                errors.push(VerificationError::NotSat {
+                    err,
+                    is_primary: false,
+                    is_relaxed: true,
+                    step: self.step,
+                })
+            }
+
+            if !errors.is_empty() {
+                return Err(Error::VerifyFailed(errors));
             }
         }
 
