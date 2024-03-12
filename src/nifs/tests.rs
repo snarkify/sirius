@@ -67,6 +67,8 @@ where
             .err(),
         None
     );
+    let pair1_relaxed = pair1.to_relax(S.k);
+    assert_eq!(S.is_sat_perm(&pair1_relaxed.U, &pair1_relaxed.W).err(), None);
     let pair2 =
         VanillaFS::generate_plonk_trace(&ck, &public_inputs2, &W2, &pp, &mut ro_nark_prepare)?;
     assert_eq!(
@@ -74,6 +76,8 @@ where
             .err(),
         None
     );
+    let pair2_relaxed = pair2.to_relax(S.k);
+    assert_eq!(S.is_sat_perm(&pair2_relaxed.U, &pair2_relaxed.W).err(), None);
 
     Ok((ck, S, pair1, pair2))
 }
