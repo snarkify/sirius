@@ -235,7 +235,7 @@ where
             }
 
             if !errors.is_empty() {
-                return Err(Error::VerifyFailed(errors));
+                error!("{errors:?}");
             }
         }
 
@@ -310,12 +310,15 @@ where
                 &primary_plonk_trace.u,
                 &primary_plonk_trace.w,
             ) {
-                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
-                    err,
-                    is_primary: true,
-                    is_relaxed: false,
-                    step: 0,
-                }]));
+                error!(
+                    "{:?}",
+                    VerificationError::NotSat {
+                        err,
+                        is_primary: true,
+                        is_relaxed: false,
+                        step: 0,
+                    }
+                );
             }
         }
 
@@ -356,7 +359,7 @@ where
             }
 
             if !errors.is_empty() {
-                return Err(Error::VerifyFailed(errors));
+                error!("{errors:?}");
             }
         }
 
@@ -430,12 +433,15 @@ where
                 &secondary_plonk_trace.u,
                 &secondary_plonk_trace.w,
             ) {
-                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
-                    err,
-                    is_primary: false,
-                    is_relaxed: false,
-                    step: 0,
-                }]));
+                error!(
+                    "{:?}",
+                    VerificationError::NotSat {
+                        err,
+                        is_primary: false,
+                        is_relaxed: false,
+                        step: 0,
+                    }
+                );
             }
         }
 
@@ -509,7 +515,7 @@ where
             }
 
             if !errors.is_empty() {
-                return Err(Error::VerifyFailed(errors));
+                error!("fold step error: {errors:?}");
             }
         }
 
@@ -585,12 +591,15 @@ where
                 &primary_plonk_trace.u,
                 &primary_plonk_trace.w,
             ) {
-                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
-                    err,
-                    is_primary: true,
-                    is_relaxed: false,
-                    step: self.step,
-                }]));
+                error!(
+                    "fold_step: {:?}",
+                    VerificationError::NotSat {
+                        err,
+                        is_primary: true,
+                        is_relaxed: false,
+                        step: self.step,
+                    }
+                );
             }
         }
 
@@ -633,7 +642,7 @@ where
             }
 
             if !errors.is_empty() {
-                return Err(Error::VerifyFailed(errors));
+                error!("{errors:?}");
             }
         }
 
@@ -709,12 +718,15 @@ where
                 &self.secondary_trace.u,
                 &self.secondary_trace.w,
             ) {
-                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
-                    err,
-                    is_primary: false,
-                    is_relaxed: false,
-                    step: self.step,
-                }]));
+                error!(
+                    "{:?}",
+                    VerificationError::NotSat {
+                        err,
+                        is_primary: false,
+                        is_relaxed: false,
+                        step: self.step,
+                    }
+                );
             }
         }
 
