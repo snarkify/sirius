@@ -609,6 +609,28 @@ where
             })
         }
 
+        if let Err(err) = pp.primary.S().is_sat_perm(
+            &self.primary.relaxed_trace.U,
+            &self.primary.relaxed_trace.W,
+        ) {
+            errors.push(VerificationError::NotSat {
+                err,
+                is_primary: false,
+                is_relaxed: true,
+            })
+        }
+
+        if let Err(err) = pp.secondary.S().is_sat_perm(
+            &self.secondary.relaxed_trace.U,
+            &self.secondary.relaxed_trace.W,
+        ) {
+            errors.push(VerificationError::NotSat {
+                err,
+                is_primary: false,
+                is_relaxed: true,
+            })
+        }
+
         if errors.is_empty() {
             Ok(())
         } else {
