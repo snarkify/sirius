@@ -87,6 +87,7 @@ pub enum VerificationError {
         err: plonk::Error,
         is_primary: bool,
         is_relaxed: bool,
+        step: usize,
     },
     #[error("TODO")]
     MockRunFailed {
@@ -203,6 +204,22 @@ where
         // Will be used as input & output `U` of zero-step of IVC
         let secondary_relaxed_trace =
             secondary_pre_round_plonk_trace.to_relax(pp.secondary.k_table_size() as usize);
+
+        if debug_mode {
+            if let Err(err) = pp.secondary.S().is_sat_relaxed(
+                pp.secondary.ck(),
+                &secondary_relaxed_trace.U,
+                &secondary_relaxed_trace.W,
+            ) {
+                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
+                    err,
+                    is_primary: false,
+                    is_relaxed: true,
+                    step: 0,
+                }]));
+            }
+        }
+
         // Prepare primary constraint system for folding
         let primary_instance = [
             util::fe_to_fe(&secondary_pre_round_plonk_trace.u.instance[1]).unwrap(),
@@ -267,12 +284,44 @@ where
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?;
 
+        if debug_mode {
+            if let Err(err) = pp.primary.S().is_sat(
+                pp.primary.ck(),
+                &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+                &primary_plonk_trace.u,
+                &primary_plonk_trace.w,
+            ) {
+                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
+                    err,
+                    is_primary: true,
+                    is_relaxed: false,
+                    step: 0,
+                }]));
+            }
+        }
+
         let secondary_z_output =
             secondary.process_step(&secondary_z_0, pp.secondary.k_table_size())?;
 
         // Will be used as input & output `U` of zero-step of IVC
         let primary_relaxed_trace =
             primary_plonk_trace.to_relax(pp.primary.k_table_size() as usize);
+
+        if debug_mode {
+            if let Err(err) = pp.primary.S().is_sat_relaxed(
+                pp.primary.ck(),
+                &primary_relaxed_trace.U,
+                &primary_relaxed_trace.W,
+            ) {
+                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
+                    err,
+                    is_primary: false,
+                    is_relaxed: false,
+                    step: 0,
+                }]));
+            }
+        }
+
         let secondary_instance = [
             util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
@@ -336,6 +385,22 @@ where
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
         )?;
 
+        if debug_mode {
+            if let Err(err) = pp.secondary.S().is_sat(
+                pp.secondary.ck(),
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+                &secondary_plonk_trace.u,
+                &secondary_plonk_trace.w,
+            ) {
+                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
+                    err,
+                    is_primary: false,
+                    is_relaxed: false,
+                    step: 0,
+                }]));
+            }
+        }
+
         Ok(Self {
             step: 1,
             debug_mode: false,
@@ -368,13 +433,29 @@ where
         debug!("start fold step with folding 'secondary' by 'primary'");
 
         debug!("start prove secondary trace");
-        let (secondary_new_trace, secondary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
-            pp.secondary.ck(),
-            &self.secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-            &self.secondary.relaxed_trace,
-            &self.secondary_trace,
-        )?;
+        let (secondary_new_relaxed_trace, secondary_cross_term_commits) =
+            nifs::vanilla::VanillaFS::prove(
+                pp.secondary.ck(),
+                &self.secondary_nifs_pp,
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+                &self.secondary.relaxed_trace,
+                &self.secondary_trace,
+            )?;
+
+        if self.debug_mode {
+            if let Err(err) = pp.secondary.S().is_sat_relaxed(
+                pp.secondary.ck(),
+                &secondary_new_relaxed_trace.U,
+                &secondary_new_relaxed_trace.W,
+            ) {
+                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
+                    err,
+                    is_primary: false,
+                    is_relaxed: true,
+                    step: self.step,
+                }]));
+            }
+        }
 
         debug!("prepare primary td");
 
@@ -392,7 +473,7 @@ where
                 step: self.step + 1,
                 z_0: &self.primary.z_0,
                 z_i: &primary_z_next,
-                relaxed: &secondary_new_trace.U,
+                relaxed: &secondary_new_relaxed_trace.U,
                 limb_width: pp.secondary.params().limb_width(),
                 limbs_count: pp.secondary.params().limbs_count(),
             }
@@ -431,7 +512,7 @@ where
         .try_collect_witness()?;
 
         self.primary.z_i = primary_z_next;
-        self.secondary.relaxed_trace = secondary_new_trace;
+        self.secondary.relaxed_trace = secondary_new_relaxed_trace;
 
         let primary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.primary.ck(),
@@ -441,14 +522,46 @@ where
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?;
 
+        if self.debug_mode {
+            if let Err(err) = pp.primary.S().is_sat(
+                pp.primary.ck(),
+                &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+                &primary_plonk_trace.u,
+                &primary_plonk_trace.w,
+            ) {
+                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
+                    err,
+                    is_primary: true,
+                    is_relaxed: false,
+                    step: self.step,
+                }]));
+            }
+        }
+
         debug!("start prove primary trace");
-        let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
-            pp.primary.ck(),
-            &self.primary_nifs_pp,
-            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-            &self.primary.relaxed_trace,
-            &primary_plonk_trace,
-        )?;
+        let (primary_new_relaxed_trace, primary_cross_term_commits) =
+            nifs::vanilla::VanillaFS::prove(
+                pp.primary.ck(),
+                &self.primary_nifs_pp,
+                &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+                &self.primary.relaxed_trace,
+                &primary_plonk_trace,
+            )?;
+
+        if self.debug_mode {
+            if let Err(err) = pp.primary.S().is_sat_relaxed(
+                pp.primary.ck(),
+                &primary_new_relaxed_trace.U,
+                &primary_new_relaxed_trace.W,
+            ) {
+                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
+                    err,
+                    is_primary: false,
+                    is_relaxed: false,
+                    step: self.step,
+                }]));
+            }
+        }
 
         debug!("start fold step with folding 'primary' by 'secondary'");
         debug!("prepare secondary td");
@@ -466,7 +579,7 @@ where
                 step: self.step + 1,
                 z_0: &self.secondary.z_0,
                 z_i: &next_secondary_z_i,
-                relaxed: &primary_new_trace.U,
+                relaxed: &primary_new_relaxed_trace.U,
                 limb_width: pp.primary.params().limb_width(),
                 limbs_count: pp.primary.params().limbs_count(),
             }
@@ -505,7 +618,7 @@ where
         .try_collect_witness()?;
 
         self.secondary.z_i = next_secondary_z_i;
-        self.primary.relaxed_trace = primary_new_trace;
+        self.primary.relaxed_trace = primary_new_relaxed_trace;
 
         self.secondary_trace = VanillaFS::generate_plonk_trace(
             pp.secondary.ck(),
@@ -514,6 +627,22 @@ where
             &self.secondary_nifs_pp,
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
         )?;
+
+        if self.debug_mode {
+            if let Err(err) = pp.secondary.S().is_sat(
+                pp.secondary.ck(),
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+                &self.secondary_trace.u,
+                &self.secondary_trace.w,
+            ) {
+                return Err(Error::VerifyFailed(vec![VerificationError::NotSat {
+                    err,
+                    is_primary: false,
+                    is_relaxed: false,
+                    step: self.step,
+                }]));
+            }
+        }
 
         self.step += 1;
 
@@ -581,6 +710,7 @@ where
                 err,
                 is_primary: true,
                 is_relaxed: false,
+                step: self.step,
             })
         }
 
@@ -593,6 +723,7 @@ where
                 err,
                 is_primary: false,
                 is_relaxed: true,
+                step: self.step,
             })
         }
 
@@ -606,17 +737,20 @@ where
                 err,
                 is_primary: false,
                 is_relaxed: true,
+                step: self.step,
             })
         }
 
-        if let Err(err) = pp.primary.S().is_sat_perm(
-            &self.primary.relaxed_trace.U,
-            &self.primary.relaxed_trace.W,
-        ) {
+        if let Err(err) = pp
+            .primary
+            .S()
+            .is_sat_perm(&self.primary.relaxed_trace.U, &self.primary.relaxed_trace.W)
+        {
             errors.push(VerificationError::NotSat {
                 err,
                 is_primary: false,
                 is_relaxed: true,
+                step: self.step,
             })
         }
 
@@ -628,6 +762,7 @@ where
                 err,
                 is_primary: false,
                 is_relaxed: true,
+                step: self.step,
             })
         }
 
