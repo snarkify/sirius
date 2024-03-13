@@ -344,7 +344,7 @@ macro_rules! create_and_verify_proof {
         let pk = keygen_pk(&params, vk, &$circuit).expect("keygen_pk should not fail");
 
         // prove
-        let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+        let mut transcript = Blake2bWrite::<_, _, _>::init(vec![]);
         create_proof::<IPACommitmentScheme<_>, ProverIPA<_>, _, _, _, _>(
             &params,
             &pk,

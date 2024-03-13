@@ -2,8 +2,11 @@ use std::{io, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
-use halo2_proofs::dev::MockProver;
+use halo2_proofs::{
+    dev::MockProver, poly::ipa::strategy::SingleStrategy, transcript::Blake2bWrite,
+};
 use halo2curves::CurveAffine;
+use rand_core::OsRng;
 use serde::Serialize;
 use tracing::*;
 
@@ -274,17 +277,63 @@ where
         };
 
         if debug_mode {
-            crate::create_and_verify_proof!(
-                IPA,
-                pp.primary.k_table_size(),
-                StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
+            use halo2_proofs::{
+                plonk,
+                poly::{
+                    commitment::ParamsProver,
+                    ipa::{
+                        commitment::{IPACommitmentScheme, ParamsIPA},
+                        multiopen::ProverIPA,
+                    },
+                    VerificationStrategy,
+                },
+                transcript::{Blake2bRead, TranscriptReadBuffer, TranscriptWriterBuffer},
+            };
+
+            let params: ParamsIPA<C1> = ParamsIPA::new(pp.primary.k_table_size());
+
+            let vk = plonk::keygen_vk(&params, &primary_sfc).unwrap();
+            let pk = plonk::keygen_pk(&params, vk, &primary_sfc).unwrap();
+
+            let mut transcript = Blake2bWrite::<_, C1, _>::init(vec![]);
+
+            println!("Generating Proof!");
+
+            plonk::create_proof::<IPACommitmentScheme<_>, ProverIPA<_>, _, _, _, _>(
+                &params,
+                &pk,
+                &[StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
                     step_circuit: &primary,
                     input: primary_sfc.input.clone(),
-                },
-                &[&primary_instance],
-                C1
+                }],
+                &[&[&primary_instance]],
+                &mut OsRng,
+                &mut transcript,
+            )
+            .expect("Failed to create proof!");
+
+            let proof = transcript.finalize();
+            debug!("{proof:?}");
+            let mut transcript_proof = Blake2bRead::init(&proof[..]);
+
+            let verified_proof_result = plonk::verify_proof(
+                &params,
+                pk.get_vk(),
+                SingleStrategy::new(&params),
+                &[&[&[]]],
+                &mut transcript_proof,
             );
-            info!("IPA primary pass");
+
+            if verified_proof_result.is_ok() {
+                info!("IPA Proof verified!");
+            } else {
+                error!(
+                    "IPA Proof verification failed! {}",
+                    verified_proof_result.err().unwrap()
+                );
+            }
+
+            debug!("IPA PASS PRIMARY");
         }
 
         let primary_witness = CircuitRunner::new(
@@ -403,17 +452,63 @@ where
         };
 
         if debug_mode {
-            crate::create_and_verify_proof!(
-                IPA,
-                pp.secondary.k_table_size(),
-                StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
+            use halo2_proofs::{
+                plonk,
+                poly::{
+                    commitment::ParamsProver,
+                    ipa::{
+                        commitment::{IPACommitmentScheme, ParamsIPA},
+                        multiopen::ProverIPA,
+                    },
+                    VerificationStrategy,
+                },
+                transcript::{Blake2bRead, TranscriptReadBuffer, TranscriptWriterBuffer},
+            };
+
+            let params: ParamsIPA<C2> = ParamsIPA::new(pp.secondary.k_table_size());
+
+            let vk = plonk::keygen_vk(&params, &secondary_sfc).unwrap();
+            let pk = plonk::keygen_pk(&params, vk, &secondary_sfc).unwrap();
+
+            let mut transcript = Blake2bWrite::<_, C2, _>::init(vec![]);
+
+            println!("Generating Proof!");
+
+            plonk::create_proof::<IPACommitmentScheme<_>, ProverIPA<_>, _, _, _, _>(
+                &params,
+                &pk,
+                &[StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
                     step_circuit: &secondary,
                     input: secondary_sfc.input.clone(),
-                },
-                &[&secondary_instance],
-                C2
+                }],
+                &[&[&secondary_instance]],
+                &mut OsRng,
+                &mut transcript,
+            )
+            .expect("Failed to create proof!");
+
+            let proof = transcript.finalize();
+            debug!("{proof:?}");
+            let mut transcript_proof = Blake2bRead::init(&proof[..]);
+
+            let verified_proof_result = plonk::verify_proof(
+                &params,
+                pk.get_vk(),
+                SingleStrategy::new(&params),
+                &[&[&[]]],
+                &mut transcript_proof,
             );
-            info!("IPA second pass");
+
+            if verified_proof_result.is_ok() {
+                info!("IPA Proof verified!");
+            } else {
+                error!(
+                    "IPA Proof verification failed! {}",
+                    verified_proof_result.err().unwrap()
+                );
+            }
+
+            debug!("IPA PASS SECONDARY");
         }
 
         let secondary_witness = CircuitRunner::new(
@@ -565,16 +660,13 @@ where
         };
 
         if self.debug_mode {
-            crate::create_and_verify_proof!(
-                IPA,
+            MockProver::run(
                 pp.primary.k_table_size(),
-                StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
-                    step_circuit: &self.primary.step_circuit,
-                    input: primary_sfc.input.clone(),
-                },
-                &[&primary_instance],
-                C1
-            );
+                &primary_sfc,
+                vec![primary_instance.to_vec()],
+            )?
+            .verify()
+            .map_err(|err| Error::from_mock_verify(err, true, self.step))?;
         }
 
         let primary_witness = CircuitRunner::new(
@@ -695,16 +787,13 @@ where
         };
 
         if self.debug_mode {
-            crate::create_and_verify_proof!(
-                IPA,
+            MockProver::run(
                 pp.secondary.k_table_size(),
-                StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
-                    step_circuit: &self.secondary.step_circuit,
-                    input: secondary_sfc.input.clone(),
-                },
-                &[&secondary_instance],
-                C2
-            );
+                &secondary_sfc,
+                vec![secondary_instance.to_vec()],
+            )?
+            .verify()
+            .map_err(|err| Error::from_mock_verify(err, false, self.step))?;
         }
 
         let secondary_witness = CircuitRunner::new(
