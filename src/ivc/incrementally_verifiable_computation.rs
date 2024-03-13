@@ -297,8 +297,6 @@ where
 
             let mut transcript = Blake2bWrite::<_, C1, _>::init(vec![]);
 
-            println!("Generating Proof!");
-
             plonk::create_proof::<IPACommitmentScheme<_>, ProverIPA<_>, _, _, _, _>(
                 &params,
                 &pk,
@@ -313,27 +311,18 @@ where
             .expect("Failed to create proof!");
 
             let proof = transcript.finalize();
-            debug!("{proof:?}");
             let mut transcript_proof = Blake2bRead::init(&proof[..]);
 
-            let verified_proof_result = plonk::verify_proof(
+            match plonk::verify_proof(
                 &params,
                 pk.get_vk(),
                 SingleStrategy::new(&params),
-                &[&[&[]]],
+                &[&[&primary_instance]],
                 &mut transcript_proof,
-            );
-
-            if verified_proof_result.is_ok() {
-                info!("IPA Proof verified!");
-            } else {
-                error!(
-                    "IPA Proof verification failed! {}",
-                    verified_proof_result.err().unwrap()
-                );
+            ) {
+                Ok(_) => info!("IPA primary proof verified!"),
+                Err(err) => panic!("IPA primary proof verification failed: {err:?}",),
             }
-
-            debug!("IPA PASS PRIMARY");
         }
 
         let primary_witness = CircuitRunner::new(
@@ -491,24 +480,16 @@ where
             debug!("{proof:?}");
             let mut transcript_proof = Blake2bRead::init(&proof[..]);
 
-            let verified_proof_result = plonk::verify_proof(
+            match plonk::verify_proof(
                 &params,
                 pk.get_vk(),
                 SingleStrategy::new(&params),
-                &[&[&[]]],
+                &[&[&secondary_instance]],
                 &mut transcript_proof,
-            );
-
-            if verified_proof_result.is_ok() {
-                info!("IPA Proof verified!");
-            } else {
-                error!(
-                    "IPA Proof verification failed! {}",
-                    verified_proof_result.err().unwrap()
-                );
+            ) {
+                Ok(_) => info!("IPA secondary proof verified!"),
+                Err(err) => panic!("IPA secondary proof verification failed: {err:?}",),
             }
-
-            debug!("IPA PASS SECONDARY");
         }
 
         let secondary_witness = CircuitRunner::new(
