@@ -284,8 +284,7 @@ where
                 &[&primary_instance],
                 C1
             );
-        } else {
-            panic!("SUCCESS");
+            info!("IPA primary pass");
         }
 
         let primary_witness = CircuitRunner::new(
@@ -404,13 +403,17 @@ where
         };
 
         if debug_mode {
-            MockProver::run(
+            crate::create_and_verify_proof!(
+                IPA,
                 pp.secondary.k_table_size(),
-                &secondary_sfc,
-                vec![secondary_instance.to_vec()],
-            )?
-            .verify()
-            .map_err(|err| Error::from_mock_verify(err, false, 0))?;
+                StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
+                    step_circuit: &secondary,
+                    input: secondary_sfc.input.clone(),
+                },
+                &[&secondary_instance],
+                C2
+            );
+            info!("IPA second pass");
         }
 
         let secondary_witness = CircuitRunner::new(
@@ -562,13 +565,16 @@ where
         };
 
         if self.debug_mode {
-            MockProver::run(
+            crate::create_and_verify_proof!(
+                IPA,
                 pp.primary.k_table_size(),
-                &primary_sfc,
-                vec![primary_instance.to_vec()],
-            )?
-            .verify()
-            .map_err(|err| Error::from_mock_verify(err, true, self.step))?;
+                StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
+                    step_circuit: &self.primary.step_circuit,
+                    input: primary_sfc.input.clone(),
+                },
+                &[&primary_instance],
+                C1
+            );
         }
 
         let primary_witness = CircuitRunner::new(
@@ -689,13 +695,16 @@ where
         };
 
         if self.debug_mode {
-            MockProver::run(
+            crate::create_and_verify_proof!(
+                IPA,
                 pp.secondary.k_table_size(),
-                &secondary_sfc,
-                vec![secondary_instance.to_vec()],
-            )?
-            .verify()
-            .map_err(|err| Error::from_mock_verify(err, false, self.step))?;
+                StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
+                    step_circuit: &self.secondary.step_circuit,
+                    input: secondary_sfc.input.clone(),
+                },
+                &[&secondary_instance],
+                C2
+            );
         }
 
         let secondary_witness = CircuitRunner::new(
