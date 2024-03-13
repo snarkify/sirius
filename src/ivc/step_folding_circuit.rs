@@ -26,7 +26,7 @@ use crate::{
 
 use super::{instance_computation::AssignedRandomOracleComputationInstance, SimpleFloorPlanner};
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(bound(serialize = "RO::Args: Serialize"))]
 pub(crate) struct StepParams<F, RO>
 where
@@ -98,6 +98,25 @@ where
 
     // TODO docs
     pub cross_term_commits: Vec<C>,
+}
+impl<'link, const ARITY: usize, C, RO> Clone for StepInputs<'link, ARITY, C, RO>
+where
+    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64> + Clone,
+    C: CurveAffine,
+    RO: ROCircuitTrait<C::Base>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            step: self.step,
+            step_pp: self.step_pp,
+            public_params_hash: self.public_params_hash,
+            z_0: self.z_0,
+            z_i: self.z_i,
+            U: self.U.clone(),
+            u: self.u.clone(),
+            cross_term_commits: self.cross_term_commits.clone(),
+        }
+    }
 }
 
 impl<'link, const ARITY: usize, C, RO> StepInputs<'link, ARITY, C, RO>

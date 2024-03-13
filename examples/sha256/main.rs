@@ -258,7 +258,7 @@ pub mod sha256 {
 
 pub use sha256::{BlockWord, Sha256, Table16Chip, Table16Config};
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 struct TestSha256Circuit<F: PrimeField> {
     _p: PhantomData<F>,
 }

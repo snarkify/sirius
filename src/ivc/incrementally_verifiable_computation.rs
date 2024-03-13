@@ -122,10 +122,10 @@ impl<const A1: usize, const A2: usize, C1, C2, SC1, SC2> IVC<A1, A2, C1, C2, SC1
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
-    C1::ScalarExt: Serialize,
-    C2::ScalarExt: Serialize,
-    SC1: StepCircuit<A1, C1::Scalar>,
-    SC2: StepCircuit<A2, C2::Scalar>,
+    C1::ScalarExt: Serialize + Clone,
+    C2::ScalarExt: Serialize + Clone,
+    SC1: StepCircuit<A1, C1::Scalar> + Clone,
+    SC2: StepCircuit<A2, C2::Scalar> + Clone,
     C1::Base: PrimeFieldBits + FromUniformBytes<64>,
     C2::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
@@ -240,7 +240,7 @@ where
         }
 
         // Prepare primary constraint system for folding
-        let primary_instance = [
+        let primary_instance: [C1::Scalar; 2] = [
             util::fe_to_fe(&secondary_pre_round_plonk_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
                 random_oracle_constant: pp.primary.params().ro_constant().clone(),
@@ -274,13 +274,18 @@ where
         };
 
         if debug_mode {
-            MockProver::run(
+            crate::create_and_verify_proof!(
+                IPA,
                 pp.primary.k_table_size(),
-                &primary_sfc,
-                vec![primary_instance.to_vec()],
-            )?
-            .verify()
-            .map_err(|err| Error::from_mock_verify(err, true, 0))?;
+                StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
+                    step_circuit: &primary,
+                    input: primary_sfc.input.clone(),
+                },
+                &[&primary_instance],
+                C1
+            );
+        } else {
+            panic!("SUCCESS");
         }
 
         let primary_witness = CircuitRunner::new(
