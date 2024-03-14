@@ -7,6 +7,7 @@ use halo2_proofs::{
 };
 use halo2curves::pasta::Fp;
 use num_traits::FromPrimitive;
+use tracing::*;
 
 use crate::run_mock_prover_test;
 
@@ -223,6 +224,8 @@ mod mult_mod_tests {
 }
 
 mod components_tests {
+    use halo2_proofs::circuit::Value;
+
     use super::*;
 
     #[derive(Clone)]
@@ -545,13 +548,13 @@ mod components_tests {
         let lhs = BigUint::from_biguint(&lhs, LIMB_WIDTH, LIMBS_COUNT).unwrap();
         let rhs = BigUint::from_biguint(&rhs, LIMB_WIDTH, LIMBS_COUNT).unwrap();
         let prod = mult_with_overflow(&lhs, &rhs);
-        log::info!("prod {prod:?}");
+        info!("prod {prod:?}");
         let sum = sum_with_overflow(&lhs, &rhs);
-        log::info!("sum {sum:?}");
+        info!("sum {sum:?}");
 
         let max_word = big_uint::get_big_int_with_n_ones(LIMB_WIDTH.get());
         let grouped = group_limbs(&prod, &max_word * &max_word);
-        log::info!("grouped {grouped:?}");
+        info!("grouped {grouped:?}");
 
         const K: u32 = 11;
         let ts = TestCircuit::<Fp>::default();
@@ -576,13 +579,13 @@ mod components_tests {
         let lhs = BigUint::from_biguint(&lhs, LIMB_WIDTH, LIMBS_COUNT).unwrap();
         let rhs = BigUint::from_biguint(&rhs, LIMB_WIDTH, LIMBS_COUNT).unwrap();
         let prod = mult_with_overflow(&lhs, &rhs);
-        log::info!("prod {prod:?}");
+        info!("prod {prod:?}");
         let sum = sum_with_overflow(&lhs, &rhs);
-        log::info!("sum {sum:?}");
+        info!("sum {sum:?}");
 
         let max_word = big_uint::get_big_int_with_n_ones(LIMB_WIDTH.get());
         let grouped = group_limbs(&prod, &max_word * &max_word);
-        log::info!("grouped {grouped:?}");
+        info!("grouped {grouped:?}");
 
         const K: u32 = 11;
         let ts = TestCircuit::<Fp>::default();
@@ -791,6 +794,8 @@ mod red_mod_tests {
 }
 
 mod decompose_tests {
+    use halo2_proofs::circuit::Value;
+
     use super::*;
 
     #[derive(Clone)]

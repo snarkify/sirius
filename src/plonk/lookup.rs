@@ -43,9 +43,9 @@ use std::{
 
 use ff::PrimeField;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
-use log::*;
 use rayon::prelude::*;
 use serde::Serialize;
+use tracing::*;
 
 use crate::{
     concat_vec,

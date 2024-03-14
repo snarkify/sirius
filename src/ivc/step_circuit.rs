@@ -3,7 +3,7 @@ use halo2_proofs::{
     circuit::{floor_planner::single_pass::SingleChipLayouter, AssignedCell, Layouter, Value},
     plonk::ConstraintSystem,
 };
-use log::*;
+use tracing::*;
 
 use crate::{main_gate::RegionCtx, table::WitnessCollector};
 

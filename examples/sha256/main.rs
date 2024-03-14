@@ -14,12 +14,12 @@ use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
 
-use log::*;
 use sirius::{
     commitment::CommitmentKey,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
     poseidon::{self, ROPair},
 };
+use tracing::*;
 
 mod table16;
 
@@ -362,8 +362,9 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 }
 
 fn main() {
-    env_logger::init();
-    log::info!("Start");
+    tracing_subscriber::fmt::init();
+
+    info!("Start");
     // C1
     let sc1 = TestSha256Circuit::default();
     // C2

@@ -5,7 +5,7 @@ use halo2_proofs::{
         Advice, Any, Assigned, Assignment, Challenge, Column, Error, Fixed, Instance, Selector,
     },
 };
-use log::*;
+use tracing::*;
 
 pub struct WitnessCollector<F: PrimeField> {
     pub(crate) instance: Vec<F>,

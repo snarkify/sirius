@@ -4,8 +4,8 @@ use ff::{Field, FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2_proofs::plonk;
 use halo2curves::CurveAffine;
-use log::*;
 use serde::Serialize;
+use tracing::*;
 
 use crate::{
     commitment::CommitmentKey,

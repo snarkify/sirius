@@ -49,8 +49,8 @@ use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::circuit::AssignedCell;
 use halo2curves::{Coordinates, CurveAffine};
 use itertools::Itertools;
-use log::*;
 use num_traits::Num;
+use tracing::*;
 
 use crate::{
     constants::NUM_CHALLENGE_BITS,
