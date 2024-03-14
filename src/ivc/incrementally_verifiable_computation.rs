@@ -609,10 +609,11 @@ where
             })
         }
 
-        if let Err(err) = pp.primary.S().is_sat_perm(
-            &self.primary.relaxed_trace.U,
-            &self.primary.relaxed_trace.W,
-        ) {
+        if let Err(err) = pp
+            .primary
+            .S()
+            .is_sat_perm(&self.primary.relaxed_trace.U, &self.primary.relaxed_trace.W)
+        {
             errors.push(VerificationError::NotSat {
                 err,
                 is_primary: false,
