@@ -106,12 +106,12 @@ where
     C: CurveAffine,
     RO: ROCircuitTrait<C::Base>,
 {
-    pub fn without_witness<SC: StepCircuit<ARITY, C::Base>>(
+    pub fn without_witness<const A2: usize, SC: StepCircuit<A2, C::Scalar>>(
         k_table_size: u32,
         num_io: usize,
         step_pp: &'link StepParams<C::Base, RO>,
     ) -> Self {
-        let mut cs = ConstraintSystem::<C::Base>::default();
+        let mut cs = ConstraintSystem::<C::Scalar>::default();
         SC::configure(&mut cs);
         let ConstraintSystemMetainfo {
             num_challenges,

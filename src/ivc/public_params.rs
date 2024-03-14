@@ -244,7 +244,7 @@ where
             primary.k_table_size,
             StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T> {
                 step_circuit: primary.step_circuit,
-                input: StepInputs::without_witness::<SC1>(
+                input: StepInputs::without_witness::<A2, SC2>(
                     primary.k_table_size,
                     NUM_IO,
                     &StepParams::new(limb_width, limbs_count, primary.ro_constant.clone()),
@@ -258,7 +258,7 @@ where
             primary.k_table_size,
             StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T> {
                 step_circuit: secondary.step_circuit,
-                input: StepInputs::without_witness::<SC2>(
+                input: StepInputs::without_witness::<A1, SC1>(
                     secondary.k_table_size,
                     NUM_IO,
                     &StepParams::new(limb_width, limbs_count, secondary.ro_constant.clone()),
