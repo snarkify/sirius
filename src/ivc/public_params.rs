@@ -255,7 +255,7 @@ where
         .try_collect_plonk_structure()?;
 
         let secondary_S = CircuitRunner::new(
-            primary.k_table_size,
+            secondary.k_table_size,
             StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T> {
                 step_circuit: secondary.step_circuit,
                 input: StepInputs::without_witness::<A1, SC1>(
