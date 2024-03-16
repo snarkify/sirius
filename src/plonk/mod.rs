@@ -16,7 +16,7 @@
 //! a given Plonk instance and witness satisfy the circuit constraints.
 use std::{iter, num::NonZeroUsize};
 
-use count_non_zero::*;
+use count_to_non_zero::*;
 use itertools::Itertools;
 use rayon::prelude::*;
 use serde::Serialize;
@@ -276,7 +276,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             .iter()
             .zip_eq(W.W.iter())
             .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
-            .count_non_zero()
+            .count_to_non_zero()
             .map(|mismatch_count| Error::CommitmentMismatch { mismatch_count })
             .err_or(())?;
 
@@ -331,7 +331,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             .iter()
             .zip_eq(W.W.iter())
             .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
-            .count_non_zero()
+            .count_to_non_zero()
             .map(|mismatch_count| Error::CommitmentMismatch { mismatch_count })
             .err_or(())?;
 
