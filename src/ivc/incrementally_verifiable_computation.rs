@@ -193,9 +193,18 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        debug!("start creation of IVC");
+        info!("start creation of IVC");
         // For use as first version of `U` in primary circuit synthesize
         let secondary_pre_round_plonk_trace = pp.secondary.S().dry_run_sps_protocol();
+
+        if let Err(err) = pp.secondary.S().is_sat(
+            pp.secondary.ck(),
+            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+            &secondary_pre_round_plonk_trace.u,
+            &secondary_pre_round_plonk_trace.w,
+        ) {
+            error!("`try_run_sps_protocol` not sat: {err:?}");
+        }
 
         let primary_z_output = primary.process_step(&primary_z_0, pp.primary.k_table_size())?;
         debug!("primary z output calculated off-circuit");
@@ -203,6 +212,7 @@ where
         // Will be used as input & output `U` of zero-step of IVC
         let secondary_relaxed_trace =
             secondary_pre_round_plonk_trace.to_relax(pp.secondary.k_table_size() as usize);
+
         // Prepare primary constraint system for folding
         let primary_instance = [
             util::fe_to_fe(&secondary_pre_round_plonk_trace.u.instance[1]).unwrap(),
@@ -247,12 +257,12 @@ where
             .map_err(|err| Error::from_mock_verify(err, true, 0))?;
         }
 
-        let primary_witness = CircuitRunner::new(
+        let primary_cr = CircuitRunner::new(
             pp.primary.k_table_size(),
             primary_sfc,
             primary_instance.to_vec(),
-        )
-        .try_collect_witness()?;
+        );
+        let primary_witness = primary_cr.try_collect_witness()?;
         debug!("primary witness calculated");
 
         // Start secondary
@@ -318,12 +328,12 @@ where
             .map_err(|err| Error::from_mock_verify(err, false, 0))?;
         }
 
-        let secondary_witness = CircuitRunner::new(
+        let secondary_cr = CircuitRunner::new(
             pp.secondary.k_table_size(),
             secondary_sfc,
             secondary_instance.to_vec(),
-        )
-        .try_collect_witness()?;
+        );
+        let secondary_witness = secondary_cr.try_collect_witness()?;
 
         let (secondary_nifs_pp, _nifs_vp) =
             VanillaFS::setup_params(pp.digest_2(), pp.secondary.S().clone())?;
@@ -423,12 +433,12 @@ where
             .map_err(|err| Error::from_mock_verify(err, true, self.step))?;
         }
 
-        let primary_witness = CircuitRunner::new(
+        let primary_cr = CircuitRunner::new(
             pp.primary.k_table_size(),
             primary_sfc,
             primary_instance.to_vec(),
-        )
-        .try_collect_witness()?;
+        );
+        let primary_witness = primary_cr.try_collect_witness()?;
 
         self.primary.z_i = primary_z_next;
         self.secondary.relaxed_trace = secondary_new_trace;
@@ -497,12 +507,12 @@ where
             .map_err(|err| Error::from_mock_verify(err, false, self.step))?;
         }
 
-        let secondary_witness = CircuitRunner::new(
+        let secondary_cr = CircuitRunner::new(
             pp.secondary.k_table_size(),
             secondary_sfc,
             secondary_instance.to_vec(),
-        )
-        .try_collect_witness()?;
+        );
+        let secondary_witness = secondary_cr.try_collect_witness()?;
 
         self.secondary.z_i = next_secondary_z_i;
         self.primary.relaxed_trace = primary_new_trace;
