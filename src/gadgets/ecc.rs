@@ -379,14 +379,19 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
 mod tests {
     use std::num::NonZeroUsize;
 
-    use super::*;
-    use crate::util::fe_to_fe_safe;
-    use crate::{create_and_verify_proof, run_mock_prover_test};
     use ff::Field;
-    use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
-    use halo2_proofs::plonk::{Circuit, Column, ConstraintSystem, Instance};
+    use halo2_proofs::{
+        circuit::{Layouter, SimpleFloorPlanner},
+        plonk::{Circuit, Column, ConstraintSystem, Instance},
+    };
     use halo2curves::pasta::{pallas, EqAffine, Fp, Fq};
     use rand_core::OsRng;
+    use tracing_test::traced_test;
+
+    use crate::{create_and_verify_proof, run_mock_prover_test, util::fe_to_fe_safe};
+
+    use super::*;
+
     #[derive(Clone, Debug)]
     struct Point<C: CurveAffine> {
         x: C::Base,
@@ -590,6 +595,7 @@ mod tests {
         }
     }
 
+    #[traced_test]
     #[test]
     #[ignore = "cause it takes a few minutes to run"]
     fn test_ecc_op() {

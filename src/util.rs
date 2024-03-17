@@ -199,6 +199,7 @@ pub(crate) fn concatenate_with_padding<F: PrimeField>(vs: &[Vec<F>], pad_size: u
 #[cfg(test)]
 mod tests {
     use halo2curves::pasta::Fp;
+    use tracing_test::traced_test;
 
     use super::*;
 
@@ -208,6 +209,7 @@ mod tests {
     }
 
     // Test empty input
+    #[traced_test]
     #[test]
     fn concatenate_empty() {
         let input: Vec<Vec<Fp>> = vec![];

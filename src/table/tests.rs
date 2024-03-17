@@ -5,6 +5,7 @@ use halo2_proofs::{
 };
 use halo2curves::group::ff::FromUniformBytes;
 use prettytable::{row, Cell, Row, Table};
+use tracing_test::traced_test;
 
 use crate::{
     main_gate::{MainGate, MainGateConfig, RegionCtx},
@@ -68,6 +69,7 @@ impl<F: PrimeField + FromUniformBytes<64>> Circuit<F> for TestCircuit<F> {
     }
 }
 
+#[traced_test]
 #[test]
 fn test_assembly() -> Result<(), Error> {
     use halo2curves::pasta::Fp;

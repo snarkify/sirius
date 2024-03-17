@@ -17,6 +17,8 @@ const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(Fp::S as u
 const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
 mod mult_mod_tests {
+    use tracing_test::traced_test;
+
     use super::*;
 
     #[derive(Clone)]
@@ -152,7 +154,8 @@ mod mult_mod_tests {
         modulus: u128,
     }
 
-    #[test_log::test]
+    #[traced_test]
+    #[test]
     fn test_mult_mod_bn() {
         const K: u32 = 11;
 
@@ -225,6 +228,7 @@ mod mult_mod_tests {
 
 mod components_tests {
     use halo2_proofs::circuit::Value;
+    use tracing_test::traced_test;
 
     use super::*;
 
@@ -540,7 +544,8 @@ mod components_tests {
         .unwrap()
     }
 
-    #[test_log::test]
+    #[traced_test]
+    #[test]
     fn test_mult_mod_bn() {
         let lhs = BigUintRaw::from_u64(u64::MAX).unwrap() * BigUintRaw::from_u64(100).unwrap();
         let rhs = BigUintRaw::from_u64(u64::MAX).unwrap() * BigUintRaw::from_u64(u64::MAX).unwrap();
@@ -571,7 +576,8 @@ mod components_tests {
         );
     }
 
-    #[test_log::test]
+    #[traced_test]
+    #[test]
     fn test_mult_mod_zero() {
         let lhs = BigUintRaw::from_u64(u64::MAX).unwrap() * BigUintRaw::from_u64(100).unwrap();
         let rhs = BigUintRaw::from_u64(0).unwrap();
@@ -604,13 +610,15 @@ mod components_tests {
 }
 
 mod red_mod_tests {
-    use crate::run_mock_prover_test;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
         plonk::{Advice, Circuit, Column, Instance},
     };
     use halo2curves::pasta::Fp;
     use num_traits::FromPrimitive;
+    use tracing_test::traced_test;
+
+    use crate::run_mock_prover_test;
 
     use super::*;
 
@@ -734,7 +742,8 @@ mod red_mod_tests {
         modulus: u128,
     }
 
-    #[test_log::test]
+    #[traced_test]
+    #[test]
     fn test_red_mod_bn() {
         const K: u32 = 11;
 
@@ -795,6 +804,7 @@ mod red_mod_tests {
 
 mod decompose_tests {
     use halo2_proofs::circuit::Value;
+    use tracing_test::traced_test;
 
     use super::*;
 
@@ -903,7 +913,8 @@ mod decompose_tests {
         val: u128,
     }
 
-    #[test_log::test]
+    #[traced_test]
+    #[test]
     fn test_from_assigned_cell() {
         const K: u32 = 11;
         let ts = TestCircuit::<Fp>::default();
@@ -934,6 +945,7 @@ mod decompose_tests {
 
 mod to_le_bits {
     use rand::Rng;
+    use tracing_test::traced_test;
 
     use super::*;
 
@@ -1028,7 +1040,8 @@ mod to_le_bits {
         }
     }
 
-    #[test_log::test]
+    #[traced_test]
+    #[test]
     fn to_le_bits() {
         const K: u32 = 15;
         let ts = TestCircuit::<Fp>::default();

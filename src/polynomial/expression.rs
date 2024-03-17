@@ -350,9 +350,11 @@ mod tests {
     // use pasta_curves::{Fp, pallas};
     use halo2_proofs::poly::Rotation;
     use halo2curves::pasta::{pallas, Fp};
+    use tracing_test::traced_test;
 
     use super::super::expression::*;
 
+    #[traced_test]
     #[test]
     fn test_expression() {
         let expr1: Expression<Fp> =
@@ -368,6 +370,7 @@ mod tests {
         assert_eq!(format!("{}", expr.expand()), "0x1 + (Z_0^2)");
     }
 
+    #[traced_test]
     #[test]
     fn test_homogeneous() {
         let expr1: Expression<Fp> =

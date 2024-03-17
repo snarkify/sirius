@@ -1026,6 +1026,7 @@ mod tests {
     use halo2_proofs::plonk::ConstraintSystem;
     use halo2curves::{bn256::G1Affine as C1, CurveAffine};
     use rand::{rngs::ThreadRng, Rng};
+    use tracing_test::traced_test;
 
     use crate::{
         commitment::CommitmentKey,
@@ -1130,6 +1131,7 @@ mod tests {
         }
     }
 
+    #[traced_test]
     #[test]
     fn generate_challenge() {
         let mut rnd = rand::thread_rng();
@@ -1204,7 +1206,8 @@ mod tests {
         }
     }
 
-    #[test_log::test]
+    #[traced_test]
+    #[test]
     fn fold_W_test() {
         let Fixture {
             mut ws,
@@ -1280,7 +1283,8 @@ mod tests {
         }
     }
 
-    #[test_log::test]
+    #[traced_test]
+    #[test]
     fn fold_E_test() {
         let Fixture {
             mut ws,
@@ -1366,7 +1370,8 @@ mod tests {
         }
     }
 
-    #[test_log::test]
+    #[traced_test]
+    #[test]
     fn fold_instances_test() {
         let Fixture {
             mut ws,
@@ -1503,7 +1508,8 @@ mod tests {
         }
     }
 
-    #[test_log::test]
+    #[traced_test]
+    #[test]
     fn fold_challenges_test() {
         let Fixture {
             mut ws,
@@ -1639,7 +1645,8 @@ mod tests {
         }
     }
 
-    #[test_log::test]
+    #[traced_test]
+    #[test]
     fn fold_all() {
         const T: usize = 6;
 

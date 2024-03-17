@@ -300,6 +300,7 @@ mod tests {
     use halo2curves::pasta::Fp;
     use sirius::run_mock_prover_test;
 
+    #[traced_test]
     #[test]
     fn lookup_table() {
         /// This represents an advice column at a certain row in the ConstraintSystem

@@ -409,6 +409,7 @@ mod tests {
     use sirius::run_mock_prover_test;
     use std::marker::PhantomData;
 
+    #[traced_test]
     #[test]
     fn message_schedule() {
         struct MyCircuit<F: PrimeField> {

@@ -477,6 +477,7 @@ mod tests {
     };
     use halo2curves::pasta::pallas;
 
+    #[traced_test]
     #[test]
     fn print_sha256_circuit() {
         use plotters::prelude::*;

@@ -303,10 +303,11 @@ mod tests {
 
     use ff::Field;
     use halo2curves::pasta::Fp;
-    use test_log::test;
+    use tracing_test::traced_test;
 
     use super::*;
 
+    #[traced_test]
     #[test]
     fn from_u64() {
         for input in [0, 256, u64::MAX / 2, u64::MAX] {
@@ -325,6 +326,7 @@ mod tests {
         }
     }
 
+    #[traced_test]
     #[test]
     fn from_u128() {
         for input in [u128::from(u64::MAX) + 1, u128::MAX / 2, u128::MAX] {
@@ -342,7 +344,7 @@ mod tests {
             assert_eq!(bn.into_bigint(), BigUintRaw::from(input));
         }
     }
-
+    #[traced_test]
     #[test]
     fn from_two_limbs() {
         let input = BigUintRaw::from(u128::MAX) * BigUintRaw::from(u128::MAX);
@@ -366,6 +368,7 @@ mod tests {
         assert_eq!(bn.into_bigint(), input);
     }
 
+    #[traced_test]
     #[test]
     fn limbs_count_err() {
         let input = BigUintRaw::from(u128::MAX) * BigUintRaw::from(u128::MAX);
@@ -378,6 +381,7 @@ mod tests {
         assert_eq!(result_with_bn, Err(Error::TooBigBigint));
     }
 
+    #[traced_test]
     #[test]
     fn limbs_limit_err() {
         let limbs_count = NonZeroUsize::new(50).unwrap();

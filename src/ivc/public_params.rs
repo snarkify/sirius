@@ -411,10 +411,12 @@ mod pp_test {
 
     use group::Group;
     use halo2curves::{bn256, grumpkin};
+    use tracing_test::traced_test;
 
-    use crate::ivc::step_circuit::{self, trivial};
     use bn256::G1 as C1;
     use grumpkin::G1 as C2;
+
+    use crate::ivc::step_circuit::{self, trivial};
 
     use super::*;
 
@@ -451,6 +453,7 @@ mod pp_test {
         }
     }
 
+    #[traced_test]
     #[test]
     fn digest() {
         type Scalar1 = <C1 as Group>::Scalar;

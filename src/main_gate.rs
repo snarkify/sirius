@@ -801,7 +801,9 @@ mod tests {
     use super::*;
     use crate::polynomial::{ColumnIndex, Expression};
     use halo2curves::pasta::Fp;
+    use tracing_test::traced_test;
 
+    #[traced_test]
     #[test]
     fn main_gate_size_change() {
         const T: usize = 10;

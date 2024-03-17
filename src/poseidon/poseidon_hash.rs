@@ -222,9 +222,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use halo2curves::pasta::{EpAffine, Fp, Fq};
+    use tracing_test::traced_test;
 
+    use super::*;
+
+    #[traced_test]
     #[test]
     fn test_poseidon_hash() {
         const T: usize = 3;
