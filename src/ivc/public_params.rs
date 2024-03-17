@@ -396,13 +396,13 @@ mod pp_test {
             CircuitPublicParamsInput {
                 step_circuit: &trivial::Circuit::default(),
                 k_table_size: K as u32,
-                commitment_key: &CommitmentKey::setup(K + 1, b"1"),
+                commitment_key: &CommitmentKey::setup(K, b"1"),
                 ro_constant: spec1,
             },
             CircuitPublicParamsInput {
                 step_circuit: &trivial::Circuit::default(),
                 k_table_size: K as u32,
-                commitment_key: &CommitmentKey::setup(K + 1, b"2"),
+                commitment_key: &CommitmentKey::setup(K, b"2"),
                 ro_constant: spec2,
             },
             LIMB_WIDTH,
