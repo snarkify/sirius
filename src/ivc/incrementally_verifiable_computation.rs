@@ -197,6 +197,15 @@ where
         // For use as first version of `U` in primary circuit synthesize
         let secondary_pre_round_plonk_trace = pp.secondary.S().dry_run_sps_protocol();
 
+        if let Err(err) = pp.secondary.S().is_sat(
+            pp.secondary.ck(),
+            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+            &secondary_pre_round_plonk_trace.u,
+            &secondary_pre_round_plonk_trace.w,
+        ) {
+            error!("`try_run_sps_protocol` not sat: {err:?}");
+        }
+
         let primary_z_output = primary.process_step(&primary_z_0, pp.primary.k_table_size())?;
         debug!("primary z output calculated off-circuit");
 

@@ -144,6 +144,7 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
         ctx.assign_fixed(|| "pre_round: q_i", self.main_gate.config().q_i, F::ONE)?;
         ctx.assign_fixed(|| "pre_round: q_o", self.main_gate.config().q_o, -F::ONE)?;
         ctx.assign_fixed(|| "pre_round: rc", self.main_gate.config().rc, rc_val)?;
+        ctx.assign_advice(|| "xrc", self.main_gate.config().xrc, Value::known(F::ONE))?;
         let out = ctx.assign_advice(|| "pre_round: out", self.main_gate.config().out, out_val)?;
 
         ctx.next();
@@ -206,6 +207,7 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
             ctx.constrain_equal(s.cell(), si.cell())?;
         }
 
+        ctx.assign_advice(|| "xrc", self.main_gate.config().xrc, Value::known(F::ONE))?;
         ctx.assign_fixed(
             || format!("full_round {}: rc", round_idx),
             self.main_gate.config().rc,
@@ -269,6 +271,8 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
                 self.main_gate.config().rc,
                 rc_val,
             )?;
+
+            ctx.assign_advice(|| "xrc", self.main_gate.config().xrc, Value::known(F::ONE))?;
             for j in 1..T {
                 q_1_vals[j] = row[j];
                 ctx.assign_fixed(
@@ -296,6 +300,7 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
                 self.main_gate.config().rc,
                 rc_val,
             )?;
+        ctx.assign_advice(|| "xrc", self.main_gate.config().xrc, Value::known(F::ONE))?;
         }
 
         let out_val = Self::next_state_val(state_vals, q_1_vals, q_5_vals, -F::ONE, rc_val);

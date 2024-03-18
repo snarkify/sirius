@@ -258,6 +258,7 @@ const MULTIPLICATION_COUNT: usize = 2;
 pub struct MainGateConfig<const T: usize> {
     pub(crate) state: [Column<Advice>; T],
     pub(crate) input: Column<Advice>,
+    pub(crate) xrc: Column<Advice>,
     pub(crate) out: Column<Advice>,
     pub(crate) q_m: [Column<Fixed>; MULTIPLICATION_COUNT],
     // for linear term
@@ -294,6 +295,7 @@ impl<const T: usize> MainGateConfig<T> {
         }
 
         name_column!(input);
+        name_column!(xrc);
         name_column!(out);
         name_column!(q_i);
         name_column!(q_o);
@@ -330,6 +332,7 @@ impl<const T: usize> MainGateConfig<T> {
         Some(MainGateConfig::<N> {
             state: self.state[..N].try_into().ok()?,
             input: self.input,
+            xrc: self.xrc,
             out: self.out,
             q_m: self.q_m,
             q_1: self.q_1[..N].try_into().ok()?,
@@ -355,6 +358,7 @@ impl<const T: usize> MainGateConfig<T> {
     pub fn iter_advice_columns(&self) -> impl Clone + Iterator<Item = &Column<Advice>> {
         self.state
             .iter()
+            .chain(iter::once(&self.xrc))
             .chain(iter::once(&self.input))
             .chain(iter::once(&self.out))
     }
@@ -497,6 +501,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
     pub fn configure(meta: &mut ConstraintSystem<F>) -> MainGateConfig<T> {
         assert!(T >= 2);
         let state = array::from_fn(|_| meta.advice_column());
+        let xrc = meta.advice_column();
         let input = meta.advice_column();
         let out = meta.advice_column();
         let q_1 = array::from_fn(|_| meta.fixed_column());
@@ -509,6 +514,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         state.map(|s| {
             meta.enable_equality(s);
         });
+        meta.enable_equality(xrc);
         meta.enable_equality(input);
         meta.enable_equality(out);
 
@@ -519,6 +525,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
 
         meta.create_gate("q_m[0]*s[0]*s[1] + q_m[1]*s[2]*s[3] + sum_i(q_1[i]*s[i]) + sum_i(q_5[i]*s[i]^5) + rc + q_i*input + q_o*out=0", |meta|{
             let state = state.into_iter().map(|s| meta.query_advice(s, Rotation::cur())).collect::<Vec<_>>();
+            let xrc= meta.query_advice(input, Rotation::cur());
             let input = meta.query_advice(input, Rotation::cur());
             let out = meta.query_advice(out, Rotation::cur());
             let q_1 = q_1.into_iter().map(|q| meta.query_fixed(q, Rotation::cur())).collect::<Vec<_>>();
@@ -528,7 +535,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
             let q_o = meta.query_fixed(q_o, Rotation::cur());
             let rc = meta.query_fixed(rc, Rotation::cur());
 
-            let mut init_term = q_m[0].clone() * state[0].clone() * state[1].clone() + q_i * input + rc + q_o * out;
+            let mut init_term = q_m[0].clone() * state[0].clone() * state[1].clone() + q_i * input + rc * xrc + q_o * out;
 
             if T >= 4 {
                 init_term = q_m[1].clone() * state[2].clone() * state[3].clone() + init_term;
@@ -546,6 +553,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
 
         MainGateConfig {
             state,
+            xrc,
             input,
             out,
             q_m,
@@ -602,6 +610,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
 
         if let Some(rc_val) = rc {
             ctx.assign_fixed(|| "rc", self.config.rc, rc_val)?;
+            ctx.assign_advice(|| "xrc", self.config.xrc, Value::known(F::ONE))?;
         }
 
         ctx.assign_fixed(|| "q_o", self.config.q_o, out.0)?;
