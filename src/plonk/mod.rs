@@ -14,10 +14,13 @@
 //!
 //! Additionally, it defines a method is_sat on PlonkStructure to determine if
 //! a given Plonk instance and witness satisfy the circuit constraints.
+use std::{iter, num::NonZeroUsize};
+
+use count_to_non_zero::*;
 use itertools::Itertools;
 use rayon::prelude::*;
 use serde::Serialize;
-use std::iter;
+use some_to_err::*;
 use tracing::*;
 
 use ff::{Field, PrimeField};
@@ -49,14 +52,16 @@ pub enum Error {
     #[error(transparent)]
     Eval(#[from] EvalError),
     #[error("(Relaxed) plonk relation not satisfied: commitment mismatch")]
-    CommitmentMismatch,
+    CommitmentMismatch { mismatch_count: NonZeroUsize },
+    #[error("(Relaxed) plonk relation not satisfied: commitment of E")]
+    ECommitmentMismatch,
     #[error("log derivative relation not satisfied")]
     LogDerivativeNotSat,
     #[error("Permutation check fail: mismatch_count {mismatch_count}")]
     PermCheckFail { mismatch_count: usize },
     #[error("(Relaxed) plonk relation not satisfied: mismatch_count {mismatch_count}, total_row {total_row}")]
     EvaluationMismatch {
-        mismatch_count: usize,
+        mismatch_count: NonZeroUsize,
         total_row: usize,
     },
 }
@@ -126,6 +131,7 @@ impl<F: PrimeField> PlonkWitness<F> {
             W: round_sizes.iter().map(|sz| vec![F::ZERO; *sz]).collect(),
         }
     }
+
     pub fn to_relax(&self, k: usize) -> RelaxedPlonkWitness<F> {
         let E = vec![F::ZERO; 1 << k];
         RelaxedPlonkWitness {
@@ -232,12 +238,6 @@ impl<F: PrimeField> PlonkStructure<F> {
         C: CurveAffine<ScalarExt = F>,
     {
         U.sps_verify(ro_nark)?;
-        let check_commitments = U
-            .W_commitments
-            .iter()
-            .zip(W.W.iter())
-            .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
-            .count();
 
         let data = PlonkEvalDomain {
             num_advice: self.num_advice_columns,
@@ -248,24 +248,39 @@ impl<F: PrimeField> PlonkStructure<F> {
             W1s: &W.W,
             W2s: &vec![],
         };
-        let nrow = 1 << self.k;
-        let res = (0..nrow)
+
+        let total_row = 1 << self.k;
+        (0..total_row)
             .into_par_iter()
-            .map(|row| data.eval(&self.poly, row))
-            .collect::<Result<Vec<F>, _>>()
-            .map(|v| v.into_iter().filter(|v| F::ZERO.ne(v)).count())?;
+            .map(|row| {
+                data.eval(&self.poly, row)
+                    .map(|row_result| if row_result.eq(&F::ZERO) { 0 } else { 1 })
+            })
+            .try_reduce(
+                || 0,
+                |mismatch_count, is_missed| Ok(mismatch_count + is_missed),
+            )
+            .map(|mismatch_count| {
+                Some(Error::EvaluationMismatch {
+                    mismatch_count: NonZeroUsize::new(mismatch_count)?,
+                    total_row,
+                })
+            })?
+            .err_or(())?;
 
-        let is_h_equal_g = self.is_sat_log_derivative(&W.W);
-
-        match (res == 0, check_commitments == 0, is_h_equal_g) {
-            (true, true, true) => Ok(()),
-            (false, _, _) => Err(Error::EvaluationMismatch {
-                mismatch_count: res,
-                total_row: nrow,
-            }),
-            (_, _, false) => Err(Error::LogDerivativeNotSat),
-            _ => Err(Error::CommitmentMismatch),
+        if !self.is_sat_log_derivative(&W.W) {
+            return Err(Error::LogDerivativeNotSat);
         }
+
+        U.W_commitments
+            .iter()
+            .zip_eq(W.W.iter())
+            .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
+            .count_to_non_zero()
+            .map(|mismatch_count| Error::CommitmentMismatch { mismatch_count })
+            .err_or(())?;
+
+        Ok(())
     }
 
     pub fn is_sat_relaxed<C>(
@@ -277,14 +292,8 @@ impl<F: PrimeField> PlonkStructure<F> {
     where
         C: CurveAffine<ScalarExt = F>,
     {
-        let check_W_commitments = U
-            .W_commitments
-            .iter()
-            .zip(W.W.iter())
-            .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
-            .count();
+        let total_row = 1 << self.k;
 
-        let nrow = 1 << self.k;
         let poly = self.poly.homogeneous(self.num_non_fold_vars());
         let data = PlonkEvalDomain {
             num_advice: self.num_advice_columns,
@@ -295,27 +304,42 @@ impl<F: PrimeField> PlonkStructure<F> {
             W1s: &W.W,
             W2s: &vec![],
         };
-        let res = (0..nrow)
+
+        (0..total_row)
             .into_par_iter()
-            .map(|row| data.eval(&poly, row))
-            .collect::<Result<Vec<F>, _>>()?
-            .into_iter()
-            .enumerate()
-            .filter(|(i, v)| W.E[*i].ne(v))
-            .count();
+            .map(|row| {
+                data.eval(&poly, row)
+                    .map(|eval_of_row| if eval_of_row.eq(&W.E[row]) { 0 } else { 1 })
+            })
+            .try_reduce(
+                || 0,
+                |mismatch_count, is_missed| Ok(mismatch_count + is_missed),
+            )
+            .map(|mismatch_count| {
+                Some(Error::EvaluationMismatch {
+                    mismatch_count: NonZeroUsize::new(mismatch_count)?,
+                    total_row,
+                })
+            })?
+            .err_or(())?;
 
-        let is_E_equal = ck.commit(&W.E).unwrap().eq(&U.E_commitment);
-        let is_h_equal_g = self.is_sat_log_derivative(&W.W);
-
-        match (res == 0, check_W_commitments == 0, is_E_equal, is_h_equal_g) {
-            (true, true, true, true) => Ok(()),
-            (false, _, _, _) => Err(Error::EvaluationMismatch {
-                mismatch_count: res,
-                total_row: nrow,
-            }),
-            (_, _, _, false) => Err(Error::LogDerivativeNotSat),
-            _ => Err(Error::CommitmentMismatch),
+        if !self.is_sat_log_derivative(&W.W) {
+            return Err(Error::LogDerivativeNotSat);
         }
+
+        U.W_commitments
+            .iter()
+            .zip_eq(W.W.iter())
+            .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
+            .count_to_non_zero()
+            .map(|mismatch_count| Error::CommitmentMismatch { mismatch_count })
+            .err_or(())?;
+
+        if ck.commit(&W.E).unwrap().ne(&U.E_commitment) {
+            return Err(Error::ECommitmentMismatch);
+        }
+
+        Ok(())
     }
 
     // permutation check for folding instance-witness pair
@@ -614,6 +638,7 @@ impl<C: CurveAffine> PlonkInstance<C> {
             challenges: vec![C::ScalarExt::ZERO; num_challenges],
         }
     }
+
     pub fn to_relax(&self) -> RelaxedPlonkInstance<C> {
         RelaxedPlonkInstance {
             W_commitments: self.W_commitments.clone(),
