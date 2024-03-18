@@ -349,11 +349,6 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 fn main() {
     tracing_subscriber::fmt::init();
 
-    let repr_len = C1Scalar::zero().to_repr().len();
-    if repr_len != 0 {
-        panic!("{repr_len}");
-    }
-
     info!("Start");
     // C1
     let sc1 = TestSha256Circuit::default();
