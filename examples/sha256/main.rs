@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
-use std::{array, fs, io, marker::PhantomData, num::NonZeroUsize, path::Path};
+use std::{array, fs, io, marker::PhantomData, mem, num::NonZeroUsize, path::Path};
 
 use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter},
+    circuit::{AssignedCell, Layouter, Value},
     plonk::ConstraintSystem,
 };
 
@@ -14,12 +14,14 @@ use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
 
+use itertools::Itertools;
 use sirius::{
     commitment::CommitmentKey,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
     main_gate::AssignedValue,
     poseidon::{self, ROPair},
 };
+use table16::InputHandleConfig;
 use tracing::*;
 
 mod table16;
@@ -259,6 +261,7 @@ pub mod sha256 {
 
 pub use sha256::{BlockWord, Sha256, Table16Chip, Table16Config};
 
+///F::Repr should be [u8; 32]
 #[derive(Default, Debug)]
 struct TestSha256Circuit<F: PrimeField> {
     _p: PhantomData<F>,
@@ -266,10 +269,86 @@ struct TestSha256Circuit<F: PrimeField> {
 
 impl<F: PrimeField> TestSha256Circuit<F> {
     fn decompose_into_block_words(
-        _layouter: &mut impl Layouter<F>,
-        _input: &[AssignedValue<F>; ARITY],
-    ) -> Result<([AssignedValue<F>; 64], [BlockWord; 64]), SynthesisError> {
-        todo!()
+        layouter: &mut impl Layouter<F>,
+        config: &InputHandleConfig,
+        input: &[AssignedValue<F>; ARITY],
+    ) -> Result<([AssignedValue<F>; 64], [BlockWord; 64]), halo2_proofs::plonk::Error> {
+        let (assigned, values) = layouter.assign_region(
+            || "handle input",
+            |mut region| {
+                input
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, input_val)| {
+                        let output = region.assign_advice(
+                            || "output",
+                            config.output,
+                            offset,
+                            || input_val.value().copied(),
+                        )?;
+                        region.constrain_equal(output.cell(), input_val.cell())?;
+
+                        region.assign_fixed(
+                            || "coeff",
+                            config.output_coeff,
+                            offset,
+                            || Value::known(-F::ONE),
+                        )?;
+
+                        input_val
+                            .value()
+                            .unwrap()
+                            .copied()
+                            .unwrap_or(F::ZERO)
+                            .to_repr()
+                            .as_ref()
+                            .chunks(mem::size_of::<u32>())
+                            .enumerate()
+                            .map(|(limb_index, chunk)| {
+                                (
+                                    F::from_u128(2u128.pow(limb_index as u32 * 32)),
+                                    u32::from_be_bytes(chunk.as_ref().try_into().unwrap()),
+                                )
+                            })
+                            .zip_eq(config.limbs_with_coeff_iter())
+                            .map(|((shift, limb), (shift_col, limb_col))| -> Result::<_, halo2_proofs::plonk::Error> {
+                                let assigned_limb = region.assign_advice(
+                                    || "limb",
+                                    *limb_col,
+                                    offset,
+                                    || Value::known(F::from_u128(limb as u128)),
+                                )?;
+
+                                region.assign_fixed(
+                                    || "coeff",
+                                    *shift_col,
+                                    offset,
+                                    || Value::known(shift),
+                                )?;
+
+                                Ok((
+                                    assigned_limb,
+                                    BlockWord(Value::known(limb)),
+                                ))
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .try_fold(
+                        (vec![], vec![]),
+                        |(mut assigned_limbs_acc, mut block_words_acc), result_with_limbs| {
+                            let (assigned_limb, limb_block_word): (Vec<_>, Vec<_>) =
+                                result_with_limbs?.into_iter().unzip();
+
+                            assigned_limbs_acc.extend(assigned_limb);
+                            block_words_acc.extend(limb_block_word);
+
+                            Ok((assigned_limbs_acc, block_words_acc))
+                        },
+                    )
+            },
+        )?;
+
+        Ok((assigned.try_into().unwrap(), values.try_into().unwrap()))
     }
 }
 
@@ -294,9 +373,11 @@ impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
         z_in: &[AssignedCell<F, F>; ARITY],
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
         Table16Chip::load(config.clone(), layouter).map_err(SynthesisError::Halo2)?;
-        let table16_chip = Table16Chip::construct(config);
+        let table16_chip = Table16Chip::construct(config.clone());
 
-        let (assigned, input) = Self::decompose_into_block_words(layouter, z_in)?;
+        let (assigned, input) =
+            Self::decompose_into_block_words(layouter, &config.input_handle, z_in)
+                .map_err(SynthesisError::Halo2)?;
 
         Sha256::digest_cells(
             table16_chip,

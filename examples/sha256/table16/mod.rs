@@ -1,12 +1,17 @@
-use std::convert::TryInto;
+use std::iter;
 use std::marker::PhantomData;
+use std::ops::Mul;
+use std::{array, convert::TryInto};
 
 use super::sha256::Sha256Instructions;
 use ff::PrimeField;
+use halo2_proofs::plonk::Fixed;
+use halo2_proofs::poly::Rotation;
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Region, Value},
     plonk::{Advice, Any, Assigned, Column, ConstraintSystem, Error},
 };
+use itertools::Itertools;
 
 mod compression;
 mod gates;
@@ -227,12 +232,28 @@ impl<F: PrimeField> AssignedBits<F, 32> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct InputHandleConfig {
+    pub coeff: [Column<Fixed>; 8],
+    pub limbs: [Column<Advice>; 8],
+
+    pub output: Column<Advice>,
+    pub output_coeff: Column<Fixed>,
+}
+
+impl InputHandleConfig {
+    pub fn limbs_with_coeff_iter(&self) -> impl Iterator<Item = (&Column<Fixed>, &Column<Advice>)> {
+        self.coeff.iter().zip_eq(self.limbs.iter())
+    }
+}
+
 /// Configuration for a [`Table16Chip`].
 #[derive(Clone, Debug)]
 pub struct Table16Config {
     lookup: SpreadTableConfig,
     message_schedule: MessageScheduleConfig,
     compression: CompressionConfig,
+    pub input_handle: InputHandleConfig,
 }
 
 /// A chip that implements SHA-256 with a maximum lookup table size of $2^16$.
@@ -308,10 +329,38 @@ impl<F: PrimeField> Table16Chip<F> {
         let message_schedule =
             MessageScheduleConfig::configure(meta, lookup_inputs, message_schedule, extras);
 
+        let input_handle_config = InputHandleConfig {
+            limbs: [a_1, a_2, a_3, a_4, a_5, a_6, a_7, a_8],
+            coeff: array::from_fn(|_| meta.fixed_column()),
+            output: input_spread,
+            output_coeff: meta.fixed_column(),
+        };
+
+        meta.create_gate("sum[a[i] * f[i]] = 0", |meta| {
+            let config = &input_handle_config;
+
+            iter::once(
+                meta.query_advice(config.output, Rotation::cur())
+                    .mul(meta.query_fixed(config.output_coeff, Rotation::cur())),
+            )
+            .chain(
+                config
+                    .limbs
+                    .iter()
+                    .zip_eq(config.coeff.iter())
+                    .map(|(a, f)| {
+                        meta.query_advice(*a, Rotation::cur())
+                            .mul(meta.query_fixed(*f, Rotation::cur()))
+                    }),
+            )
+            .reduce(|acc, item| acc + item)
+        });
+
         Table16Config {
             lookup,
             message_schedule,
             compression,
+            input_handle: input_handle_config,
         }
     }
 
