@@ -11,13 +11,17 @@ use crate::{
     commitment::CommitmentKey,
     digest::{self, DigestToCurve},
     ivc::{
+        self,
+        instance_computation::RandomOracleComputationInstance,
         step_folding_circuit::{StepFoldingCircuit, StepInputs},
         NUM_IO,
     },
     main_gate::MainGateConfig,
-    plonk::PlonkStructure,
-    poseidon::ROPair,
+    nifs::{self, vanilla::VanillaFS, FoldingScheme},
+    plonk::{PlonkStructure, PlonkTrace},
+    poseidon::{random_oracle::ROTrait, ROPair},
     table::CircuitRunner,
+    util,
 };
 
 use super::{step_folding_circuit::StepParams, StepCircuit};
@@ -28,6 +32,10 @@ pub enum Error {
     Plonk(#[from] plonk::Error),
     #[error("Error while calculate digest of pp")]
     WhileDigest(#[from] io::Error),
+    #[error("While calculate intiail plonk relaxed trace of secondary circuit: {0:?}")]
+    WhileGeneratePlonkTrace(#[from] nifs::Error),
+    #[error("While calculate intiail plonk relaxed trace of secondary circuit, error was occured in `process_step`: {0:?}")]
+    WhileProcessStep(#[from] ivc::step_circuit::SynthesisError),
 }
 
 #[derive(Serialize)]
@@ -135,6 +143,9 @@ pub struct PublicParams<
     pub(crate) primary: CircuitPublicParams<'key, A1, MAIN_GATE_T, C1, RP1>,
     pub(crate) secondary: CircuitPublicParams<'key, A2, MAIN_GATE_T, C2, RP2>,
     _p: PhantomData<(SC1, SC2)>,
+
+    #[serde(skip_serializing)]
+    secondary_initial_plonk_trace: PlonkTrace<C2>,
 
     #[serde(skip_serializing)]
     digest_1: C1,
@@ -256,23 +267,58 @@ where
         )
         .try_collect_plonk_structure()?;
 
-        let secondary_S = CircuitRunner::new(
-            secondary.k_table_size,
-            StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T> {
-                step_circuit: secondary.step_circuit,
-                input: StepInputs::without_witness::<
-                    StepFoldingCircuit<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T>,
-                >(
-                    secondary.k_table_size,
-                    NUM_IO,
-                    &StepParams::new(limb_width, limbs_count, secondary.ro_constant.clone()),
-                ),
-            },
-            vec![C2::Scalar::ZERO; NUM_IO],
-        )
-        .try_collect_plonk_structure()?;
+        let (secondary_S, secondary_initial_plonk_trace) = {
+            let secondary_initial_step_params =
+                StepParams::new(limb_width, limbs_count, secondary.ro_constant.clone());
 
-        debug!("start creating pp");
+            let secondary_initial_step_input = StepInputs::without_witness::<
+                StepFoldingCircuit<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T>,
+            >(
+                secondary.k_table_size,
+                NUM_IO,
+                &secondary_initial_step_params,
+            );
+
+            let secondary_initial_instance: [C2::Scalar; 2] = [
+                util::fe_to_fe(&secondary_initial_step_input.u.instance[0]).unwrap(),
+                RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
+                    random_oracle_constant: secondary.ro_constant.clone(),
+                    public_params_hash: &secondary_initial_step_input.public_params_hash,
+                    step: 1,
+                    z_0: &secondary_initial_step_input.z_0,
+                    z_i: &secondary
+                        .step_circuit
+                        .process_step(&secondary_initial_step_input.z_0, secondary.k_table_size)?,
+                    relaxed: &secondary_initial_step_input.U.clone(),
+                    limb_width,
+                    limbs_count,
+                }
+                .generate_with_inspect(|buf| debug!("secondary X1 pp-new 0-step: {buf:?}")),
+            ];
+
+            let secondary_sfc = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T> {
+                step_circuit: secondary.step_circuit,
+                input: secondary_initial_step_input,
+            };
+
+            let secondary_cr = CircuitRunner::new(
+                secondary.k_table_size,
+                secondary_sfc,
+                vec![C2::Scalar::ZERO; NUM_IO],
+            );
+
+            let secondary_S = secondary_cr.try_collect_plonk_structure()?;
+            let secondary_initial_plonk_trace = VanillaFS::generate_plonk_trace(
+                secondary.commitment_key,
+                &secondary_initial_instance,
+                &secondary_cr.try_collect_witness()?,
+                &VanillaFS::setup_params(C2::identity(), secondary_S.clone())?.0,
+                &mut RP1::OffCircuit::new(primary.ro_constant.clone()),
+            )?;
+
+            Result::<_, Error>::Ok((secondary_S, secondary_initial_plonk_trace))
+        }?;
+
         let mut self_ = Self {
             primary: CircuitPublicParams::new(
                 primary_S,
@@ -288,6 +334,7 @@ where
                 limb_width,
                 limbs_count,
             )?,
+            secondary_initial_plonk_trace,
             digest_1: C1::identity(),
             digest_2: C2::identity(),
             _p: PhantomData,
@@ -297,6 +344,10 @@ where
         self_.digest_2 = self_.digest()?;
 
         Ok(self_)
+    }
+
+    pub fn secondary_initial_plonk_trace(&self) -> &PlonkTrace<C2> {
+        &self.secondary_initial_plonk_trace
     }
 
     pub fn digest_1(&self) -> C1 {
@@ -351,6 +402,8 @@ where
 
 #[cfg(test)]
 mod pp_test {
+    use std::{fs, path::Path};
+
     use group::Group;
     use halo2curves::{bn256, grumpkin};
 
@@ -371,7 +424,29 @@ mod pp_test {
     type RandomOracleConstant<const T: usize, const RATE: usize, F> =
         <RandomOracle<T, RATE> as ROPair<F>>::Args;
 
-    #[test_log::test]
+    fn get_or_create_commitment_key<C: CurveAffine>(
+        k: usize,
+        label: &'static str,
+    ) -> io::Result<CommitmentKey<C>> {
+        const FOLDER: &str = ".cache/examples";
+
+        let file_path = Path::new(FOLDER).join(label).join(format!("{k}.bin"));
+
+        if file_path.exists() {
+            debug!("{file_path:?} exists, load key");
+            unsafe { CommitmentKey::load_from_file(&file_path, k) }
+        } else {
+            debug!("{file_path:?} not exists, start generate");
+            let key = CommitmentKey::setup(k, label.as_bytes());
+            fs::create_dir_all(file_path.parent().unwrap())?;
+            unsafe {
+                key.save_to_file(&file_path)?;
+            }
+            Ok(key)
+        }
+    }
+
+    #[test]
     fn digest() {
         type Scalar1 = <C1 as Group>::Scalar;
         type Scalar2 = <C2 as Group>::Scalar;
@@ -396,13 +471,13 @@ mod pp_test {
             CircuitPublicParamsInput {
                 step_circuit: &trivial::Circuit::default(),
                 k_table_size: K as u32,
-                commitment_key: &CommitmentKey::setup(K, b"1"),
+                commitment_key: &get_or_create_commitment_key(K + 3, "bn256").unwrap(),
                 ro_constant: spec1,
             },
             CircuitPublicParamsInput {
                 step_circuit: &trivial::Circuit::default(),
                 k_table_size: K as u32,
-                commitment_key: &CommitmentKey::setup(K, b"2"),
+                commitment_key: &get_or_create_commitment_key(K + 3, "grumpkin").unwrap(),
                 ro_constant: spec2,
             },
             LIMB_WIDTH,

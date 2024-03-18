@@ -76,6 +76,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct StepInputs<'link, const ARITY: usize, C, RO>
 where
     C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,

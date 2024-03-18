@@ -195,7 +195,7 @@ where
     {
         debug!("start creation of IVC");
         // For use as first version of `U` in primary circuit synthesize
-        let secondary_pre_round_plonk_trace = pp.secondary.S().dry_run_sps_protocol();
+        let secondary_pre_round_plonk_trace = pp.secondary_initial_plonk_trace();
 
         let primary_z_output = primary.process_step(&primary_z_0, pp.primary.k_table_size())?;
         debug!("primary z output calculated off-circuit");
@@ -229,7 +229,7 @@ where
                 z_0: primary_z_0,
                 z_i: primary_z_0,
                 U: secondary_relaxed_trace.U.clone(),
-                u: secondary_pre_round_plonk_trace.u,
+                u: secondary_pre_round_plonk_trace.u.clone(),
                 cross_term_commits: vec![
                     C2::identity();
                     pp.secondary.S().get_degree_for_folding().saturating_sub(1)
