@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
-use std::{array, fs, io, iter, marker::PhantomData, num::NonZeroUsize, path::Path};
+use std::{array, fs, io, marker::PhantomData, num::NonZeroUsize, path::Path};
 
 use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, Value},
+    circuit::{AssignedCell, Layouter},
     plonk::ConstraintSystem,
 };
 
@@ -17,6 +17,7 @@ use grumpkin::G1 as C2;
 use sirius::{
     commitment::CommitmentKey,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
+    main_gate::AssignedValue,
     poseidon::{self, ROPair},
 };
 use tracing::*;
@@ -263,8 +264,17 @@ struct TestSha256Circuit<F: PrimeField> {
     _p: PhantomData<F>,
 }
 
+impl<F: PrimeField> TestSha256Circuit<F> {
+    fn decompose_into_block_words(
+        _layouter: &mut impl Layouter<F>,
+        _input: &[AssignedValue<F>; ARITY],
+    ) -> Result<([AssignedValue<F>; 64], [BlockWord; 64]), SynthesisError> {
+        todo!()
+    }
+}
+
 // TODO
-const ARITY: usize = BLOCK_SIZE / 2;
+const ARITY: usize = DIGEST_SIZE;
 
 const CIRCUIT_TABLE_SIZE1: usize = 22;
 const CIRCUIT_TABLE_SIZE2: usize = 22;
@@ -286,38 +296,13 @@ impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
         Table16Chip::load(config.clone(), layouter).map_err(SynthesisError::Halo2)?;
         let table16_chip = Table16Chip::construct(config);
 
-        let input: [AssignedCell<F, F>; BLOCK_SIZE] = iter::repeat(z_in.iter())
-            .take(2)
-            .flatten()
-            .cloned()
-            .collect::<Vec<AssignedCell<F, F>>>()
-            .try_into()
-            .expect("Unreachable, ARITY * 2 == BLOCK_SIZE");
-
-        let values = input
-            .iter()
-            .map(|cell| cell.value().map(|v| *v).unwrap().unwrap_or_default())
-            .map(|field_value| {
-                u32::from_be_bytes(
-                    field_value
-                        .to_repr()
-                        .as_ref()
-                        .iter()
-                        .take(4)
-                        .copied()
-                        .collect::<Vec<_>>()
-                        .try_into()
-                        .unwrap(),
-                )
-            })
-            .map(|value| BlockWord(Value::known(value)))
-            .collect::<Box<[BlockWord]>>();
+        let (assigned, input) = Self::decompose_into_block_words(layouter, z_in)?;
 
         Sha256::digest_cells(
             table16_chip,
             layouter.namespace(|| "'abc' * 2"),
-            values.as_ref(),
             &input,
+            &assigned,
         )
         .map_err(SynthesisError::Halo2)
     }
@@ -363,6 +348,11 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 
 fn main() {
     tracing_subscriber::fmt::init();
+
+    let repr_len = C1Scalar::zero().to_repr().len();
+    if repr_len != 0 {
+        panic!("{repr_len}");
+    }
 
     info!("Start");
     // C1
