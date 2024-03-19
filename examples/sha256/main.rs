@@ -2,7 +2,7 @@
 
 use std::{array, fs, io, marker::PhantomData, mem, num::NonZeroUsize, path::Path};
 
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
@@ -14,11 +14,10 @@ use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
 
-use itertools::Itertools;
 use sirius::{
     commitment::CommitmentKey,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
-    main_gate::AssignedValue,
+    main_gate::{AssignedValue, RegionCtx},
     poseidon::{self, ROPair},
 };
 use table16::InputHandleConfig;
@@ -276,26 +275,16 @@ impl<F: PrimeField> TestSha256Circuit<F> {
         let (assigned, values) = layouter.assign_region(
             || "handle input",
             |mut region| {
+                config.name_columns(&mut region);
+                let mut region = RegionCtx::new(region, 0);
+                let shift = F::from(2).pow_vartime([32u64]); // base = 2^limb_width
+
                 input
                     .iter()
-                    .enumerate()
-                    .map(|(offset, input_val)| {
-                        let output = region.assign_advice(
-                            || "output",
-                            config.output,
-                            offset,
-                            || input_val.value().copied(),
-                        )?;
-                        region.constrain_equal(output.cell(), input_val.cell())?;
+                    .map(|input_val| {
+                        let mut prev_partial_sum = Option::<AssignedCell<F, F>>::None;
 
-                        region.assign_fixed(
-                            || "coeff",
-                            config.output_coeff,
-                            offset,
-                            || Value::known(-F::ONE),
-                        )?;
-
-                        input_val
+                        let (last_output, limbs) = input_val
                             .value()
                             .unwrap()
                             .copied()
@@ -303,35 +292,96 @@ impl<F: PrimeField> TestSha256Circuit<F> {
                             .to_repr()
                             .as_ref()
                             .chunks(mem::size_of::<u32>())
-                            .enumerate()
-                            .map(|(limb_index, chunk)| {
-                                (
-                                    F::from_u128(2u128.pow(limb_index as u32 * 32)),
-                                    u32::from_be_bytes(chunk.as_ref().try_into().unwrap()),
-                                )
-                            })
-                            .zip_eq(config.limbs_with_coeff_iter())
-                            .map(|((shift, limb), (shift_col, limb_col))| -> Result::<_, halo2_proofs::plonk::Error> {
+                            .map(|chunk| u32::from_le_bytes(chunk.as_ref().try_into().unwrap()))
+                            .rev()
+                            .map(|limb| -> Result<_, halo2_proofs::plonk::Error> {
+
+                                config.selector.enable(&mut region.region, region.offset)?;
+
+                                let limb_as_f = F::from_u128(limb as u128);
+
+
+                                debug!("limb: {limb}, limbs_as_f: {limb_as_f:?}");
+
+                                let mut output_value = Value::known(F::ZERO);
+                                debug!("start output value: {output_value:?}");
+
+                                let _assigned_prev_coeff =
+                                    region.assign_fixed(|| "prev", config.prev_coeff, shift)?;
+
+                                debug!("prev partial sum before update {prev_partial_sum:?}");
+                                if let Some(prev_partial_sum) = &mut prev_partial_sum {
+                                    debug!("prev partial sum not empty {prev_partial_sum:?}");
+                                    output_value = output_value + prev_partial_sum
+                                        .value()
+                                        .map(|f| f.mul(shift));
+
+                                    debug!("output + prev: {output_value:?}");
+
+                                    region.assign_advice_from(
+                                        || "prev",
+                                        config.prev,
+                                        prev_partial_sum.clone(),
+                                    )?
+                                } else {
+                                    debug!("prev partial sum empty {prev_partial_sum:?}");
+                                    region.assign_advice(
+                                        || "prev",
+                                        config.prev,
+                                        Value::known(F::ZERO),
+                                    )?
+                                };
+
+                                output_value = output_value + Value::known(limb_as_f);
+                                debug!("prev_partial_sum + limb: {output_value:?}");
+
                                 let assigned_limb = region.assign_advice(
                                     || "limb",
-                                    *limb_col,
-                                    offset,
-                                    || Value::known(F::from_u128(limb as u128)),
+                                    config.limb,
+                                    Value::known(limb_as_f),
                                 )?;
 
-                                region.assign_fixed(
-                                    || "coeff",
-                                    *shift_col,
-                                    offset,
-                                    || Value::known(shift),
+                                let assigned_output = region.assign_advice(
+                                    || "output",
+                                    config.output,
+                                    output_value,
                                 )?;
+
+                                prev_partial_sum = Some(assigned_output.clone());
+                                debug!("prev partial sum after update {prev_partial_sum:?}");
+
+                                region.next();
 
                                 Ok((
+                                    assigned_output,
                                     assigned_limb,
                                     BlockWord(Value::known(limb)),
                                 ))
                             })
-                            .collect::<Result<Vec<_>, _>>()
+                            .try_fold(
+                                (None, vec![]),
+                                |(mut _last_output, mut limbs), result_with_limbs| {
+                                    let (assigned_output, assigned_limb, block_word) =
+                                        result_with_limbs?;
+
+                                    debug!("output: {assigned_output:?}, assigned_limb: {assigned_limb:?}, bw: {block_word:?}");
+
+                                    limbs.push((assigned_limb, block_word));
+
+                                    Result::<_, halo2_proofs::plonk::Error>::Ok((
+                                        Some(assigned_output),
+                                        limbs,
+                                    ))
+                                },
+                            )?;
+
+                        let last_output = last_output.unwrap();
+                        if last_output.value().unwrap().ne(input_val.value().unwrap()) {
+                            error!("{:?} != {:?}", last_output.value().unwrap(), input_val.value().unwrap());
+                        }
+                        region.constrain_equal(last_output.cell(), input_val.cell())?;
+
+                        Result::<_, halo2_proofs::plonk::Error>::Ok(limbs)
                     })
                     .try_fold(
                         (vec![], vec![]),
@@ -477,12 +527,13 @@ fn main() {
     .unwrap();
     info!("public params: {pp:?}");
 
+    let mut rng = rand::thread_rng();
     IVC::fold_with_debug_mode(
         &pp,
         sc1,
-        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
+        array::from_fn(|_| C1Scalar::random(&mut rng)),
         sc2,
-        array::from_fn(|i| C2Scalar::from_u128(i as u128)),
+        array::from_fn(|_| C2Scalar::random(&mut rng)),
         NonZeroUsize::new(1).unwrap(),
     )
     .unwrap();

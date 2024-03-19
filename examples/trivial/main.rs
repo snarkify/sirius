@@ -2,7 +2,7 @@
 
 use std::{array, fs, io, num::NonZeroUsize, path::Path};
 
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use halo2_gadgets::sha256::BLOCK_SIZE;
 
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
@@ -111,10 +111,11 @@ fn main() {
     info!("public params: {pp:?}");
 
     debug!("start ivc");
+    let mut rng = rand::thread_rng();
     IVC::fold_with_debug_mode(
         &pp,
         sc1,
-        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
+        array::from_fn(|_| C1Scalar::random(&mut rng)),
         sc2,
         array::from_fn(|i| C2Scalar::from_u128(i as u128)),
         NonZeroUsize::new(5).unwrap(),
