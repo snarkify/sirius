@@ -272,19 +272,20 @@ impl<F: PrimeField> TestSha256Circuit<F> {
         config: &InputHandleConfig,
         input: &[AssignedValue<F>; ARITY],
     ) -> Result<([AssignedValue<F>; 64], [BlockWord; 64]), halo2_proofs::plonk::Error> {
+        let shift = F::from(2).pow_vartime([32u64]); // base = 2^limb_width
+
         let (assigned, values) = layouter.assign_region(
             || "handle input",
             |mut region| {
                 config.name_columns(&mut region);
                 let mut region = RegionCtx::new(region, 0);
-                let shift = F::from(2).pow_vartime([32u64]); // base = 2^limb_width
 
                 input
                     .iter()
                     .map(|input_val| {
                         let mut prev_partial_sum = Option::<AssignedCell<F, F>>::None;
 
-                        let (last_output, limbs) = input_val
+                        let limbs = input_val
                             .value()
                             .unwrap()
                             .copied()
@@ -295,11 +296,9 @@ impl<F: PrimeField> TestSha256Circuit<F> {
                             .map(|chunk| u32::from_le_bytes(chunk.as_ref().try_into().unwrap()))
                             .rev()
                             .map(|limb| -> Result<_, halo2_proofs::plonk::Error> {
-
                                 config.selector.enable(&mut region.region, region.offset)?;
 
                                 let limb_as_f = F::from_u128(limb as u128);
-
 
                                 debug!("limb: {limb}, limbs_as_f: {limb_as_f:?}");
 
@@ -312,9 +311,8 @@ impl<F: PrimeField> TestSha256Circuit<F> {
                                 debug!("prev partial sum before update {prev_partial_sum:?}");
                                 if let Some(prev_partial_sum) = &mut prev_partial_sum {
                                     debug!("prev partial sum not empty {prev_partial_sum:?}");
-                                    output_value = output_value + prev_partial_sum
-                                        .value()
-                                        .map(|f| f.mul(shift));
+                                    output_value = output_value
+                                        + prev_partial_sum.value().map(|f| f.mul(shift));
 
                                     debug!("output + prev: {output_value:?}");
 
@@ -352,34 +350,19 @@ impl<F: PrimeField> TestSha256Circuit<F> {
 
                                 region.next();
 
-                                Ok((
-                                    assigned_output,
-                                    assigned_limb,
-                                    BlockWord(Value::known(limb)),
-                                ))
+                                Ok((assigned_limb, BlockWord(Value::known(limb))))
                             })
-                            .try_fold(
-                                (None, vec![]),
-                                |(mut _last_output, mut limbs), result_with_limbs| {
-                                    let (assigned_output, assigned_limb, block_word) =
-                                        result_with_limbs?;
+                            .try_fold(vec![], |mut limbs, result_with_limbs| -> Result::<_, halo2_proofs::plonk::Error> {
+                                let (assigned_limb, block_word) = result_with_limbs?;
 
-                                    debug!("output: {assigned_output:?}, assigned_limb: {assigned_limb:?}, bw: {block_word:?}");
+                                debug!("assigned_limb: {assigned_limb:?}, bw: {block_word:?}");
 
-                                    limbs.push((assigned_limb, block_word));
+                                limbs.push((assigned_limb, block_word));
 
-                                    Result::<_, halo2_proofs::plonk::Error>::Ok((
-                                        Some(assigned_output),
-                                        limbs,
-                                    ))
-                                },
-                            )?;
+                                Ok(limbs)
+                            })?;
 
-                        let last_output = last_output.unwrap();
-                        if last_output.value().unwrap().ne(input_val.value().unwrap()) {
-                            error!("{:?} != {:?}", last_output.value().unwrap(), input_val.value().unwrap());
-                        }
-                        region.constrain_equal(last_output.cell(), input_val.cell())?;
+                        region.constrain_equal(prev_partial_sum.unwrap().cell(), input_val.cell())?;
 
                         Result::<_, halo2_proofs::plonk::Error>::Ok(limbs)
                     })
@@ -528,7 +511,7 @@ fn main() {
     info!("public params: {pp:?}");
 
     let mut rng = rand::thread_rng();
-    IVC::fold_with_debug_mode(
+    IVC::fold(
         &pp,
         sc1,
         array::from_fn(|_| C1Scalar::random(&mut rng)),
