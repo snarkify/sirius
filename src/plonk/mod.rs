@@ -66,7 +66,7 @@ pub enum Error {
     },
 }
 
-#[derive(Clone, PartialEq, Serialize, Default)]
+#[derive(Clone, PartialEq, Serialize, Default, Debug)]
 #[serde(bound(serialize = "
     F: Serialize
 "))]
@@ -160,6 +160,7 @@ pub struct RelaxedPlonkWitness<F: PrimeField> {
 }
 
 // TODO #31 docs
+#[derive(Debug)]
 pub struct RelaxedPlonkTrace<C: CurveAffine> {
     pub U: RelaxedPlonkInstance<C>,
     pub W: RelaxedPlonkWitness<C::Scalar>,

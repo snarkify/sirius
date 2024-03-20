@@ -24,7 +24,7 @@ serde_arrays = "0.1.0"
 sha3 = "0.10"
 some-to-err = "0.2.1"
 thiserror = "1.0.48"
-tracing = "0.1.40"
+tracing = { version = "0.1.40", features = ["attributes"] }
 
 [dev-dependencies]
 prettytable-rs = "0.10.0"

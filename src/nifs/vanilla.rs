@@ -1,18 +1,23 @@
 use std::marker::PhantomData;
 
-use super::*;
-use crate::commitment::CommitmentKey;
-use crate::concat_vec;
-use crate::constants::NUM_CHALLENGE_BITS;
-use crate::plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain};
-use crate::plonk::{
-    PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
-};
-use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
-use crate::polynomial::ColumnIndex;
-use crate::poseidon::ROTrait;
-use crate::sps::SpecialSoundnessVerifier;
 use halo2_proofs::arithmetic::CurveAffine;
+use tracing::*;
+
+use crate::{
+    commitment::CommitmentKey,
+    concat_vec,
+    constants::NUM_CHALLENGE_BITS,
+    plonk::{
+        eval::{Error as EvalError, Eval, PlonkEvalDomain},
+        PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness, RelaxedPlonkInstance,
+        RelaxedPlonkTrace, RelaxedPlonkWitness,
+    },
+    polynomial::ColumnIndex,
+    poseidon::ROTrait,
+    sps::SpecialSoundnessVerifier,
+};
+
+use super::*;
 
 /// Represent intermediate polynomial terms that arise when folding
 /// two polynomial relations into one.
@@ -41,6 +46,7 @@ pub struct VanillaFS<C: CurveAffine> {
     _marker: PhantomData<C>,
 }
 
+#[derive(Debug)]
 pub struct VanillaFSProverParam<C: CurveAffine> {
     pub(crate) S: PlonkStructure<C::ScalarExt>,
     /// digest of public parameter of IVC circuit
@@ -175,6 +181,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     ///
     /// # Returns
     /// A tuple containing folded accumulator and proof for the folding scheme verifier
+    #[instrument(name = "prove", skip(ro_acc))]
     fn prove(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
@@ -190,10 +197,18 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         let (cross_terms, cross_term_commits) =
             Self::commit_cross_terms(ck, &pp.S, U1, W1, U2, W2)?;
 
+        debug!("cross-term-commited");
+
         let r = VanillaFS::generate_challenge(&pp.pp_digest, ro_acc, U1, U2, &cross_term_commits)?;
 
+        debug!("challenge generated");
+
         let U = U1.fold(U2, &cross_term_commits, &r);
+        debug!("U folded");
+
         let W = W1.fold(W2, &cross_terms, &r);
+        debug!("W folded");
+
         Ok((RelaxedPlonkTrace { U, W }, cross_term_commits))
     }
 
