@@ -245,6 +245,7 @@ where
     RP1: ROPair<C1::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
     RP2: ROPair<C2::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
 {
+    #[instrument(name = "pp.new", skip_all)]
     pub fn new(
         primary: CircuitPublicParamsInput<'key, '_, A1, C1, RP1::Args, SC1>,
         secondary: CircuitPublicParamsInput<'key, '_, A2, C2, RP2::Args, SC2>,
@@ -268,6 +269,9 @@ where
         .try_collect_plonk_structure()?;
 
         let (secondary_S, secondary_initial_plonk_trace) = {
+            let s = span!(Level::ERROR, "secondary_trace in pp");
+            let _e = s.enter();
+
             let secondary_initial_step_params =
                 StepParams::new(limb_width, limbs_count, secondary.ro_constant.clone());
 

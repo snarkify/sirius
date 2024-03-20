@@ -181,6 +181,7 @@ where
         Ok(())
     }
 
+    #[instrument(name = "ivc step 0", skip_all)]
     fn new<const T: usize, RP1, RP2>(
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
         primary: SC1,
@@ -247,12 +248,16 @@ where
             .map_err(|err| Error::from_mock_verify(err, true, 0))?;
         }
 
-        let primary_witness = CircuitRunner::new(
-            pp.primary.k_table_size(),
-            primary_sfc,
-            primary_instance.to_vec(),
-        )
-        .try_collect_witness()?;
+        let primary_witness = {
+            let s = span!(Level::ERROR, "primary proof", step = 0);
+            let _e = s.enter();
+            CircuitRunner::new(
+                pp.primary.k_table_size(),
+                primary_sfc,
+                primary_instance.to_vec(),
+            )
+            .try_collect_witness()
+        }?;
         debug!("primary witness calculated");
 
         // Start secondary
@@ -318,12 +323,16 @@ where
             .map_err(|err| Error::from_mock_verify(err, false, 0))?;
         }
 
-        let secondary_witness = CircuitRunner::new(
-            pp.secondary.k_table_size(),
-            secondary_sfc,
-            secondary_instance.to_vec(),
-        )
-        .try_collect_witness()?;
+        let secondary_witness = {
+            let s = span!(Level::ERROR, "secondary proof", step = 0);
+            let _e = s.enter();
+            CircuitRunner::new(
+                pp.secondary.k_table_size(),
+                secondary_sfc,
+                secondary_instance.to_vec(),
+            )
+            .try_collect_witness()
+        }?;
 
         let (secondary_nifs_pp, _nifs_vp) =
             VanillaFS::setup_params(pp.digest_2(), pp.secondary.S().clone())?;
@@ -357,6 +366,7 @@ where
         })
     }
 
+    #[instrument(name = "ivc step 0", skip_all, fields(step = self.step))]
     fn fold_step<const T: usize, RP1, RP2>(
         &mut self,
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
@@ -423,12 +433,16 @@ where
             .map_err(|err| Error::from_mock_verify(err, true, self.step))?;
         }
 
-        let primary_witness = CircuitRunner::new(
-            pp.primary.k_table_size(),
-            primary_sfc,
-            primary_instance.to_vec(),
-        )
-        .try_collect_witness()?;
+        let primary_witness = {
+            let s = span!(Level::ERROR, "primary proof", step = self.step);
+            let _e = s.enter();
+            CircuitRunner::new(
+                pp.primary.k_table_size(),
+                primary_sfc,
+                primary_instance.to_vec(),
+            )
+            .try_collect_witness()
+        }?;
 
         self.primary.z_i = primary_z_next;
         self.secondary.relaxed_trace = secondary_new_trace;
@@ -497,12 +511,16 @@ where
             .map_err(|err| Error::from_mock_verify(err, false, self.step))?;
         }
 
-        let secondary_witness = CircuitRunner::new(
-            pp.secondary.k_table_size(),
-            secondary_sfc,
-            secondary_instance.to_vec(),
-        )
-        .try_collect_witness()?;
+        let secondary_witness = {
+            let s = span!(Level::ERROR, "secondary proof", step = self.step);
+            let _e = s.enter();
+            CircuitRunner::new(
+                pp.secondary.k_table_size(),
+                secondary_sfc,
+                secondary_instance.to_vec(),
+            )
+            .try_collect_witness()
+        }?;
 
         self.secondary.z_i = next_secondary_z_i;
         self.primary.relaxed_trace = primary_new_trace;

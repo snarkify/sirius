@@ -181,7 +181,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     ///
     /// # Returns
     /// A tuple containing folded accumulator and proof for the folding scheme verifier
-    #[instrument(name = "prove", skip(ro_acc))]
+    #[instrument(name = "prove", skip_all, fields(input = format!("{incoming:?}")))]
     fn prove(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
@@ -189,6 +189,8 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         accumulator: &Self::Accumulator,
         incoming: &PlonkTrace<C>,
     ) -> Result<(Self::Accumulator, Self::Proof), Error> {
+        debug!("start");
+
         let U1 = &accumulator.U;
         let W1 = &accumulator.W;
         let U2 = &incoming.u;
