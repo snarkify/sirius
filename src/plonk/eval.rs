@@ -1,6 +1,7 @@
+use std::collections::{hash_map::Entry, HashMap};
+
 use crate::polynomial::{ColumnIndex, MultiPolynomial};
 use ff::PrimeField;
-use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -96,51 +97,45 @@ pub trait Eval<F: PrimeField> {
                             return Ok(F::ONE);
                         }
                         if let Some(vn) = evals.get(&Index { column_index, exp }) {
-                            Ok(*vn)
-                        } else if let Some(v1) = evals.get(&Index {
+                            return Ok(*vn);
+                        }
+
+                        let v1 = match evals.entry(Index {
                             column_index,
                             exp: &1,
                         }) {
-                            let vn = v1.pow([*exp as u64, 0, 0, 0]);
-                            evals.insert(Index { column_index, exp }, vn);
-                            Ok(vn)
-                        } else {
-                            let v1 = match column_index {
-                                // evaluation for challenge variable
-                                ColumnIndex::Challenge { column_index } => {
-                                    self.eval_challenge(*column_index)
-                                }
-                                // evaluation for column polynomial variable
-                                ColumnIndex::Polynominal {
-                                    rotation,
-                                    column_index,
-                                } => {
-                                    let rotation_plus_row = rotation + (row as i32);
-                                    // TODO: double check how halo2 handle
-                                    // (1): row+rot < 0
-                                    // (2): row+rot >= row_size = 2^K
-                                    let row = if rotation_plus_row < 0 {
-                                        rotation_plus_row + row_size
-                                    } else if rotation_plus_row >= row_size {
-                                        rotation_plus_row - row_size
-                                    } else {
-                                        rotation_plus_row
-                                    };
-                                    self.eval_column_var(row as usize, *column_index)
-                                }
-                            }?;
-
-                            evals
-                                .entry(Index {
-                                    column_index,
-                                    exp: &1,
+                            Entry::Occupied(occupied) => *occupied.get(),
+                            Entry::Vacant(vacant) => {
+                                *vacant.insert(match column_index {
+                                    // evaluation for challenge variable
+                                    ColumnIndex::Challenge { column_index } => {
+                                        self.eval_challenge(*column_index)?
+                                    }
+                                    // evaluation for column polynomial variable
+                                    ColumnIndex::Polynominal {
+                                        rotation,
+                                        column_index,
+                                    } => {
+                                        let rotation_plus_row = rotation + (row as i32);
+                                        // TODO: double check how halo2 handle
+                                        // (1): row+rot < 0
+                                        // (2): row+rot >= row_size = 2^K
+                                        let row = if rotation_plus_row < 0 {
+                                            rotation_plus_row + row_size
+                                        } else if rotation_plus_row >= row_size {
+                                            rotation_plus_row - row_size
+                                        } else {
+                                            rotation_plus_row
+                                        };
+                                        self.eval_column_var(row as usize, *column_index)?
+                                    }
                                 })
-                                .or_insert_with(|| v1.pow([1, 0, 0, 0]));
+                            }
+                        };
 
-                            Ok(*evals
-                                .entry(Index { column_index, exp })
-                                .or_insert_with(|| v1.pow([*exp as u64, 0, 0, 0])))
-                        }
+                        let vn = v1.pow([*exp as u64, 0, 0, 0]);
+                        evals.insert(Index { column_index, exp }, vn);
+                        Ok(vn)
                     })
                     .try_fold(
                         mono.coeff,

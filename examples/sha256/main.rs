@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use std::{array, fs, io, iter, marker::PhantomData, num::NonZeroUsize, path::Path};
+use std::{array, fs, io, marker::PhantomData, mem, num::NonZeroUsize, path::Path};
 
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
@@ -17,8 +17,10 @@ use grumpkin::G1 as C2;
 use sirius::{
     commitment::CommitmentKey,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
+    main_gate::{AssignedValue, RegionCtx},
     poseidon::{self, ROPair},
 };
+use table16::InputHandleConfig;
 use tracing::*;
 
 mod table16;
@@ -258,13 +260,133 @@ pub mod sha256 {
 
 pub use sha256::{BlockWord, Sha256, Table16Chip, Table16Config};
 
+///F::Repr should be [u8; 32]
 #[derive(Default, Debug)]
 struct TestSha256Circuit<F: PrimeField> {
     _p: PhantomData<F>,
 }
 
+impl<F: PrimeField> TestSha256Circuit<F> {
+    fn decompose_into_block_words(
+        layouter: &mut impl Layouter<F>,
+        config: &InputHandleConfig,
+        input: &[AssignedValue<F>; ARITY],
+    ) -> Result<([AssignedValue<F>; 64], [BlockWord; 64]), halo2_proofs::plonk::Error> {
+        let shift = F::from(2).pow_vartime([32u64]); // base = 2^limb_width
+
+        let (assigned, values) = layouter.assign_region(
+            || "handle input",
+            |mut region| {
+                config.name_columns(&mut region);
+                let mut region = RegionCtx::new(region, 0);
+
+                input
+                    .iter()
+                    .map(|input_val| {
+                        let mut prev_partial_sum = Option::<AssignedCell<F, F>>::None;
+
+                        let limbs = input_val
+                            .value()
+                            .unwrap()
+                            .copied()
+                            .unwrap_or(F::ZERO)
+                            .to_repr()
+                            .as_ref()
+                            .chunks(mem::size_of::<u32>())
+                            .map(|chunk| u32::from_le_bytes(chunk.as_ref().try_into().unwrap()))
+                            .rev()
+                            .map(|limb| -> Result<_, halo2_proofs::plonk::Error> {
+                                config.selector.enable(&mut region.region, region.offset)?;
+
+                                let limb_as_f = F::from_u128(limb as u128);
+
+                                debug!("limb: {limb}, limbs_as_f: {limb_as_f:?}");
+
+                                let mut output_value = Value::known(F::ZERO);
+                                debug!("start output value: {output_value:?}");
+
+                                let _assigned_prev_coeff =
+                                    region.assign_fixed(|| "prev", config.prev_coeff, shift)?;
+
+                                debug!("prev partial sum before update {prev_partial_sum:?}");
+                                if let Some(prev_partial_sum) = &mut prev_partial_sum {
+                                    debug!("prev partial sum not empty {prev_partial_sum:?}");
+                                    output_value = output_value
+                                        + prev_partial_sum.value().map(|f| f.mul(shift));
+
+                                    debug!("output + prev: {output_value:?}");
+
+                                    region.assign_advice_from(
+                                        || "prev",
+                                        config.prev,
+                                        prev_partial_sum.clone(),
+                                    )?
+                                } else {
+                                    debug!("prev partial sum empty {prev_partial_sum:?}");
+                                    region.assign_advice(
+                                        || "prev",
+                                        config.prev,
+                                        Value::known(F::ZERO),
+                                    )?
+                                };
+
+                                output_value = output_value + Value::known(limb_as_f);
+                                debug!("prev_partial_sum + limb: {output_value:?}");
+
+                                let assigned_limb = region.assign_advice(
+                                    || "limb",
+                                    config.limb,
+                                    Value::known(limb_as_f),
+                                )?;
+
+                                let assigned_output = region.assign_advice(
+                                    || "output",
+                                    config.output,
+                                    output_value,
+                                )?;
+
+                                prev_partial_sum = Some(assigned_output.clone());
+                                debug!("prev partial sum after update {prev_partial_sum:?}");
+
+                                region.next();
+
+                                Ok((assigned_limb, BlockWord(Value::known(limb))))
+                            })
+                            .try_fold(vec![], |mut limbs, result_with_limbs| -> Result::<_, halo2_proofs::plonk::Error> {
+                                let (assigned_limb, block_word) = result_with_limbs?;
+
+                                debug!("assigned_limb: {assigned_limb:?}, bw: {block_word:?}");
+
+                                limbs.push((assigned_limb, block_word));
+
+                                Ok(limbs)
+                            })?;
+
+                        //region.constrain_equal(prev_partial_sum.unwrap().cell(), input_val.cell())?;
+
+                        Result::<_, halo2_proofs::plonk::Error>::Ok(limbs)
+                    })
+                    .try_fold(
+                        (vec![], vec![]),
+                        |(mut assigned_limbs_acc, mut block_words_acc), result_with_limbs| {
+                            let (assigned_limb, limb_block_word): (Vec<_>, Vec<_>) =
+                                result_with_limbs?.into_iter().unzip();
+
+                            assigned_limbs_acc.extend(assigned_limb);
+                            block_words_acc.extend(limb_block_word);
+
+                            Ok((assigned_limbs_acc, block_words_acc))
+                        },
+                    )
+            },
+        )?;
+
+        Ok((assigned.try_into().unwrap(), values.try_into().unwrap()))
+    }
+}
+
 // TODO
-const ARITY: usize = BLOCK_SIZE / 2;
+const ARITY: usize = DIGEST_SIZE;
 
 const CIRCUIT_TABLE_SIZE1: usize = 22;
 const CIRCUIT_TABLE_SIZE2: usize = 22;
@@ -284,40 +406,17 @@ impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
         z_in: &[AssignedCell<F, F>; ARITY],
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
         Table16Chip::load(config.clone(), layouter).map_err(SynthesisError::Halo2)?;
-        let table16_chip = Table16Chip::construct(config);
+        let table16_chip = Table16Chip::construct(config.clone());
 
-        let input: [AssignedCell<F, F>; BLOCK_SIZE] = iter::repeat(z_in.iter())
-            .take(2)
-            .flatten()
-            .cloned()
-            .collect::<Vec<AssignedCell<F, F>>>()
-            .try_into()
-            .expect("Unreachable, ARITY * 2 == BLOCK_SIZE");
-
-        let values = input
-            .iter()
-            .map(|cell| cell.value().map(|v| *v).unwrap().unwrap_or_default())
-            .map(|field_value| {
-                u32::from_be_bytes(
-                    field_value
-                        .to_repr()
-                        .as_ref()
-                        .iter()
-                        .take(4)
-                        .copied()
-                        .collect::<Vec<_>>()
-                        .try_into()
-                        .unwrap(),
-                )
-            })
-            .map(|value| BlockWord(Value::known(value)))
-            .collect::<Box<[BlockWord]>>();
+        let (assigned, input) =
+            Self::decompose_into_block_words(layouter, &config.input_handle, z_in)
+                .map_err(SynthesisError::Halo2)?;
 
         Sha256::digest_cells(
             table16_chip,
             layouter.namespace(|| "'abc' * 2"),
-            values.as_ref(),
             &input,
+            &assigned,
         )
         .map_err(SynthesisError::Halo2)
     }
@@ -411,12 +510,13 @@ fn main() {
     .unwrap();
     info!("public params: {pp:?}");
 
-    IVC::fold_with_debug_mode(
+    let mut rng = rand::thread_rng();
+    IVC::fold(
         &pp,
         sc1,
-        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
+        array::from_fn(|_| C1Scalar::random(&mut rng)),
         sc2,
-        array::from_fn(|i| C2Scalar::from_u128(i as u128)),
+        array::from_fn(|_| C2Scalar::random(&mut rng)),
         NonZeroUsize::new(1).unwrap(),
     )
     .unwrap();

@@ -1,18 +1,23 @@
 use std::marker::PhantomData;
 
-use super::*;
-use crate::commitment::CommitmentKey;
-use crate::concat_vec;
-use crate::constants::NUM_CHALLENGE_BITS;
-use crate::plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain};
-use crate::plonk::{
-    PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
-};
-use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
-use crate::polynomial::ColumnIndex;
-use crate::poseidon::ROTrait;
-use crate::sps::SpecialSoundnessVerifier;
 use halo2_proofs::arithmetic::CurveAffine;
+use tracing::*;
+
+use crate::{
+    commitment::CommitmentKey,
+    concat_vec,
+    constants::NUM_CHALLENGE_BITS,
+    plonk::{
+        eval::{Error as EvalError, Eval, PlonkEvalDomain},
+        PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness, RelaxedPlonkInstance,
+        RelaxedPlonkTrace, RelaxedPlonkWitness,
+    },
+    polynomial::ColumnIndex,
+    poseidon::ROTrait,
+    sps::SpecialSoundnessVerifier,
+};
+
+use super::*;
 
 /// Represent intermediate polynomial terms that arise when folding
 /// two polynomial relations into one.
@@ -41,6 +46,7 @@ pub struct VanillaFS<C: CurveAffine> {
     _marker: PhantomData<C>,
 }
 
+#[derive(Debug)]
 pub struct VanillaFSProverParam<C: CurveAffine> {
     pub(crate) S: PlonkStructure<C::ScalarExt>,
     /// digest of public parameter of IVC circuit
@@ -69,6 +75,7 @@ impl<C: CurveAffine> VanillaFS<C> {
     /// of the two instance-witness pairs. They play a crucial role
     /// in the folding process, allowing two polynomial relations
     /// to be combined into one.
+    #[instrument(name = "commit_cross_terms", skip_all)]
     pub fn commit_cross_terms(
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
@@ -83,6 +90,14 @@ impl<C: CurveAffine> VanillaFS<C> {
         } else {
             S.selectors[0].len()
         };
+        debug!(
+            "lenght:
+                U1.challenges = {},
+                U2.challenges = {},
+            ",
+            U1.challenges.len(),
+            U2.challenges.len(),
+        );
         let data = PlonkEvalDomain {
             num_advice: S.num_advice_columns,
             num_lookup: S.num_lookups(),
@@ -94,27 +109,35 @@ impl<C: CurveAffine> VanillaFS<C> {
         };
 
         let normalized = S.poly.fold_transform(offset, S.num_fold_vars());
+        debug!("S.poly normalized");
+
         let r_index = normalized.num_challenges() - 1;
         let degree = S.poly.degree_for_folding(offset);
-        let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
-            .map(|k| {
-                normalized.coeff_of(
-                    ColumnIndex::Challenge {
-                        column_index: r_index,
-                    },
-                    k,
-                )
-            })
-            .map(|multipoly| {
-                (0..num_row)
-                    .into_par_iter()
-                    .map(|row| data.eval(&multipoly, row))
-                    .collect::<Result<Vec<C::ScalarExt>, EvalError>>()
-            })
-            .collect::<Result<Vec<Vec<C::ScalarExt>>, EvalError>>()?;
-        let cross_term_commits: Vec<C> =
-            cross_terms.iter().map(|v| ck.commit(v).unwrap()).collect();
-        Ok((cross_terms, cross_term_commits))
+
+        debug!("degree = {degree}, num_row = {num_row}");
+
+        itertools::process_results(
+            (1..degree)
+                .map(|k| {
+                    normalized.coeff_of(
+                        ColumnIndex::Challenge {
+                            column_index: r_index,
+                        },
+                        k,
+                    )
+                })
+                .map(|multipoly| {
+                    let cross_term = (0..num_row)
+                        .into_par_iter()
+                        .map(|row| data.eval(&multipoly, row))
+                        .collect::<Result<Vec<C::ScalarExt>, EvalError>>()?;
+
+                    let commit = ck.commit(&cross_term).unwrap();
+
+                    Ok((cross_term, commit))
+                }),
+            |iter| iter.unzip::<_, _, Vec<_>, Vec<_>>(),
+        )
     }
 
     /// Absorb all fields into RandomOracle `RO` & generate challenge based on that
@@ -175,6 +198,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     ///
     /// # Returns
     /// A tuple containing folded accumulator and proof for the folding scheme verifier
+    #[instrument(name = "prove", skip_all)]
     fn prove(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
@@ -182,6 +206,8 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         accumulator: &Self::Accumulator,
         incoming: &PlonkTrace<C>,
     ) -> Result<(Self::Accumulator, Self::Proof), Error> {
+        debug!("start");
+
         let U1 = &accumulator.U;
         let W1 = &accumulator.W;
         let U2 = &incoming.u;
@@ -190,10 +216,18 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         let (cross_terms, cross_term_commits) =
             Self::commit_cross_terms(ck, &pp.S, U1, W1, U2, W2)?;
 
+        debug!("cross-term-commited");
+
         let r = VanillaFS::generate_challenge(&pp.pp_digest, ro_acc, U1, U2, &cross_term_commits)?;
 
+        debug!("challenge generated");
+
         let U = U1.fold(U2, &cross_term_commits, &r);
+        debug!("U folded");
+
         let W = W1.fold(W2, &cross_terms, &r);
+        debug!("W folded");
+
         Ok((RelaxedPlonkTrace { U, W }, cross_term_commits))
     }
 
