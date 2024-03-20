@@ -249,7 +249,7 @@ where
         }
 
         let primary_witness = {
-            let s = span!(Level::ERROR, "primary proof", step = 0);
+            let s = span!(Level::ERROR, "primary_witness", step = 0);
             let _e = s.enter();
             CircuitRunner::new(
                 pp.primary.k_table_size(),
@@ -264,13 +264,17 @@ where
         let (primary_nifs_pp, _primary_off_circuit_vp) =
             VanillaFS::setup_params(pp.digest_1(), pp.primary.S().clone())?;
 
-        let primary_plonk_trace = VanillaFS::generate_plonk_trace(
-            pp.primary.ck(),
-            &primary_instance,
-            &primary_witness,
-            &primary_nifs_pp,
-            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-        )?;
+        let primary_plonk_trace = {
+            let s = span!(Level::ERROR, "gen primary trace", step = 0);
+            let _e = s.enter();
+            VanillaFS::generate_plonk_trace(
+                pp.primary.ck(),
+                &primary_instance,
+                &primary_witness,
+                &primary_nifs_pp,
+                &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+            )
+        }?;
 
         let secondary_z_output =
             secondary.process_step(&secondary_z_0, pp.secondary.k_table_size())?;
@@ -337,13 +341,17 @@ where
         let (secondary_nifs_pp, _nifs_vp) =
             VanillaFS::setup_params(pp.digest_2(), pp.secondary.S().clone())?;
 
-        let secondary_plonk_trace = VanillaFS::generate_plonk_trace(
-            pp.secondary.ck(),
-            &secondary_instance,
-            &secondary_witness,
-            &secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-        )?;
+        let secondary_plonk_trace = {
+            let s = span!(Level::ERROR, "gen secondary trace", step = 0);
+            let _e = s.enter();
+            VanillaFS::generate_plonk_trace(
+                pp.secondary.ck(),
+                &secondary_instance,
+                &secondary_witness,
+                &secondary_nifs_pp,
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+            )
+        }?;
 
         Ok(Self {
             step: 1,
@@ -378,13 +386,18 @@ where
         debug!("start fold step with folding 'secondary' by 'primary'");
 
         debug!("start prove secondary trace");
-        let (secondary_new_trace, secondary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
-            pp.secondary.ck(),
-            &self.secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-            &self.secondary.relaxed_trace,
-            &self.secondary_trace,
-        )?;
+        let (secondary_new_trace, secondary_cross_term_commits) = {
+            let s = span!(Level::ERROR, "folding scheme prove primary");
+            let _e = s.enter();
+
+            nifs::vanilla::VanillaFS::prove(
+                pp.secondary.ck(),
+                &self.secondary_nifs_pp,
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+                &self.secondary.relaxed_trace,
+                &self.secondary_trace,
+            )
+        }?;
 
         debug!("prepare primary td");
 
@@ -447,13 +460,17 @@ where
         self.primary.z_i = primary_z_next;
         self.secondary.relaxed_trace = secondary_new_trace;
 
-        let primary_plonk_trace = VanillaFS::generate_plonk_trace(
-            pp.primary.ck(),
-            &primary_instance,
-            &primary_witness,
-            &self.primary_nifs_pp,
-            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-        )?;
+        let primary_plonk_trace = {
+            let s = span!(Level::ERROR, "gen primary trace", step = self.step);
+            let _e = s.enter();
+            VanillaFS::generate_plonk_trace(
+                pp.primary.ck(),
+                &primary_instance,
+                &primary_witness,
+                &self.primary_nifs_pp,
+                &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+            )
+        }?;
 
         debug!("start prove primary trace");
         let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
@@ -525,13 +542,17 @@ where
         self.secondary.z_i = next_secondary_z_i;
         self.primary.relaxed_trace = primary_new_trace;
 
-        self.secondary_trace = VanillaFS::generate_plonk_trace(
-            pp.secondary.ck(),
-            &secondary_instance,
-            &secondary_witness,
-            &self.secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-        )?;
+        self.secondary_trace = {
+            let s = span!(Level::ERROR, "gen secondary trace", step = self.step);
+            let _e = s.enter();
+            VanillaFS::generate_plonk_trace(
+                pp.secondary.ck(),
+                &secondary_instance,
+                &secondary_witness,
+                &self.secondary_nifs_pp,
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+            )
+        }?;
 
         self.step += 1;
 

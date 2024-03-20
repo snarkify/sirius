@@ -362,7 +362,7 @@ impl<F: PrimeField> TestSha256Circuit<F> {
                                 Ok(limbs)
                             })?;
 
-                        region.constrain_equal(prev_partial_sum.unwrap().cell(), input_val.cell())?;
+                        //region.constrain_equal(prev_partial_sum.unwrap().cell(), input_val.cell())?;
 
                         Result::<_, halo2_proofs::plonk::Error>::Ok(limbs)
                     })

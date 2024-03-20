@@ -8,7 +8,9 @@ use std::{
 
 use ff::PrimeField;
 use halo2_proofs::{plonk::Expression as PE, poly::Rotation};
+use rayon::prelude::*;
 use serde::Serialize;
+use tracing::*;
 
 use crate::util::trim_leading_zeros;
 
@@ -635,9 +637,10 @@ impl<F: PrimeField> MultiPolynomial<F> {
     pub fn homogeneous(&self, offset: usize) -> Self {
         let u_index = self.num_challenges();
         let degree = self.degree_for_folding(offset);
+        debug!("homogeneous monomials len: {}", self.monomials.len());
         let monos = self
             .monomials
-            .iter()
+            .par_iter()
             .map(|f| f.homogeneous(degree, offset, u_index))
             .collect();
         Self {

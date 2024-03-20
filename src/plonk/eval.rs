@@ -95,6 +95,7 @@ pub trait Eval<F: PrimeField> {
                         if *exp == 0 {
                             return Ok(F::ONE);
                         }
+
                         if let Some(vn) = evals.get(&Index { column_index, exp }) {
                             Ok(*vn)
                         } else if let Some(v1) = evals.get(&Index {
@@ -130,16 +131,25 @@ pub trait Eval<F: PrimeField> {
                                 }
                             }?;
 
-                            evals
-                                .entry(Index {
-                                    column_index,
-                                    exp: &1,
-                                })
-                                .or_insert_with(|| v1.pow([1, 0, 0, 0]));
+                            assert_eq!(
+                                evals.insert(
+                                    Index {
+                                        column_index,
+                                        exp: &1,
+                                    },
+                                    v1.pow([1, 0, 0, 0]),
+                                ),
+                                None
+                            );
 
-                            Ok(*evals
-                                .entry(Index { column_index, exp })
-                                .or_insert_with(|| v1.pow([*exp as u64, 0, 0, 0])))
+                            let v1pow = v1.pow([*exp as u64, 0, 0, 0]);
+
+                            assert_eq!(
+                                evals.insert(Index { column_index, exp }, v1pow.clone()),
+                                None
+                            );
+
+                            Ok(v1pow)
                         }
                     })
                     .try_fold(

@@ -75,6 +75,7 @@ impl<C: CurveAffine> VanillaFS<C> {
     /// of the two instance-witness pairs. They play a crucial role
     /// in the folding process, allowing two polynomial relations
     /// to be combined into one.
+    #[instrument(name = "commit_cross_terms", skip_all)]
     pub fn commit_cross_terms(
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
@@ -89,6 +90,14 @@ impl<C: CurveAffine> VanillaFS<C> {
         } else {
             S.selectors[0].len()
         };
+        debug!(
+            "lenght:
+                U1.challenges = {},
+                U2.challenges = {},
+            ",
+            U1.challenges.len(),
+            U2.challenges.len(),
+        );
         let data = PlonkEvalDomain {
             num_advice: S.num_advice_columns,
             num_lookup: S.num_lookups(),
@@ -100,27 +109,35 @@ impl<C: CurveAffine> VanillaFS<C> {
         };
 
         let normalized = S.poly.fold_transform(offset, S.num_fold_vars());
+        debug!("S.poly normalized");
+
         let r_index = normalized.num_challenges() - 1;
         let degree = S.poly.degree_for_folding(offset);
-        let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
-            .map(|k| {
-                normalized.coeff_of(
-                    ColumnIndex::Challenge {
-                        column_index: r_index,
-                    },
-                    k,
-                )
-            })
-            .map(|multipoly| {
-                (0..num_row)
-                    .into_par_iter()
-                    .map(|row| data.eval(&multipoly, row))
-                    .collect::<Result<Vec<C::ScalarExt>, EvalError>>()
-            })
-            .collect::<Result<Vec<Vec<C::ScalarExt>>, EvalError>>()?;
-        let cross_term_commits: Vec<C> =
-            cross_terms.iter().map(|v| ck.commit(v).unwrap()).collect();
-        Ok((cross_terms, cross_term_commits))
+
+        debug!("degree = {degree}, num_row = {num_row}");
+
+        itertools::process_results(
+            (1..degree)
+                .map(|k| {
+                    normalized.coeff_of(
+                        ColumnIndex::Challenge {
+                            column_index: r_index,
+                        },
+                        k,
+                    )
+                })
+                .map(|multipoly| {
+                    let cross_term = (0..num_row)
+                        .into_par_iter()
+                        .map(|row| data.eval(&multipoly, row))
+                        .collect::<Result<Vec<C::ScalarExt>, EvalError>>()?;
+
+                    let commit = ck.commit(&cross_term).unwrap();
+
+                    Ok((cross_term, commit))
+                }),
+            |iter| iter.unzip::<_, _, Vec<_>, Vec<_>>(),
+        )
     }
 
     /// Absorb all fields into RandomOracle `RO` & generate challenge based on that
@@ -181,7 +198,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     ///
     /// # Returns
     /// A tuple containing folded accumulator and proof for the folding scheme verifier
-    #[instrument(name = "prove", skip_all, fields(input = format!("{incoming:?}")))]
+    #[instrument(name = "prove", skip_all)]
     fn prove(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
