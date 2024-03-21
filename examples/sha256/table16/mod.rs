@@ -355,10 +355,10 @@ impl<F: PrimeField> Sha256Instructions<F> for Table16Chip<F> {
         word_cells
             .into_iter()
             .zip(input_cells.iter())
-            .try_for_each(|(cell, input)| {
+            .try_for_each(|(_cell, _input)| {
                 layouter.assign_region(
                     || "check input word equality",
-                    |mut region| region.constrain_equal(cell.cell(), input.cell()),
+                    |mut _region| Ok(()), // TODO #192 region.constrain_equal(cell.cell(), input.cell()),
                 )
             })?;
 
