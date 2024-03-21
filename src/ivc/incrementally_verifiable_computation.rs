@@ -193,6 +193,7 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
+        let primary_span = span!(Level::ERROR, "primary", step = 0).entered();
         debug!("start creation of IVC");
         // For use as first version of `U` in primary circuit synthesize
         let secondary_pre_round_plonk_trace = pp.secondary_initial_plonk_trace();
@@ -288,6 +289,9 @@ where
             .generate_with_inspect(|buf| debug!("secondary X1 zero-step: {buf:?}")),
         ];
 
+        primary_span.exit();
+        let _secondary_span = span!(Level::ERROR, "secondary", step = 0).entered();
+
         let secondary_sfc = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
             step_circuit: &secondary,
             input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
@@ -365,6 +369,7 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
+        let primary_span = span!(Level::ERROR, "primary", step = self.step).entered();
         debug!("start fold step with folding 'secondary' by 'primary'");
 
         debug!("start prove secondary trace");
@@ -449,6 +454,9 @@ where
             &self.primary.relaxed_trace,
             &primary_plonk_trace,
         )?;
+
+        primary_span.exit();
+        let _secondary_span = span!(Level::ERROR, "secondary", step = self.step).entered();
 
         debug!("start fold step with folding 'primary' by 'secondary'");
         debug!("prepare secondary td");
