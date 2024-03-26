@@ -9,11 +9,17 @@ use super::Expression;
 
 pub type Degree = usize;
 
-pub struct FoldingPoly<F> {
+/// Polynome grouped by degrees
+///
+/// We mean some challenge and its degrees are represented as [`GroupedPoly::term`] keys, and
+/// coefficients are represented as [`GroupedPoly::term`] values
+///
+/// `x^0 * a + x^1 * b + x^3 * c -> { 0 => a, 1 => b, 3 => c }`
+pub struct GroupedPoly<F> {
     // TODO #159 depend on `evaluate` algo, can be changed to `BTreeMap`
     terms: HashMap<Degree, Expression<F>>,
 }
-impl<F> Default for FoldingPoly<F> {
+impl<F> Default for GroupedPoly<F> {
     fn default() -> Self {
         Self {
             terms: Default::default(),
@@ -23,10 +29,10 @@ impl<F> Default for FoldingPoly<F> {
 
 macro_rules! impl_poly_ops {
     ($trait:ident, $method:ident, $variant:ident, $rhs_expr: expr) => {
-        impl<F: PrimeField> $trait for FoldingPoly<F> {
-            type Output = FoldingPoly<F>;
+        impl<F: PrimeField> $trait for GroupedPoly<F> {
+            type Output = Self;
 
-            fn $method(mut self, rhs: FoldingPoly<F>) -> Self::Output {
+            fn $method(mut self, rhs: Self) -> Self::Output {
                 rhs.terms.into_iter().for_each(|(degree, rhs_expr)| {
                     match self.terms.entry(degree) {
                         Entry::Vacant(vacant) => {
@@ -50,10 +56,10 @@ macro_rules! impl_poly_ops {
 impl_poly_ops!(Add, add, Sum, std::convert::identity);
 impl_poly_ops!(Sub, sub, Sum, std::ops::Neg::neg);
 
-impl<F: PrimeField> Mul for FoldingPoly<F> {
-    type Output = FoldingPoly<F>;
-    fn mul(self, rhs: FoldingPoly<F>) -> Self::Output {
-        let mut res = FoldingPoly::default();
+impl<F: PrimeField> Mul for GroupedPoly<F> {
+    type Output = GroupedPoly<F>;
+    fn mul(self, rhs: GroupedPoly<F>) -> Self::Output {
+        let mut res = GroupedPoly::default();
         for (lhs_degree, lhs_expr) in self.terms.into_iter() {
             for (rhs_degree, rhs_expr) in rhs.terms.iter() {
                 let degree = lhs_degree + rhs_degree;
@@ -87,7 +93,7 @@ mod test {
 
     #[test]
     fn simple_add() {
-        let mut actual = FoldingPoly::<Fq> {
+        let mut actual = GroupedPoly::<Fq> {
             terms: map! {
                 0 => Expression::Constant(Fq::from_u128(u128::MAX)),
                 1 => Expression::Polynomial(Query {
@@ -97,7 +103,7 @@ mod test {
                 5 => Expression::Challenge(0),
             },
         }
-        .add(FoldingPoly::<Fq> {
+        .add(GroupedPoly::<Fq> {
             terms: map! {
                 0 => Expression::Challenge(0),
                 2 => Expression::Polynomial(Query {
@@ -126,7 +132,7 @@ mod test {
 
     #[test]
     fn simple_sub() {
-        let mut actual = FoldingPoly::<Fq> {
+        let mut actual = GroupedPoly::<Fq> {
             terms: map! {
                 0 => Expression::Constant(Fq::from_u128(u128::MAX)),
                 1 => Expression::Polynomial(Query {
@@ -136,7 +142,7 @@ mod test {
                 5 => Expression::Constant(Fq::ONE),
             },
         }
-        .sub(FoldingPoly::<Fq> {
+        .sub(GroupedPoly::<Fq> {
             terms: map! {
                 0 => Expression::Challenge(0),
                 2 => Expression::Polynomial(Query {
@@ -165,7 +171,7 @@ mod test {
 
     #[test]
     fn simple_mul() {
-        let mut actual = FoldingPoly::<Fq> {
+        let mut actual = GroupedPoly::<Fq> {
             terms: map! {
                 9 => Expression::Sum(
                     Box::new(Expression::Polynomial(Query { index: 0, rotation: Rotation(0) })),
@@ -173,7 +179,7 @@ mod test {
                 ),
             },
         }
-        .mul(FoldingPoly::<Fq> {
+        .mul(GroupedPoly::<Fq> {
             terms: map! {
                 9 => Expression::Product(
                     Box::new(Expression::Polynomial(Query { index: 2, rotation: Rotation(0) })),
@@ -192,14 +198,14 @@ mod test {
 
     #[test]
     fn mul() {
-        let mut actual = FoldingPoly::<Fq> {
+        let mut actual = GroupedPoly::<Fq> {
             terms: map! {
                 2 => Expression::Polynomial(Query { index: 0, rotation: Rotation(0) }),
                 3 => Expression::Polynomial(Query { index: 1, rotation: Rotation(0) }),
                 4 => Expression::Polynomial(Query { index: 2, rotation: Rotation(0) }),
             },
         }
-        .mul(FoldingPoly::<Fq> {
+        .mul(GroupedPoly::<Fq> {
             terms: map! {
                 2 => Expression::Polynomial(Query { index: 3, rotation: Rotation(0) }),
                 3 => Expression::Polynomial(Query { index: 4, rotation: Rotation(0) }),
