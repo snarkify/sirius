@@ -102,8 +102,6 @@ where
         limb_width: NonZeroUsize,
         n_limbs: NonZeroUsize,
     ) -> Result<Self, Error> {
-        debug!("start creating circuit pp");
-
         let params = StepParams::new(limb_width, n_limbs, ro_constant);
 
         Ok(Self {
@@ -245,12 +243,14 @@ where
     RP1: ROPair<C1::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
     RP2: ROPair<C2::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
 {
+    #[instrument(name = "creating pp", skip_all)]
     pub fn new(
         primary: CircuitPublicParamsInput<'key, '_, A1, C1, RP1::Args, SC1>,
         secondary: CircuitPublicParamsInput<'key, '_, A2, C2, RP2::Args, SC2>,
         limb_width: NonZeroUsize,
         limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
+        let primary_span = span!(Level::ERROR, "primary").entered();
         let primary_S = CircuitRunner::new(
             primary.k_table_size,
             StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T> {
@@ -266,8 +266,11 @@ where
             vec![C1::Scalar::ZERO; NUM_IO],
         )
         .try_collect_plonk_structure()?;
+        primary_span.exit();
 
         let (secondary_S, secondary_initial_plonk_trace) = {
+            let _secondary_span = span!(Level::ERROR, "secondary").entered();
+
             let secondary_initial_step_params =
                 StepParams::new(limb_width, limbs_count, secondary.ro_constant.clone());
 
@@ -318,6 +321,8 @@ where
 
             Result::<_, Error>::Ok((secondary_S, secondary_initial_plonk_trace))
         }?;
+
+        debug!("primary & secondary pp created");
 
         let mut self_ = Self {
             primary: CircuitPublicParams::new(
