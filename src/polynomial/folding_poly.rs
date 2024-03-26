@@ -49,7 +49,30 @@ macro_rules! impl_poly_ops {
 
 impl_poly_ops!(Add, add, Sum, std::convert::identity);
 impl_poly_ops!(Sub, sub, Sum, std::ops::Neg::neg);
-impl_poly_ops!(Mul, mul, Product, std::convert::identity);
+
+impl<F: PrimeField> Mul for FoldingPoly<F> {
+    type Output = FoldingPoly<F>;
+    fn mul(self, rhs: FoldingPoly<F>) -> Self::Output {
+        let mut res = FoldingPoly::default();
+        for (lhs_degree, lhs_expr) in self.terms.into_iter() {
+            for (rhs_degree, rhs_expr) in rhs.terms.iter() {
+                let degree = lhs_degree + rhs_degree;
+                let expr = lhs_expr.clone() * rhs_expr.clone();
+
+                match res.terms.entry(degree) {
+                    Entry::Occupied(mut occupied) => {
+                        let current = Box::new(occupied.get().clone());
+                        occupied.insert(Expression::Sum(current, Box::new(expr)));
+                    }
+                    Entry::Vacant(vacant) => {
+                        vacant.insert(expr);
+                    }
+                }
+            }
+        }
+        res
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -144,24 +167,18 @@ mod test {
     fn simple_mul() {
         let mut actual = FoldingPoly::<Fq> {
             terms: map! {
-                0 => Expression::Constant(Fq::from_u128(u128::MAX)),
-                1 => Expression::Polynomial(Query {
-                    index: 0,
-                    rotation: Rotation(0)
-                }),
-                5 => Expression::Constant(Fq::ONE),
-                9 => Expression::Challenge(9),
+                9 => Expression::Sum(
+                    Box::new(Expression::Polynomial(Query { index: 0, rotation: Rotation(0) })),
+                    Box::new(Expression::Polynomial(Query { index: 1, rotation: Rotation(1) }))
+                ),
             },
         }
         .mul(FoldingPoly::<Fq> {
             terms: map! {
-                0 => Expression::Challenge(0),
-                2 => Expression::Polynomial(Query {
-                    index: 5,
-                    rotation: Rotation(-2)
-                }),
-                5 => Expression::Challenge(0),
-                9 => Expression::Challenge(9),
+                9 => Expression::Product(
+                    Box::new(Expression::Polynomial(Query { index: 2, rotation: Rotation(0) })),
+                    Box::new(Expression::Polynomial(Query { index: 3, rotation: Rotation(0) }))
+                ),
             },
         })
         .terms
@@ -170,15 +187,6 @@ mod test {
         .collect::<Vec<_>>();
         actual.sort();
 
-        assert_eq!(
-            actual,
-            vec![
-                "0;0xffffffffffffffffffffffffffffffff(r_0)",
-                "1;(Z_0)",
-                "2;(Z_5[-2])",
-                "5;(r_0)",
-                "9;(r_9^2)"
-            ]
-        );
+        assert_eq!(actual, vec!["18;(Z_0)(Z_2)(Z_3) + (Z_2)(Z_3)(Z_1[+1])"]);
     }
 }
