@@ -189,4 +189,38 @@ mod test {
 
         assert_eq!(actual, vec!["18;(Z_0)(Z_2)(Z_3) + (Z_2)(Z_3)(Z_1[+1])"]);
     }
+
+    #[test]
+    fn mul() {
+        let mut actual = FoldingPoly::<Fq> {
+            terms: map! {
+                2 => Expression::Polynomial(Query { index: 0, rotation: Rotation(0) }),
+                3 => Expression::Polynomial(Query { index: 1, rotation: Rotation(0) }),
+                4 => Expression::Polynomial(Query { index: 2, rotation: Rotation(0) }),
+            },
+        }
+        .mul(FoldingPoly::<Fq> {
+            terms: map! {
+                2 => Expression::Polynomial(Query { index: 3, rotation: Rotation(0) }),
+                3 => Expression::Polynomial(Query { index: 4, rotation: Rotation(0) }),
+                4 => Expression::Polynomial(Query { index: 5, rotation: Rotation(0) }),
+            },
+        })
+        .terms
+        .iter()
+        .map(|(degree, term)| format!("{degree};{}", term.expand()))
+        .collect::<Vec<_>>();
+        actual.sort();
+
+        assert_eq!(
+            actual,
+            vec![
+                "4;(Z_0)(Z_3)",
+                "5;(Z_1)(Z_3) + (Z_0)(Z_4)",
+                "6;(Z_2)(Z_3) + (Z_1)(Z_4) + (Z_0)(Z_5)",
+                "7;(Z_2)(Z_4) + (Z_1)(Z_5)",
+                "8;(Z_2)(Z_5)"
+            ]
+        );
+    }
 }
