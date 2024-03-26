@@ -1,4 +1,5 @@
 pub mod expression;
+pub mod folding_poly;
 pub mod monomial;
 pub mod multi_polynomial;
 pub mod sparse;
