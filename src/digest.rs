@@ -75,9 +75,11 @@ mod tests {
     use ff::PrimeField;
     use halo2curves::bn256::{Fr, G1Affine};
     use serde::*;
+    use tracing_test::traced_test;
 
     use super::{into_curve_by_bits, DigestToCurve};
 
+    #[traced_test]
     #[test]
     fn consistency() {
         // MODULUS - 1

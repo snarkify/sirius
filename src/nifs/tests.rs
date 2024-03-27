@@ -199,8 +199,11 @@ fn smallest_power(n: usize, K: u32) -> usize {
 
 // test with single custom gate without lookup
 mod zero_round_test {
-    use super::*;
+    use tracing_test::traced_test;
+
     use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
+
+    use super::*;
 
     const T: usize = 3;
 
@@ -259,6 +262,7 @@ mod zero_round_test {
         }
     }
 
+    #[traced_test]
     #[test]
     fn test_nifs() -> Result<(), NIFSError> {
         const K: u32 = 4;

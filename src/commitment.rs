@@ -127,9 +127,11 @@ impl<C: CurveAffine> CommitmentKey<C> {
 mod file_tests {
     use halo2curves::bn256::G1Affine;
     use tempfile::tempdir;
+    use tracing_test::traced_test;
 
     use super::*;
 
+    #[traced_test]
     #[test]
     fn consistency() {
         const K: usize = 10;

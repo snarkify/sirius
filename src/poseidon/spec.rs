@@ -134,9 +134,11 @@ impl<F: Serialize + ff::PrimeField, const T: usize, const RATE: usize> Serialize
 #[cfg(test)]
 mod tests {
     use halo2curves::secp256r1::Fp;
+    use tracing_test::traced_test;
 
     use super::*;
 
+    #[traced_test]
     #[test]
     fn just_serialize() {
         let spec = Spec::<Fp, 10, 9>::new(10, 10);

@@ -964,6 +964,7 @@ mod tests {
     use sirius::run_mock_prover_test;
     use std::marker::PhantomData;
 
+    #[traced_test]
     #[test]
     fn compress() {
         struct MyCircuit<F: PrimeField> {

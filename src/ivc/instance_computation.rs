@@ -177,6 +177,7 @@ mod tests {
         plonk::ConstraintSystem,
     };
     use halo2curves::{bn256, grumpkin};
+    use tracing_test::traced_test;
 
     type C1 = <bn256::G1 as halo2curves::group::prime::PrimeCurve>::Affine;
     type C2 = <grumpkin::G1 as halo2curves::group::prime::PrimeCurve>::Affine;
@@ -197,7 +198,8 @@ mod tests {
 
     use super::*;
 
-    #[test_log::test]
+    #[traced_test]
+    #[test]
     fn consistency() {
         let random_oracle_constant = Spec::<Base, 10, 9>::new(10, 10);
 

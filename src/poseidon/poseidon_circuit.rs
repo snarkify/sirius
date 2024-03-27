@@ -425,6 +425,7 @@ mod tests {
         group::ff::FromUniformBytes,
         pasta::{EqAffine, Fp},
     };
+    use tracing_test::traced_test;
 
     use crate::{
         create_and_verify_proof, main_gate::MainGateConfig, poseidon::Spec, run_mock_prover_test,
@@ -499,6 +500,7 @@ mod tests {
         }
     }
 
+    #[traced_test]
     #[test]
     fn test_poseidon_circuit() {
         println!("-----running Poseidon Circuit-----");
