@@ -1,11 +1,12 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    ops::{Add, Mul, Sub},
+    convert,
+    ops::{Add, Mul, Neg, Sub},
 };
 
 use ff::PrimeField;
 
-use super::Expression;
+use super::{Expression, Query};
 
 pub type Degree = usize;
 
@@ -19,6 +20,51 @@ pub struct GroupedPoly<F> {
     // TODO #159 depend on `evaluate` algo, can be changed to `BTreeMap`
     terms: HashMap<Degree, Expression<F>>,
 }
+
+impl<F: PrimeField> GroupedPoly<F> {
+    fn aggregate(mut self, degree: usize, expr: Expression<F>) -> Self {
+        match self.terms.entry(degree) {
+            Entry::Vacant(vacant) => {
+                vacant.insert(expr);
+            }
+            Entry::Occupied(mut occupied) => {
+                occupied.insert(Expression::Sum(
+                    Box::new(occupied.get().clone()),
+                    Box::new(expr),
+                ));
+            }
+        }
+        self
+    }
+
+    // fold transform
+    // here self is Expression<F>
+    pub fn fold_transform(&self, _mm: usize, _nn: usize) -> Self {
+        let num_challenges = self.num_challenges();
+        let _r = Expression::<F>::Challenge(2 * num_challenges);
+
+        todo!("Part of #159")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate<T>(
+        &self,
+        _constant: &impl Fn(F) -> T,
+        _poly: &impl Fn(Query) -> T,
+        _challenge: &impl Fn(usize) -> T,
+        _negated: &impl Fn(T) -> T,
+        _sum: &impl Fn(T, T) -> T,
+        _product: &impl Fn(T, T) -> T,
+        _scaled: &impl Fn(T, F) -> T,
+    ) -> T {
+        todo!("Part of #159")
+    }
+
+    pub fn num_challenges(&self) -> usize {
+        self.terms.values().map(|expr| expr.num_challenges()).sum()
+    }
+}
+
 impl<F> Default for GroupedPoly<F> {
     fn default() -> Self {
         Self {
@@ -53,8 +99,22 @@ macro_rules! impl_poly_ops {
     };
 }
 
-impl_poly_ops!(Add, add, Sum, std::convert::identity);
-impl_poly_ops!(Sub, sub, Sum, std::ops::Neg::neg);
+impl_poly_ops!(Add, add, Sum, convert::identity);
+impl_poly_ops!(Sub, sub, Sum, Neg::neg);
+
+impl<F: PrimeField> Neg for GroupedPoly<F> {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Self {
+            terms: self
+                .terms
+                .into_iter()
+                .map(|(k, v)| (k, Neg::neg(v)))
+                .collect(),
+        }
+    }
+}
 
 impl<F: PrimeField> Mul for GroupedPoly<F> {
     type Output = GroupedPoly<F>;
