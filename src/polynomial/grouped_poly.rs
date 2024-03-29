@@ -114,8 +114,18 @@ impl_poly_ops!(Sub, sub, Sum, std::ops::Neg::neg);
 impl<F: PrimeField> Mul<F> for GroupedPoly<F> {
     type Output = Self;
 
-    fn mul(self, _rhs: F) -> Self::Output {
-        todo!()
+    fn mul(self, rhs: F) -> Self::Output {
+        Self {
+            terms: self
+                .terms
+                .into_iter()
+                .map(|expr| {
+                    expr.map(|expr| {
+                        Expression::Product(Box::new(Expression::Constant(rhs)), Box::new(expr))
+                    })
+                })
+                .collect(),
+        }
     }
 }
 
