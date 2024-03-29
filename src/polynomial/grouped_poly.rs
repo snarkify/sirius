@@ -197,7 +197,7 @@ mod test {
 
     #[test]
     fn simple_add() {
-        let mut actual = GroupedPoly::<Fq>::from(map! {
+        let actual = GroupedPoly::<Fq>::from(map! {
             0 => Expression::Constant(Fq::from_u128(u128::MAX)),
             1 => Expression::Polynomial(Query {
                 index: 0,
@@ -216,7 +216,6 @@ mod test {
         .iter()
         .map(|(degree, term)| format!("{degree};{}", term.expand()))
         .collect::<Vec<_>>();
-        actual.sort();
 
         assert_eq!(
             actual,
@@ -231,7 +230,7 @@ mod test {
 
     #[test]
     fn simple_sub() {
-        let mut actual = GroupedPoly::<Fq>::from(map! {
+        let actual = GroupedPoly::<Fq>::from(map! {
             0 => Expression::Constant(Fq::from_u128(u128::MAX)),
             1 => Expression::Polynomial(Query {
                 index: 0,
@@ -250,7 +249,6 @@ mod test {
         .iter()
         .map(|(degree, term)| format!("{degree};{}", term.expand()))
         .collect::<Vec<_>>();
-        actual.sort();
 
         assert_eq!(
             actual,
@@ -265,7 +263,7 @@ mod test {
 
     #[test]
     fn simple_mul() {
-        let mut actual = GroupedPoly::<Fq>::from(map! {
+        let actual = GroupedPoly::<Fq>::from(map! {
             9 => Expression::Sum(
                 Box::new(Expression::Polynomial(Query { index: 0, rotation: Rotation(0) })),
                 Box::new(Expression::Polynomial(Query { index: 1, rotation: Rotation(1) }))
@@ -280,14 +278,13 @@ mod test {
         .iter()
         .map(|(degree, term)| format!("{degree};{}", term.expand()))
         .collect::<Vec<_>>();
-        actual.sort();
 
         assert_eq!(actual, vec!["18;(Z_0)(Z_2)(Z_3) + (Z_2)(Z_3)(Z_1[+1])"]);
     }
 
     #[test]
     fn mul() {
-        let mut actual = GroupedPoly::<Fq>::from(map! {
+        let actual = GroupedPoly::<Fq>::from(map! {
                 2 => Expression::Polynomial(Query { index: 0, rotation: Rotation(0) }),
                 3 => Expression::Polynomial(Query { index: 1, rotation: Rotation(0) }),
                 4 => Expression::Polynomial(Query { index: 2, rotation: Rotation(0) }),
@@ -300,7 +297,6 @@ mod test {
         .iter()
         .map(|(degree, term)| format!("{degree};{}", term.expand()))
         .collect::<Vec<_>>();
-        actual.sort();
 
         assert_eq!(
             actual,
@@ -317,24 +313,25 @@ mod test {
     #[test]
     fn creation() {
         // P(a, b, c, d, e) &= (a + b + c) * (d + e) =>
-        //     [a1 + b1 + c1 + k* (a2 + b2 + c2)] & [d1 + e1 + k * (d2 + e2)] =
+        //     [a1 + b1 + c1 + k* (a2 + b2 + c2)] & [d1 + e1 + k * (d2 + e2)]
+        //
+        //     =
         //
         //     (a1 + b1 + c1)(d1 + e1)                             * k^0 +
         //     [(a2 + b2 + c2)(d1 + e1) + (a1 + b1 + c1)(d2 + e2)] * k^1 +
-        //     (a2 + b2 + c2)(d2 + e2)                             * k^2      =
+        //     (a2 + b2 + c2)(d2 + e2)                             * k^2
+        //
+        //     =
         //
         //     a1*d1 + a1*e1 + b1*d1 + b1*e1 + c1*d1 + c1*e1       * k^0 +
         //     a2*d1 + a2*e1 + b2*d1 + b2*e1 + c2*d1 + c2*e1 + a1*d2 + a1*e2 + b1*d2 + b1*e2 + c1*d2 + c1*e2 * k^1 +
         //     a2*d2 + a2*e2 + b2*d2 + b2*e2 + c2*d2 + c2*e2       * k^2
-        //
 
-        fn sum(expr: &[Expression<Fq>]) -> Expression<Fq> {
-            match expr.split_first() {
-                Some((first, rest)) => {
-                    Expression::Sum(Box::new(first.clone()), Box::new(sum(rest)))
-                }
+        fn sum(expr: &[Expression<Fq>]) -> Box<Expression<Fq>> {
+            Box::new(match expr.split_first() {
+                Some((first, rest)) => Expression::Sum(Box::new(first.clone()), sum(rest)),
                 None => Expression::Constant(Fq::ZERO),
-            }
+            })
         }
 
         let [a, b, c, d, e] = array::from_fn(|index| {
@@ -344,18 +341,13 @@ mod test {
             })
         });
 
-        let grouped_poly = GroupedPoly::new(
-            Expression::Product(Box::new(sum(&[a, b, c])), Box::new(sum(&[d, e]))),
-            5,
-            0,
-        );
+        let grouped_poly =
+            GroupedPoly::new(Expression::Product(sum(&[a, b, c]), sum(&[d, e])), 5, 0);
 
-        let mut actual = grouped_poly
+        let actual = grouped_poly
             .iter()
             .map(|(degree, term)| format!("{degree};{}", term.expand()))
             .collect::<Vec<_>>();
-
-        actual.sort();
 
         assert_eq!(
             actual,
