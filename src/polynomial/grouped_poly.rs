@@ -40,6 +40,10 @@ impl<IT: IntoIterator<Item = (usize, Expression<F>)>, F: PrimeField> From<IT> fo
 }
 
 impl<F: PrimeField> GroupedPoly<F> {
+    fn new(_expr: Expression<F>) -> Self {
+        todo!("#159")
+    }
+
     fn iter(&self) -> impl Iterator<Item = (usize, &Expression<F>)> {
         self.terms
             .iter()
@@ -123,8 +127,11 @@ impl<F: PrimeField> Mul for GroupedPoly<F> {
 
 #[cfg(test)]
 mod test {
+    use std::array;
+
     use crate::polynomial::Query;
 
+    use digest::typenum::Exp;
     use ff::Field;
     use halo2_proofs::poly::Rotation;
     use halo2curves::pasta::Fq;
@@ -249,5 +256,34 @@ mod test {
                 "8;(Z_2)(Z_5)"
             ]
         );
+    }
+
+    #[test]
+    fn creation() {
+        // P(a, b, c, d, e) &= (a + b + c) * (d + e) =>
+        //     [a1 + b1 + c1 + k* (a2 + b2 + c2)] & [d1 + e1 + k * (d2 + e2)] =
+        //     (a1 + b1 + c1)(d1 + e1)                             * k^0 +
+        //     [(a2 + b2 + c2)(d1 + e1) + (a1 + b1 + c1)(d2 + e2)] * k^1 +
+        //     (a2 + b2 + c2)(d2 + e2)                             * k^2
+        let poly = |index: usize| {
+            Box::new(Expression::Polynomial(Query {
+                index,
+                rotation: Rotation(0),
+            }))
+        };
+
+        let [a, b, c, d, e] = array::from_fn(|i| poly(i));
+
+        let a_b_c = Expression::Sum(Box::new(Expression::Sum(a, b)), c);
+        let d_e = Expression::Sum(d, e);
+
+        let grouped_poly = GroupedPoly::new(Expression::Product(Box::new(a_b_c), Box::new(d_e)));
+
+        let actual = grouped_poly
+            .iter()
+            .collect::<Vec<(usize, &Expression<Fq>)>>();
+
+        assert_eq!(actual.len(), 3);
+        todo!("#159 present final expression: {actual:?}");
     }
 }
