@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 
-use ff::Field;
 use halo2_proofs::arithmetic::CurveAffine;
 
 use crate::{
@@ -8,7 +7,7 @@ use crate::{
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
     plonk::{
-        eval::{Error as EvalError, Eval, PlonkEvalDomain},
+        eval::{EvalGrouped, PlonkEvalDomain},
         PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness, RelaxedPlonkInstance,
         RelaxedPlonkTrace, RelaxedPlonkWitness,
     },
@@ -82,11 +81,6 @@ impl<C: CurveAffine> VanillaFS<C> {
         U2: &PlonkInstance<C>,
         W2: &PlonkWitness<C::ScalarExt>,
     ) -> Result<(CrossTerms<C>, CrossTermCommits<C>), Error> {
-        let num_row = if !S.fixed_columns.is_empty() {
-            S.fixed_columns[0].len()
-        } else {
-            S.selectors[0].len()
-        };
         let data = PlonkEvalDomain {
             num_advice: S.num_advice_columns,
             num_lookup: S.num_lookups(),
@@ -98,21 +92,17 @@ impl<C: CurveAffine> VanillaFS<C> {
         };
 
         itertools::process_results(
-            GroupedPoly::new(&S.expr, S.num_fold_vars(), S.num_challenges)
-                .into_iter_all_degree()
-                .map(|expr| {
-                    let cross_term = match expr {
-                        Some(expr) => (0..num_row)
-                            .into_par_iter()
-                            .map(|row| data.eval_grouped(&expr, row))
-                            .collect::<Result<Vec<C::ScalarExt>, EvalError>>()?,
-                        None => vec![C::ScalarExt::ZERO; num_row],
-                    };
+            data.eval_grouped(&GroupedPoly::new(
+                &S.expr,
+                S.num_fold_vars(),
+                S.num_challenges,
+            ))
+            .map(|result_with_cross_term| {
+                let cross_term = result_with_cross_term?;
+                let commit = ck.commit(&cross_term).unwrap();
 
-                    let commit = ck.commit(&cross_term).unwrap();
-
-                    Result::<_, Error>::Ok((cross_term, commit))
-                }),
+                Result::<_, Error>::Ok((cross_term, commit))
+            }),
             |iter| iter.unzip::<_, _, Vec<_>, Vec<_>>(),
         )
     }

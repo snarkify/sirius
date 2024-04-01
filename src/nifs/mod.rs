@@ -8,8 +8,6 @@
 //! For more details look at:
 //! - Paragraph '3. Folding scheme' at [Nova whitepaper](https://eprint.iacr.org/2021/370)
 //! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
-use rayon::prelude::*;
-
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2_proofs::plonk::Error as Halo2Error;
 

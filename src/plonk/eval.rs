@@ -1,6 +1,7 @@
-use crate::polynomial::{ColumnIndex, Expression, MultiPolynomial};
+use std::{collections::HashMap, iter};
+
+use crate::polynomial::{grouped_poly::GroupedPoly, ColumnIndex, MultiPolynomial};
 use ff::PrimeField;
-use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -23,17 +24,20 @@ pub enum Error {
     UnsupportedVariableType { var_type: ColumnIndex },
 }
 
-/// The `Eval` trait is used to evaluate multi-variable polynomials in a Evaluation Domain defined
-/// over a prime field `F`
-///
-/// This trait encapsulates the necessary functionality to evaluate polynomials
-/// It allows you to retrieve challenges, selectors,
-/// fixed values and also includes methods to evaluate advice, column and challenge
-/// variables for specific rows.
-pub trait Eval<F: PrimeField> {
+pub trait GetEvaluateData<F: PrimeField> {
+    fn num_row(&self) -> usize {
+        match self.get_fixed().as_ref().len() {
+            0 => self.get_selectors().as_ref()[0].len(),
+            len => len,
+        }
+    }
+
     fn get_challenges(&self) -> &impl AsRef<[F]>;
     fn get_selectors(&self) -> &impl AsRef<[Vec<bool>]>;
     fn get_fixed(&self) -> &impl AsRef<[Vec<F>]>;
+
+    fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, Error>;
+
     fn num_lookup(&self) -> usize;
 
     /// total row size of the evaluation domain
@@ -45,8 +49,6 @@ pub trait Eval<F: PrimeField> {
             .or_else(|| self.get_selectors().as_ref().first().map(Vec::len))
             .expect("Fixed & Selectors can't be empty in one time")
     }
-
-    fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, Error>;
 
     /// evaluate a single column variable on specific row
     fn eval_column_var(&self, row: usize, index: usize) -> Result<F, Error> {
@@ -70,11 +72,16 @@ pub trait Eval<F: PrimeField> {
             },
         )
     }
+}
 
-    fn eval_grouped(&self, _expr: &Expression<F>, _row: usize) -> Result<F, Error> {
-        todo!()
-    }
-
+/// The `Eval` trait is used to evaluate multi-variable polynomials in a Evaluation Domain defined
+/// over a prime field `F`
+///
+/// This trait encapsulates the necessary functionality to evaluate polynomials
+/// It allows you to retrieve challenges, selectors,
+/// fixed values and also includes methods to evaluate advice, column and challenge
+/// variables for specific rows.
+pub trait Eval<F: PrimeField>: GetEvaluateData<F> {
     /// evaluate virtual multi-polynomial (i.e. custom gates, cross-term expressions etc) on specific row
     /// to evaluate each monomial term of the form $c*x1[row]^{k1}*x2[row]^{k2}*\cdots$, we first lookup
     /// the value of $x[row]$ from the EvaluationDomain, then calculate the value of monomial.
@@ -154,6 +161,14 @@ pub trait Eval<F: PrimeField> {
             .try_fold(F::ZERO, |acc, value| Ok(acc + value?))
     }
 }
+impl<F: PrimeField, T: GetEvaluateData<F>> Eval<F> for T {}
+
+pub trait EvalGrouped<F: PrimeField>: GetEvaluateData<F> {
+    fn eval_grouped(&self, _poly: &GroupedPoly<F>) -> impl Iterator<Item = Result<Vec<F>, Error>> {
+        iter::once_with(|| todo!())
+    }
+}
+impl<F: PrimeField, T: GetEvaluateData<F>> EvalGrouped<F> for T {}
 
 /// Used for evaluate compressed lookup expressions L_i(x1,...,xa) = l_i
 pub struct LookupEvalDomain<'a, F: PrimeField> {
@@ -178,7 +193,7 @@ pub struct PlonkEvalDomain<'a, F: PrimeField> {
     pub(crate) W2s: &'a Vec<Vec<F>>,
 }
 
-impl<'a, F: PrimeField> Eval<F> for LookupEvalDomain<'a, F> {
+impl<'a, F: PrimeField> GetEvaluateData<F> for LookupEvalDomain<'a, F> {
     fn num_lookup(&self) -> usize {
         self.num_lookup
     }
@@ -208,7 +223,7 @@ impl<'a, F: PrimeField> Eval<F> for LookupEvalDomain<'a, F> {
     }
 }
 
-impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
+impl<'a, F: PrimeField> GetEvaluateData<F> for PlonkEvalDomain<'a, F> {
     fn num_lookup(&self) -> usize {
         self.num_lookup
     }
