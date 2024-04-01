@@ -32,11 +32,11 @@ pub mod graph_evaluator {
         /// This is a fixed column
         Fixed { index: usize, rotation: usize },
         /// This is an advice (witness) column
-        Advice(usize, usize),
+        Advice { index: usize, rotation: usize },
         /// This is an instance (external) column
-        Instance(usize, usize),
+        Instance { index: usize, rotation: usize },
         /// This is a challenge
-        Challenge(usize),
+        Challenge { index: usize },
         /// Previous value
         PreviousValue(),
     }
@@ -66,21 +66,27 @@ pub mod graph_evaluator {
         /// Get the resulting value of this calculation
         pub fn evaluate<F: PrimeField>(
             &self,
-            _rotations: &[usize],
+            rotations: &[usize],
             constants: &[F],
             intermediates: &[F],
-            _eval_getter: &impl Eval<F>,
-            _previous_value: &F,
+            eval_getter: &impl Eval<F>,
+            previous_value: &F,
         ) -> F {
             let get_value = |value: &ValueSource| -> F {
                 match value {
+                    ValueSource::Instance { index, rotation } => todo!("get {index}{rotation}"),
                     ValueSource::Constant(id) => constants[*id],
                     ValueSource::Intermediate(id) => intermediates[*id],
-                    ValueSource::Fixed { index, rotation } => todo!("{index}{rotation}"),
-                    ValueSource::Advice(_, _) => todo!(),
-                    ValueSource::Instance(_, _) => todo!(),
-                    ValueSource::Challenge(_) => todo!(),
-                    ValueSource::PreviousValue() => todo!(),
+                    ValueSource::Fixed { index, rotation } => {
+                        eval_getter.get_fixed().as_ref()[*index][rotations[*rotation]]
+                    }
+                    ValueSource::Advice { index, rotation } => eval_getter
+                        .eval_advice_var(rotations[*rotation], *index)
+                        .expect("TODO"),
+                    ValueSource::Challenge { index } => {
+                        *eval_getter.get_challenges().as_ref().get(*index).unwrap()
+                    }
+                    ValueSource::PreviousValue() => *previous_value,
                 }
             };
 
@@ -191,13 +197,16 @@ pub mod graph_evaluator {
                 Expression::Constant(scalar) => self.add_constant(scalar),
                 Expression::Polynomial(query) => {
                     let rot_idx = self.add_rotation(&query.rotation);
-                    self.add_calculation(Calculation::Store(ValueSource::Advice(
-                        query.index,
-                        rot_idx,
-                    )))
+                    self.add_calculation(Calculation::Store(ValueSource::Advice {
+                        index: query.index,
+                        rotation: rot_idx,
+                    }))
                 }
-                Expression::Challenge(challenge_index) => self
-                    .add_calculation(Calculation::Store(ValueSource::Challenge(*challenge_index))),
+                Expression::Challenge(challenge_index) => {
+                    self.add_calculation(Calculation::Store(ValueSource::Challenge {
+                        index: *challenge_index,
+                    }))
+                }
                 Expression::Negated(a) => match **a {
                     Expression::Constant(scalar) => self.add_constant(&-scalar),
                     _ => {
