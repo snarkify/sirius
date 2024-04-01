@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    ops::{Add, Mul, Sub},
-};
+use std::ops::{Add, Mul, Sub};
 
 use ff::PrimeField;
 use itertools::*;
@@ -26,8 +23,8 @@ impl<F> Default for GroupedPoly<F> {
     }
 }
 
-impl<F: PrimeField> From<HashMap<usize, Expression<F>>> for GroupedPoly<F> {
-    fn from(value: HashMap<usize, Expression<F>>) -> Self {
+impl<IT: IntoIterator<Item = (usize, Expression<F>)>, F: PrimeField> From<IT> for GroupedPoly<F> {
+    fn from(value: IT) -> Self {
         let mut self_ = Self::default();
 
         for (degree, expr) in value.into_iter() {
