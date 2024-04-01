@@ -33,8 +33,6 @@ pub mod graph_evaluator {
         Fixed { index: usize, rotation: usize },
         /// This is an advice (witness) column
         Advice { index: usize, rotation: usize },
-        /// This is an instance (external) column
-        Instance { index: usize, rotation: usize },
         /// This is a challenge
         Challenge { index: usize },
         /// Previous value
@@ -74,7 +72,6 @@ pub mod graph_evaluator {
         ) -> F {
             let get_value = |value: &ValueSource| -> F {
                 match value {
-                    ValueSource::Instance { index, rotation } => todo!("get {index}{rotation}"),
                     ValueSource::Constant(id) => constants[*id],
                     ValueSource::Intermediate(id) => intermediates[*id],
                     ValueSource::Fixed { index, rotation } => {
@@ -83,9 +80,11 @@ pub mod graph_evaluator {
                     ValueSource::Advice { index, rotation } => eval_getter
                         .eval_advice_var(rotations[*rotation], *index)
                         .expect("TODO"),
-                    ValueSource::Challenge { index } => {
-                        *eval_getter.get_challenges().as_ref().get(*index).unwrap()
-                    }
+                    ValueSource::Challenge { index } => *eval_getter
+                        .get_challenges()
+                        .as_ref()
+                        .get(*index)
+                        .expect("TODO"),
                     ValueSource::PreviousValue() => *previous_value,
                 }
             };
