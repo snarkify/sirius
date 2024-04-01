@@ -42,6 +42,30 @@ impl<IT: IntoIterator<Item = (usize, Expression<F>)>, F: PrimeField> From<IT> fo
 }
 
 impl<F: PrimeField> GroupedPoly<F> {
+    /// This function converts an arbitrary expression into a [`GroupedPoly`], by selecting new
+    /// [`Expression::Polynomial`] & [`Expression::Challenge`]
+    ///
+    /// Since they are labelled using a sequential index, to select new ones we need to know the
+    /// ones that are not already occupied. Moreover, we need a one-to-one correspondence for each
+    /// polynomial and challenge.
+    ///
+    /// Therefore, `num_of_poly` & `num_of_challenge` are used as input parameters, which allow us to
+    /// allocate a polynomial `x + num_of_poly` for polynomial `x` and for challenge respectively.
+    ///
+    /// ## Example
+    ///
+    /// ```math
+    /// P(a, b, c, d, e) &= (a + b + c) * (d + e) =>
+    ///     [a1 + b1 + c1 + k * (a2 + b2 + c2)] & [d1 + e1 + k * (d2 + e2)]
+    ///     =
+    ///     (a1 + b1 + c1)(d1 + e1)                             * k^0 +
+    ///     [(a2 + b2 + c2)(d1 + e1) + (a1 + b1 + c1)(d2 + e2)] * k^1 +
+    ///     (a2 + b2 + c2)(d2 + e2)                             * k^2
+    ///     =
+    ///     a1*d1 + a1*e1 + b1*d1 + b1*e1 + c1*d1 + c1*e1       * k^0 +
+    ///     a2*d1 + a2*e1 + b2*d1 + b2*e1 + c2*d1 + c2*e1 + a1*d2 + a1*e2 + b1*d2 + b1*e2 + c1*d2 + c1*e2 * k^1 +
+    ///     a2*d2 + a2*e2 + b2*d2 + b2*e2 + c2*d2 + c2*e2       * k^2
+    /// ```
     fn new(expr: Expression<F>, num_of_poly: usize, num_of_challenge: usize) -> Self {
         expr.evaluate(
             &|constant| GroupedPoly {
