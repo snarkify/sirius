@@ -1,18 +1,23 @@
 use std::marker::PhantomData;
 
-use super::*;
-use crate::commitment::CommitmentKey;
-use crate::concat_vec;
-use crate::constants::NUM_CHALLENGE_BITS;
-use crate::plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain};
-use crate::plonk::{
-    PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
-};
-use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
-use crate::polynomial::ColumnIndex;
-use crate::poseidon::ROTrait;
-use crate::sps::SpecialSoundnessVerifier;
+use ff::Field;
 use halo2_proofs::arithmetic::CurveAffine;
+
+use crate::{
+    commitment::CommitmentKey,
+    concat_vec,
+    constants::NUM_CHALLENGE_BITS,
+    plonk::{
+        eval::{Error as EvalError, Eval, PlonkEvalDomain},
+        PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness, RelaxedPlonkInstance,
+        RelaxedPlonkTrace, RelaxedPlonkWitness,
+    },
+    polynomial::grouped_poly::GroupedPoly,
+    poseidon::ROTrait,
+    sps::SpecialSoundnessVerifier,
+};
+
+use super::*;
 
 /// Represent intermediate polynomial terms that arise when folding
 /// two polynomial relations into one.
@@ -77,7 +82,6 @@ impl<C: CurveAffine> VanillaFS<C> {
         U2: &PlonkInstance<C>,
         W2: &PlonkWitness<C::ScalarExt>,
     ) -> Result<(CrossTerms<C>, CrossTermCommits<C>), Error> {
-        let offset = S.num_non_fold_vars();
         let num_row = if !S.fixed_columns.is_empty() {
             S.fixed_columns[0].len()
         } else {
@@ -93,28 +97,24 @@ impl<C: CurveAffine> VanillaFS<C> {
             W2s: &W2.W,
         };
 
-        let normalized = S.poly.fold_transform(offset, S.num_fold_vars());
-        let r_index = normalized.num_challenges() - 1;
-        let degree = S.poly.degree_for_folding(offset);
-        let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
-            .map(|k| {
-                normalized.coeff_of(
-                    ColumnIndex::Challenge {
-                        column_index: r_index,
-                    },
-                    k,
-                )
-            })
-            .map(|multipoly| {
-                (0..num_row)
-                    .into_par_iter()
-                    .map(|row| data.eval(&multipoly, row))
-                    .collect::<Result<Vec<C::ScalarExt>, EvalError>>()
-            })
-            .collect::<Result<Vec<Vec<C::ScalarExt>>, EvalError>>()?;
-        let cross_term_commits: Vec<C> =
-            cross_terms.iter().map(|v| ck.commit(v).unwrap()).collect();
-        Ok((cross_terms, cross_term_commits))
+        itertools::process_results(
+            GroupedPoly::new(&S.expr, S.num_fold_vars(), S.num_challenges)
+                .into_iter_all_degree()
+                .map(|expr| {
+                    let cross_term = match expr {
+                        Some(expr) => (0..num_row)
+                            .into_par_iter()
+                            .map(|row| data.eval_grouped(&expr, row))
+                            .collect::<Result<Vec<C::ScalarExt>, EvalError>>()?,
+                        None => vec![C::ScalarExt::ZERO; num_row],
+                    };
+
+                    let commit = ck.commit(&cross_term).unwrap();
+
+                    Result::<_, Error>::Ok((cross_term, commit))
+                }),
+            |iter| iter.unzip::<_, _, Vec<_>, Vec<_>>(),
+        )
     }
 
     /// Absorb all fields into RandomOracle `RO` & generate challenge based on that

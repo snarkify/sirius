@@ -1,4 +1,4 @@
-use crate::polynomial::{ColumnIndex, MultiPolynomial};
+use crate::polynomial::{ColumnIndex, Expression, MultiPolynomial};
 use ff::PrimeField;
 use std::collections::HashMap;
 
@@ -69,6 +69,10 @@ pub trait Eval<F: PrimeField> {
                 challenge_index: index,
             },
         )
+    }
+
+    fn eval_grouped(&self, _expr: &Expression<F>, _row: usize) -> Result<F, Error> {
+        todo!()
     }
 
     /// evaluate virtual multi-polynomial (i.e. custom gates, cross-term expressions etc) on specific row

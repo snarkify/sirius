@@ -37,6 +37,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
             num_challenges,
             round_sizes,
             poly,
+            expr,
             ..
         } = ConstraintSystemMetainfo::build(self.k as usize, &self.cs);
 
@@ -49,6 +50,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
             num_challenges,
             round_sizes,
             poly,
+            expr,
             permutation_matrix: vec![],
             lookup_arguments: plonk::lookup::Arguments::compress_from(&self.cs),
         };

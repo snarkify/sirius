@@ -33,7 +33,7 @@ use crate::{
     plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain},
     polynomial::{
         sparse::{matrix_multiply, SparseMatrix},
-        MultiPolynomial,
+        Expression, MultiPolynomial,
     },
     poseidon::{AbsorbInRO, ROTrait},
     sps::{Error as SpsError, SpecialSoundnessVerifier},
@@ -89,6 +89,7 @@ pub struct PlonkStructure<F: PrimeField> {
 
     /// singla polynomial relation that combines custom gates and lookup relations
     pub(crate) poly: MultiPolynomial<F>,
+    pub(crate) expr: Expression<F>,
     pub(crate) permutation_matrix: SparseMatrix<F>,
     pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
 }

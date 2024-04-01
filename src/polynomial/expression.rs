@@ -6,7 +6,7 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
 };
 
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use halo2_proofs::{plonk::Expression as PE, poly::Rotation};
 use serde::Serialize;
 
@@ -61,6 +61,12 @@ pub enum Expression<F> {
     Sum(Box<Expression<F>>, Box<Expression<F>>),
     Product(Box<Expression<F>>, Box<Expression<F>>),
     Scaled(Box<Expression<F>>, F),
+}
+
+impl<F: Field> Default for Expression<F> {
+    fn default() -> Self {
+        Expression::Constant(F::default())
+    }
 }
 
 impl<F: PrimeField> Display for Expression<F> {
