@@ -30,8 +30,9 @@ use crate::{
     commitment::CommitmentKey,
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
-    plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain},
+    plonk::eval::{Error as EvalError, PlonkEvalDomain},
     polynomial::{
+        graph_evaluator::GraphEvaluator,
         sparse::{matrix_multiply, SparseMatrix},
         Expression, MultiPolynomial,
     },
@@ -89,7 +90,7 @@ pub struct PlonkStructure<F: PrimeField> {
 
     /// singla polynomial relation that combines custom gates and lookup relations
     pub(crate) poly: MultiPolynomial<F>,
-    pub(crate) expr: Expression<F>,
+    pub(crate) custom_gates_lookup_compressed: Expression<F>,
     pub(crate) permutation_matrix: SparseMatrix<F>,
     pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
 }
@@ -254,8 +255,10 @@ impl<F: PrimeField> PlonkStructure<F> {
         (0..total_row)
             .into_par_iter()
             .map(|row| {
-                data.eval(&self.poly, row)
-                    .map(|row_result| if row_result.eq(&F::ZERO) { 0 } else { 1 })
+                let row_result = GraphEvaluator::<C>::new(&self.custom_gates_lookup_compressed)
+                    .evaluate(&data, row);
+
+                Result::<_, Error>::Ok(if row_result.eq(&F::ZERO) { 0 } else { 1 })
             })
             .try_reduce(
                 || 0,
@@ -295,7 +298,6 @@ impl<F: PrimeField> PlonkStructure<F> {
     {
         let total_row = 1 << self.k;
 
-        let poly = self.poly.homogeneous(self.num_non_fold_vars());
         let data = PlonkEvalDomain {
             num_advice: self.num_advice_columns,
             num_lookup: self.num_lookups(),
@@ -309,8 +311,10 @@ impl<F: PrimeField> PlonkStructure<F> {
         (0..total_row)
             .into_par_iter()
             .map(|row| {
-                data.eval(&poly, row)
-                    .map(|eval_of_row| if eval_of_row.eq(&W.E[row]) { 0 } else { 1 })
+                let row_result = GraphEvaluator::<C>::new(&self.custom_gates_lookup_compressed)
+                    .evaluate(&data, row);
+
+                Result::<_, Error>::Ok(if row_result.eq(&W.E[row]) { 0 } else { 1 })
             })
             .try_reduce(
                 || 0,
@@ -741,7 +745,7 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
         Self { W, E }
     }
 
-    pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &[Vec<F>], r: &F) -> Self {
+    pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &[Box<[F]>], r: &F) -> Self {
         let W = self
             .W
             .iter()

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::polynomial::{
     graph_evaluator::GraphEvaluator, grouped_poly::GroupedPoly, ColumnIndex, MultiPolynomial,
 };
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use halo2curves::CurveAffine;
 use rayon::prelude::IntoParallelIterator;
 use rayon::prelude::*;
@@ -175,24 +175,17 @@ where
     fn eval_grouped(
         &self,
         poly: &GroupedPoly<C::ScalarExt>,
-    ) -> impl Iterator<Item = Vec<C::ScalarExt>> {
-        poly.iter_all_degree().map(|expr| {
-            match expr {
-                Some(expr) => {
-                    let evaluator = GraphEvaluator::<C>::new(&expr);
+    ) -> impl Iterator<Item = Box<[C::ScalarExt]>> {
+        poly.iter_all_degree().map(|expr| match expr {
+            Some(expr) => {
+                let evaluator = GraphEvaluator::<C>::new(expr);
 
-                    (0..self.num_row())
-                        .into_par_iter()
-                        .map(|row| {
-                            let mut data = evaluator.instance();
-                            let rot_scale = 0; // TODO
-                            let k_table_size = 0; // TODO
-                            evaluator.evaluate(&mut data, self, row, rot_scale, k_table_size)
-                        })
-                        .collect::<Vec<_>>()
-                }
-                None => vec![],
+                (0..self.num_row())
+                    .into_par_iter()
+                    .map(|row| evaluator.evaluate(self, row))
+                    .collect::<Box<[_]>>()
             }
+            None => vec![C::ScalarExt::ZERO; self.num_row()].into_boxed_slice(),
         })
     }
 }

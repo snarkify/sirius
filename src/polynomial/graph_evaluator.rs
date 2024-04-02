@@ -7,8 +7,8 @@ use crate::plonk::eval::Eval;
 use super::Expression;
 
 /// Return the index in the polynomial of size `isize` after rotation `rot`.
-fn get_rotation_idx(idx: usize, rot: i32, rot_scale: i32, isize: i32) -> usize {
-    (((idx as i32) + (rot * rot_scale)).rem_euclid(isize)) as usize
+fn get_rotation_idx(idx: usize, rot: i32, num_row: usize) -> usize {
+    (((idx as i32) + rot).rem_euclid(num_row as i32)) as usize
 }
 
 /// Value used in a calculation
@@ -174,9 +174,7 @@ impl<C: CurveAffine> GraphEvaluator<C> {
             .iter()
             .find(|c| c.calculation == calculation);
         match existing_calculation {
-            Some(existing_calculation) => {
-                ValueSource::Intermediate(existing_calculation.target)
-            }
+            Some(existing_calculation) => ValueSource::Intermediate(existing_calculation.target),
             None => {
                 let target = self.num_intermediates;
                 self.calculations.push(CalculationInfo {
@@ -247,8 +245,7 @@ impl<C: CurveAffine> GraphEvaluator<C> {
             Expression::Product(a, b) => {
                 let result_a = self.add_expression(a);
                 let result_b = self.add_expression(b);
-                if result_a == ValueSource::Constant(0) || result_b == ValueSource::Constant(0)
-                {
+                if result_a == ValueSource::Constant(0) || result_b == ValueSource::Constant(0) {
                     ValueSource::Constant(0)
                 } else if result_a == ValueSource::Constant(1) {
                     result_b
@@ -288,17 +285,11 @@ impl<C: CurveAffine> GraphEvaluator<C> {
         }
     }
 
-    pub fn evaluate(
-        &self,
-        data: &mut EvaluationData<C>,
-        getter: &impl Eval<C::ScalarExt>,
-        idx: usize,
-        rot_scale: i32,
-        k_table_size: i32,
-    ) -> C::ScalarExt {
+    pub fn evaluate(&self, getter: &impl Eval<C::ScalarExt>, idx: usize) -> C::ScalarExt {
+        let mut data = self.instance();
         // All rotation index values
         for (rot_idx, rot) in self.rotations.iter().enumerate() {
-            data.rotations[rot_idx] = get_rotation_idx(idx, *rot, rot_scale, k_table_size);
+            data.rotations[rot_idx] = get_rotation_idx(idx, *rot, getter.num_row());
         }
 
         // All calculations, with cached intermediate results
@@ -319,4 +310,3 @@ impl<C: CurveAffine> GraphEvaluator<C> {
         }
     }
 }
-

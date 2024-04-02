@@ -25,7 +25,7 @@ use super::*;
 /// polynomial relations are folded, certain terms (referred
 /// to as cross terms) emerge that capture the interaction between
 /// the two original polynomials.
-pub type CrossTerms<C> = Vec<Vec<<C as CurveAffine>::ScalarExt>>;
+pub type CrossTerms<C> = Vec<Box<[<C as CurveAffine>::ScalarExt]>>;
 
 /// Cryptographic commitments to the [`CrossTerms`].
 pub type CrossTermCommits<C> = Vec<C>;
@@ -92,11 +92,14 @@ impl<C: CurveAffine> VanillaFS<C> {
         };
 
         itertools::process_results(
-            data.eval_grouped(&GroupedPoly::new(
-                &S.expr,
-                S.num_fold_vars(),
-                S.num_challenges,
-            ))
+            <PlonkEvalDomain<'_, C::ScalarExt> as EvalGrouped<C>>::eval_grouped(
+                &data,
+                &GroupedPoly::new(
+                    &S.custom_gates_lookup_compressed,
+                    S.num_fold_vars(),
+                    S.num_challenges,
+                ),
+            )
             .map(|result_with_cross_term| {
                 let cross_term = result_with_cross_term;
                 let commit = ck.commit(&cross_term).unwrap();
