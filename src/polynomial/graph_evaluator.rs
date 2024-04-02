@@ -22,7 +22,7 @@ pub enum ValueSource {
     /// This is a fixed column
     Fixed { index: usize, rotation: usize },
     /// This is an advice (witness) column
-    Advice { index: usize, rotation: usize },
+    Poly { index: usize, rotation: usize },
     /// This is a challenge
     Challenge { index: usize },
 }
@@ -64,8 +64,8 @@ impl Calculation {
                 ValueSource::Fixed { index, rotation } => {
                     eval_getter.get_fixed().as_ref()[*index][rotations[*rotation]]
                 }
-                ValueSource::Advice { index, rotation } => eval_getter
-                    .eval_advice_var(rotations[*rotation], *index)
+                ValueSource::Poly { index, rotation } => eval_getter
+                    .eval_column_var(rotations[*rotation], *index)
                     .expect("TODO"),
                 ValueSource::Challenge { index } => *eval_getter
                     .get_challenges()
@@ -157,20 +157,23 @@ impl<C: CurveAffine> GraphEvaluator<C> {
 
     /// Adds a rotation
     fn add_rotation(&mut self, rotation: &Rotation) -> usize {
-        let position = self.rotations.iter().position(|&c| c == rotation.0);
-        match position {
-            Some(pos) => pos,
+        match self.rotations.iter().position(|&c| c == rotation.0) {
+            Some(index) => {
+                debug!("rotation {rotation:?} already have index: {index}, will use it");
+                index
+            }
             None => {
                 self.rotations.push(rotation.0);
-                self.rotations.len() - 1
+                let index = self.rotations.len() - 1;
+                debug!("rotation {rotation:?} have't index, add it with index: {index}");
+                index
             }
         }
     }
 
     /// Adds a constant
     fn add_constant(&mut self, constant: &C::ScalarExt) -> ValueSource {
-        let position = self.constants.iter().position(|&c| c == *constant);
-        ValueSource::Constant(match position {
+        ValueSource::Constant(match self.constants.iter().position(|&c| c == *constant) {
             Some(index) => {
                 debug!("constant {constant:?} already have index: {index}, will use it");
                 index
@@ -213,7 +216,7 @@ impl<C: CurveAffine> GraphEvaluator<C> {
             Expression::Constant(scalar) => self.add_constant(scalar),
             Expression::Polynomial(query) => {
                 let rot_idx = self.add_rotation(&query.rotation);
-                self.add_calculation(Calculation::Store(ValueSource::Advice {
+                self.add_calculation(Calculation::Store(ValueSource::Poly {
                     index: query.index,
                     rotation: rot_idx,
                 }))
@@ -338,10 +341,15 @@ impl<C: CurveAffine> GraphEvaluator<C> {
 
 #[cfg(test)]
 mod tests {
+    use std::array;
+
     use halo2curves::bn256;
     use tracing_test::traced_test;
 
-    use crate::plonk::eval::GetEvaluateData;
+    use crate::{
+        plonk::eval::{Error as EvalError, GetEvaluateData},
+        polynomial::Query,
+    };
 
     use super::*;
 
@@ -367,18 +375,14 @@ mod tests {
             &self.fixed
         }
 
-        fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, crate::plonk::eval::Error> {
+        fn eval_advice_var(&self, row_index: usize, column_index: usize) -> Result<F, EvalError> {
             self.advice
-                .get(col)
-                .ok_or(
-                    crate::plonk::eval::Error::ColumnVariableIndexOutOfBoundary {
-                        column_index: col,
-                    },
-                )
+                .get(column_index)
+                .ok_or(EvalError::ColumnVariableIndexOutOfBoundary { column_index })
                 .and_then(|column| {
                     column
-                        .get(row)
-                        .ok_or(crate::plonk::eval::Error::RowIndexOutOfBoundary { row_index: row })
+                        .get(row_index)
+                        .ok_or(EvalError::RowIndexOutOfBoundary { row_index })
                 })
                 .cloned()
         }
@@ -444,5 +448,130 @@ mod tests {
                 .evaluate(&Mock::default(), 0);
 
         assert_eq!(res, -value);
+    }
+
+    #[traced_test]
+    #[test]
+    fn poly() {
+        let mut rnd = rand::thread_rng();
+        let [advice00, advice01, advice10, advice11, fixed00, fixed01, fixed10, fixed11] =
+            array::from_fn(|_| Scalar::random(&mut rnd));
+        let [selector1, selector2] = [true, false];
+
+        let data = Mock {
+            advice: vec![vec![advice00, advice10], vec![advice01, advice11]],
+            fixed: vec![vec![fixed00, fixed10], vec![fixed01, fixed11]],
+            selectors: vec![vec![selector1, selector2], vec![selector1, selector2]],
+            ..Default::default()
+        };
+
+        let num_selectors = data.num_selectors();
+        let num_fixed = data.num_fixed();
+
+        let eval_selector = |column_index, rotation, row| {
+            GraphEvaluator::<C1>::new(&Expression::Polynomial::<Scalar>(Query {
+                index: column_index,
+                rotation: Rotation(rotation),
+            }))
+            .evaluate(&data, row)
+        };
+        let eval_fixed = |column_index, rotation, row| {
+            GraphEvaluator::<C1>::new(&Expression::Polynomial::<Scalar>(Query {
+                index: num_selectors + column_index,
+                rotation: Rotation(rotation),
+            }))
+            .evaluate(&data, row)
+        };
+        let eval_advice = |column_index, rotation, row| {
+            GraphEvaluator::<C1>::new(&Expression::Polynomial::<Scalar>(Query {
+                index: num_selectors + num_fixed + column_index,
+                rotation: Rotation(rotation),
+            }))
+            .evaluate(&data, row)
+        };
+
+        assert_eq!(eval_advice(0, 0, 0), advice00);
+        assert_eq!(eval_advice(0, 1, 0), advice10);
+        assert_eq!(eval_advice(0, 0, 1), advice10);
+        assert_eq!(eval_advice(0, -1, 1), advice00);
+        assert_eq!(eval_advice(1, 0, 1), advice11);
+
+        assert_eq!(eval_fixed(0, 0, 0), fixed00);
+        assert_eq!(eval_fixed(0, 0, 1), fixed10);
+        assert_eq!(eval_fixed(0, -1, 1), fixed00);
+
+        assert_eq!(
+            eval_selector(0, 0, 0),
+            if selector1 { Scalar::ONE } else { Scalar::ZERO }
+        );
+
+        assert_eq!(
+            eval_selector(0, 0, 1),
+            if selector2 { Scalar::ONE } else { Scalar::ZERO }
+        );
+    }
+
+    #[traced_test]
+    #[test]
+    fn challenge() {
+        let value = Scalar::random(&mut rand::thread_rng());
+
+        assert_eq!(
+            GraphEvaluator::<C1>::new(&Expression::Challenge(0)).evaluate(
+                &Mock {
+                    challenges: vec![value],
+                    ..Default::default()
+                },
+                0
+            ),
+            value
+        );
+    }
+
+    #[traced_test]
+    #[test]
+    fn eval() {
+        fn sum(expr: &[Expression<Scalar>]) -> Box<Expression<Scalar>> {
+            Box::new(match expr.split_first() {
+                Some((first, rest)) => Expression::Sum(Box::new(first.clone()), sum(rest)),
+                None => Expression::Constant(Scalar::ZERO),
+            })
+        }
+
+        let mut rnd = rand::thread_rng();
+        let [advice00, advice01, advice10, advice11, fixed00, fixed01, fixed10, fixed11] =
+            array::from_fn(|_| Scalar::random(&mut rnd));
+
+        let data = Mock {
+            advice: vec![vec![advice00, advice10], vec![advice01, advice11]],
+            fixed: vec![vec![fixed00, fixed10], vec![fixed01, fixed11]],
+            selectors: vec![vec![false; 2], vec![false; 2]],
+            ..Default::default()
+        };
+
+        let num_selectors = data.num_selectors();
+        let num_fixed = data.num_fixed();
+
+        let get_fixed = |column_index, rotation| {
+            Expression::Polynomial::<Scalar>(Query {
+                index: num_selectors + column_index,
+                rotation: Rotation(rotation),
+            })
+        };
+        let get_advice = |column_index, rotation| {
+            Expression::Polynomial::<Scalar>(Query {
+                index: num_selectors + num_fixed + column_index,
+                rotation: Rotation(rotation),
+            })
+        };
+
+        assert_eq!(
+            GraphEvaluator::<C1>::new(&Expression::Product(
+                sum(&[get_advice(0, 0), get_advice(1, 0), get_advice(1, 0)]),
+                sum(&[get_fixed(0, 0), get_advice(0, 0)]),
+            ))
+            .evaluate(&data, 0),
+            (advice00 + advice01 + advice01) * (fixed00 + advice00)
+        );
     }
 }

@@ -30,20 +30,13 @@ pub enum Error {
 }
 
 pub trait GetEvaluateData<F: PrimeField> {
-    fn num_row(&self) -> usize {
-        match self.get_fixed().as_ref().len() {
-            0 => self.get_selectors().as_ref()[0].len(),
-            len => len,
-        }
-    }
+    fn num_lookup(&self) -> usize;
 
     fn get_challenges(&self) -> &impl AsRef<[F]>;
     fn get_selectors(&self) -> &impl AsRef<[Vec<bool>]>;
     fn get_fixed(&self) -> &impl AsRef<[Vec<F>]>;
 
     fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, Error>;
-
-    fn num_lookup(&self) -> usize;
 
     /// total row size of the evaluation domain
     fn row_size(&self) -> usize {
@@ -56,16 +49,20 @@ pub trait GetEvaluateData<F: PrimeField> {
     }
 
     /// evaluate a single column variable on specific row
-    fn eval_column_var(&self, row: usize, index: usize) -> Result<F, Error> {
+    fn eval_column_var(&self, row_index: usize, column_index: usize) -> Result<F, Error> {
         let selectors = self.get_selectors().as_ref();
         let fixed = self.get_fixed().as_ref();
 
         selectors
-            .get(index)
-            .map(|selector| if selector[row] { F::ONE } else { F::ZERO })
-            .or_else(|| fixed.get(index - selectors.len()).map(|fixed| fixed[row]))
+            .get(column_index)
+            .map(|selector| if selector[row_index] { F::ONE } else { F::ZERO })
+            .or_else(|| {
+                fixed
+                    .get(column_index - selectors.len())
+                    .map(|fixed| fixed[row_index])
+            })
             .map_or_else(
-                || self.eval_advice_var(row, index - selectors.len() - fixed.len()),
+                || self.eval_advice_var(row_index, column_index - selectors.len() - fixed.len()),
                 Ok,
             )
     }
@@ -76,6 +73,25 @@ pub trait GetEvaluateData<F: PrimeField> {
                 challenge_index: index,
             },
         )
+    }
+
+    fn num_row(&self) -> usize {
+        match self.get_fixed().as_ref().len() {
+            0 => self.get_selectors().as_ref()[0].len(),
+            len => len,
+        }
+    }
+
+    fn num_selectors(&self) -> usize {
+        self.get_selectors().as_ref().len()
+    }
+
+    fn num_challenges(&self) -> usize {
+        self.get_challenges().as_ref().len()
+    }
+
+    fn num_fixed(&self) -> usize {
+        self.get_fixed().as_ref().len()
     }
 }
 
@@ -231,15 +247,15 @@ impl<'a, F: PrimeField> GetEvaluateData<F> for LookupEvalDomain<'a, F> {
         self.fixed
     }
 
-    fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, Error> {
-        if index >= self.advice.len() {
+    fn eval_advice_var(&self, row: usize, row_index: usize) -> Result<F, Error> {
+        if row_index >= self.advice.len() {
             Err(Error::ColumnVariableIndexOutOfBoundary {
-                column_index: index,
+                column_index: row_index,
             })
-        } else if row >= self.advice[index].len() {
+        } else if row >= self.advice[row_index].len() {
             Err(Error::RowIndexOutOfBoundary { row_index: row })
         } else {
-            Ok(self.advice[index][row])
+            Ok(self.advice[row_index][row])
         }
     }
 }
