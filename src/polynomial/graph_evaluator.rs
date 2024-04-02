@@ -1,6 +1,7 @@
 use ff::{Field, PrimeField};
 use halo2_proofs::poly::Rotation;
 use halo2curves::CurveAffine;
+use tracing::*;
 
 use crate::plonk::eval::Eval;
 
@@ -116,6 +117,7 @@ pub struct EvaluationData<C: CurveAffine> {
 #[derive(Clone, Debug)]
 pub struct GraphEvaluator<C: CurveAffine> {
     /// Constants
+    /// TODO #159 Consider better ways of storage (sorted for example)
     pub constants: Vec<C::ScalarExt>,
     /// Rotations
     pub rotations: Vec<i32>,
@@ -125,17 +127,30 @@ pub struct GraphEvaluator<C: CurveAffine> {
     pub num_intermediates: usize,
 }
 
-impl<C: CurveAffine> Default for GraphEvaluator<C> {
+impl<C: CurveAffine + Default> Default for GraphEvaluator<C> {
     fn default() -> Self {
-        todo!()
+        Self {
+            // The most used constants are added here, for simplicity's sake
+            constants: vec![
+                C::ScalarExt::ZERO,
+                C::ScalarExt::ONE,
+                C::ScalarExt::from(2u64),
+            ],
+            rotations: Default::default(),
+            calculations: Default::default(),
+            num_intermediates: Default::default(),
+        }
     }
 }
 
 impl<C: CurveAffine> GraphEvaluator<C> {
+    #[instrument(name = "GraphEvaluator::new", skip_all)]
     pub fn new(expr: &Expression<C::ScalarExt>) -> Self {
         let mut self_ = GraphEvaluator::default();
 
-        self_.add_expression(expr);
+        debug!("from {expr:?}"); // TODO Remove, too big log line
+        let value_source = self_.add_expression(expr);
+        self_.add_calculation(Calculation::Store(value_source));
 
         self_
     }
@@ -156,10 +171,15 @@ impl<C: CurveAffine> GraphEvaluator<C> {
     fn add_constant(&mut self, constant: &C::ScalarExt) -> ValueSource {
         let position = self.constants.iter().position(|&c| c == *constant);
         ValueSource::Constant(match position {
-            Some(pos) => pos,
+            Some(index) => {
+                debug!("constant {constant:?} already have index: {index}, will use it");
+                index
+            }
             None => {
                 self.constants.push(*constant);
-                self.constants.len() - 1
+                let index = self.constants.len() - 1;
+                debug!("constant {constant:?} have't index, add it with index: {index}");
+                index
             }
         })
     }
@@ -228,16 +248,19 @@ impl<C: CurveAffine> GraphEvaluator<C> {
                         }
                     }
                     _ => {
-                        let result_a = self.add_expression(a);
-                        let result_b = self.add_expression(b);
-                        if result_a == ValueSource::Constant(0) {
-                            result_b
-                        } else if result_b == ValueSource::Constant(0) {
-                            result_a
-                        } else if result_a <= result_b {
-                            self.add_calculation(Calculation::Add(result_a, result_b))
+                        let expr_a_value_source = self.add_expression(a);
+                        let expr_b_value_source = self.add_expression(b);
+
+                        if expr_a_value_source <= expr_b_value_source {
+                            self.add_calculation(Calculation::Add(
+                                expr_a_value_source,
+                                expr_b_value_source,
+                            ))
                         } else {
-                            self.add_calculation(Calculation::Add(result_b, result_a))
+                            self.add_calculation(Calculation::Add(
+                                expr_b_value_source,
+                                expr_a_value_source,
+                            ))
                         }
                     }
                 }
@@ -285,6 +308,7 @@ impl<C: CurveAffine> GraphEvaluator<C> {
         }
     }
 
+    #[instrument(name = "GraphEvaluator::evaluate", skip_all)]
     pub fn evaluate(&self, getter: &impl Eval<C::ScalarExt>, idx: usize) -> C::ScalarExt {
         let mut data = self.instance();
         // All rotation index values
@@ -294,6 +318,7 @@ impl<C: CurveAffine> GraphEvaluator<C> {
 
         // All calculations, with cached intermediate results
         for calc in self.calculations.iter() {
+            debug!("start calc: {calc:?}");
             data.intermediates[calc.target] = calc.calculation.evaluate(
                 &data.rotations,
                 &self.constants,
@@ -308,5 +333,116 @@ impl<C: CurveAffine> GraphEvaluator<C> {
         } else {
             C::ScalarExt::ZERO
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use halo2curves::bn256;
+    use tracing_test::traced_test;
+
+    use crate::plonk::eval::GetEvaluateData;
+
+    use super::*;
+
+    #[derive(Default)]
+    struct Mock<F: PrimeField> {
+        challenges: Vec<F>,
+        selectors: Vec<Vec<bool>>,
+        fixed: Vec<Vec<F>>,
+        advice: Vec<Vec<F>>,
+        num_lookup: usize,
+    }
+
+    impl<F: PrimeField> GetEvaluateData<F> for Mock<F> {
+        fn get_challenges(&self) -> &impl AsRef<[F]> {
+            &self.challenges
+        }
+
+        fn get_selectors(&self) -> &impl AsRef<[Vec<bool>]> {
+            &self.selectors
+        }
+
+        fn get_fixed(&self) -> &impl AsRef<[Vec<F>]> {
+            &self.fixed
+        }
+
+        fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, crate::plonk::eval::Error> {
+            self.advice
+                .get(col)
+                .ok_or(
+                    crate::plonk::eval::Error::ColumnVariableIndexOutOfBoundary {
+                        column_index: col,
+                    },
+                )
+                .and_then(|column| {
+                    column
+                        .get(row)
+                        .ok_or(crate::plonk::eval::Error::RowIndexOutOfBoundary { row_index: row })
+                })
+                .cloned()
+        }
+
+        fn num_lookup(&self) -> usize {
+            self.num_lookup
+        }
+    }
+
+    type C1 = bn256::G1Affine;
+    type Scalar = <C1 as CurveAffine>::ScalarExt;
+
+    #[traced_test]
+    #[test]
+    fn constant() {
+        let val = Scalar::random(&mut rand::thread_rng());
+
+        assert_eq!(
+            GraphEvaluator::<C1>::new(&Expression::Constant(val)).evaluate(&Mock::default(), 0),
+            val
+        );
+    }
+
+    #[traced_test]
+    #[test]
+    fn sum_const() {
+        let mut rnd = rand::thread_rng();
+        let lhs = Scalar::random(&mut rnd);
+        let rhs = Scalar::random(&mut rnd);
+
+        let res = GraphEvaluator::<C1>::new(&Expression::Sum(
+            Box::new(Expression::Constant(lhs)),
+            Box::new(Expression::Constant(rhs)),
+        ))
+        .evaluate(&Mock::default(), 0);
+
+        assert_eq!(res, lhs + rhs);
+    }
+
+    #[traced_test]
+    #[test]
+    fn product_const() {
+        let mut rnd = rand::thread_rng();
+        let lhs = Scalar::random(&mut rnd);
+        let rhs = Scalar::random(&mut rnd);
+
+        let res = GraphEvaluator::<C1>::new(&Expression::Product(
+            Box::new(Expression::Constant(lhs)),
+            Box::new(Expression::Constant(rhs)),
+        ))
+        .evaluate(&Mock::default(), 0);
+
+        assert_eq!(res, lhs * rhs);
+    }
+
+    #[traced_test]
+    #[test]
+    fn neg_const() {
+        let value = Scalar::random(&mut rand::thread_rng());
+
+        let res =
+            GraphEvaluator::<C1>::new(&Expression::Negated(Box::new(Expression::Constant(value))))
+                .evaluate(&Mock::default(), 0);
+
+        assert_eq!(res, -value);
     }
 }
