@@ -98,7 +98,7 @@ impl<C: CurveAffine> VanillaFS<C> {
                 S.num_challenges,
             ))
             .map(|result_with_cross_term| {
-                let cross_term = result_with_cross_term?;
+                let cross_term = result_with_cross_term;
                 let commit = ck.commit(&cross_term).unwrap();
 
                 Result::<_, Error>::Ok((cross_term, commit))

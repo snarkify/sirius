@@ -1,7 +1,12 @@
-use std::{collections::HashMap, iter};
+use std::collections::HashMap;
 
-use crate::polynomial::{grouped_poly::GroupedPoly, ColumnIndex, MultiPolynomial};
+use crate::polynomial::{
+    graph_evaluator::GraphEvaluator, grouped_poly::GroupedPoly, ColumnIndex, MultiPolynomial,
+};
 use ff::PrimeField;
+use halo2curves::CurveAffine;
+use rayon::prelude::IntoParallelIterator;
+use rayon::prelude::*;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -163,12 +168,35 @@ pub trait Eval<F: PrimeField>: GetEvaluateData<F> {
 }
 impl<F: PrimeField, T: GetEvaluateData<F>> Eval<F> for T {}
 
-pub trait EvalGrouped<F: PrimeField>: GetEvaluateData<F> {
-    fn eval_grouped(&self, _poly: &GroupedPoly<F>) -> impl Iterator<Item = Result<Vec<F>, Error>> {
-        iter::once_with(|| todo!())
+pub trait EvalGrouped<C: CurveAffine>: GetEvaluateData<C::ScalarExt> + Sized + Sync
+where
+    C::ScalarExt: PrimeField,
+{
+    fn eval_grouped(
+        &self,
+        poly: &GroupedPoly<C::ScalarExt>,
+    ) -> impl Iterator<Item = Vec<C::ScalarExt>> {
+        poly.iter_all_degree().map(|expr| {
+            match expr {
+                Some(expr) => {
+                    let evaluator = GraphEvaluator::<C>::new(&expr);
+
+                    (0..self.num_row())
+                        .into_par_iter()
+                        .map(|row| {
+                            let mut data = evaluator.instance();
+                            let rot_scale = 0; // TODO
+                            let k_table_size = 0; // TODO
+                            evaluator.evaluate(&mut data, self, row, rot_scale, k_table_size)
+                        })
+                        .collect::<Vec<_>>()
+                }
+                None => vec![],
+            }
+        })
     }
 }
-impl<F: PrimeField, T: GetEvaluateData<F>> EvalGrouped<F> for T {}
+impl<C: CurveAffine, T: GetEvaluateData<C::ScalarExt> + Sync + Sized> EvalGrouped<C> for T {}
 
 /// Used for evaluate compressed lookup expressions L_i(x1,...,xa) = l_i
 pub struct LookupEvalDomain<'a, F: PrimeField> {

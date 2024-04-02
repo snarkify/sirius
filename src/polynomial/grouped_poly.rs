@@ -102,8 +102,8 @@ impl<F: PrimeField> GroupedPoly<F> {
             .filter_map(|(degree, expr)| expr.as_ref().map(|expr| (degree, expr)))
     }
 
-    pub fn into_iter_all_degree(self) -> impl Iterator<Item = Option<Expression<F>>> {
-        self.terms.into_iter()
+    pub fn iter_all_degree(&self) -> impl Iterator<Item = &Option<Expression<F>>> {
+        self.terms.iter()
     }
 }
 
