@@ -39,7 +39,7 @@ use ff::PrimeField;
 use halo2_proofs::poly::Rotation;
 use tracing::*;
 
-use crate::plonk::eval::GetDataForEval;
+use crate::plonk::eval::{self, GetDataForEval};
 
 use super::Expression;
 
@@ -84,6 +84,18 @@ enum Calculation {
     Store(ValueSource),
 }
 
+#[derive(thiserror::Error, Debug, PartialEq, Eq)]
+pub enum Error {
+    #[error(transparent)]
+    WhilePoly(#[from] eval::Error),
+    #[error("TODO")]
+    NoFixedColumn { index: usize },
+    #[error("TODO")]
+    NoChallenge { index: usize },
+    #[error("TODO")]
+    RowOutOfBound { row: usize },
+}
+
 impl Calculation {
     /// Get the resulting value of this calculation
     fn evaluate<F: PrimeField>(
@@ -92,42 +104,50 @@ impl Calculation {
         constants: &[F],
         intermediates: &[F],
         eval_getter: &impl GetDataForEval<F>,
-    ) -> F {
-        let get_value = |value: &ValueSource| -> F {
+    ) -> Result<F, Error> {
+        let get_value = |value: &ValueSource| -> Result<F, Error> {
             match value {
-                ValueSource::Constant(id) => constants[*id],
-                ValueSource::Intermediate(id) => intermediates[*id],
-                ValueSource::Fixed { index, rotation } => {
-                    eval_getter.get_fixed().as_ref()[*index][rotations[*rotation]]
+                ValueSource::Constant(id) => Ok(constants[*id]),
+                ValueSource::Intermediate(id) => Ok(intermediates[*id]),
+                ValueSource::Fixed { index, rotation } => eval_getter
+                    .get_fixed()
+                    .as_ref()
+                    .get(*index)
+                    .ok_or(Error::NoFixedColumn { index: *index })?
+                    .get(rotations[*rotation])
+                    .cloned()
+                    .ok_or(Error::RowOutOfBound {
+                        row: rotations[*rotation],
+                    }),
+                ValueSource::Poly { index, rotation } => {
+                    Ok(eval_getter.eval_column_var(rotations[*rotation], *index)?)
                 }
-                ValueSource::Poly { index, rotation } => eval_getter
-                    .eval_column_var(rotations[*rotation], *index)
-                    .expect("TODO"),
-                ValueSource::Challenge { index } => *eval_getter
+                ValueSource::Challenge { index } => eval_getter
                     .get_challenges()
                     .as_ref()
                     .get(*index)
-                    .expect("TODO"),
+                    .cloned()
+                    .ok_or(Error::NoChallenge { index: *index }),
             }
         };
 
-        match self {
-            Calculation::Add(a, b) => get_value(a) + get_value(b),
-            Calculation::Sub(a, b) => get_value(a) - get_value(b),
-            Calculation::Mul(a, b) => get_value(a) * get_value(b),
-            Calculation::Square(v) => get_value(v).square(),
-            Calculation::Double(v) => get_value(v).double(),
-            Calculation::Negate(v) => -get_value(v),
+        Ok(match self {
+            Calculation::Add(a, b) => get_value(a)? + get_value(b)?,
+            Calculation::Sub(a, b) => get_value(a)? - get_value(b)?,
+            Calculation::Mul(a, b) => get_value(a)? * get_value(b)?,
+            Calculation::Square(v) => get_value(v)?.square(),
+            Calculation::Double(v) => get_value(v)?.double(),
+            Calculation::Negate(v) => -get_value(v)?,
             Calculation::Horner(start_value, parts, factor) => {
-                let factor = get_value(factor);
-                let mut value = get_value(start_value);
+                let factor = get_value(factor)?;
+                let mut value = get_value(start_value)?;
                 for part in parts.iter() {
-                    value = value * factor + get_value(part);
+                    value = value * factor + get_value(part)?;
                 }
                 value
             }
-            Calculation::Store(v) => get_value(v),
-        }
+            Calculation::Store(v) => get_value(v)?,
+        })
     }
 }
 
@@ -341,7 +361,7 @@ impl<F: PrimeField> GraphEvaluator<F> {
     }
 
     #[instrument(name = "GraphEvaluator::evaluate", skip_all)]
-    pub fn evaluate(&self, getter: &impl GetDataForEval<F>, idx: usize) -> F {
+    pub fn evaluate(&self, getter: &impl GetDataForEval<F>, idx: usize) -> Result<F, Error> {
         let mut data = self.instance();
         // All rotation index values
         for (rot_idx, rot) in self.rotations.iter().enumerate() {
@@ -355,14 +375,14 @@ impl<F: PrimeField> GraphEvaluator<F> {
                 &self.constants,
                 &data.intermediates,
                 getter,
-            );
+            )?;
         }
 
         // Return the result of the last calculation (if any)
         if let Some(calc) = self.calculations.last() {
-            data.intermediates[calc.target]
+            Ok(data.intermediates[calc.target])
         } else {
-            F::ZERO
+            Ok(F::ZERO)
         }
     }
 }
@@ -429,7 +449,9 @@ mod tests {
         let val = Scalar::random(&mut rand::thread_rng());
 
         assert_eq!(
-            GraphEvaluator::<Scalar>::new(&Expression::Constant(val)).evaluate(&Mock::default(), 0),
+            GraphEvaluator::<Scalar>::new(&Expression::Constant(val))
+                .evaluate(&Mock::default(), 0)
+                .unwrap(),
             val
         );
     }
@@ -445,7 +467,8 @@ mod tests {
             Box::new(Expression::Constant(lhs)),
             Box::new(Expression::Constant(rhs)),
         ))
-        .evaluate(&Mock::default(), 0);
+        .evaluate(&Mock::default(), 0)
+        .unwrap();
 
         assert_eq!(res, lhs + rhs);
     }
@@ -461,7 +484,8 @@ mod tests {
             Box::new(Expression::Constant(lhs)),
             Box::new(Expression::Constant(rhs)),
         ))
-        .evaluate(&Mock::default(), 0);
+        .evaluate(&Mock::default(), 0)
+        .unwrap();
 
         assert_eq!(res, lhs * rhs);
     }
@@ -474,7 +498,8 @@ mod tests {
         let res = GraphEvaluator::<Scalar>::new(&Expression::Negated(Box::new(
             Expression::Constant(value),
         )))
-        .evaluate(&Mock::default(), 0);
+        .evaluate(&Mock::default(), 0)
+        .unwrap();
 
         assert_eq!(res, -value);
     }
@@ -519,28 +544,28 @@ mod tests {
             .evaluate(&data, row)
         };
 
-        assert_eq!(eval_advice(0, 0, 0), advice00);
-        assert_eq!(eval_advice(0, 1, 0), advice10);
-        assert_eq!(eval_advice(0, 0, 1), advice10);
-        assert_eq!(eval_advice(0, -1, 1), advice00);
-        assert_eq!(eval_advice(1, 0, 1), advice11);
+        assert_eq!(eval_advice(0, 0, 0), Ok(advice00));
+        assert_eq!(eval_advice(0, 1, 0), Ok(advice10));
+        assert_eq!(eval_advice(0, 0, 1), Ok(advice10));
+        assert_eq!(eval_advice(0, -1, 1), Ok(advice00));
+        assert_eq!(eval_advice(1, 0, 1), Ok(advice11));
 
-        assert_eq!(eval_fixed(0, 0, 0), fixed00);
-        assert_eq!(eval_fixed(0, 0, 1), fixed10);
-        assert_eq!(eval_fixed(0, -1, 1), fixed00);
+        assert_eq!(eval_fixed(0, 0, 0), Ok(fixed00));
+        assert_eq!(eval_fixed(0, 0, 1), Ok(fixed10));
+        assert_eq!(eval_fixed(0, -1, 1), Ok(fixed00));
 
         assert_eq!(
             eval_selector(0, 0, 0),
-            if selector1 { Scalar::ONE } else { Scalar::ZERO }
+            Ok(if selector1 { Scalar::ONE } else { Scalar::ZERO })
         );
 
         assert_eq!(
             eval_selector(0, 0, 1),
-            if selector2 { Scalar::ONE } else { Scalar::ZERO }
+            Ok(if selector2 { Scalar::ONE } else { Scalar::ZERO })
         );
 
-        assert_eq!(eval_advice(0, 2, 0), advice00);
-        assert_eq!(eval_advice(0, 1, 1), advice00);
+        assert_eq!(eval_advice(0, 2, 0), Ok(advice00));
+        assert_eq!(eval_advice(0, 1, 1), Ok(advice00));
     }
 
     #[traced_test]
@@ -556,7 +581,7 @@ mod tests {
                 },
                 0
             ),
-            value
+            Ok(value)
         );
     }
 
@@ -603,7 +628,7 @@ mod tests {
                 sum(&[get_fixed(0, 0), get_advice(0, 0)]),
             ))
             .evaluate(&data, 0),
-            (advice00 + advice01 + advice01) * (fixed00 + advice00)
+            Ok((advice00 + advice01 + advice01) * (fixed00 + advice00))
         );
     }
 }
