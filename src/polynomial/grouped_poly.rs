@@ -95,11 +95,15 @@ impl<F: PrimeField> GroupedPoly<F> {
         )
     }
 
-    fn iter(&self) -> impl Iterator<Item = (usize, &Expression<F>)> {
+    fn iter_with_degree(&self) -> impl Iterator<Item = (usize, &Expression<F>)> {
         self.terms
             .iter()
             .enumerate()
             .filter_map(|(degree, expr)| expr.as_ref().map(|expr| (degree, expr)))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Option<Expression<F>>> {
+        self.terms.iter()
     }
 }
 
@@ -237,7 +241,7 @@ mod test {
             }),
             5 => Expression::Constant(Fq::ONE),
         }))
-        .iter()
+        .iter_with_degree()
         .map(|(degree, term)| format!("{degree};{}", term.expand()))
         .collect::<Vec<_>>();
 
@@ -270,7 +274,7 @@ mod test {
             }),
             5 => Expression::Challenge(0),
         }))
-        .iter()
+        .iter_with_degree()
         .map(|(degree, term)| format!("{degree};{}", term.expand()))
         .collect::<Vec<_>>();
 
@@ -299,7 +303,7 @@ mod test {
                 Box::new(Expression::Polynomial(Query { index: 3, rotation: Rotation(0) }))
             ),
         }))
-        .iter()
+        .iter_with_degree()
         .map(|(degree, term)| format!("{degree};{}", term.expand()))
         .collect::<Vec<_>>();
 
@@ -318,7 +322,7 @@ mod test {
             3 => Expression::Polynomial(Query { index: 4, rotation: Rotation(0) }),
             4 => Expression::Polynomial(Query { index: 5, rotation: Rotation(0) }),
         }))
-        .iter()
+        .iter_with_degree()
         .map(|(degree, term)| format!("{degree};{}", term.expand()))
         .collect::<Vec<_>>();
 
@@ -369,7 +373,7 @@ mod test {
             GroupedPoly::new(Expression::Product(sum(&[a, b, c]), sum(&[d, e])), 5, 0);
 
         let actual = grouped_poly
-            .iter()
+            .iter_with_degree()
             .map(|(degree, term)| format!("{degree};{}", term.expand()))
             .collect::<Vec<_>>();
 
