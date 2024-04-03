@@ -19,6 +19,7 @@ use crate::plonk::{PlonkInstance, PlonkStructure, PlonkTrace};
 use crate::poseidon::ROTrait;
 use crate::sps::Error as SpsError;
 
+pub mod protogalaxy;
 pub mod vanilla;
 
 /// Trait representing the NIFS folding scheme.
@@ -67,6 +68,25 @@ pub trait FoldingScheme<C: CurveAffine> {
         ro_acc: &mut impl ROTrait<C::Base>,
         accumulator: &Self::AccumulatorInstance,
         incoming: &PlonkInstance<C>,
+        proof: &Self::Proof,
+    ) -> Result<Self::AccumulatorInstance, Error>;
+
+    /// Perform the multi-folding operation as a prover.
+    fn prove_mult(
+        ck: &CommitmentKey<C>,
+        pp: &Self::ProverParam,
+        ro_acc: &mut impl ROTrait<C::Base>,
+        accumulator: &Self::Accumulator,
+        incoming: &[PlonkTrace<C>],
+    ) -> Result<(Self::Accumulator, Self::Proof), Error>;
+
+    /// Perform the multi-folding operation as a verifier.
+    fn verify_mult(
+        vp: &Self::VerifierParam,
+        ro_nark: &mut impl ROTrait<C::Base>,
+        ro_acc: &mut impl ROTrait<C::Base>,
+        accumulator: &Self::AccumulatorInstance,
+        incoming: &[PlonkInstance<C>],
         proof: &Self::Proof,
     ) -> Result<Self::AccumulatorInstance, Error>;
 }
