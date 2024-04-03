@@ -291,6 +291,8 @@ mod zero_round_test {
 // test multiple gates without lookup
 // test example adapted from https://github.com/icemelon/halo2-tutorial
 mod one_round_test {
+    use tracing_test::traced_test;
+
     use super::*;
 
     #[derive(Clone)]
@@ -442,6 +444,7 @@ mod one_round_test {
         seq
     }
 
+    #[traced_test]
     #[test]
     fn test_nifs() -> Result<(), NIFSError> {
         const K: u32 = 4;
