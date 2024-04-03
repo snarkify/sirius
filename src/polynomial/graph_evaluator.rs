@@ -39,7 +39,7 @@ use ff::PrimeField;
 use halo2_proofs::poly::Rotation;
 use tracing::*;
 
-use crate::plonk::eval::{self, GetDataForEval};
+use crate::plonk::eval::{Error as EvalError, GetDataForEval};
 
 use super::Expression;
 
@@ -84,18 +84,6 @@ enum Calculation {
     Store(ValueSource),
 }
 
-#[derive(thiserror::Error, Debug, PartialEq, Eq)]
-pub enum Error {
-    #[error(transparent)]
-    WhilePoly(#[from] eval::Error),
-    #[error("Can't find fixed column with index: {index}")]
-    NoFixedColumn { index: usize },
-    #[error("Can't find challenge with index: {index}")]
-    NoChallenge { index: usize },
-    #[error("Can't find row with {index} index, num of rows: {num_of_rows}")]
-    RowOutOfBound { index: usize, num_of_rows: usize },
-}
-
 impl Calculation {
     /// Get the resulting value of this calculation
     fn evaluate<F: PrimeField>(
@@ -104,26 +92,23 @@ impl Calculation {
         constants: &[F],
         intermediates: &[F],
         eval_getter: &impl GetDataForEval<F>,
-    ) -> Result<F, Error> {
-        let get_value = |value: &ValueSource| -> Result<F, Error> {
+    ) -> Result<F, EvalError> {
+        let get_value = |value: &ValueSource| -> Result<F, EvalError> {
             match value {
                 ValueSource::Constant(id) => Ok(constants[*id]),
                 ValueSource::Intermediate(id) => Ok(intermediates[*id]),
-                ValueSource::Fixed { index, rotation } => {
-                    let fixed_column = eval_getter
-                        .get_fixed()
-                        .as_ref()
-                        .get(*index)
-                        .ok_or(Error::NoFixedColumn { index: *index })?;
-
-                    fixed_column
-                        .get(rotations[*rotation])
-                        .cloned()
-                        .ok_or(Error::RowOutOfBound {
-                            index: rotations[*rotation],
-                            num_of_rows: fixed_column.len(),
-                        })
-                }
+                ValueSource::Fixed { index, rotation } => eval_getter
+                    .get_fixed()
+                    .as_ref()
+                    .get(*index)
+                    .ok_or(EvalError::ColumnVariableIndexOutOfBoundary {
+                        column_index: *index,
+                    })?
+                    .get(rotations[*rotation])
+                    .cloned()
+                    .ok_or(EvalError::RowIndexOutOfBoundary {
+                        row_index: rotations[*rotation],
+                    }),
                 ValueSource::Poly { index, rotation } => {
                     Ok(eval_getter.eval_column_var(rotations[*rotation], *index)?)
                 }
@@ -132,7 +117,9 @@ impl Calculation {
                     .as_ref()
                     .get(*index)
                     .cloned()
-                    .ok_or(Error::NoChallenge { index: *index }),
+                    .ok_or(EvalError::ChallengeIndexOutOfBoundary {
+                        challenge_index: *index,
+                    }),
             }
         };
 
@@ -366,7 +353,7 @@ impl<F: PrimeField> GraphEvaluator<F> {
     }
 
     #[instrument(name = "GraphEvaluator::evaluate", skip_all)]
-    pub fn evaluate(&self, getter: &impl GetDataForEval<F>, idx: usize) -> Result<F, Error> {
+    pub fn evaluate(&self, getter: &impl GetDataForEval<F>, idx: usize) -> Result<F, EvalError> {
         let mut data = self.instance();
         // All rotation index values
         for (rot_idx, rot) in self.rotations.iter().enumerate() {
