@@ -95,6 +95,14 @@ impl<F: PrimeField> GroupedPoly<F> {
         )
     }
 
+    pub fn len(&self) -> usize {
+        self.terms.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.terms.is_empty()
+    }
+
     fn iter_with_degree(&self) -> impl Iterator<Item = (usize, &Expression<F>)> {
         self.terms
             .iter()

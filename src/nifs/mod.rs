@@ -11,7 +11,7 @@
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2_proofs::plonk::Error as Halo2Error;
 
-use crate::commitment::{CommitmentKey, self};
+use crate::commitment::{self, CommitmentKey};
 use crate::plonk::eval::Error as EvalError;
 use crate::plonk::{PlonkInstance, PlonkStructure, PlonkTrace};
 use crate::poseidon::ROTrait;
@@ -80,7 +80,7 @@ pub enum Error {
     #[error(transparent)]
     Plonk(#[from] Halo2Error),
     #[error(transparent)]
-    Commit(#[from] commitment::Error)
+    Commit(#[from] commitment::Error),
 }
 
 #[cfg(test)]

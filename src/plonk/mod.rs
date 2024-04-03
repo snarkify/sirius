@@ -34,7 +34,7 @@ use crate::{
     polynomial::{
         grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
-        Expression, MultiPolynomial,
+        Expression,
     },
     poseidon::{AbsorbInRO, ROTrait},
     sps::{Error as SpsError, SpecialSoundnessVerifier},
@@ -87,9 +87,6 @@ pub struct PlonkStructure<F: PrimeField> {
     pub(crate) num_challenges: usize,
     /// specify the witness size of each prover round
     pub(crate) round_sizes: Vec<usize>,
-
-    /// singla polynomial relation that combines custom gates and lookup relations
-    pub(crate) poly: MultiPolynomial<F>,
 
     pub(crate) custom_gates_lookup_compressed: Expression<F>,
 
@@ -415,8 +412,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     }
 
     pub fn get_degree_for_folding(&self) -> usize {
-        let offset = self.num_non_fold_vars();
-        self.poly.degree_for_folding(offset)
+        self.grouped_poly().len()
     }
 
     pub fn dry_run_sps_protocol<C: CurveAffine<ScalarExt = F>>(&self) -> PlonkTrace<C> {

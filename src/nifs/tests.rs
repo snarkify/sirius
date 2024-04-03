@@ -151,13 +151,13 @@ where
 
     f_U = U_from_verify;
     f_W = W;
-    assert_eq!(S.is_sat_relaxed(ck, &f_U, &f_W).err(), None);
-    assert_eq!(S.is_sat_perm(&f_U, &f_W).err(), None);
+    assert_eq!(S.is_sat_relaxed(ck, &f_U, &f_W), Ok(()));
+    assert_eq!(S.is_sat_perm(&f_U, &f_W), Ok(()));
 
     let (
         RelaxedPlonkTrace {
             U: U_from_prove,
-            W: _W,
+            W: W_from_prove,
         },
         cross_term_commits,
     ) = VanillaFS::prove(
@@ -183,9 +183,9 @@ where
     assert_eq!(U_from_prove, U_from_verify);
 
     f_U = U_from_verify;
-    f_W = _W;
-    assert_eq!(S.is_sat_relaxed(ck, &f_U, &f_W).err(), None);
-    assert_eq!(S.is_sat_perm(&f_U, &f_W).err(), None);
+    f_W = W_from_prove;
+    assert_eq!(S.is_sat_perm(&f_U, &f_W), Ok(()));
+    assert_eq!(S.is_sat_relaxed(ck, &f_U, &f_W), Ok(()));
     Ok(())
 }
 
