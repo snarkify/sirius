@@ -88,12 +88,12 @@ enum Calculation {
 pub enum Error {
     #[error(transparent)]
     WhilePoly(#[from] eval::Error),
-    #[error("TODO")]
+    #[error("Can't find fixed column with index: {index}")]
     NoFixedColumn { index: usize },
-    #[error("TODO")]
+    #[error("Can't find challenge with index: {index}")]
     NoChallenge { index: usize },
-    #[error("TODO")]
-    RowOutOfBound { row: usize },
+    #[error("Can't find row with {index} index, num of rows: {num_of_rows}")]
+    RowOutOfBound { index: usize, num_of_rows: usize },
 }
 
 impl Calculation {
@@ -109,16 +109,21 @@ impl Calculation {
             match value {
                 ValueSource::Constant(id) => Ok(constants[*id]),
                 ValueSource::Intermediate(id) => Ok(intermediates[*id]),
-                ValueSource::Fixed { index, rotation } => eval_getter
-                    .get_fixed()
-                    .as_ref()
-                    .get(*index)
-                    .ok_or(Error::NoFixedColumn { index: *index })?
-                    .get(rotations[*rotation])
-                    .cloned()
-                    .ok_or(Error::RowOutOfBound {
-                        row: rotations[*rotation],
-                    }),
+                ValueSource::Fixed { index, rotation } => {
+                    let fixed_column = eval_getter
+                        .get_fixed()
+                        .as_ref()
+                        .get(*index)
+                        .ok_or(Error::NoFixedColumn { index: *index })?;
+
+                    fixed_column
+                        .get(rotations[*rotation])
+                        .cloned()
+                        .ok_or(Error::RowOutOfBound {
+                            index: rotations[*rotation],
+                            num_of_rows: fixed_column.len(),
+                        })
+                }
                 ValueSource::Poly { index, rotation } => {
                     Ok(eval_getter.eval_column_var(rotations[*rotation], *index)?)
                 }
