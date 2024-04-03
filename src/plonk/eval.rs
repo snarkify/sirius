@@ -31,7 +31,14 @@ pub trait GetDataForEval<F: PrimeField> {
     fn get_challenges(&self) -> &impl AsRef<[F]>;
     fn get_selectors(&self) -> &impl AsRef<[Vec<bool>]>;
     fn get_fixed(&self) -> &impl AsRef<[Vec<F>]>;
+
     fn num_lookup(&self) -> usize;
+    fn num_selectors(&self) -> usize {
+        self.get_selectors().as_ref().len()
+    }
+    fn num_fixed(&self) -> usize {
+        self.get_fixed().as_ref().len()
+    }
 
     fn eval_advice_var(&self, row_index: usize, colulm_index: usize) -> Result<F, Error>;
 

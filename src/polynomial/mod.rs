@@ -1,4 +1,5 @@
 pub mod expression;
+pub mod graph_evaluator;
 pub mod grouped_poly;
 pub mod monomial;
 pub mod multi_polynomial;
