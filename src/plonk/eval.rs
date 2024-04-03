@@ -1,4 +1,4 @@
-use crate::polynomial::{ColumnIndex, MultiPolynomial};
+use crate::polynomial::{grouped_poly::GroupedPoly, ColumnIndex, Expression, MultiPolynomial};
 use ff::PrimeField;
 use std::collections::HashMap;
 
@@ -23,20 +23,19 @@ pub enum Error {
     UnsupportedVariableType { var_type: ColumnIndex },
 }
 
-/// The `Eval` trait is used to evaluate multi-variable polynomials in a Evaluation Domain defined
-/// over a prime field `F`
+/// Provides a contract for retrieving evaluation data necessary for evaluating of poly
 ///
-/// This trait encapsulates the necessary functionality to evaluate polynomials
-/// It allows you to retrieve challenges, selectors,
-/// fixed values and also includes methods to evaluate advice, column and challenge
-/// variables for specific rows.
-pub trait Eval<F: PrimeField> {
+/// Implementors of this trait are responsible for providing access to various
+/// kinds of data: challenges, selectors, fixed columns, etc.
+pub trait GetDataForEval<F: PrimeField> {
     fn get_challenges(&self) -> &impl AsRef<[F]>;
     fn get_selectors(&self) -> &impl AsRef<[Vec<bool>]>;
     fn get_fixed(&self) -> &impl AsRef<[Vec<F>]>;
     fn num_lookup(&self) -> usize;
 
-    /// total row size of the evaluation domain
+    fn eval_advice_var(&self, row_index: usize, colulm_index: usize) -> Result<F, Error>;
+
+    /// Total row size of the evaluation domain
     fn row_size(&self) -> usize {
         self.get_fixed()
             .as_ref()
@@ -45,8 +44,6 @@ pub trait Eval<F: PrimeField> {
             .or_else(|| self.get_selectors().as_ref().first().map(Vec::len))
             .expect("Fixed & Selectors can't be empty in one time")
     }
-
-    fn eval_advice_var(&self, row: usize, col: usize) -> Result<F, Error>;
 
     /// evaluate a single column variable on specific row
     fn eval_column_var(&self, row: usize, index: usize) -> Result<F, Error> {
@@ -70,12 +67,34 @@ pub trait Eval<F: PrimeField> {
             },
         )
     }
+}
 
-    /// evaluate virtual multi-polynomial (i.e. custom gates, cross-term expressions etc) on specific row
-    /// to evaluate each monomial term of the form $c*x1[row]^{k1}*x2[row]^{k2}*\cdots$, we first lookup
-    /// the value of $x[row]$ from the EvaluationDomain, then calculate the value of monomial.
-    /// to speedup, we will save the x and x^k in a HashMap
-    fn eval(&self, poly: &MultiPolynomial<F>, row: usize) -> Result<F, Error> {
+/// The `Eval` trait is used to evaluate multi-variable polynomials in a Evaluation Domain defined
+/// over a prime field `F`
+///
+/// This trait encapsulates the necessary functionality to evaluate polynomials
+///
+/// # Generic Parameters
+///
+/// * `F`: The prime field over which the evaluations are carried out.
+/// * `POLY`: The type of polynomial or expression to be evaluated.
+///
+pub trait Eval<F: PrimeField, POLY>: GetDataForEval<F> {
+    /// General method allowing to perform calculations of input polynomial type on the basis of
+    /// data requested in `GetEvalData`. Depending on its representation the implementation may
+    /// differ
+    fn eval(&self, poly: &POLY, row_index: usize) -> Result<F, Error>;
+}
+
+impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, MultiPolynomial<F>> for E {
+    /// Evaluate virtual multi-polynomial (i.e. custom gates, cross-term expressions etc) on
+    /// specific row to evaluate each monomial term of the form
+    /// ```math
+    /// $c*x1[row]^{k1}*x2[row]^{k2}*\cdots$
+    /// ```
+    /// we first lookup the value of `$x[row]$` from the Evaluation domain, then calculate the
+    /// value of monomial. to speedup, we will save the x and `x^k` in a HashMap
+    fn eval(&self, poly: &MultiPolynomial<F>, row_index: usize) -> Result<F, Error> {
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         struct Index<'l> {
             column_index: &'l ColumnIndex,
@@ -115,7 +134,7 @@ pub trait Eval<F: PrimeField> {
                                     rotation,
                                     column_index,
                                 } => {
-                                    let rotation_plus_row = rotation + (row as i32);
+                                    let rotation_plus_row = rotation + (row_index as i32);
                                     // TODO: double check how halo2 handle
                                     // (1): row+rot < 0
                                     // (2): row+rot >= row_size = 2^K
@@ -151,6 +170,18 @@ pub trait Eval<F: PrimeField> {
     }
 }
 
+impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, GroupedPoly<F>> for E {
+    fn eval(&self, _poly: &GroupedPoly<F>, _row_index: usize) -> Result<F, Error> {
+        todo!("#159")
+    }
+}
+
+impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, Expression<F>> for E {
+    fn eval(&self, _expr: &Expression<F>, _row_index: usize) -> Result<F, Error> {
+        todo!("#159")
+    }
+}
+
 /// Used for evaluate compressed lookup expressions L_i(x1,...,xa) = l_i
 pub struct LookupEvalDomain<'a, F: PrimeField> {
     pub(crate) num_lookup: usize,
@@ -174,7 +205,7 @@ pub struct PlonkEvalDomain<'a, F: PrimeField> {
     pub(crate) W2s: &'a Vec<Vec<F>>,
 }
 
-impl<'a, F: PrimeField> Eval<F> for LookupEvalDomain<'a, F> {
+impl<'a, F: PrimeField> GetDataForEval<F> for LookupEvalDomain<'a, F> {
     fn num_lookup(&self) -> usize {
         self.num_lookup
     }
@@ -204,7 +235,7 @@ impl<'a, F: PrimeField> Eval<F> for LookupEvalDomain<'a, F> {
     }
 }
 
-impl<'a, F: PrimeField> Eval<F> for PlonkEvalDomain<'a, F> {
+impl<'a, F: PrimeField> GetDataForEval<F> for PlonkEvalDomain<'a, F> {
     fn num_lookup(&self) -> usize {
         self.num_lookup
     }
