@@ -8,12 +8,10 @@
 //! For more details look at:
 //! - Paragraph '3. Folding scheme' at [Nova whitepaper](https://eprint.iacr.org/2021/370)
 //! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
-use rayon::prelude::*;
-
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2_proofs::plonk::Error as Halo2Error;
 
-use crate::commitment::CommitmentKey;
+use crate::commitment::{CommitmentKey, self};
 use crate::plonk::eval::Error as EvalError;
 use crate::plonk::{PlonkInstance, PlonkStructure, PlonkTrace};
 use crate::poseidon::ROTrait;
@@ -81,6 +79,8 @@ pub enum Error {
     Sps(#[from] SpsError),
     #[error(transparent)]
     Plonk(#[from] Halo2Error),
+    #[error(transparent)]
+    Commit(#[from] commitment::Error)
 }
 
 #[cfg(test)]

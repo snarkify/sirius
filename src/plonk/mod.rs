@@ -32,8 +32,9 @@ use crate::{
     constants::NUM_CHALLENGE_BITS,
     plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain},
     polynomial::{
+        grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
-        MultiPolynomial, Expression,
+        Expression, MultiPolynomial,
     },
     poseidon::{AbsorbInRO, ROTrait},
     sps::{Error as SpsError, SpecialSoundnessVerifier},
@@ -203,6 +204,13 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPl
 }
 
 impl<F: PrimeField> PlonkStructure<F> {
+    pub fn grouped_poly(&self) -> GroupedPoly<F> {
+        GroupedPoly::new(
+            &self.custom_gates_lookup_compressed,
+            self.num_fold_vars(),
+            self.num_challenges,
+        )
+    }
     /// return the index offset of fixed variables(i.e. not folded)
     pub fn num_non_fold_vars(&self) -> usize {
         self.fixed_columns.len() + self.selectors.len()
@@ -252,11 +260,11 @@ impl<F: PrimeField> PlonkStructure<F> {
             W2s: &vec![],
         };
 
-        let total_row = 1 << self.k;
-        (0..total_row)
+        let num_of_row = 1 << self.k;
+        (0..num_of_row)
             .into_par_iter()
             .map(|row| {
-                data.eval(&self.poly, row)
+                data.eval(&self.custom_gates_lookup_compressed, row)
                     .map(|row_result| if row_result.eq(&F::ZERO) { 0 } else { 1 })
             })
             .try_reduce(
@@ -266,7 +274,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             .map(|mismatch_count| {
                 Some(Error::EvaluationMismatch {
                     mismatch_count: NonZeroUsize::new(mismatch_count)?,
-                    total_row,
+                    total_row: num_of_row,
                 })
             })?
             .err_or(())?;
@@ -297,7 +305,6 @@ impl<F: PrimeField> PlonkStructure<F> {
     {
         let total_row = 1 << self.k;
 
-        let poly = self.poly.homogeneous(self.num_non_fold_vars());
         let data = PlonkEvalDomain {
             num_advice: self.num_advice_columns,
             num_lookup: self.num_lookups(),
@@ -311,7 +318,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         (0..total_row)
             .into_par_iter()
             .map(|row| {
-                data.eval(&poly, row)
+                data.eval(&self.custom_gates_lookup_compressed, row)
                     .map(|eval_of_row| if eval_of_row.eq(&W.E[row]) { 0 } else { 1 })
             })
             .try_reduce(
@@ -743,7 +750,7 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
         Self { W, E }
     }
 
-    pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &[Vec<F>], r: &F) -> Self {
+    pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &[Box<[F]>], r: &F) -> Self {
         let W = self
             .W
             .iter()

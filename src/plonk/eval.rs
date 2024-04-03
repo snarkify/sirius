@@ -1,5 +1,9 @@
-use crate::polynomial::{grouped_poly::GroupedPoly, ColumnIndex, Expression, MultiPolynomial};
+use crate::polynomial::{
+    graph_evaluator::GraphEvaluator, grouped_poly::GroupedPoly, ColumnIndex, Expression,
+    MultiPolynomial,
+};
 use ff::PrimeField;
+use rayon::prelude::*;
 use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -177,16 +181,30 @@ impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, MultiPolynomial<F>> for E {
     }
 }
 
-impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, GroupedPoly<F>> for E {
-    fn eval(&self, _poly: &GroupedPoly<F>, _row_index: usize) -> Result<F, Error> {
-        todo!("#159")
+impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, Expression<F>> for E {
+    fn eval(&self, expr: &Expression<F>, row_index: usize) -> Result<F, Error> {
+        GraphEvaluator::new(expr).evaluate(self, row_index)
     }
 }
 
-impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, Expression<F>> for E {
-    fn eval(&self, _expr: &Expression<F>, _row_index: usize) -> Result<F, Error> {
-        todo!("#159")
-    }
+pub fn eval_grouped<F: PrimeField>(
+    data: &(impl GetDataForEval<F> + Sync),
+    poly: &GroupedPoly<F>,
+) -> Result<Vec<Box<[F]>>, Error> {
+    let row_size = data.row_size();
+    poly.iter()
+        .map(|expr| match expr {
+            Some(expr) => {
+                let evaluator = GraphEvaluator::new(expr);
+
+                (0..row_size)
+                    .into_par_iter()
+                    .map(|row_index| evaluator.evaluate(data, row_index))
+                    .collect::<Result<Box<[_]>, _>>()
+            }
+            None => Ok(vec![F::ZERO; row_size].into_boxed_slice()),
+        })
+        .collect::<Result<Vec<Box<[F]>>, Error>>()
 }
 
 /// Used for evaluate compressed lookup expressions L_i(x1,...,xa) = l_i

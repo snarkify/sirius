@@ -4,13 +4,11 @@ use super::*;
 use crate::commitment::CommitmentKey;
 use crate::concat_vec;
 use crate::constants::NUM_CHALLENGE_BITS;
-use crate::plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain};
+use crate::plonk::eval::{self, PlonkEvalDomain};
 use crate::plonk::{
     PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
 };
 use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
-use crate::polynomial::grouped_poly::GroupedPoly;
-use crate::polynomial::ColumnIndex;
 use crate::poseidon::ROTrait;
 use crate::sps::SpecialSoundnessVerifier;
 use halo2_proofs::arithmetic::CurveAffine;
@@ -78,51 +76,28 @@ impl<C: CurveAffine> VanillaFS<C> {
         U2: &PlonkInstance<C>,
         W2: &PlonkWitness<C::ScalarExt>,
     ) -> Result<(CrossTerms<C>, CrossTermCommits<C>), Error> {
-        let offset = S.num_non_fold_vars();
-        let num_row = if !S.fixed_columns.is_empty() {
-            S.fixed_columns[0].len()
-        } else {
-            S.selectors[0].len()
-        };
-        let data = PlonkEvalDomain {
-            num_advice: S.num_advice_columns,
-            num_lookup: S.num_lookups(),
-            challenges: concat_vec!(&U1.challenges, &[U1.u], &U2.challenges, &[U2.to_relax().u]),
-            selectors: &S.selectors,
-            fixed: &S.fixed_columns,
-            W1s: &W1.W,
-            W2s: &W2.W,
-        };
+        let cross_terms = eval::eval_grouped(
+            &PlonkEvalDomain {
+                num_advice: S.num_advice_columns,
+                num_lookup: S.num_lookups(),
+                challenges: concat_vec!(
+                    &U1.challenges,
+                    &[U1.u],
+                    &U2.challenges,
+                    &[U2.to_relax().u]
+                ),
+                selectors: &S.selectors,
+                fixed: &S.fixed_columns,
+                W1s: &W1.W,
+                W2s: &W2.W,
+            },
+            &S.grouped_poly(),
+        )?;
 
-        let normalized = S.poly.fold_transform(offset, S.num_fold_vars());
-
-        let grouped_poly = GroupedPoly::new(
-            &S.custom_gates_lookup_compressed,
-            S.num_fold_vars(),
-            S.num_challenges,
-        );
-
-        let r_index = normalized.num_challenges() - 1;
-        let degree = S.poly.degree_for_folding(offset);
-        let cross_terms: Vec<Box<[C::ScalarExt]>> = (1..degree)
-            .map(|k| {
-                normalized.coeff_of(
-                    ColumnIndex::Challenge {
-                        column_index: r_index,
-                    },
-                    k,
-                )
-            })
-            .map(|multipoly| {
-                (0..num_row)
-                    .into_par_iter()
-                    .map(|row| data.eval(&multipoly, row))
-                    .collect::<Result<Box<[C::ScalarExt]>, EvalError>>()
-            })
-            .collect::<Result<Vec<Box<[C::ScalarExt]>>, EvalError>>()?;
-
-        let cross_term_commits: Vec<C> =
-            cross_terms.iter().map(|v| ck.commit(v).unwrap()).collect();
+        let cross_term_commits: Vec<C> = cross_terms
+            .iter()
+            .map(|v| ck.commit(v))
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok((cross_terms, cross_term_commits))
     }

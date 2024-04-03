@@ -370,7 +370,7 @@ mod test {
         });
 
         let grouped_poly =
-            GroupedPoly::new(Expression::Product(sum(&[a, b, c]), sum(&[d, e])), 5, 0);
+            GroupedPoly::new(&Expression::Product(sum(&[a, b, c]), sum(&[d, e])), 5, 0);
 
         let actual = grouped_poly
             .iter_with_degree()
