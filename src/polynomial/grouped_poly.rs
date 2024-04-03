@@ -66,7 +66,7 @@ impl<F: PrimeField> GroupedPoly<F> {
     ///     a2*d1 + a2*e1 + b2*d1 + b2*e1 + c2*d1 + c2*e1 + a1*d2 + a1*e2 + b1*d2 + b1*e2 + c1*d2 + c1*e2 * k^1 +
     ///     a2*d2 + a2*e2 + b2*d2 + b2*e2 + c2*d2 + c2*e2       * k^2
     /// ```
-    fn new(expr: Expression<F>, num_of_poly: usize, num_of_challenge: usize) -> Self {
+    pub fn new(expr: &Expression<F>, num_of_poly: usize, num_of_challenge: usize) -> Self {
         expr.evaluate(
             &|constant| GroupedPoly {
                 terms: vec![Some(Expression::Constant(constant))],

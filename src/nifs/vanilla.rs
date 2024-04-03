@@ -9,6 +9,7 @@ use crate::plonk::{
     PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
 };
 use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
+use crate::polynomial::grouped_poly::GroupedPoly;
 use crate::polynomial::ColumnIndex;
 use crate::poseidon::ROTrait;
 use crate::sps::SpecialSoundnessVerifier;
@@ -21,7 +22,7 @@ use halo2_proofs::arithmetic::CurveAffine;
 /// polynomial relations are folded, certain terms (referred
 /// to as cross terms) emerge that capture the interaction between
 /// the two original polynomials.
-pub type CrossTerms<C> = Vec<Vec<<C as CurveAffine>::ScalarExt>>;
+pub type CrossTerms<C> = Vec<Box<[<C as CurveAffine>::ScalarExt]>>;
 
 /// Cryptographic commitments to the [`CrossTerms`].
 pub type CrossTermCommits<C> = Vec<C>;
@@ -94,9 +95,16 @@ impl<C: CurveAffine> VanillaFS<C> {
         };
 
         let normalized = S.poly.fold_transform(offset, S.num_fold_vars());
+
+        let grouped_poly = GroupedPoly::new(
+            &S.custom_gates_lookup_compressed,
+            S.num_fold_vars(),
+            S.num_challenges,
+        );
+
         let r_index = normalized.num_challenges() - 1;
         let degree = S.poly.degree_for_folding(offset);
-        let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
+        let cross_terms: Vec<Box<[C::ScalarExt]>> = (1..degree)
             .map(|k| {
                 normalized.coeff_of(
                     ColumnIndex::Challenge {
@@ -109,11 +117,13 @@ impl<C: CurveAffine> VanillaFS<C> {
                 (0..num_row)
                     .into_par_iter()
                     .map(|row| data.eval(&multipoly, row))
-                    .collect::<Result<Vec<C::ScalarExt>, EvalError>>()
+                    .collect::<Result<Box<[C::ScalarExt]>, EvalError>>()
             })
-            .collect::<Result<Vec<Vec<C::ScalarExt>>, EvalError>>()?;
+            .collect::<Result<Vec<Box<[C::ScalarExt]>>, EvalError>>()?;
+
         let cross_term_commits: Vec<C> =
             cross_terms.iter().map(|v| ck.commit(v).unwrap()).collect();
+
         Ok((cross_terms, cross_term_commits))
     }
 
