@@ -70,7 +70,9 @@ pub trait FoldingScheme<C: CurveAffine> {
         incoming: &PlonkInstance<C>,
         proof: &Self::Proof,
     ) -> Result<Self::AccumulatorInstance, Error>;
+}
 
+pub trait MultifoldingScheme<C: CurveAffine>: FoldingScheme<C> {
     /// Perform the multi-folding operation as a prover.
     fn prove_mult(
         ck: &CommitmentKey<C>,

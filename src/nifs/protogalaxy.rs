@@ -75,7 +75,9 @@ impl<C: CurveAffine> FoldingScheme<C> for ProtoGalaxy<C> {
     ) -> Result<Self::AccumulatorInstance, Error> {
         Self::verify_mult(vp, ro_nark, ro_acc, accumulator, &[incoming.clone()], proof)
     }
+}
 
+impl<C: CurveAffine> MultifoldingScheme<C> for ProtoGalaxy<C> {
     /// Generates multi-folding proof using the protogalaxy protocol.
     ///
     /// This method takes one accumulator instance-witness pair and multiple incoming instance-witness pair

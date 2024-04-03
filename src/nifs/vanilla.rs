@@ -228,25 +228,4 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
 
         Ok(U1.fold(U2, cross_term_commits, &r))
     }
-
-    fn prove_mult(
-        _: &CommitmentKey<C>,
-        _: &Self::ProverParam,
-        _: &mut impl ROTrait<C::Base>,
-        _: &Self::Accumulator,
-        _: &[PlonkTrace<C>],
-    ) -> Result<(Self::Accumulator, Self::Proof), Error> {
-        unimplemented!("multi-folding not supported for Vanilla Prover")
-    }
-
-    fn verify_mult(
-        _: &Self::VerifierParam,
-        _: &mut impl ROTrait<C::Base>,
-        _: &mut impl ROTrait<C::Base>,
-        _: &Self::AccumulatorInstance,
-        _: &[PlonkInstance<C>],
-        _: &Self::Proof,
-    ) -> Result<Self::AccumulatorInstance, Error> {
-        unimplemented!("multi-folding not supported for Vanilla Verifier")
-    }
 }
