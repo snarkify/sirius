@@ -2,7 +2,7 @@ use crate::polynomial::{grouped_poly::GroupedPoly, ColumnIndex, Expression, Mult
 use ff::PrimeField;
 use std::collections::HashMap;
 
-#[derive(Debug, thiserror::Error, PartialEq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
     #[error("challenge index out of boundary: {challenge_index}")]
     ChallengeIndexOutOfBoundary { challenge_index: usize },
