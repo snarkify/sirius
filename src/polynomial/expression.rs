@@ -63,6 +63,12 @@ pub enum Expression<F> {
     Scaled(Box<Expression<F>>, F),
 }
 
+impl<F: Default> Default for Expression<F> {
+    fn default() -> Self {
+        Expression::Constant(F::default())
+    }
+}
+
 impl<F: PrimeField> Display for Expression<F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.visualize())
