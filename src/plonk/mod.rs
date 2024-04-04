@@ -30,7 +30,7 @@ use crate::{
     commitment::CommitmentKey,
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
-    plonk::eval::{Error as EvalError, Eval, GetDataForEval, PlonkEvalDomain},
+    plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain},
     polynomial::{
         grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
@@ -134,10 +134,9 @@ impl<F: PrimeField> PlonkWitness<F> {
     }
 
     pub fn to_relax(&self, k: usize) -> RelaxedPlonkWitness<F> {
-        let E = vec![F::ZERO; 1 << k];
         RelaxedPlonkWitness {
             W: self.W.clone(),
-            E,
+            E: vec![F::ZERO; 1 << k],
         }
     }
 }
