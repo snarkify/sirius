@@ -217,6 +217,7 @@ pub struct LookupEvalDomain<'a, F: PrimeField> {
 }
 
 /// Used for evaluate cross terms T[i]
+#[derive(Debug)]
 pub struct PlonkEvalDomain<'a, F: PrimeField> {
     pub(crate) num_advice: usize,
     pub(crate) num_lookup: usize,

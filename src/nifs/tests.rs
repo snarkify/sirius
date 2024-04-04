@@ -7,6 +7,7 @@ use halo2_proofs::{
 use halo2curves::bn256::{Fr, G1Affine};
 use halo2curves::group::ff::FromUniformBytes;
 use std::marker::PhantomData;
+use tracing::*;
 
 use crate::nifs::{vanilla::VanillaFS, Error as NIFSError};
 use crate::plonk::{
@@ -449,7 +450,7 @@ mod one_round_test {
 
     #[traced_test]
     #[test]
-    fn test_nifs() -> Result<(), NIFSError> {
+    fn one_round_test() -> Result<(), NIFSError> {
         const K: u32 = 4;
         const SIZE: usize = 16;
         // circuit 1

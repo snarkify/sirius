@@ -30,7 +30,7 @@ use crate::{
     commitment::CommitmentKey,
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
-    plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain},
+    plonk::eval::{Error as EvalError, Eval, GetDataForEval, PlonkEvalDomain},
     polynomial::{
         grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
@@ -60,9 +60,9 @@ pub enum Error {
     LogDerivativeNotSat,
     #[error("Permutation check fail: mismatch_count {mismatch_count}")]
     PermCheckFail { mismatch_count: usize },
-    #[error("(Relaxed) plonk relation not satisfied: mismatch_count {mismatch_count}, total_row {total_row}")]
+    #[error("(Relaxed) plonk relation not satisfied: mismatch in lines {mismatches:?}, total_row {total_row}")]
     EvaluationMismatch {
-        mismatch_count: NonZeroUsize,
+        mismatches: Vec<usize>,
         total_row: usize,
     },
 }
@@ -269,8 +269,10 @@ impl<F: PrimeField> PlonkStructure<F> {
                 |mismatch_count, is_missed| Ok(mismatch_count + is_missed),
             )
             .map(|mismatch_count| {
+                let mismatches = NonZeroUsize::new(mismatch_count)?;
+
                 Some(Error::EvaluationMismatch {
-                    mismatch_count: NonZeroUsize::new(mismatch_count)?,
+                    mismatches: vec![0; mismatches.get()],
                     total_row: num_of_row,
                 })
             })?
@@ -303,7 +305,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     {
         let total_row = 1 << self.k;
 
-        let data = PlonkEvalDomain {
+        let plonk_eval_domain = PlonkEvalDomain {
             num_advice: self.num_advice_columns,
             num_lookup: self.num_lookups(),
             challenges: concat_vec!(&U.challenges, &[U.u]),
@@ -312,22 +314,41 @@ impl<F: PrimeField> PlonkStructure<F> {
             W1s: &W.W,
             W2s: &vec![],
         };
+        debug!("data: {plonk_eval_domain:?}");
+        let expr = self.grouped_poly().fold(self.num_non_fold_vars());
 
         (0..total_row)
             .into_par_iter()
             .map(|row| {
-                data.eval(&self.custom_gates_lookup_compressed, row)
-                    .map(|eval_of_row| if eval_of_row.eq(&W.E[row]) { 0 } else { 1 })
+                plonk_eval_domain.eval(&expr, row).map(|eval_of_row| {
+                    let expected_err = W.E[row];
+
+                    if eval_of_row.eq(&expected_err) {
+                        vec![]
+                    } else {
+                        warn!("not equal: {eval_of_row:?} != {expected_err:?}");
+                        vec![row]
+                    }
+                })
             })
             .try_reduce(
-                || 0,
-                |mismatch_count, is_missed| Ok(mismatch_count + is_missed),
+                || Vec::new(),
+                |mut mismatches, missed_row| {
+                    if let Some(row) = missed_row.first() {
+                        mismatches.push(*row);
+                    }
+                    Ok(mismatches)
+                },
             )
-            .map(|mismatch_count| {
-                Some(Error::EvaluationMismatch {
-                    mismatch_count: NonZeroUsize::new(mismatch_count)?,
-                    total_row,
-                })
+            .map(|mismatches| {
+                if mismatches.is_empty() {
+                    None
+                } else {
+                    Some(Error::EvaluationMismatch {
+                        mismatches,
+                        total_row,
+                    })
+                }
             })?
             .err_or(())?;
 
