@@ -190,6 +190,7 @@ impl<F: PrimeField> GraphEvaluator<F> {
     pub fn new(expr: &Expression<F>) -> Self {
         let mut self_ = GraphEvaluator::default();
 
+        debug!("from {expr:?}");
         let value_source = self_.add_expression(expr);
         self_.add_calculation(Calculation::Store(value_source));
 

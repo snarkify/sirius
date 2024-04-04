@@ -17,6 +17,7 @@ use crate::util::create_ro;
 
 use super::*;
 
+#[instrument(name = "prepare trace", skip_all)]
 fn prepare_trace<C, F1, F2, CT>(
     K: u32,
     circuit1: CT,
@@ -101,6 +102,7 @@ where
 /// copy constrains relation
 /// (3) the second folded witness-instance pair satisfies the relaxed polynomial relation  and
 /// copy constrains relation
+#[instrument(name = "fold_instances", skip_all)]
 fn fold_instances<C, F1, F2>(
     ck: &CommitmentKey<C>,
     S: &PlonkStructure<F1>,
@@ -186,6 +188,7 @@ where
     f_W = W_from_prove;
     assert_eq!(S.is_sat_perm(&f_U, &f_W), Ok(()));
     assert_eq!(S.is_sat_relaxed(ck, &f_U, &f_W), Ok(()));
+
     Ok(())
 }
 
@@ -475,6 +478,7 @@ mod one_round_test {
             public_inputs2,
             G1Affine::default(),
         )?;
+
         fold_instances(&ck, &S, &pair1, &pair2, G1Affine::default())
     }
 }

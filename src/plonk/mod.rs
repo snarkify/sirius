@@ -291,6 +291,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         Ok(())
     }
 
+    #[instrument(name = "is_sat_relaxed", skip_all)]
     pub fn is_sat_relaxed<C>(
         &self,
         ck: &CommitmentKey<C>,
