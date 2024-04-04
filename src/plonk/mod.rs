@@ -308,14 +308,20 @@ impl<F: PrimeField> PlonkStructure<F> {
         let plonk_eval_domain = PlonkEvalDomain {
             num_advice: self.num_advice_columns,
             num_lookup: self.num_lookups(),
-            challenges: concat_vec!(&U.challenges, &[U.u]),
+            challenges: {
+                let mut ch = U.challenges.clone();
+                ch.push(U.u);
+                debug!("challenges: {}, {ch:?}", ch.len());
+                ch
+            },
             selectors: &self.selectors,
             fixed: &self.fixed_columns,
             W1s: &W.W,
             W2s: &vec![],
         };
         debug!("data: {plonk_eval_domain:?}");
-        let expr = self.grouped_poly().fold(self.num_non_fold_vars());
+        let expr = self.grouped_poly().fold(self.num_challenges);
+        debug!("expr: {expr:?}");
 
         (0..total_row)
             .into_par_iter()

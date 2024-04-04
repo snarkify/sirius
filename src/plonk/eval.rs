@@ -5,6 +5,7 @@ use crate::polynomial::{
 use ff::PrimeField;
 use rayon::prelude::*;
 use std::collections::HashMap;
+use tracing::*;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
@@ -290,8 +291,10 @@ impl<'a, F: PrimeField> GetDataForEval<F> for PlonkEvalDomain<'a, F> {
             (false, index - max_width)
         };
         let num_witness = if is_first_instance {
+            debug!("first instance");
             self.W1s.len()
         } else {
+            debug!("second instance");
             self.W2s.len()
         };
 
