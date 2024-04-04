@@ -11,6 +11,7 @@ pub(crate) struct ConstraintSystemMetainfo<F: PrimeField> {
     pub round_sizes: Vec<usize>,
     pub folding_degree: usize,
     pub poly: MultiPolynomial<F>,
+    pub custom_gates_lookup_compressed: Expression<F>,
 }
 
 impl<F: PrimeField> ConstraintSystemMetainfo<F> {
@@ -91,7 +92,9 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
             0
         };
 
-        let poly = plonk::util::compress_expression(&exprs, challenge_index).expand();
+        let custom_gates_lookup_compressed =
+            plonk::util::compress_expression(&exprs, challenge_index);
+        let poly = custom_gates_lookup_compressed.expand();
 
         let folding_degree = poly.degree_for_folding(cs.num_fixed_columns() + cs.num_selectors());
 
@@ -100,6 +103,7 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
             round_sizes,
             folding_degree,
             poly,
+            custom_gates_lookup_compressed,
         }
     }
 }
