@@ -103,21 +103,13 @@ impl<F: PrimeField> GroupedPoly<F> {
 
     pub fn fold(&self, num_of_challenge: usize) -> Expression<F> {
         let r = Expression::Challenge(num_of_challenge);
+
         self.iter()
             .zip(iter::successors(Some(r.clone()), |el| {
-                Some(Expression::Product(
-                    Box::new(el.clone()),
-                    Box::new(r.clone()),
-                ))
+                Some(el.clone() * r.clone())
             }))
             .fold(Expression::default(), |acc, (expr, challenge)| match expr {
-                Some(expr) => Expression::Sum(
-                    Box::new(acc),
-                    Box::new(Expression::Product(
-                        Box::new(expr.clone()),
-                        Box::new(challenge),
-                    )),
-                ),
+                Some(expr) => acc + (expr.clone() * challenge),
                 None => acc,
             })
     }
