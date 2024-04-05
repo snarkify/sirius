@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeSet, HashSet},
     fmt,
     fmt::{Debug, Display},
-    ops::{Add, Mul, Neg, Sub},
+    ops::{self, Add, Mul, Neg, Sub},
 };
 
 use ff::PrimeField;
@@ -43,6 +43,12 @@ pub struct Query {
     pub index: usize,
     #[serde(serialize_with = "serialize_rotation")]
     pub rotation: Rotation,
+}
+
+impl Query {
+    pub fn is_advice(&self) -> bool {
+        todo!()
+    }
 }
 
 fn serialize_rotation<S: serde::ser::Serializer>(
@@ -171,8 +177,12 @@ impl<F: PrimeField> Expression<F> {
         }
     }
 
-    /// index_to_poly is mapping from i to (rotation, column_index, type), see [`Monomial`]
-    fn _expand(&self, index_to_poly: &[ColumnIndex]) -> MultiPolynomial<F> {
+    pub fn expand(&self) -> MultiPolynomial<F> {
+        let mut set = BTreeSet::new();
+        self.poly_set(&mut set);
+        let index_to_poly = set.into_iter().collect::<Box<[_]>>();
+
+        // index_to_poly is mapping from i to (rotation, column_index, type), see [`Monomial`]
         self.evaluate(
             &|c| {
                 let arity = index_to_poly.len();
@@ -222,13 +232,6 @@ impl<F: PrimeField> Expression<F> {
             &|a, b| a * b,
             &|a, k| a * k,
         )
-    }
-
-    pub fn expand(&self) -> MultiPolynomial<F> {
-        let mut set = BTreeSet::new();
-        self.poly_set(&mut set);
-        let index_to_poly = set.into_iter().collect::<Box<[_]>>();
-        self._expand(&index_to_poly)
     }
 
     // fold_transform will fold a polynomial expression P(f_1,...f_m, x_1,...,x_n)
@@ -317,6 +320,99 @@ impl<F: PrimeField> Expression<F> {
             }
             _ => unimplemented!("not supported"),
         }
+    }
+
+    pub fn homogeneous(&self, new_challenge_index: usize) -> HomogeneousExpression<F> {
+        use Expression::*;
+
+        fn multiply_by_u<F: PrimeField>(
+            expr: Expression<F>,
+            new_challenge_index: usize,
+            degree: usize,
+        ) -> Expression<F> {
+            if degree != 0 {
+                multiply_by_u(
+                    Expression::Challenge(new_challenge_index) * expr,
+                    new_challenge_index,
+                    degree - 1,
+                )
+            } else {
+                expr
+            }
+        }
+
+        match self {
+            Constant(constant) => (Constant(*constant), 0).into(),
+            Polynomial(polynomial) => (
+                Polynomial(*polynomial),
+                if polynomial.is_advice() { 1 } else { 0 },
+            )
+                .into(),
+            Challenge(challenge) => (Challenge(*challenge), 1).into(),
+            Sum(lhs, rhs) => {
+                let HomogeneousExpression {
+                    expr: lhs,
+                    degree: lhs_degree,
+                } = lhs.homogeneous(new_challenge_index);
+                let HomogeneousExpression {
+                    expr: rhs,
+                    degree: rhs_degree,
+                } = rhs.homogeneous(new_challenge_index);
+
+                match lhs_degree.cmp(&rhs_degree) {
+                    Ordering::Greater => (
+                        lhs + multiply_by_u(rhs, new_challenge_index, lhs_degree - rhs_degree),
+                        lhs_degree,
+                    ),
+                    Ordering::Less => (
+                        multiply_by_u(lhs, new_challenge_index, rhs_degree - lhs_degree) + rhs,
+                        rhs_degree,
+                    ),
+                    Ordering::Equal => (lhs + rhs, lhs_degree),
+                }
+                .into()
+            }
+            Product(lhs, rhs) => {
+                let HomogeneousExpression {
+                    expr: lhs,
+                    degree: lhs_degree,
+                } = lhs.homogeneous(new_challenge_index);
+                let HomogeneousExpression {
+                    expr: rhs,
+                    degree: rhs_degree,
+                } = rhs.homogeneous(new_challenge_index);
+
+                (lhs * rhs, lhs_degree + rhs_degree).into()
+            }
+            Negated(expr) => {
+                let HomogeneousExpression { expr, degree } = expr.homogeneous(new_challenge_index);
+                (-expr, degree).into()
+            }
+            Scaled(expr, constant) => {
+                let HomogeneousExpression { expr, degree } = expr.homogeneous(new_challenge_index);
+                (Scaled(Box::new(expr), *constant), degree).into()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Default)]
+pub struct HomogeneousExpression<F: PrimeField> {
+    expr: Expression<F>,
+    degree: usize,
+}
+
+impl<F: PrimeField> ops::Deref for HomogeneousExpression<F> {
+    type Target = Expression<F>;
+    fn deref(&self) -> &Self::Target {
+        &self.expr
+    }
+}
+
+impl<F: PrimeField> From<(Expression<F>, usize)> for HomogeneousExpression<F> {
+    fn from(value: (Expression<F>, usize)) -> Self {
+        let (expr, degree) = value;
+        Self { expr, degree }
     }
 }
 

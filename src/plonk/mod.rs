@@ -14,7 +14,7 @@
 //!
 //! Additionally, it defines a method is_sat on PlonkStructure to determine if
 //! a given Plonk instance and witness satisfy the circuit constraints.
-use std::{iter, num::NonZeroUsize};
+use std::{iter, num::NonZeroUsize, ops::Deref};
 
 use count_to_non_zero::*;
 use itertools::Itertools;
@@ -32,9 +32,9 @@ use crate::{
     constants::NUM_CHALLENGE_BITS,
     plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain},
     polynomial::{
+        expression::{Expression, HomogeneousExpression},
         grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
-        Expression,
     },
     poseidon::{AbsorbInRO, ROTrait},
     sps::{Error as SpsError, SpecialSoundnessVerifier},
@@ -68,6 +68,27 @@ pub enum Error {
 }
 
 #[derive(Clone, PartialEq, Serialize, Default)]
+pub(crate) struct CustomGatesLookupView<F: PrimeField> {
+    pub(crate) compressed: Expression<F>,
+    pub(crate) homogeneous: HomogeneousExpression<F>,
+    pub(crate) grouped: GroupedPoly<F>,
+}
+
+impl<F: PrimeField> CustomGatesLookupView<F> {
+    pub fn new(original: Expression<F>, num_of_poly: usize, num_of_challenge: usize) -> Self {
+        let homogeneous = original.homogeneous(num_of_challenge);
+        Self {
+            grouped: GroupedPoly::new(&homogeneous, num_of_poly, num_of_challenge + 1),
+            compressed: original,
+            homogeneous,
+        }
+    }
+    pub fn degree(&self) -> usize {
+        self.grouped.len()
+    }
+}
+
+#[derive(Clone, PartialEq, Serialize, Default)]
 #[serde(bound(serialize = "
     F: Serialize
 "))]
@@ -88,7 +109,7 @@ pub struct PlonkStructure<F: PrimeField> {
     /// specify the witness size of each prover round
     pub(crate) round_sizes: Vec<usize>,
 
-    pub(crate) custom_gates_lookup_compressed: Expression<F>,
+    pub(crate) custom_gates_lookup_compressed: CustomGatesLookupView<F>,
 
     pub(crate) permutation_matrix: SparseMatrix<F>,
     pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
@@ -200,12 +221,8 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPl
 }
 
 impl<F: PrimeField> PlonkStructure<F> {
-    pub fn grouped_poly(&self) -> GroupedPoly<F> {
-        GroupedPoly::new(
-            &self.custom_gates_lookup_compressed,
-            self.num_fold_vars(),
-            self.num_challenges,
-        )
+    pub fn grouped_poly(&self) -> &GroupedPoly<F> {
+        &self.custom_gates_lookup_compressed.grouped
     }
     /// return the index offset of fixed variables(i.e. not folded)
     pub fn num_non_fold_vars(&self) -> usize {
@@ -260,7 +277,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         (0..num_of_row)
             .into_par_iter()
             .map(|row| {
-                data.eval(&self.custom_gates_lookup_compressed, row)
+                data.eval(&self.custom_gates_lookup_compressed.compressed, row)
                     .map(|row_result| if row_result.eq(&F::ZERO) { 0 } else { 1 })
             })
             .try_reduce(
@@ -319,13 +336,13 @@ impl<F: PrimeField> PlonkStructure<F> {
             W2s: &vec![],
         };
         debug!("data: {plonk_eval_domain:?}");
-        let expr = self.grouped_poly().fold(self.num_challenges);
+        let expr = self.custom_gates_lookup_compressed.homogeneous.deref();
         debug!("expr: {expr:?}");
 
         (0..total_row)
             .into_par_iter()
             .map(|row| {
-                plonk_eval_domain.eval(&expr, row).map(|eval_of_row| {
+                plonk_eval_domain.eval(expr, row).map(|eval_of_row| {
                     let expected_err = W.E[row];
 
                     if eval_of_row.eq(&expected_err) {
@@ -337,7 +354,7 @@ impl<F: PrimeField> PlonkStructure<F> {
                 })
             })
             .try_reduce(
-                || Vec::new(),
+                Vec::new,
                 |mut mismatches, missed_row| {
                     if let Some(row) = missed_row.first() {
                         mismatches.push(*row);
@@ -439,7 +456,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     }
 
     pub fn get_degree_for_folding(&self) -> usize {
-        self.grouped_poly().len()
+        self.custom_gates_lookup_compressed.degree()
     }
 
     pub fn dry_run_sps_protocol<C: CurveAffine<ScalarExt = F>>(&self) -> PlonkTrace<C> {

@@ -91,7 +91,7 @@ impl<C: CurveAffine> VanillaFS<C> {
                 W1s: &W1.W,
                 W2s: &W2.W,
             },
-            &S.grouped_poly(),
+            S.grouped_poly(),
         )?;
 
         let cross_term_commits: Vec<C> = cross_terms

@@ -5,6 +5,7 @@ use std::{
 
 use ff::PrimeField;
 use itertools::*;
+use serde::Serialize;
 use tracing::*;
 
 use crate::polynomial::Query;
@@ -17,6 +18,7 @@ use super::Expression;
 /// coefficients are represented as [`GroupedPoly::term`] values
 ///
 /// `x^0 * a + x^1 * b + x^3 * c -> { 0 => a, 1 => b, 3 => c }`
+#[derive(Clone, PartialEq, Serialize)]
 pub struct GroupedPoly<F> {
     // TODO #159 depend on `evaluate` algo, can be changed to `BTreeMap`
     terms: Vec<Option<Expression<F>>>,

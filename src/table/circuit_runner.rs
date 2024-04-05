@@ -2,7 +2,7 @@ use ff::PrimeField;
 use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error, FloorPlanner};
 
 use crate::{
-    plonk::{self, PlonkStructure},
+    plonk::{self, CustomGatesLookupView, PlonkStructure},
     util::batch_invert_assigned,
 };
 
@@ -40,15 +40,20 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
             ..
         } = ConstraintSystemMetainfo::build(self.k as usize, &self.cs);
 
+        let num_advice_columns = self.cs.num_advice_columns();
         let mut S = PlonkStructure {
             k: self.k as usize,
             num_io: self.instance.len(),
             selectors: vec![],
             fixed_columns: vec![],
-            num_advice_columns: self.cs.num_advice_columns(),
             num_challenges,
             round_sizes,
-            custom_gates_lookup_compressed,
+            custom_gates_lookup_compressed: CustomGatesLookupView::new(
+                custom_gates_lookup_compressed,
+                num_advice_columns,
+                num_challenges,
+            ),
+            num_advice_columns,
             permutation_matrix: vec![],
             lookup_arguments: plonk::lookup::Arguments::compress_from(&self.cs),
         };
