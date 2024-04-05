@@ -75,8 +75,14 @@ pub(crate) struct CustomGatesLookupView<F: PrimeField> {
 }
 
 impl<F: PrimeField> CustomGatesLookupView<F> {
-    pub fn new(original: Expression<F>, num_of_poly: usize, num_of_challenge: usize) -> Self {
-        let homogeneous = original.homogeneous(num_of_challenge);
+    pub fn new(
+        original: Expression<F>,
+        num_selectors: usize,
+        num_fixed: usize,
+        num_of_poly: usize,
+        num_of_challenge: usize,
+    ) -> Self {
+        let homogeneous = original.homogeneous(num_of_challenge, num_selectors, num_fixed);
         Self {
             grouped: GroupedPoly::new(&homogeneous, num_of_poly, num_of_challenge + 1),
             compressed: original,
@@ -337,7 +343,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         };
         debug!("data: {plonk_eval_domain:?}");
         let expr = self.custom_gates_lookup_compressed.homogeneous.deref();
-        debug!("expr: {expr:?}");
+        debug!("expr: {expr}");
 
         (0..total_row)
             .into_par_iter()
@@ -353,15 +359,12 @@ impl<F: PrimeField> PlonkStructure<F> {
                     }
                 })
             })
-            .try_reduce(
-                Vec::new,
-                |mut mismatches, missed_row| {
-                    if let Some(row) = missed_row.first() {
-                        mismatches.push(*row);
-                    }
-                    Ok(mismatches)
-                },
-            )
+            .try_reduce(Vec::new, |mut mismatches, missed_row| {
+                if let Some(row) = missed_row.first() {
+                    mismatches.push(*row);
+                }
+                Ok(mismatches)
+            })
             .map(|mismatches| {
                 if mismatches.is_empty() {
                     None

@@ -50,6 +50,8 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
             round_sizes,
             custom_gates_lookup_compressed: CustomGatesLookupView::new(
                 custom_gates_lookup_compressed,
+                0,
+                0,
                 num_advice_columns,
                 num_challenges,
             ),
