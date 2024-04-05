@@ -335,14 +335,13 @@ impl<F: PrimeField> Expression<F> {
             new_challenge_index: usize,
             degree: usize,
         ) -> Expression<F> {
-            if degree != 0 {
-                multiply_by_u(
+            match degree.checked_sub(1) {
+                Some(degree_sub_1) => multiply_by_u(
                     Expression::Challenge(new_challenge_index) * expr,
                     new_challenge_index,
-                    degree - 1,
-                )
-            } else {
-                expr
+                    degree_sub_1,
+                ),
+                None => expr,
             }
         }
 
