@@ -348,13 +348,13 @@ impl<F: PrimeField> Expression<F> {
     ) -> HomogeneousExpression<F> {
         use Expression::*;
 
-        fn multiply_by_u<F: PrimeField>(
+        fn multiply_by_challenge<F: PrimeField>(
             expr: Expression<F>,
             new_challenge_index: usize,
             degree: usize,
         ) -> Expression<F> {
             match degree.checked_sub(1) {
-                Some(degree_sub_1) => multiply_by_u(
+                Some(degree_sub_1) => multiply_by_challenge(
                     Expression::Challenge(new_challenge_index) * expr,
                     new_challenge_index,
                     degree_sub_1,
@@ -363,19 +363,26 @@ impl<F: PrimeField> Expression<F> {
             }
         }
 
-        match self {
-            Constant(constant) => (Constant(*constant), 0).into(),
-            Polynomial(polynomial) => (
-                Polynomial(*polynomial),
-                if polynomial.is_advice(num_selector, num_fixed) {
-                    1
-                } else {
-                    0
-                },
-            )
-                .into(),
-            Challenge(challenge) => (Challenge(*challenge), 1).into(),
-            Sum(lhs, rhs) => {
+        self.evaluate(
+            &|constant| -> HomogeneousExpression<F> { (Constant(constant), 0).into() },
+            &|polynomial: Query| {
+                (
+                    Polynomial(polynomial),
+                    if polynomial.is_advice(num_selector, num_fixed) {
+                        1
+                    } else {
+                        0
+                    },
+                )
+                    .into()
+            },
+            &|challenge| (Challenge(challenge), 1).into(),
+            &|expr| {
+                let HomogeneousExpression { expr, degree } =
+                    expr.homogeneous(new_challenge_index, num_selector, num_fixed);
+                (-expr, degree).into()
+            },
+            &|lhs, rhs| {
                 let HomogeneousExpression {
                     expr: lhs,
                     degree: lhs_degree,
@@ -387,18 +394,23 @@ impl<F: PrimeField> Expression<F> {
 
                 match lhs_degree.cmp(&rhs_degree) {
                     Ordering::Greater => (
-                        lhs + multiply_by_u(rhs, new_challenge_index, lhs_degree - rhs_degree),
+                        lhs + multiply_by_challenge(
+                            rhs,
+                            new_challenge_index,
+                            lhs_degree - rhs_degree,
+                        ),
                         lhs_degree,
                     ),
                     Ordering::Less => (
-                        multiply_by_u(lhs, new_challenge_index, rhs_degree - lhs_degree) + rhs,
+                        multiply_by_challenge(lhs, new_challenge_index, rhs_degree - lhs_degree)
+                            + rhs,
                         rhs_degree,
                     ),
                     Ordering::Equal => (lhs + rhs, lhs_degree),
                 }
                 .into()
-            }
-            Product(lhs, rhs) => {
+            },
+            &|lhs, rhs| {
                 let HomogeneousExpression {
                     expr: lhs,
                     degree: lhs_degree,
@@ -409,18 +421,14 @@ impl<F: PrimeField> Expression<F> {
                 } = rhs.homogeneous(new_challenge_index, num_selector, num_fixed);
 
                 (lhs * rhs, lhs_degree + rhs_degree).into()
-            }
-            Negated(expr) => {
+            },
+            &|expr, constant| {
                 let HomogeneousExpression { expr, degree } =
                     expr.homogeneous(new_challenge_index, num_selector, num_fixed);
-                (-expr, degree).into()
-            }
-            Scaled(expr, constant) => {
-                let HomogeneousExpression { expr, degree } =
-                    expr.homogeneous(new_challenge_index, num_selector, num_fixed);
-                (Scaled(Box::new(expr), *constant), degree).into()
-            }
-        }
+
+                (Scaled(Box::new(expr), constant), degree).into()
+            },
+        )
     }
 }
 
