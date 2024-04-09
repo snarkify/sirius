@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeSet, HashSet},
     fmt,
     fmt::{Debug, Display},
-    ops::{Add, Mul, Neg, Sub},
+    ops::{self, Add, Mul, Neg, Sub},
 };
 
 use ff::PrimeField;
@@ -43,6 +43,12 @@ pub struct Query {
     pub index: usize,
     #[serde(serialize_with = "serialize_rotation")]
     pub rotation: Rotation,
+}
+
+impl Query {
+    pub fn is_advice(&self, num_selectors: usize, num_fixed: usize) -> bool {
+        self.index >= num_selectors + num_fixed
+    }
 }
 
 fn serialize_rotation<S: serde::ser::Serializer>(
@@ -171,8 +177,12 @@ impl<F: PrimeField> Expression<F> {
         }
     }
 
-    /// index_to_poly is mapping from i to (rotation, column_index, type), see [`Monomial`]
-    fn _expand(&self, index_to_poly: &[ColumnIndex]) -> MultiPolynomial<F> {
+    pub fn expand(&self) -> MultiPolynomial<F> {
+        let mut set = BTreeSet::new();
+        self.poly_set(&mut set);
+        let index_to_poly = set.into_iter().collect::<Box<[_]>>();
+
+        // index_to_poly is mapping from i to (rotation, column_index, type), see [`Monomial`]
         self.evaluate(
             &|c| {
                 let arity = index_to_poly.len();
@@ -222,13 +232,6 @@ impl<F: PrimeField> Expression<F> {
             &|a, b| a * b,
             &|a, k| a * k,
         )
-    }
-
-    pub fn expand(&self) -> MultiPolynomial<F> {
-        let mut set = BTreeSet::new();
-        self.poly_set(&mut set);
-        let index_to_poly = set.into_iter().collect::<Box<[_]>>();
-        self._expand(&index_to_poly)
     }
 
     // fold_transform will fold a polynomial expression P(f_1,...f_m, x_1,...,x_n)
@@ -318,6 +321,135 @@ impl<F: PrimeField> Expression<F> {
             _ => unimplemented!("not supported"),
         }
     }
+
+    /// Transforms the current expression into a homogeneous expression with a potentially
+    /// increased degree, based on the challenge.
+    ///
+    /// This function operates recursively and selectively increases the degree of the expression
+    /// parts to make the overall expression homogeneous, i.e., of uniform degree.
+    ///
+    /// # Arguments
+    ///
+    /// * `new_challenge_index` - The index of the new challenge variable to be introduced for
+    ///    degree adjustments.
+    /// * `num_selector` & `num_fixed` Used to keep track of which columns are Fixed & Selector and
+    ///    which are polynomials, which is important in terms of adding degree. Degree should only be
+    ///    added for Advice columns. Advice column indexed start only after selectors & fixed indexed
+    ///
+    /// # Example
+    /// ```math
+    /// $$a\cdot b+c\rightarrow a\cdot b+c\cdot u$$
+    ///```
+    pub fn homogeneous(
+        &self,
+        new_challenge_index: usize,
+        num_selector: usize,
+        num_fixed: usize,
+    ) -> HomogeneousExpression<F> {
+        use Expression::*;
+
+        fn multiply_by_challenge<F: PrimeField>(
+            expr: Expression<F>,
+            new_challenge_index: usize,
+            degree: usize,
+        ) -> Expression<F> {
+            match degree.checked_sub(1) {
+                Some(degree_sub_1) => multiply_by_challenge(
+                    Expression::Challenge(new_challenge_index) * expr,
+                    new_challenge_index,
+                    degree_sub_1,
+                ),
+                None => expr,
+            }
+        }
+
+        self.evaluate(
+            &|constant| -> HomogeneousExpression<F> { (Constant(constant), 0).into() },
+            &|polynomial: Query| {
+                (
+                    Polynomial(polynomial),
+                    if polynomial.is_advice(num_selector, num_fixed) {
+                        1
+                    } else {
+                        0
+                    },
+                )
+                    .into()
+            },
+            &|challenge| (Challenge(challenge), 1).into(),
+            &|expr| {
+                let HomogeneousExpression { expr, degree } =
+                    expr.homogeneous(new_challenge_index, num_selector, num_fixed);
+                (-expr, degree).into()
+            },
+            &|lhs, rhs| {
+                let HomogeneousExpression {
+                    expr: lhs,
+                    degree: lhs_degree,
+                } = lhs.homogeneous(new_challenge_index, num_selector, num_fixed);
+                let HomogeneousExpression {
+                    expr: rhs,
+                    degree: rhs_degree,
+                } = rhs.homogeneous(new_challenge_index, num_selector, num_fixed);
+
+                match lhs_degree.cmp(&rhs_degree) {
+                    Ordering::Greater => (
+                        lhs + multiply_by_challenge(
+                            rhs,
+                            new_challenge_index,
+                            lhs_degree - rhs_degree,
+                        ),
+                        lhs_degree,
+                    ),
+                    Ordering::Less => (
+                        multiply_by_challenge(lhs, new_challenge_index, rhs_degree - lhs_degree)
+                            + rhs,
+                        rhs_degree,
+                    ),
+                    Ordering::Equal => (lhs + rhs, lhs_degree),
+                }
+                .into()
+            },
+            &|lhs, rhs| {
+                let HomogeneousExpression {
+                    expr: lhs,
+                    degree: lhs_degree,
+                } = lhs.homogeneous(new_challenge_index, num_selector, num_fixed);
+                let HomogeneousExpression {
+                    expr: rhs,
+                    degree: rhs_degree,
+                } = rhs.homogeneous(new_challenge_index, num_selector, num_fixed);
+
+                (lhs * rhs, lhs_degree + rhs_degree).into()
+            },
+            &|expr, constant| {
+                let HomogeneousExpression { expr, degree } =
+                    expr.homogeneous(new_challenge_index, num_selector, num_fixed);
+
+                (Scaled(Box::new(expr), constant), degree).into()
+            },
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Default)]
+pub struct HomogeneousExpression<F: PrimeField> {
+    pub expr: Expression<F>,
+    degree: usize,
+}
+
+impl<F: PrimeField> ops::Deref for HomogeneousExpression<F> {
+    type Target = Expression<F>;
+    fn deref(&self) -> &Self::Target {
+        &self.expr
+    }
+}
+
+impl<F: PrimeField> From<(Expression<F>, usize)> for HomogeneousExpression<F> {
+    fn from(value: (Expression<F>, usize)) -> Self {
+        let (expr, degree) = value;
+        Self { expr, degree }
+    }
 }
 
 impl<F: PrimeField> Neg for Expression<F> {
@@ -352,10 +484,13 @@ impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
 
 #[cfg(test)]
 mod tests {
+    use std::array;
+
     use ff::PrimeField;
     // use pasta_curves::{Fp, pallas};
     use halo2_proofs::poly::Rotation;
     use halo2curves::pasta::{pallas, Fp};
+    use tracing::*;
     use tracing_test::traced_test;
 
     use super::super::expression::*;
@@ -378,7 +513,7 @@ mod tests {
 
     #[traced_test]
     #[test]
-    fn test_homogeneous() {
+    fn test_multi_polynomial_homogeneous() {
         let expr1: Expression<Fp> =
             Expression::Polynomial(Query {
                 index: 0,
@@ -395,6 +530,57 @@ mod tests {
         assert_eq!(
             format!("{}", expr3.expand().homogeneous(0)),
             "(r_0^2) + (Z_0)(r_0) + (Z_0)(Z_1)"
+        );
+    }
+
+    #[traced_test]
+    #[test]
+    fn test_homogeneous_simple() {
+        use Expression::*;
+
+        let expr1 = Polynomial(Query {
+            index: 0,
+            rotation: Rotation(0),
+        }) + Constant(pallas::Base::from(1));
+
+        let expr2 = Polynomial(Query {
+            index: 0,
+            rotation: Rotation(0),
+        }) * Polynomial(Query {
+            index: 1,
+            rotation: Rotation(0),
+        });
+
+        let expr3 = expr1.clone() + expr2.clone();
+        debug!("from {expr3}");
+        assert_eq!(
+            format!("{}", expr3.homogeneous(0, 0, 0).expr),
+            "((r_0 * (Z_0 + (r_0 * 0x1))) + (Z_0 * Z_1))"
+        );
+    }
+
+    #[traced_test]
+    #[test]
+    fn test_homogeneous() {
+        let [a, b, c, d, e] = array::from_fn(|index| {
+            Expression::<pallas::Base>::Polynomial(Query {
+                index,
+                rotation: Rotation(0),
+            })
+        });
+
+        let expr = a.clone()
+            + (a.clone() * b.clone())
+            + (a.clone() * b.clone() * c.clone())
+            + (a * b * c * d * e);
+
+        debug!("from {expr}");
+
+        let homogeneous = expr.homogeneous(0, 0, 0).expr;
+
+        assert_eq!(
+            format!("{}", homogeneous),
+            "((r_0 * (r_0 * ((r_0 * ((r_0 * Z_0) + (Z_0 * Z_1))) + ((Z_0 * Z_1) * Z_2)))) + ((((Z_0 * Z_1) * Z_2) * Z_3) * Z_4))"
         );
     }
 }
