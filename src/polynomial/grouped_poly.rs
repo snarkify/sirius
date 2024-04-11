@@ -621,4 +621,58 @@ mod test {
             ]
         );
     }
+
+    #[traced_test]
+    #[test]
+    fn sandbox() {
+        use Expression::*;
+
+        let [s, a1, a2, b1, b2] = array::from_fn(|index| {
+            Expression::<Fq>::Polynomial(Query {
+                index,
+                rotation: Rotation(0),
+            })
+        });
+
+        let [r, u] = array::from_fn(|index| Expression::Challenge(index));
+
+        //u*s(b2-a2-b1)+r*s*(a2-b1-a1)
+        let input = u * s.clone() * (b2 - a2.clone() - b1.clone()) + r * s * (a2 - b1 - a1);
+
+        assert_eq!(input.to_string(),
+            "(((r_1 * Z_0) * ((Z_4 + (-Z_2)) + (-Z_3))) + ((r_0 * Z_0) * ((Z_2 + (-Z_3)) + (-Z_1))))"
+        );
+
+        const OFFSET: usize = 10;
+        let num_of_challenges = OFFSET;
+        let num_of_poly = OFFSET;
+        let new = Challenge(num_of_challenges * 2);
+
+        let evaluated = input.evaluate(
+            &|constant| Constant(constant),
+            &|poly| {
+                let y = Expression::Polynomial(Query {
+                    index: poly.index + num_of_poly,
+                    rotation: poly.rotation,
+                });
+                let poly = Expression::Polynomial(poly);
+
+                poly + y * new.clone()
+            },
+            &|challenge_index| {
+                let y = Expression::Challenge(challenge_index + num_of_challenges);
+
+                Expression::Challenge(challenge_index) + (y * new.clone())
+            },
+            &|a| -a,
+            &|a, b| a + b,
+            &|a, b| a * b,
+            &|a, k| a * k,
+        );
+
+        assert_eq!(
+            evaluated.to_string(),
+            "((((r_1 + (r_11 * r_20)) * (Z_0 + (Z_10 * r_20))) * (((Z_4 + (Z_14 * r_20)) + (-(Z_2 + (Z_12 * r_20)))) + (-(Z_3 + (Z_13 * r_20))))) + (((r_0 + (r_10 * r_20)) * (Z_0 + (Z_10 * r_20))) * (((Z_2 + (Z_12 * r_20)) + (-(Z_3 + (Z_13 * r_20)))) + (-(Z_1 + (Z_11 * r_20))))))"
+        );
+    }
 }
