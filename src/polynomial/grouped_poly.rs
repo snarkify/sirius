@@ -1,5 +1,5 @@
 use std::{
-    iter,
+    fmt, iter,
     ops::{Add, Mul, Neg, Sub},
 };
 
@@ -23,6 +23,20 @@ pub struct GroupedPoly<F> {
     // TODO #159 depend on `evaluate` algo, can be changed to `BTreeMap`
     terms: Vec<Option<Expression<F>>>,
 }
+
+impl<F: PrimeField> fmt::Display for GroupedPoly<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.iter_with_degree()
+                .map(|(degree, expr)| format!("r^{degree} * ({expr})"))
+                .intersperse(" + ".to_owned())
+                .collect::<String>()
+        )
+    }
+}
+
 impl<F> Default for GroupedPoly<F> {
     fn default() -> Self {
         Self {
@@ -75,7 +89,7 @@ impl<F: PrimeField> GroupedPoly<F> {
     #[instrument(name = "GroupedPoly::new", skip_all)]
     pub fn new(expr: &Expression<F>, num_of_poly: usize, num_of_challenge: usize) -> Self {
         debug!("from {expr:?}");
-        let self_ = expr.evaluate(
+        expr.evaluate(
             &|constant| GroupedPoly {
                 terms: vec![Some(Expression::Constant(constant))],
             },
@@ -85,26 +99,50 @@ impl<F: PrimeField> GroupedPoly<F> {
                     rotation: poly.rotation,
                 });
                 let poly = Expression::Polynomial(poly);
-                debug!("created new one poly. from {poly} created {y}");
 
-                GroupedPoly {
-                    terms: vec![Some(poly), Some(y)],
-                }
+                let res = GroupedPoly {
+                    terms: vec![Some(poly.clone()), Some(y)],
+                };
+
+                debug!("[{poly}] _=>_ [{res}]");
+
+                res
             },
             &|challenge_index| {
                 let y = Expression::Challenge(challenge_index + num_of_challenge);
 
-                GroupedPoly {
+                let res = GroupedPoly {
                     terms: vec![Some(Expression::Challenge(challenge_index)), Some(y)],
-                }
-            },
-            &|a| -a,
-            &|a, b| a + b,
-            &|a, b| a * b,
-            &|a, k| a * k,
-        );
+                };
 
-        self_
+                debug!(
+                    "[{}] _=>_ [{res}]",
+                    Expression::<F>::Challenge(challenge_index)
+                );
+
+                res
+            },
+            &|a| {
+                let res = -a.clone();
+                debug!("-1 _*_ [{a}] _=_ [{res}]");
+                res
+            },
+            &|a, b| {
+                let res = a.clone() + b.clone();
+                debug!("[{a}] _+_ [{b}] _=_ [{res}]");
+                res
+            },
+            &|a, b| {
+                let res = a.clone() * b.clone();
+                debug!("[{a}] _*_ [{b}] _=_ [{res}]");
+                res
+            },
+            &|a, k| {
+                let res = a.clone() * k.clone();
+                debug!("[{a}] _*_ [{k:?}] _=_ [{res}]");
+                res
+            },
+        )
     }
 
     pub fn fold(&self, num_of_challenge: usize) -> Expression<F> {
@@ -194,7 +232,6 @@ impl<F: PrimeField> Mul for GroupedPoly<F> {
     type Output = GroupedPoly<F>;
     fn mul(self, rhs: GroupedPoly<F>) -> Self::Output {
         let mut res = GroupedPoly::default();
-        res.terms.resize(self.terms.len() * rhs.terms.len(), None);
 
         for (lhs_degree, lhs_expr) in self
             .terms
@@ -212,10 +249,14 @@ impl<F: PrimeField> Mul for GroupedPoly<F> {
                 let degree = lhs_degree + rhs_degree;
                 let expr = lhs_expr.clone() * rhs_expr.clone();
 
+                if res.len() <= degree {
+                    res.terms.resize(degree + 1, None);
+                }
+
                 let entry = res
                     .terms
                     .get_mut(degree)
-                    .expect("safe because resize at the top");
+                    .expect("safe because resize above");
 
                 match entry.take() {
                     Some(current) => {
@@ -547,6 +588,36 @@ mod test {
                 "0;(Z_0)(Z_3) + (Z_1)(Z_3) + (Z_2)(Z_3) + (Z_0)(Z_4) + (Z_1)(Z_4) + (Z_2)(Z_4)",
                 "1;(Z_3)(Z_5) + (Z_4)(Z_5) + (Z_3)(Z_6) + (Z_4)(Z_6) + (Z_3)(Z_7) + (Z_4)(Z_7) + (Z_0)(Z_8) + (Z_1)(Z_8) + (Z_2)(Z_8) + (Z_0)(Z_9) + (Z_1)(Z_9) + (Z_2)(Z_9)",
                 "2;(Z_5)(Z_8) + (Z_6)(Z_8) + (Z_7)(Z_8) + (Z_5)(Z_9) + (Z_6)(Z_9) + (Z_7)(Z_9)"
+            ]
+        );
+    }
+
+    #[traced_test]
+    #[test]
+    fn simple_example_for_selector() {
+        use Expression::*;
+
+        let [a, b, c] = array::from_fn(|index| {
+            Expression::Polynomial(Query {
+                index,
+                rotation: Rotation(0),
+            })
+        });
+
+        let input = Product(Box::new(a), Box::new(Sum(Box::new(b), Box::new(c))));
+        assert_eq!(input.to_string(), "(Z_0 * (Z_1 + Z_2))");
+
+        let actual = GroupedPoly::<Fq>::new(&input, input.num_polynomial(), input.num_challenges())
+            .iter_with_degree()
+            .map(|(degree, term)| format!("{degree};{}", term.expand()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            actual,
+            [
+                "0;(Z_0)(Z_1) + (Z_0)(Z_2)",
+                "1;(Z_1)(Z_3) + (Z_2)(Z_3) + (Z_0)(Z_4) + (Z_0)(Z_5)",
+                "2;(Z_3)(Z_4) + (Z_3)(Z_5)"
             ]
         );
     }

@@ -177,6 +177,7 @@ impl<F: PrimeField> Expression<F> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[instrument(name = "evaluate", skip_all)]
     pub fn evaluate<T>(
         &self,
         constant: &impl Fn(F) -> T,
