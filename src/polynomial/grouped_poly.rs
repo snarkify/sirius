@@ -75,7 +75,7 @@ impl<F: PrimeField> GroupedPoly<F> {
     #[instrument(name = "GroupedPoly::new", skip_all)]
     pub fn new(expr: &Expression<F>, num_of_poly: usize, num_of_challenge: usize) -> Self {
         debug!("from {expr:?}");
-        expr.evaluate(
+        let self_ = expr.evaluate(
             &|constant| GroupedPoly {
                 terms: vec![Some(Expression::Constant(constant))],
             },
@@ -84,9 +84,11 @@ impl<F: PrimeField> GroupedPoly<F> {
                     index: poly.index + num_of_poly,
                     rotation: poly.rotation,
                 });
+                let poly = Expression::Polynomial(poly);
+                debug!("created new one poly. from {poly} created {y}");
 
                 GroupedPoly {
-                    terms: vec![Some(Expression::Polynomial(poly)), Some(y)],
+                    terms: vec![Some(poly), Some(y)],
                 }
             },
             &|challenge_index| {
@@ -100,7 +102,9 @@ impl<F: PrimeField> GroupedPoly<F> {
             &|a, b| a + b,
             &|a, b| a * b,
             &|a, k| a * k,
-        )
+        );
+
+        self_
     }
 
     pub fn fold(&self, num_of_challenge: usize) -> Expression<F> {
@@ -124,7 +128,7 @@ impl<F: PrimeField> GroupedPoly<F> {
         self.terms.is_empty()
     }
 
-    fn iter_with_degree(&self) -> impl Iterator<Item = (usize, &Expression<F>)> {
+    pub fn iter_with_degree(&self) -> impl Iterator<Item = (usize, &Expression<F>)> {
         self.terms
             .iter()
             .enumerate()
@@ -249,6 +253,7 @@ mod test {
     use halo2_proofs::poly::Rotation;
     use halo2curves::pasta::Fq;
     use maplit::hashmap as map;
+    use tracing_test::traced_test;
 
     use super::*;
 
@@ -365,6 +370,136 @@ mod test {
                 "8;(Z_2)(Z_5)"
             ]
         );
+    }
+
+    #[traced_test]
+    #[test]
+    fn from_one_round_test() {
+        use Expression::*;
+        let sum = |expr1, expr2| Sum(Box::new(expr1), Box::new(expr2));
+
+        let product = |expr1, expr2| Product(Box::new(expr1), Box::new(expr2));
+
+        let negated = |expr| Negated(Box::new(expr));
+
+        let input = sum(
+            product(
+                Challenge(1),
+                product(
+                    Polynomial(Query {
+                        index: 0,
+                        rotation: Rotation(0),
+                    }),
+                    sum(
+                        sum(
+                            Polynomial(Query {
+                                index: 2,
+                                rotation: Rotation(0),
+                            }),
+                            negated(Polynomial(Query {
+                                index: 1,
+                                rotation: Rotation(0),
+                            })),
+                        ),
+                        negated(Polynomial(Query {
+                            index: 2,
+                            rotation: Rotation(-1),
+                        })),
+                    ),
+                ),
+            ),
+            product(
+                sum(
+                    product(
+                        Polynomial(Query {
+                            index: 0,
+                            rotation: Rotation(0),
+                        }),
+                        sum(
+                            sum(
+                                Polynomial(Query {
+                                    index: 1,
+                                    rotation: Rotation(0),
+                                }),
+                                negated(Polynomial(Query {
+                                    index: 2,
+                                    rotation: Rotation(-1),
+                                })),
+                            ),
+                            negated(Polynomial(Query {
+                                index: 1,
+                                rotation: Rotation(-1),
+                            })),
+                        ),
+                    ),
+                    product(Constant(Fq::ZERO), Challenge(0)),
+                ),
+                Challenge(0),
+            ),
+        );
+        info!("from input: {input}");
+        assert_eq!(
+            input.expand().to_string().replace(&format!("{:?}", Fq::ZERO - Fq::ONE), "-1"),
+            "-1(Z_1[-1])(Z_0)(r_0) + -1(Z_2[-1])(Z_0)(r_0) + (Z_0)(r_0)(Z_1) + -1(Z_2[-1])(Z_0)(r_1) + -1(Z_0)(Z_1)(r_1) + (Z_0)(r_1)(Z_2)"
+        );
+
+        let num_challenges = input.num_challenges();
+        let num_poly = input.num_polynomial();
+        debug!("num of poly: {num_poly} & num challenges: {num_challenges}");
+
+        let actual: Vec<String> = GroupedPoly::new(&input, num_poly, num_challenges)
+            .iter_with_degree()
+            .map(|(degree, term)| format!("{degree};{}", term.expand()))
+            .map(|term| term.replace(&format!("{:?}", Fq::ZERO - Fq::ONE), "-1"))
+            .collect::<Vec<_>>();
+
+        // TODO Fill expected by hand
+        todo!("Check correctness of {actual:?}");
+        // [
+        //     "0;-1(Z_1[-1])(Z_0)(r_0) +
+        //         -1(Z_2[-1])(Z_0)(r_0) +
+        //         (Z_0)(r_0)(Z_1) +
+        //         -1(Z_2[-1])(Z_0)(r_1) +
+        //         -1(Z_0)(Z_1)(r_1) +
+        //         (Z_0)(r_1)(Z_2)",
+        //     "1;-1(Z_6[-1])(Z_0)(r_0) +
+        //         -1(Z_7[-1])(Z_0)(r_0) +
+        //         -1(Z_7[-1])(Z_0)(r_1) +
+        //         -1(Z_1[-1])(Z_0)(r_2) +
+        //         -1(Z_2[-1])(Z_0)(r_2) +
+        //         (Z_0)(Z_1)(r_2) +
+        //         -1(Z_2[-1])(Z_0)(r_3) +
+        //         -1(Z_0)(Z_1)(r_3) +
+        //         (Z_0)(Z_2)(r_3) +
+        //         -1(Z_1[-1])(r_0)(Z_5) + // Why not Z_0?
+        //         -1(Z_2[-1])(r_0)(Z_5) + // Why not Z_0?
+        //         (r_0)(Z_1)(Z_5) + // Why not Z_0?
+        //         -1(Z_2[-1])(r_1)(Z_5) + // Why not Z_0?
+        //         -1(Z_1)(r_1)(Z_5) + // Why not Z_0?
+        //         (r_1)(Z_2)(Z_5) + // Why not Z_0?
+        //         (Z_0)(r_0)(Z_6) +
+        //         -1(Z_0)(r_1)(Z_6) +
+        //         (Z_0)(r_1)(Z_7)",
+        //     "2;-1(Z_6[-1])(Z_0)(r_2) +
+        //         -1(Z_7[-1])(Z_0)(r_2) +
+        //         -1(Z_7[-1])(Z_0)(r_3) +
+        //         -1(Z_6[-1])(r_0)(Z_5) + // Why not Z_0?
+        //         -1(Z_7[-1])(r_0)(Z_5) + // Why not Z_0?
+        //         -1(Z_7[-1])(r_1)(Z_5) + // Why not Z_0?
+        //         -1(Z_1[-1])(r_2)(Z_5) + // Why not Z_0?
+        //         -1(Z_2[-1])(r_2)(Z_5) + // Why not Z_0?
+        //         (Z_1)(r_2)(Z_5) + // Why not Z_0?
+        //         -1(Z_2[-1])(r_3)(Z_5) + // Why not Z_0?
+        //         -1(Z_1)(r_3)(Z_5) + // Why not Z_0?
+        //         (Z_2)(r_3)(Z_5) + // Why not Z_0?
+        //         (Z_0)(r_2)(Z_6) +
+        //         -1(Z_0)(r_3)(Z_6) +
+        //         (r_0)(Z_5)(Z_6) + // Why not Z_0?
+        //         -1(r_1)(Z_5)(Z_6) + // Why not Z_0?
+        //         (Z_0)(r_3)(Z_7) +
+        //         (r_1)(Z_5)(Z_7)", // Why not Z_0?
+        //     "3;-1(Z_6[-1])(r_2)(Z_5) + -1(Z_7[-1])(r_2)(Z_5) + -1(Z_7[-1])(r_3)(Z_5) + (r_2)(Z_5)(Z_6) + -1(r_3)(Z_5)(Z_6) + (r_3)(Z_5)(Z_7)"
+        // ]
     }
 
     #[test]

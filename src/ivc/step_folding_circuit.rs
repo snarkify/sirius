@@ -19,7 +19,7 @@ use crate::{
         StepCircuit,
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
-    plonk::{PlonkInstance, RelaxedPlonkInstance},
+    plonk::{CustomGatesLookupView, PlonkInstance, RelaxedPlonkInstance},
     poseidon::ROCircuitTrait,
     table::ConstraintSystemMetainfo,
 };
@@ -119,9 +119,18 @@ where
         let ConstraintSystemMetainfo {
             num_challenges,
             round_sizes,
-            folding_degree,
-            ..
+            custom_gates_lookup_compressed,
         } = ConstraintSystemMetainfo::build(k_table_size as usize, &cs);
+
+        let folding_degree = CustomGatesLookupView::new(
+            custom_gates_lookup_compressed,
+            cs.num_selectors(),
+            cs.num_fixed_columns(),
+            cs.num_advice_columns(),
+            cs.num_challenges(),
+        )
+        .grouped
+        .len();
 
         Self {
             step: C::Base::ZERO,

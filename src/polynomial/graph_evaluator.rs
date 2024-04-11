@@ -97,29 +97,39 @@ impl Calculation {
             match value {
                 ValueSource::Constant(id) => Ok(constants[*id]),
                 ValueSource::Intermediate(id) => Ok(intermediates[*id]),
-                ValueSource::Fixed { index, rotation } => eval_getter
-                    .get_fixed()
-                    .as_ref()
-                    .get(*index)
-                    .ok_or(EvalError::ColumnVariableIndexOutOfBoundary {
-                        column_index: *index,
-                    })?
-                    .get(rotations[*rotation])
-                    .cloned()
-                    .ok_or(EvalError::RowIndexOutOfBoundary {
-                        row_index: rotations[*rotation],
-                    }),
-                ValueSource::Poly { index, rotation } => {
-                    Ok(eval_getter.eval_column_var(rotations[*rotation], *index)?)
+                ValueSource::Fixed { index, rotation } => {
+                    let fixed = eval_getter
+                        .get_fixed()
+                        .as_ref()
+                        .get(*index)
+                        .ok_or(EvalError::ColumnVariableIndexOutOfBoundary {
+                            column_index: *index,
+                        })?
+                        .get(rotations[*rotation])
+                        .cloned()
+                        .ok_or(EvalError::RowIndexOutOfBoundary {
+                            row_index: rotations[*rotation],
+                        });
+                    debug!("fixed[{index}:{rotation}]: {fixed:?}");
+                    fixed
                 }
-                ValueSource::Challenge { index } => eval_getter
-                    .get_challenges()
-                    .as_ref()
-                    .get(*index)
-                    .cloned()
-                    .ok_or(EvalError::ChallengeIndexOutOfBoundary {
-                        challenge_index: *index,
-                    }),
+                ValueSource::Poly { index, rotation } => {
+                    let poly = eval_getter.eval_column_var(rotations[*rotation], *index)?;
+                    debug!("poly[{index}:{rotation}]: {poly:?}");
+                    Ok(poly)
+                }
+                ValueSource::Challenge { index } => {
+                    let challenge = eval_getter
+                        .get_challenges()
+                        .as_ref()
+                        .get(*index)
+                        .cloned()
+                        .ok_or(EvalError::ChallengeIndexOutOfBoundary {
+                            challenge_index: *index,
+                        });
+                    debug!("challenge[{index}]: {challenge:?}");
+                    challenge
+                }
             }
         };
 
@@ -353,7 +363,7 @@ impl<F: PrimeField> GraphEvaluator<F> {
         }
     }
 
-    #[instrument(name = "GraphEvaluator::evaluate", skip_all)]
+    #[instrument(name = "GraphEvaluator::evaluate", skip(getter, self))]
     pub fn evaluate(&self, getter: &impl GetDataForEval<F>, idx: usize) -> Result<F, EvalError> {
         let mut data = self.instance();
         // All rotation index values
@@ -362,8 +372,12 @@ impl<F: PrimeField> GraphEvaluator<F> {
         }
 
         // All calculations, with cached intermediate results
-        for calc in self.calculations.iter() {
-            data.intermediates[calc.target] = calc.calculation.evaluate(
+        for CalculationInfo {
+            calculation,
+            target,
+        } in self.calculations.iter()
+        {
+            data.intermediates[*target] = calculation.evaluate(
                 &data.rotations,
                 &self.constants,
                 &data.intermediates,
@@ -371,12 +385,13 @@ impl<F: PrimeField> GraphEvaluator<F> {
             )?;
         }
 
-        // Return the result of the last calculation (if any)
-        if let Some(calc) = self.calculations.last() {
-            Ok(data.intermediates[calc.target])
-        } else {
-            Ok(F::ZERO)
-        }
+        self.calculations
+            .last()
+            .map(|calc| data.intermediates[calc.target])
+            .ok_or_else(|| {
+                error!("error while `evaluate`, empty calculation graph");
+                EvalError::InvalidExpression
+            })
     }
 }
 

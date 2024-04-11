@@ -194,7 +194,9 @@ pub fn eval_grouped<F: PrimeField>(
 ) -> Result<Vec<Box<[F]>>, Error> {
     let row_size = data.row_size();
     poly.iter()
-        .map(|expr| match expr {
+        .enumerate()
+        .skip(1)
+        .map(|(_degree, expr)| match expr {
             Some(expr) => {
                 let evaluator = GraphEvaluator::new(expr);
 

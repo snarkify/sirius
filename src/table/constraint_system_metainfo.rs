@@ -1,16 +1,12 @@
 use ff::PrimeField;
 use halo2_proofs::plonk::ConstraintSystem;
 
-use crate::{
-    concat_vec, plonk,
-    polynomial::{grouped_poly::GroupedPoly, Expression},
-};
+use crate::{concat_vec, plonk, polynomial::Expression};
 
 pub(crate) struct ConstraintSystemMetainfo<F: PrimeField> {
     pub num_challenges: usize,
     pub round_sizes: Vec<usize>,
     pub custom_gates_lookup_compressed: Expression<F>,
-    pub folding_degree: usize,
 }
 
 impl<F: PrimeField> ConstraintSystemMetainfo<F> {
@@ -94,18 +90,10 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
         let custom_gates_lookup_compressed =
             plonk::util::compress_expression(&exprs, challenge_index);
 
-        let folding_degree = GroupedPoly::new(
-            &custom_gates_lookup_compressed,
-            cs.num_advice_columns() + 5 * num_lookups,
-            num_challenges,
-        )
-        .len();
-
         ConstraintSystemMetainfo {
             num_challenges,
             round_sizes,
             custom_gates_lookup_compressed,
-            folding_degree,
         }
     }
 }

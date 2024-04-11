@@ -6,6 +6,7 @@ use std::{
     ops::{self, Add, Mul, Neg, Sub},
 };
 
+use tracing::*;
 use ff::PrimeField;
 use halo2_proofs::{plonk::Expression as PE, poly::Rotation};
 use serde::Serialize;
@@ -38,6 +39,15 @@ impl Ord for ColumnIndex {
     }
 }
 
+impl From<&Query> for ColumnIndex {
+    fn from(query: &Query) -> ColumnIndex {
+        ColumnIndex::Polynominal {
+            rotation: query.rotation.0,
+            column_index: query.index,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Query {
     pub index: usize,
@@ -47,7 +57,7 @@ pub struct Query {
 
 impl Query {
     pub fn is_advice(&self, num_selectors: usize, num_fixed: usize) -> bool {
-        self.index >= num_selectors + num_fixed
+        self.index >= (num_selectors + num_fixed)
     }
 }
 
@@ -106,6 +116,34 @@ impl<F: PrimeField> Expression<F> {
                 b.poly_set(set);
             }
             Expression::Scaled(a, _) => a.poly_set(set),
+        }
+    }
+
+    // return the number of challenges in expression
+    pub fn num_polynomial(&self) -> usize {
+        let mut set = HashSet::new();
+        self.collect_polynomial(&mut set);
+        set.len()
+    }
+
+    fn collect_polynomial(&self, set: &mut HashSet<ColumnIndex>) {
+        match self {
+            Expression::Constant(_) => (),
+            Expression::Polynomial(query) => {
+                error!("found new query: {}", Self::Polynomial(*query));
+                set.insert(query.into());
+            }
+            Expression::Challenge(_) => {}
+            Expression::Negated(a) => a.collect_polynomial(set),
+            Expression::Sum(a, b) => {
+                a.collect_polynomial(set);
+                b.collect_polynomial(set);
+            }
+            Expression::Product(a, b) => {
+                a.collect_polynomial(set);
+                b.collect_polynomial(set);
+            }
+            Expression::Scaled(a, _) => a.collect_polynomial(set),
         }
     }
 

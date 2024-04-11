@@ -33,6 +33,7 @@ use crate::{
     plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain},
     polynomial::{
         expression::{Expression, HomogeneousExpression},
+        graph_evaluator::GraphEvaluator,
         grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
     },
@@ -83,8 +84,21 @@ impl<F: PrimeField> CustomGatesLookupView<F> {
         num_of_challenge: usize,
     ) -> Self {
         let homogeneous = original.homogeneous(num_of_challenge, num_selectors, num_fixed);
+        // challenge[1] - u
+        let grouped =
+            GroupedPoly::new(&homogeneous, num_of_poly, homogeneous.expr.num_challenges());
+
+        debug!("MARK: homogeneous: {}", homogeneous.deref());
+        grouped
+            .iter()
+            .enumerate()
+            .for_each(|(degree, expr)| match expr {
+                Some(expr) => debug!("Grouped[{degree}] = {expr}"),
+                None => debug!("Grouped[{degree}] = None"),
+            });
+
         Self {
-            grouped: GroupedPoly::new(&homogeneous, num_of_poly, num_of_challenge + 1),
+            grouped,
             compressed: original,
             homogeneous,
         }
@@ -333,7 +347,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             challenges: {
                 let mut ch = U.challenges.clone();
                 ch.push(U.u);
-                debug!("challenges: {}, {ch:?}", ch.len());
+                debug!("CHALLENGES: {}, {ch:?}", ch.len());
                 ch
             },
             selectors: &self.selectors,
@@ -342,22 +356,27 @@ impl<F: PrimeField> PlonkStructure<F> {
             W2s: &vec![],
         };
         debug!("data: {plonk_eval_domain:?}");
-        let expr = self.custom_gates_lookup_compressed.homogeneous.deref();
-        debug!("expr: {expr}");
+        debug!(
+            "expr: {}",
+            self.custom_gates_lookup_compressed.homogeneous.deref()
+        );
+        let evaluator = GraphEvaluator::new(&self.custom_gates_lookup_compressed.homogeneous);
 
         (0..total_row)
             .into_par_iter()
             .map(|row| {
-                plonk_eval_domain.eval(expr, row).map(|eval_of_row| {
-                    let expected_err = W.E[row];
+                evaluator
+                    .evaluate(&plonk_eval_domain, row)
+                    .map(|eval_of_row| {
+                        let expected_err = W.E[row];
 
-                    if eval_of_row.eq(&expected_err) {
-                        vec![]
-                    } else {
-                        warn!("not equal: {eval_of_row:?} != {expected_err:?}");
-                        vec![row]
-                    }
-                })
+                        if eval_of_row.eq(&expected_err) {
+                            vec![]
+                        } else {
+                            warn!("{row} row not equal: {eval_of_row:?} != {expected_err:?}");
+                            vec![row]
+                        }
+                    })
             })
             .try_reduce(Vec::new, |mut mismatches, missed_row| {
                 if let Some(row) = missed_row.first() {

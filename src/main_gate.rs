@@ -698,6 +698,8 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
     ) -> Result<AssignedValue<F>, Error> {
         let d = terms.len();
         let mut out: Option<AssignedValue<F>> = None;
+        let r_val = Value::known(r);
+
         for i in 1..d {
             let lhs_val = Value::known(terms[d - 1 - i]);
             let rhs_val = if i == 1 {
@@ -705,13 +707,13 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
             } else {
                 out.as_ref().unwrap().value().copied()
             };
-            let r_val = Value::known(r);
             ctx.assign_advice(|| "input", self.config.input, lhs_val)?;
             let rhs = ctx.assign_advice(|| "s[1]", self.config.state[1], rhs_val)?;
             if out.is_some() {
                 ctx.constrain_equal(rhs.cell(), out.unwrap().cell())?;
             }
             ctx.assign_advice(|| "s[0]", self.config.state[0], r_val)?;
+
             out = Some(ctx.assign_advice(
                 || "out=s[0]*s[1]+input",
                 self.config.out,

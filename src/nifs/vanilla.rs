@@ -1,6 +1,8 @@
 use std::marker::PhantomData;
 
-use super::*;
+use halo2_proofs::arithmetic::CurveAffine;
+use tracing::*;
+
 use crate::commitment::CommitmentKey;
 use crate::concat_vec;
 use crate::constants::NUM_CHALLENGE_BITS;
@@ -11,8 +13,8 @@ use crate::plonk::{
 use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
 use crate::poseidon::ROTrait;
 use crate::sps::SpecialSoundnessVerifier;
-use halo2_proofs::arithmetic::CurveAffine;
 
+use super::*;
 /// Represent intermediate polynomial terms that arise when folding
 /// two polynomial relations into one.
 ///
@@ -68,6 +70,7 @@ impl<C: CurveAffine> VanillaFS<C> {
     /// of the two instance-witness pairs. They play a crucial role
     /// in the folding process, allowing two polynomial relations
     /// to be combined into one.
+    #[instrument(name = "commit_cross_terms", skip_all)]
     pub fn commit_cross_terms(
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
@@ -160,6 +163,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     ///
     /// # Returns
     /// A tuple containing folded accumulator and proof for the folding scheme verifier
+    #[instrument(name = "prove", skip_all)]
     fn prove(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
@@ -199,6 +203,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     ///
     /// # Returns
     /// The folded relaxed Plonk instance.
+    #[instrument(name = "verify", skip_all)]
     fn verify(
         vp: &Self::VerifierParam,
         ro_nark: &mut impl ROTrait<C::Base>,
