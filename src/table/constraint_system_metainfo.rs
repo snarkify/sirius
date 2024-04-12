@@ -2,7 +2,8 @@ use ff::PrimeField;
 use halo2_proofs::plonk::ConstraintSystem;
 
 use crate::{
-    concat_vec, plonk,
+    concat_vec,
+    plonk::{self, CompressedCustomGatesLookupView},
     polynomial::{Expression, MultiPolynomial},
 };
 
@@ -11,7 +12,7 @@ pub(crate) struct ConstraintSystemMetainfo<F: PrimeField> {
     pub round_sizes: Vec<usize>,
     pub folding_degree: usize,
     pub poly: MultiPolynomial<F>,
-    pub custom_gates_lookup_compressed: Expression<F>,
+    pub custom_gates_lookup_compressed: CompressedCustomGatesLookupView<F>,
 }
 
 impl<F: PrimeField> ConstraintSystemMetainfo<F> {
@@ -48,7 +49,7 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
             .chain(lookup_exprs)
             .collect::<Vec<_>>();
 
-        let num_challenges = if has_vector_lookup {
+        let num_challenges: usize = if has_vector_lookup {
             3
         } else if num_lookups > 0 {
             2
@@ -86,15 +87,15 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
 
         // we use r3 to combine all custom gates and lookup expressions
         // find the challenge index of r3
-        let challenge_index = if num_challenges > 0 {
-            num_challenges - 1
-        } else {
-            0
-        };
+        let custom_gates_lookup_compressed = CompressedCustomGatesLookupView::new(
+            &exprs,
+            cs.num_selectors(),
+            cs.num_fixed_columns(),
+            cs.num_advice_columns(),
+            num_challenges,
+        );
 
-        let custom_gates_lookup_compressed =
-            plonk::util::compress_expression(&exprs, challenge_index);
-        let poly = custom_gates_lookup_compressed.expand();
+        let poly = custom_gates_lookup_compressed.compressed().expand();
 
         let folding_degree = poly.degree_for_folding(cs.num_fixed_columns() + cs.num_selectors());
 

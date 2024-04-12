@@ -30,8 +30,13 @@ use crate::{
     commitment::CommitmentKey,
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
-    plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain},
+    plonk::{
+        self,
+        eval::{Error as EvalError, Eval, PlonkEvalDomain},
+    },
     polynomial::{
+        expression::HomogeneousExpression,
+        grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
         Expression, MultiPolynomial,
     },
@@ -67,6 +72,56 @@ pub enum Error {
 }
 
 #[derive(Clone, PartialEq, Serialize, Default)]
+pub struct CompressedCustomGatesLookupView<F: PrimeField> {
+    compressed: Expression<F>,
+    homogeneous: HomogeneousExpression<F>,
+    grouped: GroupedPoly<F>,
+}
+
+impl<F: PrimeField> CompressedCustomGatesLookupView<F> {
+    pub fn new(
+        original_expressions: &[Expression<F>],
+        num_selectors: usize,
+        num_fixed: usize,
+        num_of_poly: usize,
+        num_challenges: usize,
+    ) -> Self {
+        let compressed = plonk::util::compress_expression(
+            original_expressions,
+            num_challenges.saturating_sub(1),
+        );
+
+        let homogeneous =
+            compressed.homogeneous(num_selectors, num_fixed, compressed.num_challenges());
+
+        let num_challenges = homogeneous.num_challenges();
+
+        Self {
+            compressed,
+            grouped: GroupedPoly::new(
+                &homogeneous,
+                num_selectors,
+                num_fixed,
+                num_of_poly,
+                num_challenges,
+            ),
+            homogeneous,
+        }
+    }
+    pub fn compressed(&self) -> &Expression<F> {
+        &self.compressed
+    }
+
+    pub fn homogeneous(&self) -> &HomogeneousExpression<F> {
+        &self.homogeneous
+    }
+
+    pub fn grouped(&self) -> &GroupedPoly<F> {
+        &self.grouped
+    }
+}
+
+#[derive(Clone, PartialEq, Serialize, Default)]
 #[serde(bound(serialize = "
     F: Serialize
 "))]
@@ -90,7 +145,7 @@ pub struct PlonkStructure<F: PrimeField> {
     /// singla polynomial relation that combines custom gates and lookup relations
     pub(crate) poly: MultiPolynomial<F>,
 
-    pub(crate) custom_gates_lookup_compressed: Expression<F>,
+    pub(crate) custom_gates_lookup_compressed: CompressedCustomGatesLookupView<F>,
 
     pub(crate) permutation_matrix: SparseMatrix<F>,
     pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
