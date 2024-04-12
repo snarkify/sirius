@@ -107,11 +107,25 @@ impl<F: PrimeField> GroupedPoly<F> {
         )
     }
 
-    fn iter(&self) -> impl Iterator<Item = (usize, &Expression<F>)> {
+    fn iter_with_degree(&self) -> impl Iterator<Item = (usize, &Expression<F>)> {
         self.terms
             .iter()
             .enumerate()
             .filter_map(|(degree, expr)| expr.as_ref().map(|expr| (degree, expr)))
+    }
+    pub fn iter(&self) -> impl Iterator<Item = Option<&Expression<F>>> {
+        self.terms.iter().map(|e| e.as_ref())
+    }
+    pub fn iter_all_but_not_zero(&self) -> impl Iterator<Item = Option<&Expression<F>>> {
+        self.iter().skip(1)
+    }
+
+    pub fn len(&self) -> usize {
+        self.terms.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.terms.is_empty()
     }
 }
 
@@ -169,7 +183,6 @@ impl<F: PrimeField> Mul for GroupedPoly<F> {
     type Output = GroupedPoly<F>;
     fn mul(self, rhs: GroupedPoly<F>) -> Self::Output {
         let mut res = GroupedPoly::default();
-        res.terms.resize(self.terms.len() * rhs.terms.len(), None);
 
         for (lhs_degree, lhs_expr) in self
             .terms
@@ -186,6 +199,10 @@ impl<F: PrimeField> Mul for GroupedPoly<F> {
             {
                 let degree = lhs_degree + rhs_degree;
                 let expr = lhs_expr.clone() * rhs_expr.clone();
+
+                if degree >= res.terms.len() {
+                    res.terms.resize(degree + 1, None);
+                }
 
                 let entry = res
                     .terms
@@ -249,7 +266,7 @@ mod test {
             }),
             5 => Expression::Constant(Fq::ONE),
         }))
-        .iter()
+        .iter_with_degree()
         .map(|(degree, term)| format!("{degree};{}", term.expand()))
         .collect::<Vec<_>>();
 
@@ -282,7 +299,7 @@ mod test {
             }),
             5 => Expression::Challenge(0),
         }))
-        .iter()
+        .iter_with_degree()
         .map(|(degree, term)| format!("{degree};{}", term.expand()))
         .collect::<Vec<_>>();
 
@@ -311,7 +328,7 @@ mod test {
                 Box::new(Expression::Polynomial(Query { index: 3, rotation: Rotation(0) }))
             ),
         }))
-        .iter()
+        .iter_with_degree()
         .map(|(degree, term)| format!("{degree};{}", term.expand()))
         .collect::<Vec<_>>();
 
@@ -330,7 +347,7 @@ mod test {
             3 => Expression::Polynomial(Query { index: 4, rotation: Rotation(0) }),
             4 => Expression::Polynomial(Query { index: 5, rotation: Rotation(0) }),
         }))
-        .iter()
+        .iter_with_degree()
         .map(|(degree, term)| format!("{degree};{}", term.expand()))
         .collect::<Vec<_>>();
 
@@ -386,7 +403,7 @@ mod test {
         );
 
         let actual = grouped_poly
-            .iter()
+            .iter_with_degree()
             .map(|(degree, term)| format!("{degree};{}", term.expand()))
             .collect::<Vec<_>>();
 

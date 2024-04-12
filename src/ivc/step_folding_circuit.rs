@@ -119,8 +119,7 @@ where
         let ConstraintSystemMetainfo {
             num_challenges,
             round_sizes,
-            folding_degree,
-            ..
+            custom_gates_lookup_compressed,
         } = ConstraintSystemMetainfo::build(k_table_size as usize, &cs);
 
         Self {
@@ -131,7 +130,13 @@ where
             z_i: [C::Base::ZERO; ARITY],
             U: RelaxedPlonkInstance::new(num_io, num_challenges, round_sizes.len()),
             u: PlonkInstance::new(num_io, num_challenges, round_sizes.len()),
-            cross_term_commits: vec![C::identity(); folding_degree.saturating_sub(1)],
+            cross_term_commits: vec![
+                C::identity();
+                custom_gates_lookup_compressed
+                    .grouped()
+                    .len()
+                    .saturating_sub(1)
+            ],
         }
     }
 }

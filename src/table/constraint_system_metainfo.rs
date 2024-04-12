@@ -4,14 +4,12 @@ use halo2_proofs::plonk::ConstraintSystem;
 use crate::{
     concat_vec,
     plonk::{self, CompressedCustomGatesLookupView},
-    polynomial::{Expression, MultiPolynomial},
+    polynomial::Expression,
 };
 
 pub(crate) struct ConstraintSystemMetainfo<F: PrimeField> {
     pub num_challenges: usize,
     pub round_sizes: Vec<usize>,
-    pub folding_degree: usize,
-    pub poly: MultiPolynomial<F>,
     pub custom_gates_lookup_compressed: CompressedCustomGatesLookupView<F>,
 }
 
@@ -95,15 +93,10 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
             num_challenges,
         );
 
-        let poly = custom_gates_lookup_compressed.compressed().expand();
-
-        let folding_degree = poly.degree_for_folding(cs.num_fixed_columns() + cs.num_selectors());
 
         ConstraintSystemMetainfo {
             num_challenges,
             round_sizes,
-            folding_degree,
-            poly,
             custom_gates_lookup_compressed,
         }
     }

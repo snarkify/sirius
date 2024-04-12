@@ -291,6 +291,8 @@ mod zero_round_test {
 // test multiple gates without lookup
 // test example adapted from https://github.com/icemelon/halo2-tutorial
 mod one_round_test {
+    use tracing_test::traced_test;
+
     use super::*;
 
     #[derive(Clone)]
@@ -442,6 +444,7 @@ mod one_round_test {
         seq
     }
 
+    #[traced_test]
     #[test]
     fn test_nifs() -> Result<(), NIFSError> {
         const K: u32 = 4;
@@ -479,10 +482,11 @@ mod one_round_test {
 // test vector lookup
 // test example adapted from https://github.com/icemelon/halo2-tutorial
 mod three_rounds_test {
-    use super::*;
-    use halo2_proofs::circuit::Chip;
-    use halo2_proofs::plonk::TableColumn;
+    use halo2_proofs::{circuit::Chip, plonk::TableColumn};
     use num_bigint::BigUint as BigUintRaw;
+    use tracing_test::traced_test;
+
+    use super::*;
 
     pub fn f_to_u64<F: PrimeField>(f: &F) -> u64 {
         BigUintRaw::from_bytes_le(f.to_repr().as_ref())
@@ -749,6 +753,7 @@ mod three_rounds_test {
         seq
     }
 
+    #[traced_test]
     #[test]
     fn test_nifs() -> Result<(), NIFSError> {
         const K: u32 = 5;

@@ -38,7 +38,7 @@ use crate::{
         expression::HomogeneousExpression,
         grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
-        Expression, MultiPolynomial,
+        Expression,
     },
     poseidon::{AbsorbInRO, ROTrait},
     sps::{Error as SpsError, SpecialSoundnessVerifier},
@@ -112,7 +112,7 @@ impl<F: PrimeField> CompressedCustomGatesLookupView<F> {
         &self.compressed
     }
 
-    pub fn homogeneous(&self) -> &HomogeneousExpression<F> {
+    pub fn homogeneous(&self) -> &Expression<F> {
         &self.homogeneous
     }
 
@@ -141,9 +141,6 @@ pub struct PlonkStructure<F: PrimeField> {
     pub(crate) num_challenges: usize,
     /// specify the witness size of each prover round
     pub(crate) round_sizes: Vec<usize>,
-
-    /// singla polynomial relation that combines custom gates and lookup relations
-    pub(crate) poly: MultiPolynomial<F>,
 
     pub(crate) custom_gates_lookup_compressed: CompressedCustomGatesLookupView<F>,
 
@@ -308,10 +305,11 @@ impl<F: PrimeField> PlonkStructure<F> {
         };
 
         let total_row = 1 << self.k;
+
         (0..total_row)
             .into_par_iter()
             .map(|row| {
-                data.eval(&self.poly, row)
+                data.eval(self.custom_gates_lookup_compressed.compressed(), row)
                     .map(|row_result| if row_result.eq(&F::ZERO) { 0 } else { 1 })
             })
             .try_reduce(
@@ -352,7 +350,6 @@ impl<F: PrimeField> PlonkStructure<F> {
     {
         let total_row = 1 << self.k;
 
-        let poly = self.poly.homogeneous(self.num_non_fold_vars());
         let data = PlonkEvalDomain {
             num_advice: self.num_advice_columns,
             num_lookup: self.num_lookups(),
@@ -363,11 +360,20 @@ impl<F: PrimeField> PlonkStructure<F> {
             W2s: &vec![],
         };
 
+        let poly = self.custom_gates_lookup_compressed.homogeneous();
         (0..total_row)
             .into_par_iter()
             .map(|row| {
-                data.eval(&poly, row)
-                    .map(|eval_of_row| if eval_of_row.eq(&W.E[row]) { 0 } else { 1 })
+                data.eval(poly, row).map(|eval_of_row| {
+                    let expected = W.E[row];
+
+                    if eval_of_row.eq(&expected) {
+                        0
+                    } else {
+                        warn!("row {row} invalid: expected {expected:?}, but {eval_of_row:?}");
+                        1
+                    }
+                })
             })
             .try_reduce(
                 || 0,
@@ -463,8 +469,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     }
 
     pub fn get_degree_for_folding(&self) -> usize {
-        let offset = self.num_non_fold_vars();
-        self.poly.degree_for_folding(offset)
+        self.custom_gates_lookup_compressed.grouped().len()
     }
 
     pub fn dry_run_sps_protocol<C: CurveAffine<ScalarExt = F>>(&self) -> PlonkTrace<C> {
@@ -798,7 +803,7 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
         Self { W, E }
     }
 
-    pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &[Vec<F>], r: &F) -> Self {
+    pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &[Box<[F]>], r: &F) -> Self {
         let W = self
             .W
             .iter()

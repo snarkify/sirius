@@ -3,6 +3,7 @@ use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error, FloorPlanner};
 
 use crate::{
     plonk::{self, PlonkStructure},
+    polynomial::sparse::SparseMatrix,
     util::batch_invert_assigned,
 };
 
@@ -36,28 +37,27 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
         let ConstraintSystemMetainfo {
             num_challenges,
             round_sizes,
-            poly,
             custom_gates_lookup_compressed,
-            ..
         } = ConstraintSystemMetainfo::build(self.k as usize, &self.cs);
 
-        let mut S = PlonkStructure {
+        let PreprocessingData {
+            permutation_matrix,
+            fixed_columns,
+            selectors,
+        } = self.try_collect_preprocessing()?;
+
+        Ok(PlonkStructure {
             k: self.k as usize,
             num_io: self.instance.len(),
-            selectors: vec![],
-            fixed_columns: vec![],
+            selectors,
+            fixed_columns,
             num_advice_columns: self.cs.num_advice_columns(),
             num_challenges,
             round_sizes,
-            poly,
             custom_gates_lookup_compressed,
-            permutation_matrix: vec![],
+            permutation_matrix,
             lookup_arguments: plonk::lookup::Arguments::compress_from(&self.cs),
-        };
-
-        self.try_collect_preprocessing(&mut S)?;
-
-        Ok(S)
+        })
     }
 
     pub fn try_collect_witness(&self) -> Result<Witness<F>, Error> {
@@ -71,7 +71,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
         Ok(batch_invert_assigned(&witness.advice))
     }
 
-    fn try_collect_preprocessing(&self, S: &mut PlonkStructure<F>) -> Result<(), Error> {
+    fn try_collect_preprocessing(&self) -> Result<PreprocessingData<F>, Error> {
         let nrow = 1 << self.k;
 
         let mut circuit_data = CircuitData {
@@ -89,15 +89,21 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
             vec![],
         )?;
 
-        S.permutation_matrix = plonk::util::construct_permutation_matrix(
-            self.k as usize,
-            self.instance.len(),
-            &self.cs,
-            &circuit_data.permutation,
-        );
-        S.fixed_columns = batch_invert_assigned(&circuit_data.fixed);
-        S.selectors = circuit_data.selector;
-
-        Ok(())
+        Ok(PreprocessingData {
+            permutation_matrix: plonk::util::construct_permutation_matrix(
+                self.k as usize,
+                self.instance.len(),
+                &self.cs,
+                &circuit_data.permutation,
+            ),
+            fixed_columns: batch_invert_assigned(&circuit_data.fixed),
+            selectors: circuit_data.selector,
+        })
     }
+}
+
+struct PreprocessingData<F: PrimeField> {
+    pub(crate) permutation_matrix: SparseMatrix<F>,
+    pub(crate) fixed_columns: Vec<Vec<F>>,
+    pub(crate) selectors: Vec<Vec<bool>>,
 }

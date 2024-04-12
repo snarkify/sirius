@@ -96,6 +96,7 @@ pub(crate) fn compress_expression<F: PrimeField>(
     challenge_index: usize,
 ) -> Expression<F> {
     let y = Expression::Challenge(challenge_index);
+
     if exprs.len() > 1 {
         exprs
             .iter()
