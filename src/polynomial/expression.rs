@@ -362,11 +362,12 @@ impl<F: PrimeField> Expression<F> {
     ///```
     pub fn homogeneous(
         &self,
-        new_challenge_index: usize,
         num_selector: usize,
         num_fixed: usize,
+        num_challenges: usize,
     ) -> HomogeneousExpression<F> {
         use Expression::*;
+        let new_challenge_index = num_challenges.saturating_sub(1);
 
         fn multiply_by_challenge<F: PrimeField>(
             expr: Expression<F>,
@@ -399,18 +400,18 @@ impl<F: PrimeField> Expression<F> {
             &|challenge| (Challenge(challenge), 1).into(),
             &|expr| {
                 let HomogeneousExpression { expr, degree } =
-                    expr.homogeneous(new_challenge_index, num_selector, num_fixed);
+                    expr.homogeneous(num_selector, num_fixed, num_challenges);
                 (-expr, degree).into()
             },
             &|lhs, rhs| {
                 let HomogeneousExpression {
                     expr: lhs,
                     degree: lhs_degree,
-                } = lhs.homogeneous(new_challenge_index, num_selector, num_fixed);
+                } = lhs.homogeneous(num_selector, num_fixed, num_challenges);
                 let HomogeneousExpression {
                     expr: rhs,
                     degree: rhs_degree,
-                } = rhs.homogeneous(new_challenge_index, num_selector, num_fixed);
+                } = rhs.homogeneous(num_selector, num_fixed, num_challenges);
 
                 match lhs_degree.cmp(&rhs_degree) {
                     Ordering::Greater => (
@@ -434,17 +435,17 @@ impl<F: PrimeField> Expression<F> {
                 let HomogeneousExpression {
                     expr: lhs,
                     degree: lhs_degree,
-                } = lhs.homogeneous(new_challenge_index, num_selector, num_fixed);
+                } = lhs.homogeneous(num_selector, num_fixed, num_challenges);
                 let HomogeneousExpression {
                     expr: rhs,
                     degree: rhs_degree,
-                } = rhs.homogeneous(new_challenge_index, num_selector, num_fixed);
+                } = rhs.homogeneous(num_selector, num_fixed, num_challenges);
 
                 (lhs * rhs, lhs_degree + rhs_degree).into()
             },
             &|expr, constant| {
                 let HomogeneousExpression { expr, degree } =
-                    expr.homogeneous(new_challenge_index, num_selector, num_fixed);
+                    expr.homogeneous(num_selector, num_fixed, num_challenges);
 
                 (Scaled(Box::new(expr), constant), degree).into()
             },
