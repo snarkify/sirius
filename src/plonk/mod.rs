@@ -85,8 +85,13 @@ impl<F: PrimeField> CustomGatesLookupView<F> {
     ) -> Self {
         let homogeneous = original.homogeneous(num_of_challenge, num_selectors, num_fixed);
         // challenge[1] - u
-        let grouped =
-            GroupedPoly::new(&homogeneous, num_of_poly, homogeneous.expr.num_challenges());
+        let grouped = GroupedPoly::new(
+            &homogeneous,
+            num_selectors,
+            num_fixed,
+            num_of_poly,
+            homogeneous.expr.num_challenges(),
+        );
 
         debug!("MARK: homogeneous: {}", homogeneous.deref());
         grouped

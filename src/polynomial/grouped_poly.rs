@@ -87,26 +87,31 @@ impl<F: PrimeField> GroupedPoly<F> {
     ///     a2*d2 + a2*e2 + b2*d2 + b2*e2 + c2*d2 + c2*e2       * k^2
     /// ```
     #[instrument(name = "GroupedPoly::new", skip_all)]
-    pub fn new(expr: &Expression<F>, num_of_poly: usize, num_of_challenge: usize) -> Self {
+    pub fn new(
+        expr: &Expression<F>,
+        num_selectors: usize,
+        num_fixed: usize,
+        num_of_poly: usize,
+        num_of_challenge: usize,
+    ) -> Self {
         debug!("from {expr:?}");
         expr.evaluate(
             &|constant| GroupedPoly {
                 terms: vec![Some(Expression::Constant(constant))],
             },
             &|poly| {
-                let y = Expression::Polynomial(Query {
-                    index: poly.index + num_of_poly,
-                    rotation: poly.rotation,
-                });
-                let poly = Expression::Polynomial(poly);
-
-                let res = GroupedPoly {
-                    terms: vec![Some(poly.clone()), Some(y)],
+                let mut result = GroupedPoly {
+                    terms: vec![Some(Expression::Polynomial(poly))],
                 };
 
-                debug!("[{poly}] _=>_ [{res}]");
+                if poly.is_advice(num_selectors, num_fixed) {
+                    result.terms.push(Some(Expression::Polynomial(Query {
+                        index: poly.index + num_of_poly,
+                        rotation: poly.rotation,
+                    })));
+                }
 
-                res
+                result
             },
             &|challenge_index| {
                 let y = Expression::Challenge(challenge_index + num_of_challenge);
@@ -138,7 +143,7 @@ impl<F: PrimeField> GroupedPoly<F> {
                 res
             },
             &|a, k| {
-                let res = a.clone() * k.clone();
+                let res = a.clone() * k;
                 debug!("[{a}] _*_ [{k:?}] _=_ [{res}]");
                 res
             },
@@ -488,7 +493,7 @@ mod test {
         let num_poly = input.num_polynomial();
         debug!("num of poly: {num_poly} & num challenges: {num_challenges}");
 
-        let actual: Vec<String> = GroupedPoly::new(&input, num_poly, num_challenges)
+        let actual: Vec<String> = GroupedPoly::new(&input, 0, 0, num_poly, num_challenges)
             .iter_with_degree()
             .map(|(degree, term)| format!("{degree};{}", term.expand()))
             .map(|term| term.replace(&format!("{:?}", Fq::ZERO - Fq::ONE), "-1"))
@@ -574,8 +579,13 @@ mod test {
             })
         });
 
-        let grouped_poly =
-            GroupedPoly::new(&Expression::Product(sum(&[a, b, c]), sum(&[d, e])), 5, 0);
+        let grouped_poly = GroupedPoly::new(
+            &Expression::Product(sum(&[a, b, c]), sum(&[d, e])),
+            0,
+            0,
+            5,
+            0,
+        );
 
         let actual = grouped_poly
             .iter_with_degree()
@@ -607,10 +617,11 @@ mod test {
         let input = Product(Box::new(a), Box::new(Sum(Box::new(b), Box::new(c))));
         assert_eq!(input.to_string(), "(Z_0 * (Z_1 + Z_2))");
 
-        let actual = GroupedPoly::<Fq>::new(&input, input.num_polynomial(), input.num_challenges())
-            .iter_with_degree()
-            .map(|(degree, term)| format!("{degree};{}", term.expand()))
-            .collect::<Vec<_>>();
+        let actual =
+            GroupedPoly::<Fq>::new(&input, 0, 0, input.num_polynomial(), input.num_challenges())
+                .iter_with_degree()
+                .map(|(degree, term)| format!("{degree};{}", term.expand()))
+                .collect::<Vec<_>>();
 
         assert_eq!(
             actual,
