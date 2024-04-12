@@ -47,12 +47,13 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
             .chain(lookup_exprs)
             .collect::<Vec<_>>();
 
+        #[allow(clippy::if_same_then_else)]
         let num_challenges: usize = if has_vector_lookup {
-            3
-        } else if num_lookups > 0 {
             2
-        } else if num_gates > 1 {
+        } else if num_lookups > 0 {
             1
+        } else if num_gates > 1 {
+            0
         } else {
             0
         };
@@ -92,7 +93,6 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
             cs.num_advice_columns(),
             num_challenges,
         );
-
 
         ConstraintSystemMetainfo {
             num_challenges,

@@ -86,15 +86,14 @@ impl<F: PrimeField> CompressedCustomGatesLookupView<F> {
         num_of_poly: usize,
         num_challenges: usize,
     ) -> Self {
-        let compressed = plonk::util::compress_expression(
-            original_expressions,
-            num_challenges.saturating_sub(1),
-        );
+        debug!("input num_challenges: {num_challenges}"); // = 2
+        let compressed = plonk::util::compress_expression(original_expressions, num_challenges);
+        let num_challenges = compressed.num_challenges();
+        debug!("after compressing num_challenges: {num_challenges}"); // = 3
 
-        let homogeneous =
-            compressed.homogeneous(num_selectors, num_fixed, compressed.num_challenges());
-
+        let homogeneous = compressed.homogeneous(num_selectors, num_fixed, num_challenges);
         let num_challenges = homogeneous.num_challenges();
+        debug!("after homogeneous num_challenges: {num_challenges}"); // = 4
 
         Self {
             compressed,

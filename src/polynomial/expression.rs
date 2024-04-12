@@ -347,7 +347,7 @@ impl<F: PrimeField> Expression<F> {
         num_challenges: usize,
     ) -> HomogeneousExpression<F> {
         use Expression::*;
-        let new_challenge_index = num_challenges.saturating_sub(1);
+        let new_challenge_index = num_challenges;
 
         fn multiply_by_challenge<F: PrimeField>(
             expr: Expression<F>,
