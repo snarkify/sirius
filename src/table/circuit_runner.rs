@@ -1,5 +1,6 @@
 use ff::PrimeField;
 use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error, FloorPlanner};
+use tracing::*;
 
 use crate::{
     plonk::{self, PlonkStructure},
@@ -33,18 +34,23 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
         }
     }
 
+    #[instrument(name = "CircuitRunner::collect_plonk", skip_all)]
     pub fn try_collect_plonk_structure(&self) -> Result<PlonkStructure<F>, Error> {
+        debug!("start build metainfo");
         let ConstraintSystemMetainfo {
             num_challenges,
             round_sizes,
             custom_gates_lookup_compressed,
         } = ConstraintSystemMetainfo::build(self.k as usize, &self.cs);
+        debug!("meta info is ready");
 
+        debug!("start preprocessing");
         let PreprocessingData {
             permutation_matrix,
             fixed_columns,
             selectors,
         } = self.try_collect_preprocessing()?;
+        debug!("preprocessing is ready");
 
         Ok(PlonkStructure {
             k: self.k as usize,
@@ -60,6 +66,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
         })
     }
 
+    #[instrument(name = "CircuitRunner::collect_witness", skip_all)]
     pub fn try_collect_witness(&self) -> Result<Witness<F>, Error> {
         let mut witness = WitnessCollector {
             instance: self.instance.clone(),

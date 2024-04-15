@@ -243,33 +243,38 @@ where
     RP1: ROPair<C1::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
     RP2: ROPair<C2::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
 {
-    #[instrument(name = "creating pp", skip_all)]
+    #[instrument(name = "pp::new", skip_all)]
     pub fn new(
         primary: CircuitPublicParamsInput<'key, '_, A1, C1, RP1::Args, SC1>,
         secondary: CircuitPublicParamsInput<'key, '_, A2, C2, RP2::Args, SC2>,
         limb_width: NonZeroUsize,
         limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
-        let primary_span = span!(Level::ERROR, "primary").entered();
-        let primary_S = CircuitRunner::new(
-            primary.k_table_size,
-            StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T> {
-                step_circuit: primary.step_circuit,
-                input: StepInputs::without_witness::<
-                    StepFoldingCircuit<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T>,
-                >(
-                    primary.k_table_size,
-                    NUM_IO,
-                    &StepParams::new(limb_width, limbs_count, primary.ro_constant.clone()),
-                ),
-            },
-            vec![C1::Scalar::ZERO; NUM_IO],
-        )
-        .try_collect_plonk_structure()?;
-        primary_span.exit();
+        let primary_S = {
+            let _primary_span = span!(Level::ERROR, "primary").entered();
+
+            debug!("start");
+            let step_params = StepParams::new(limb_width, limbs_count, primary.ro_constant.clone());
+            let input = StepInputs::without_witness::<
+                StepFoldingCircuit<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T>,
+            >(primary.k_table_size, NUM_IO, &step_params);
+            debug!("step input is ready");
+
+            let cr = CircuitRunner::new(
+                primary.k_table_size,
+                StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T> {
+                    step_circuit: primary.step_circuit,
+                    input,
+                },
+                vec![C1::Scalar::ZERO; NUM_IO],
+            );
+            debug!("start collect plonk");
+            cr.try_collect_plonk_structure()
+        }?;
 
         let (secondary_S, secondary_initial_plonk_trace) = {
             let _secondary_span = span!(Level::ERROR, "secondary").entered();
+            debug!("start");
 
             let secondary_initial_step_params =
                 StepParams::new(limb_width, limbs_count, secondary.ro_constant.clone());
@@ -298,6 +303,7 @@ where
                 }
                 .generate_with_inspect(|buf| debug!("secondary X1 pp-new 0-step: {buf:?}")),
             ];
+            debug!("instances ready");
 
             let secondary_sfc = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T> {
                 step_circuit: secondary.step_circuit,
@@ -311,6 +317,8 @@ where
             );
 
             let secondary_S = secondary_cr.try_collect_plonk_structure()?;
+
+            debug!("plonk structure ready");
             let secondary_initial_plonk_trace = VanillaFS::generate_plonk_trace(
                 secondary.commitment_key,
                 &secondary_initial_instance,
@@ -318,6 +326,7 @@ where
                 &VanillaFS::setup_params(C2::identity(), secondary_S.clone())?.0,
                 &mut RP1::OffCircuit::new(primary.ro_constant.clone()),
             )?;
+            debug!("trace ready");
 
             Result::<_, Error>::Ok((secondary_S, secondary_initial_plonk_trace))
         }?;

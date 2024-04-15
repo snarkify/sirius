@@ -362,7 +362,10 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 }
 
 fn main() {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_ansi(false) // <------ this
+        .with_max_level(Level::DEBUG)
+        .init();
 
     info!("Start");
     // C1

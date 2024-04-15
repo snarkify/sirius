@@ -194,7 +194,7 @@ where
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
         let primary_span = span!(Level::ERROR, "primary", step = 0).entered();
-        debug!("start creation of IVC");
+        trace!("start creation of IVC");
         // For use as first version of `U` in primary circuit synthesize
         let secondary_pre_round_plonk_trace = pp.secondary_initial_plonk_trace();
 

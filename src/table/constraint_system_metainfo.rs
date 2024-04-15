@@ -1,5 +1,6 @@
 use ff::PrimeField;
 use halo2_proofs::plonk::ConstraintSystem;
+use tracing::*;
 
 use crate::{
     concat_vec,
@@ -16,6 +17,7 @@ pub(crate) struct ConstraintSystemMetainfo<F: PrimeField> {
 impl<F: PrimeField> ConstraintSystemMetainfo<F> {
     /// The separation of this function from circuit_info is to remove dependency on [`PlonkStructure`]
     /// it is used to kickstart the Folding Circuit initialization
+    #[instrument(name = "ConstraintSystemMetainfo", skip_all)]
     pub(crate) fn build(
         k_table_size: usize,
         cs: &ConstraintSystem<F>,
@@ -95,6 +97,7 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
             num_lookups,
         };
 
+        debug!("start compress");
         let custom_gates_lookup_compressed = CompressedCustomGatesLookupView::new(&exprs, &mut ctx);
 
         ConstraintSystemMetainfo {

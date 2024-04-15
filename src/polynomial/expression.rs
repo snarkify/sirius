@@ -9,6 +9,7 @@ use std::{
 use ff::PrimeField;
 use halo2_proofs::{plonk::Expression as PE, poly::Rotation};
 use serde::Serialize;
+use tracing::*;
 
 use super::{Monomial, MultiPolynomial};
 
@@ -78,7 +79,7 @@ pub enum QueryType {
 impl Query {
     pub fn subtype(&self, ctx: &QueryIndexContext) -> QueryType {
         if self.index < ctx.num_selectors {
-            return QueryType::Selector;
+            QueryType::Selector
         } else if self.index < ctx.num_selectors + ctx.num_fixed {
             QueryType::Fixed
         } else if self.index < ctx.num_selectors + ctx.num_fixed + ctx.num_advice {
@@ -177,6 +178,32 @@ impl<F: PrimeField> Expression<F> {
                 b.collect_challenges(set);
             }
             Expression::Scaled(a, _) => a.collect_challenges(set),
+        }
+    }
+
+    pub fn expressions_count(&self) -> usize {
+        let mut count = 0;
+        self.collect_expression_count(&mut count);
+        count
+    }
+
+    fn collect_expression_count(&self, count: &mut usize) {
+        *count += 1;
+
+        match self {
+            Expression::Constant(_) => (),
+            Expression::Polynomial(_) => (),
+            Expression::Challenge(_) => (),
+            Expression::Negated(a) => a.collect_expression_count(count),
+            Expression::Sum(a, b) => {
+                a.collect_expression_count(count);
+                b.collect_expression_count(count);
+            }
+            Expression::Product(a, b) => {
+                a.collect_expression_count(count);
+                b.collect_expression_count(count);
+            }
+            Expression::Scaled(a, _) => a.collect_expression_count(count),
         }
     }
 
@@ -392,26 +419,25 @@ impl<F: PrimeField> Expression<F> {
             degree: usize,
         ) -> Expression<F> {
             match degree.checked_sub(1) {
-                Some(degree_sub_1) => multiply_by_challenge(
-                    Expression::Challenge(new_challenge_index) * expr,
-                    new_challenge_index,
-                    degree_sub_1,
-                ),
+                Some(degree_sub_1) => {
+                    expr * multiply_by_challenge(
+                        Expression::Challenge(new_challenge_index),
+                        new_challenge_index,
+                        degree_sub_1,
+                    )
+                }
                 None => expr,
             }
         }
 
         self.evaluate(
             &|constant| -> HomogeneousExpression<F> { (Constant(constant), 0).into() },
-            &|polynomial: Query| {
-                (
-                    Polynomial(polynomial),
-                    match polynomial.subtype(ctx) {
-                        QueryType::Advice | QueryType::Lookup => 1,
-                        _other => 0,
-                    },
-                )
-                    .into()
+            &|polynomial: Query| HomogeneousExpression {
+                expr: Polynomial(polynomial),
+                degree: match polynomial.subtype(ctx) {
+                    QueryType::Advice | QueryType::Lookup => 1,
+                    _other => 0,
+                },
             },
             &|challenge| (Challenge(challenge), 1).into(),
             &|expr| {
@@ -419,14 +445,17 @@ impl<F: PrimeField> Expression<F> {
                 (-expr, degree).into()
             },
             &|lhs, rhs| {
-                let HomogeneousExpression {
-                    expr: lhs,
-                    degree: lhs_degree,
-                } = lhs.homogeneous(ctx);
-                let HomogeneousExpression {
-                    expr: rhs,
-                    degree: rhs_degree,
-                } = rhs.homogeneous(ctx);
+                debug!("degrees in sum: [{}; {}]", lhs.degree, rhs.degree);
+                let (
+                    HomogeneousExpression {
+                        expr: lhs,
+                        degree: lhs_degree,
+                    },
+                    HomogeneousExpression {
+                        expr: rhs,
+                        degree: rhs_degree,
+                    },
+                ) = rayon::join(|| lhs.homogeneous(ctx), || rhs.homogeneous(ctx));
 
                 match lhs_degree.cmp(&rhs_degree) {
                     Ordering::Greater => (
@@ -447,18 +476,22 @@ impl<F: PrimeField> Expression<F> {
                 .into()
             },
             &|lhs, rhs| {
-                let HomogeneousExpression {
-                    expr: lhs,
-                    degree: lhs_degree,
-                } = lhs.homogeneous(ctx);
-                let HomogeneousExpression {
-                    expr: rhs,
-                    degree: rhs_degree,
-                } = rhs.homogeneous(ctx);
+                debug!("degrees in prod: [{}; {}]", lhs.degree, rhs.degree);
+                let (
+                    HomogeneousExpression {
+                        expr: lhs,
+                        degree: lhs_degree,
+                    },
+                    HomogeneousExpression {
+                        expr: rhs,
+                        degree: rhs_degree,
+                    },
+                ) = rayon::join(|| lhs.homogeneous(ctx), || rhs.homogeneous(ctx));
 
                 (lhs * rhs, lhs_degree + rhs_degree).into()
             },
             &|expr, constant| {
+                debug!("degrees in scaled: [{}]", expr.degree);
                 let HomogeneousExpression { expr, degree } = expr.homogeneous(ctx);
 
                 (Scaled(Box::new(expr), constant), degree).into()
