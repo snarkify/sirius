@@ -117,14 +117,17 @@ impl Calculation {
                 ValueSource::Poly { index, rotation } => {
                     Ok(eval_getter.eval_column_var(rotations[*rotation], *index)?)
                 }
-                ValueSource::Challenge { index } => eval_getter
-                    .get_challenges()
-                    .as_ref()
-                    .get(*index)
-                    .cloned()
-                    .ok_or(EvalError::ChallengeIndexOutOfBoundary {
-                        challenge_index: *index,
-                    }),
+                ValueSource::Challenge { index } => {
+                    let challenges = eval_getter.get_challenges().as_ref();
+
+                    challenges
+                        .get(*index)
+                        .cloned()
+                        .ok_or(EvalError::ChallengeIndexOutOfBoundary {
+                            challenge_index: *index,
+                            challeges_len: challenges.len(),
+                        })
+                }
             }
         };
 

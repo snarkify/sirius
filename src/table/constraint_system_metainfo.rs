@@ -49,14 +49,15 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
 
         #[allow(clippy::if_same_then_else)]
         let num_challenges: usize = if has_vector_lookup {
-            2
+            2 // 3
         } else if num_lookups > 0 {
-            1
+            1 // 2
         } else if num_gates > 1 {
-            0
+            0 // 1
         } else {
             0
         };
+        // r3 - for compressed
 
         // we have at most 3 prover rounds
         let nrow = 1 << k_table_size;
@@ -95,7 +96,7 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
         );
 
         ConstraintSystemMetainfo {
-            num_challenges,
+            num_challenges: custom_gates_lookup_compressed.compressed().num_challenges(),
             round_sizes,
             custom_gates_lookup_compressed,
         }

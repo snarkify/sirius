@@ -8,7 +8,10 @@ use std::collections::HashMap;
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
     #[error("challenge index out of boundary: {challenge_index}")]
-    ChallengeIndexOutOfBoundary { challenge_index: usize },
+    ChallengeIndexOutOfBoundary {
+        challenge_index: usize,
+        challeges_len: usize,
+    },
     #[error("column variable index out of boundary: {column_index}")]
     ColumnVariableIndexOutOfBoundary { column_index: usize },
     #[error("column variable row index out of boundary: {row_index}")]
@@ -71,11 +74,14 @@ pub trait GetDataForEval<F: PrimeField> {
     }
 
     fn eval_challenge(&self, index: usize) -> Result<F, Error> {
-        self.get_challenges().as_ref().get(index).copied().ok_or(
-            Error::ChallengeIndexOutOfBoundary {
+        let challenges = self.get_challenges().as_ref();
+        challenges
+            .get(index)
+            .copied()
+            .ok_or(Error::ChallengeIndexOutOfBoundary {
                 challenge_index: index,
-            },
-        )
+                challeges_len: challenges.len(),
+            })
     }
 }
 

@@ -186,11 +186,10 @@ impl<F: PrimeField> PlonkWitness<F> {
         }
     }
 
-    pub fn to_relax(&self, k: usize) -> RelaxedPlonkWitness<F> {
-        let E = vec![F::ZERO; 1 << k];
+    pub fn to_relax(&self, k_table_size: usize) -> RelaxedPlonkWitness<F> {
         RelaxedPlonkWitness {
             W: self.W.clone(),
-            E,
+            E: vec![F::ZERO; 1 << k_table_size].into_boxed_slice(),
         }
     }
 }
@@ -210,7 +209,7 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
 pub struct RelaxedPlonkWitness<F: PrimeField> {
     /// each vector element in W is a vector folded from an old [`RelaxedPlonkWitness.W`] and [`PlonkWitness.W`]
     pub(crate) W: Vec<Vec<F>>,
-    pub(crate) E: Vec<F>,
+    pub(crate) E: Box<[F]>,
 }
 
 // TODO #31 docs
@@ -489,6 +488,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         ro_nark: &mut RO,
         num_challenges: usize,
     ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+        debug!("run sps protocol with {num_challenges} challenges");
         match num_challenges {
             0 => self.run_sps_protocol_0(instance, advice, ck),
             1 => self.run_sps_protocol_1(instance, advice, ck, ro_nark),
@@ -791,18 +791,16 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
     /// in special soundness protocol.
     /// In current version, we have either one round (without lookup)
     /// or two rounds (with lookup)
-    pub fn new(k: usize, round_sizes: &[usize]) -> Self {
-        let mut W = Vec::new();
-        let mut E = Vec::new();
-        for sz in round_sizes.iter() {
-            let tmp = vec![F::ZERO; *sz];
-            W.push(tmp);
+    pub fn new(k_table_size: usize, round_sizes: &[usize]) -> Self {
+        Self {
+            W: round_sizes.iter().map(|sz| vec![F::ZERO; *sz]).collect(),
+            E: iter::repeat(F::ZERO).take(1 << k_table_size).collect(),
         }
-        E.resize(1 << k, F::ZERO);
-        Self { W, E }
     }
 
+    #[instrument(name = "relaxed::fold", skip_all)]
     pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &[Box<[F]>], r: &F) -> Self {
+        debug!("start W: {} len", self.W.len());
         let W = self
             .W
             .iter()
@@ -815,6 +813,16 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
             })
             .collect::<Vec<_>>();
 
+        debug!(
+            "start E {} len & cross term {} len",
+            self.E.len(),
+            cross_terms.len()
+        );
+
+        // r^1, r^2, ...
+        let powers_or_r = iter::successors(Some(*r), |el| Some(*el * r))
+            .take(cross_terms.len())
+            .collect::<Box<[_]>>();
         let E = self
             .E
             .par_iter()
@@ -822,10 +830,10 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
             .map(|(i, ei)| {
                 cross_terms
                     .iter()
-                    .zip(iter::successors(Some(*r), |el| Some(*el * r))) // r^1, r^2, ...
+                    .zip_eq(powers_or_r.iter().copied())
                     .fold(*ei, |acc, (tk, power_of_r)| acc + power_of_r * tk[i])
             })
-            .collect::<Vec<_>>();
+            .collect();
 
         RelaxedPlonkWitness { W, E }
     }

@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use ff::Field;
+use tracing::*;
 
 use super::*;
 use crate::commitment::CommitmentKey;
@@ -95,17 +96,26 @@ impl<C: CurveAffine> VanillaFS<C> {
             .custom_gates_lookup_compressed
             .grouped()
             .iter()
+            .enumerate()
             .skip(1)
-            .map(|optional_expr| match optional_expr {
+            .map(|(degree, optional_expr)| match optional_expr {
                 Some(expr) => {
+                    trace!("cross term for degree {degree}: {expr}");
                     let evaluator = GraphEvaluator::new(expr);
 
                     (0..row_size)
                         .into_par_iter()
-                        .map(|row_index| evaluator.evaluate(&data, row_index))
+                        .map(|row_index| {
+                            let evaluated = evaluator.evaluate(&data, row_index)?;
+                            trace!("row {row_index} evaluated: {evaluated:?}");
+                            Result::<_, Error>::Ok(evaluated)
+                        })
                         .collect::<Result<Box<[_]>, _>>()
                 }
-                None => Ok(vec![C::ScalarExt::ZERO; row_size].into_boxed_slice()),
+                None => {
+                    trace!("cross term for degree {degree}: empty");
+                    Ok(vec![C::ScalarExt::ZERO; row_size].into_boxed_slice())
+                }
             })
             .collect::<Result<CrossTerms<C>, _>>()?;
 
