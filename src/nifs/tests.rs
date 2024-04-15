@@ -1,14 +1,14 @@
 use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},
+    plonk::{self, Advice, Circuit, Column, ConstraintSystem, Instance, Selector},
     poly::Rotation,
 };
 use halo2curves::bn256::{Fr, G1Affine};
 use halo2curves::group::ff::FromUniformBytes;
 use std::marker::PhantomData;
 
-use crate::nifs::{vanilla::VanillaFS, Error as NIFSError};
+use crate::nifs::{vanilla::VanillaFS, self};
 use crate::plonk::{
     PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness,
 };
@@ -16,6 +16,14 @@ use crate::table::CircuitRunner;
 use crate::util::create_ro;
 
 use super::*;
+
+#[derive(thiserror::Error, Debug)]
+enum Error {
+    #[error(transparent)]
+    Nifs(#[from] nifs::Error),
+    #[error(transparent)]
+    Plonk(#[from] plonk::Error),
+}
 
 fn prepare_trace<C, F1, F2, CT>(
     K: u32,
@@ -31,7 +39,7 @@ fn prepare_trace<C, F1, F2, CT>(
         PlonkTrace<C>,
         PlonkTrace<C>,
     ),
-    NIFSError,
+    Error,
 >
 where
     C: CurveAffine<ScalarExt = F1, Base = F2>,
@@ -107,7 +115,7 @@ fn fold_instances<C, F1, F2>(
     pair1: &PlonkTrace<C>,
     pair2: &PlonkTrace<C>,
     pp_digest: C,
-) -> Result<(), NIFSError>
+) -> Result<(), Error>
 where
     C: CurveAffine<ScalarExt = F1, Base = F2>,
     F1: PrimeField,
@@ -145,8 +153,7 @@ where
         &f_U,
         &pair1.u,
         &cross_term_commits,
-    )
-    .unwrap();
+    )?;
     assert_eq!(U_from_prove, U_from_verify);
 
     f_U = U_from_verify;
@@ -178,8 +185,7 @@ where
         &f_U,
         &pair2.u,
         &cross_term_commits,
-    )
-    .unwrap();
+    )?;
     assert_eq!(U_from_prove, U_from_verify);
 
     f_U = U_from_verify;
@@ -248,7 +254,7 @@ mod zero_round_test {
             &self,
             config: Self::Config,
             mut layouter: impl Layouter<F>,
-        ) -> Result<(), Error> {
+        ) -> Result<(), plonk::Error> {
             let pchip = MainGate::new(config.pconfig);
             let output = layouter.assign_region(
                 || "test",
@@ -264,7 +270,7 @@ mod zero_round_test {
 
     #[traced_test]
     #[test]
-    fn test_nifs() -> Result<(), NIFSError> {
+    fn test_nifs() -> Result<(), Error> {
         const K: u32 = 4;
         let inputs1 = (1..10).map(Fr::from).collect();
         let inputs2 = (2..11).map(Fr::from).collect();
@@ -357,7 +363,7 @@ mod one_round_test {
             a: F,
             b: F,
             nrows: usize,
-        ) -> Result<(Number<F>, Number<F>), Error> {
+        ) -> Result<(Number<F>, Number<F>), plonk::Error> {
             layouter.assign_region(
                 || "entire block",
                 |mut region| {
@@ -394,7 +400,7 @@ mod one_round_test {
             mut layouter: impl Layouter<F>,
             num: Number<F>,
             row: usize,
-        ) -> Result<(), Error> {
+        ) -> Result<(), plonk::Error> {
             layouter.constrain_instance(num.0.cell(), self.config.instance, row)
         }
     }
@@ -425,7 +431,7 @@ mod one_round_test {
             &self,
             config: Self::Config,
             mut layouter: impl Layouter<F>,
-        ) -> Result<(), Error> {
+        ) -> Result<(), plonk::Error> {
             let chip = FiboChip::construct(config);
             let nrows = (self.num + 1) / 2;
             let (_, b) = chip.load(layouter.namespace(|| "block"), self.a, self.b, nrows)?;
@@ -446,7 +452,7 @@ mod one_round_test {
 
     #[traced_test]
     #[test]
-    fn test_nifs() -> Result<(), NIFSError> {
+    fn test_nifs() -> Result<(), Error> {
         const K: u32 = 4;
         const SIZE: usize = 16;
         // circuit 1
@@ -585,7 +591,7 @@ mod three_rounds_test {
             a: F,
             b: F,
             c: F,
-        ) -> Result<(Number<F>, Number<F>, Number<F>), Error> {
+        ) -> Result<(Number<F>, Number<F>, Number<F>), plonk::Error> {
             let config = self.config();
 
             layouter.assign_region(
@@ -613,7 +619,7 @@ mod three_rounds_test {
             mut layouter: impl Layouter<F>,
             a: &Number<F>,
             b: &Number<F>,
-        ) -> Result<Number<F>, Error> {
+        ) -> Result<Number<F>, plonk::Error> {
             let config = self.config();
             layouter.assign_region(
                 || "add",
@@ -637,7 +643,7 @@ mod three_rounds_test {
             mut layouter: impl Layouter<F>,
             a: &Number<F>,
             b: &Number<F>,
-        ) -> Result<Number<F>, Error> {
+        ) -> Result<Number<F>, plonk::Error> {
             let config = self.config();
             layouter.assign_region(
                 || "xor",
@@ -662,7 +668,7 @@ mod three_rounds_test {
             )
         }
 
-        fn load_table(&self, mut layouter: impl Layouter<F>) -> Result<(), Error> {
+        fn load_table(&self, mut layouter: impl Layouter<F>) -> Result<(), plonk::Error> {
             layouter.assign_table(
                 || "xor",
                 |mut table| {
@@ -726,7 +732,7 @@ mod three_rounds_test {
             &self,
             config: Self::Config,
             mut layouter: impl Layouter<F>,
-        ) -> Result<(), Error> {
+        ) -> Result<(), plonk::Error> {
             let chip = FiboChip::construct(config);
             let (mut a, mut b, mut c) =
                 chip.load_private(layouter.namespace(|| "first row"), self.a, self.b, self.c)?;
@@ -755,7 +761,7 @@ mod three_rounds_test {
 
     #[traced_test]
     #[test]
-    fn test_nifs() -> Result<(), NIFSError> {
+    fn test_nifs() -> Result<(), Error> {
         const K: u32 = 5;
         let num = 7;
 
