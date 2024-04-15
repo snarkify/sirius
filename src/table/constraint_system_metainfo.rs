@@ -4,7 +4,7 @@ use halo2_proofs::plonk::ConstraintSystem;
 use crate::{
     concat_vec,
     plonk::{self, CompressedCustomGatesLookupView},
-    polynomial::Expression,
+    polynomial::{expression::QueryIndexContext, Expression},
 };
 
 pub(crate) struct ConstraintSystemMetainfo<F: PrimeField> {
@@ -87,13 +87,15 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
 
         // we use r3 to combine all custom gates and lookup expressions
         // find the challenge index of r3
-        let custom_gates_lookup_compressed = CompressedCustomGatesLookupView::new(
-            &exprs,
-            cs.num_selectors(),
-            cs.num_fixed_columns(),
-            cs.num_advice_columns(),
+        let mut ctx = QueryIndexContext {
+            num_selectors: cs.num_selectors(),
+            num_fixed: cs.num_fixed_columns(),
+            num_advice: cs.num_advice_columns(),
             num_challenges,
-        );
+            num_lookups,
+        };
+
+        let custom_gates_lookup_compressed = CompressedCustomGatesLookupView::new(&exprs, &mut ctx);
 
         ConstraintSystemMetainfo {
             num_challenges: custom_gates_lookup_compressed.compressed().num_challenges(),

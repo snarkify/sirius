@@ -38,6 +38,29 @@ impl Ord for ColumnIndex {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Default)]
+pub struct QueryIndexContext {
+    pub num_selectors: usize,
+    pub num_fixed: usize,
+    pub num_advice: usize,
+    pub num_challenges: usize,
+    pub num_lookups: usize,
+}
+
+impl QueryIndexContext {
+    pub fn num_fold_vars(self) -> usize {
+        self.num_advice + self.num_lookups * 5
+    }
+
+    pub fn advice_shift(self, advice_poly_index: usize) -> usize {
+        advice_poly_index + self.num_fold_vars()
+    }
+
+    pub fn lookup_shift(self, lookup_poly_index: usize) -> usize {
+        lookup_poly_index + self.num_fold_vars()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Query {
     pub index: usize,
@@ -45,9 +68,28 @@ pub struct Query {
     pub rotation: Rotation,
 }
 
+pub enum QueryType {
+    Selector,
+    Fixed,
+    Advice,
+    Lookup,
+}
+
 impl Query {
-    pub fn is_advice(&self, num_selectors: usize, num_fixed: usize) -> bool {
-        self.index >= num_selectors + num_fixed
+    pub fn subtype(&self, ctx: &QueryIndexContext) -> QueryType {
+        if self.index < ctx.num_selectors {
+            return QueryType::Selector;
+        } else if self.index < ctx.num_selectors + ctx.num_fixed {
+            QueryType::Fixed
+        } else if self.index < ctx.num_selectors + ctx.num_fixed + ctx.num_advice {
+            QueryType::Advice
+        } else if self.index
+            < ctx.num_selectors + ctx.num_fixed + ctx.num_advice + (5 * ctx.num_lookups)
+        {
+            QueryType::Lookup
+        } else {
+            unreachable!("unknown index {} in {ctx:?}", self.index)
+        }
     }
 }
 
@@ -340,14 +382,9 @@ impl<F: PrimeField> Expression<F> {
     /// ```math
     /// $$a\cdot b+c\rightarrow a\cdot b+c\cdot u$$
     ///```
-    pub fn homogeneous(
-        &self,
-        num_selector: usize,
-        num_fixed: usize,
-        num_challenges: usize,
-    ) -> HomogeneousExpression<F> {
+    pub fn homogeneous(&self, ctx: &QueryIndexContext) -> HomogeneousExpression<F> {
         use Expression::*;
-        let new_challenge_index = num_challenges;
+        let new_challenge_index = ctx.num_challenges;
 
         fn multiply_by_challenge<F: PrimeField>(
             expr: Expression<F>,
@@ -369,29 +406,27 @@ impl<F: PrimeField> Expression<F> {
             &|polynomial: Query| {
                 (
                     Polynomial(polynomial),
-                    if polynomial.is_advice(num_selector, num_fixed) {
-                        1
-                    } else {
-                        0
+                    match polynomial.subtype(ctx) {
+                        QueryType::Advice | QueryType::Lookup => 1,
+                        _other => 0,
                     },
                 )
                     .into()
             },
             &|challenge| (Challenge(challenge), 1).into(),
             &|expr| {
-                let HomogeneousExpression { expr, degree } =
-                    expr.homogeneous(num_selector, num_fixed, num_challenges);
+                let HomogeneousExpression { expr, degree } = expr.homogeneous(ctx);
                 (-expr, degree).into()
             },
             &|lhs, rhs| {
                 let HomogeneousExpression {
                     expr: lhs,
                     degree: lhs_degree,
-                } = lhs.homogeneous(num_selector, num_fixed, num_challenges);
+                } = lhs.homogeneous(ctx);
                 let HomogeneousExpression {
                     expr: rhs,
                     degree: rhs_degree,
-                } = rhs.homogeneous(num_selector, num_fixed, num_challenges);
+                } = rhs.homogeneous(ctx);
 
                 match lhs_degree.cmp(&rhs_degree) {
                     Ordering::Greater => (
@@ -415,17 +450,16 @@ impl<F: PrimeField> Expression<F> {
                 let HomogeneousExpression {
                     expr: lhs,
                     degree: lhs_degree,
-                } = lhs.homogeneous(num_selector, num_fixed, num_challenges);
+                } = lhs.homogeneous(ctx);
                 let HomogeneousExpression {
                     expr: rhs,
                     degree: rhs_degree,
-                } = rhs.homogeneous(num_selector, num_fixed, num_challenges);
+                } = rhs.homogeneous(ctx);
 
                 (lhs * rhs, lhs_degree + rhs_degree).into()
             },
             &|expr, constant| {
-                let HomogeneousExpression { expr, degree } =
-                    expr.homogeneous(num_selector, num_fixed, num_challenges);
+                let HomogeneousExpression { expr, degree } = expr.homogeneous(ctx);
 
                 (Scaled(Box::new(expr), constant), degree).into()
             },
@@ -555,7 +589,15 @@ mod tests {
         let expr3 = expr1.clone() + expr2.clone();
         debug!("from {expr3}");
         assert_eq!(
-            format!("{}", expr3.homogeneous(0, 0, 0).expr),
+            format!(
+                "{}",
+                expr3
+                    .homogeneous(&QueryIndexContext {
+                        num_advice: 2,
+                        ..Default::default()
+                    })
+                    .expr
+            ),
             "((r_0 * (Z_0 + (r_0 * 0x1))) + (Z_0 * Z_1))"
         );
     }
@@ -577,7 +619,12 @@ mod tests {
 
         debug!("from {expr}");
 
-        let homogeneous = expr.homogeneous(0, 0, 0).expr;
+        let homogeneous = expr
+            .homogeneous(&QueryIndexContext {
+                num_advice: 5,
+                ..Default::default()
+            })
+            .expr;
 
         assert_eq!(
             format!("{}", homogeneous),

@@ -4,9 +4,9 @@ use ff::PrimeField;
 use itertools::*;
 use serde::Serialize;
 
-use crate::polynomial::Query;
+use crate::polynomial::{Query, QueryType};
 
-use super::Expression;
+use super::{expression::QueryIndexContext, Expression};
 
 /// Polynome grouped by degrees
 ///
@@ -68,33 +68,28 @@ impl<F: PrimeField> GroupedPoly<F> {
     ///     a2*d1 + a2*e1 + b2*d1 + b2*e1 + c2*d1 + c2*e1 + a1*d2 + a1*e2 + b1*d2 + b1*e2 + c1*d2 + c1*e2 * k^1 +
     ///     a2*d2 + a2*e2 + b2*d2 + b2*e2 + c2*d2 + c2*e2       * k^2
     /// ```
-    pub fn new(
-        expr: &Expression<F>,
-        num_selectors: usize,
-        num_fixed: usize,
-        num_of_poly: usize,
-        num_challenges: usize,
-    ) -> Self {
+    pub fn new(expr: &Expression<F>, ctx: &QueryIndexContext) -> Self {
         expr.evaluate(
             &|constant| GroupedPoly {
                 terms: vec![Some(Expression::Constant(constant))],
             },
             &|poly| {
-                let mut result = GroupedPoly {
-                    terms: vec![Some(Expression::Polynomial(poly))],
-                };
+                let mut terms = vec![Some(Expression::Polynomial(poly))];
 
-                if poly.is_advice(num_selectors, num_fixed) {
-                    result.terms.push(Some(Expression::Polynomial(Query {
-                        index: poly.index + num_of_poly,
-                        rotation: poly.rotation,
-                    })));
+                match poly.subtype(ctx) {
+                    QueryType::Lookup | QueryType::Advice => {
+                        terms.push(Some(Expression::Polynomial(Query {
+                            index: poly.index + ctx.num_fold_vars(),
+                            rotation: poly.rotation,
+                        })))
+                    }
+                    _other => (),
                 }
 
-                result
+                GroupedPoly { terms }
             },
             &|challenge_index| {
-                let y = Expression::Challenge(challenge_index + num_challenges);
+                let y = Expression::Challenge(challenge_index + ctx.num_challenges);
 
                 GroupedPoly {
                     terms: vec![Some(Expression::Challenge(challenge_index)), Some(y)],
@@ -396,10 +391,10 @@ mod test {
 
         let grouped_poly = GroupedPoly::new(
             &Expression::Product(sum(&[a, b, c]), sum(&[d, e])),
-            0,
-            0,
-            5,
-            0,
+            &QueryIndexContext {
+                num_advice: 5,
+                ..Default::default()
+            },
         );
 
         let actual = grouped_poly

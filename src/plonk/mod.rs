@@ -35,7 +35,7 @@ use crate::{
         eval::{Error as EvalError, Eval, PlonkEvalDomain},
     },
     polynomial::{
-        expression::HomogeneousExpression,
+        expression::{HomogeneousExpression, QueryIndexContext},
         grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
         Expression,
@@ -79,31 +79,19 @@ pub struct CompressedCustomGatesLookupView<F: PrimeField> {
 }
 
 impl<F: PrimeField> CompressedCustomGatesLookupView<F> {
-    pub fn new(
-        original_expressions: &[Expression<F>],
-        num_selectors: usize,
-        num_fixed: usize,
-        num_of_poly: usize,
-        num_challenges: usize,
-    ) -> Self {
-        debug!("input num_challenges: {num_challenges}"); // = 2
-        let compressed = plonk::util::compress_expression(original_expressions, num_challenges);
-        let num_challenges = compressed.num_challenges();
-        debug!("after compressing num_challenges: {num_challenges}"); // = 3
+    pub fn new(original_expressions: &[Expression<F>], ctx: &mut QueryIndexContext) -> Self {
+        debug!("input num_challenges: {}", ctx.num_challenges); // = 2
+        let compressed = plonk::util::compress_expression(original_expressions, ctx.num_challenges);
+        ctx.num_challenges = compressed.num_challenges();
+        debug!("after compressing num_challenges: {}", ctx.num_challenges); // = 3
 
-        let homogeneous = compressed.homogeneous(num_selectors, num_fixed, num_challenges);
-        let num_challenges = homogeneous.num_challenges();
-        debug!("after homogeneous num_challenges: {num_challenges}"); // = 4
+        let homogeneous = compressed.homogeneous(ctx);
+        ctx.num_challenges = homogeneous.num_challenges();
+        debug!("after homogeneous num_challenges: {}", ctx.num_challenges); // = 4
 
         Self {
             compressed,
-            grouped: GroupedPoly::new(
-                &homogeneous,
-                num_selectors,
-                num_fixed,
-                num_of_poly,
-                num_challenges,
-            ),
+            grouped: GroupedPoly::new(&homogeneous, ctx),
             homogeneous,
         }
     }
