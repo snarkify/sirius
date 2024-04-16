@@ -267,22 +267,42 @@ impl<F: PrimeField> Expression<F> {
     }
 
     fn visualize(&self) -> String {
-        self.evaluate(
-            &|c| trim_leading_zeros(format!("{:?}", c)),
-            &|poly| {
+        match self {
+            Expression::Constant(c) => trim_leading_zeros(format!("{:?}", c)),
+            Expression::Polynomial(poly) => {
                 let rotation = match poly.rotation.0.cmp(&0) {
                     Ordering::Equal => "".to_owned(),
                     Ordering::Less => format!("[{}]", poly.rotation.0),
                     Ordering::Greater => format!("[+{}]", poly.rotation.0),
                 };
                 format!("Z_{}{}", poly.index, rotation)
-            },
-            &|index| format!("r_{}", index),
-            &|a| format!("(-{})", a),
-            &|a, b| format!("({} + {})", a, b),
-            &|a, b| format!("({} * {})", a, b),
-            &|a, k| format!("{:?} * {}", trim_leading_zeros(format!("{:?}", k)), a),
-        )
+            }
+            Expression::Challenge(index) => format!("r_{}", index),
+            Expression::Negated(a) => format!("-{}", a),
+            Expression::Sum(lhs, rhs) => {
+                if let Expression::Negated(b) = &**rhs {
+                    format!("{} - {}", lhs, b)
+                } else {
+                    format!("{} + {}", lhs, rhs)
+                }
+            }
+            Expression::Product(lhs, rhs) => {
+                let left = if let Expression::Sum(_, _) = &**lhs {
+                    format!("({})", lhs.visualize())
+                } else {
+                    lhs.visualize()
+                };
+                let right = if let Expression::Sum(_, _) = &**rhs {
+                    format!("({})", rhs.visualize())
+                } else {
+                    rhs.visualize()
+                };
+                format!("{} * {}", left, right)
+            }
+            Expression::Scaled(a, k) => {
+                format!("{:?} * {}", trim_leading_zeros(format!("{:?}", k)), a)
+            }
+        }
     }
 
     pub fn from_halo2_expr(expr: &PE<F>, num_selector: usize, num_fixed: usize) -> Self {
@@ -551,11 +571,11 @@ mod tests {
             rotation: Rotation(0),
         });
 
-        let expr3 = expr1.clone() + expr2.clone();
+        let expr3 = expr1.clone() - expr2.clone();
         debug!("from {expr3}");
         assert_eq!(
             format!("{}", expr3.homogeneous(0, 0, 0).expr),
-            "((r_0 * (Z_0 + (r_0 * 0x1))) + (Z_0 * Z_1))"
+            "r_0 * (Z_0 + r_0 * 0x1) - Z_0 * Z_1"
         );
     }
 
@@ -580,7 +600,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", homogeneous),
-            "((r_0 * (r_0 * ((r_0 * ((r_0 * Z_0) + (Z_0 * Z_1))) + ((Z_0 * Z_1) * Z_2)))) + ((((Z_0 * Z_1) * Z_2) * Z_3) * Z_4))"
+            "r_0 * r_0 * (r_0 * (r_0 * Z_0 + Z_0 * Z_1) + Z_0 * Z_1 * Z_2) + Z_0 * Z_1 * Z_2 * Z_3 * Z_4"
         );
     }
 }
