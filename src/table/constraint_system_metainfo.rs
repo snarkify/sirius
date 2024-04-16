@@ -51,12 +51,16 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
 
         #[allow(clippy::if_same_then_else)]
         let num_challenges: usize = if has_vector_lookup {
+            debug!("has vector lookup, challenges will be 3, now 2");
             2 // 3
         } else if num_lookups > 0 {
+            debug!("num_lookups not zero, challenges will be 2, now 1");
             1 // 2
         } else if num_gates > 1 {
+            debug!("num gates > 1, challenges will be 1, now 0");
             0 // 1
         } else {
+            debug!("challenges will be zero");
             0
         };
         // r3 - for compressed

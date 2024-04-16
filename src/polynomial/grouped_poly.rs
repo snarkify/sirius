@@ -1,8 +1,13 @@
-use std::ops::{Add, Mul, Neg, Sub};
+use std::{
+    cmp::{self, Ordering},
+    ops::{Add, Mul, Neg, Sub},
+    time::Instant,
+};
 
 use ff::PrimeField;
 use itertools::*;
 use serde::Serialize;
+use tracing::*;
 
 use crate::polynomial::{Query, QueryType};
 
@@ -69,12 +74,13 @@ impl<F: PrimeField> GroupedPoly<F> {
     ///     a2*d2 + a2*e2 + b2*d2 + b2*e2 + c2*d2 + c2*e2       * k^2
     /// ```
     pub fn new(expr: &Expression<F>, ctx: &QueryIndexContext) -> Self {
-        expr.evaluate(
-            &|constant| GroupedPoly {
-                terms: vec![Some(Expression::Constant(constant))],
+        use Expression::*;
+        match expr {
+            Constant(constant) => GroupedPoly {
+                terms: vec![Some(Expression::Constant(*constant))],
             },
-            &|poly| {
-                let mut terms = vec![Some(Expression::Polynomial(poly))];
+            Polynomial(poly) => {
+                let mut terms = vec![Some(Expression::Polynomial(*poly))];
 
                 match poly.subtype(ctx) {
                     QueryType::Lookup | QueryType::Advice => {
@@ -87,19 +93,26 @@ impl<F: PrimeField> GroupedPoly<F> {
                 }
 
                 GroupedPoly { terms }
+            }
+            Challenge(challenge_index) => GroupedPoly {
+                terms: vec![
+                    Some(Expression::Challenge(*challenge_index)),
+                    Some(Expression::Challenge(challenge_index + ctx.num_challenges)),
+                ],
             },
-            &|challenge_index| {
-                let y = Expression::Challenge(challenge_index + ctx.num_challenges);
+            Negated(a) => GroupedPoly::new(a, ctx).neg(),
+            Sum(a, b) => {
+                let (a, b) = rayon::join(|| GroupedPoly::new(a, ctx), || GroupedPoly::new(b, ctx));
 
-                GroupedPoly {
-                    terms: vec![Some(Expression::Challenge(challenge_index)), Some(y)],
-                }
-            },
-            &|a| -a,
-            &|a, b| a + b,
-            &|a, b| a * b,
-            &|a, k| a * k,
-        )
+                a + b
+            }
+            Product(a, b) => {
+                let (a, b) = rayon::join(|| GroupedPoly::new(a, ctx), || GroupedPoly::new(b, ctx));
+
+                a * b
+            }
+            Scaled(a, k) => GroupedPoly::new(a, ctx) * k,
+        }
     }
 
     fn iter_with_degree(&self) -> impl Iterator<Item = (usize, &Expression<F>)> {
@@ -156,17 +169,17 @@ macro_rules! impl_poly_ops {
 impl_poly_ops!(Add, add, Sum, std::convert::identity);
 impl_poly_ops!(Sub, sub, Sum, std::ops::Neg::neg);
 
-impl<F: PrimeField> Mul<F> for GroupedPoly<F> {
+impl<F: PrimeField> Mul<&F> for GroupedPoly<F> {
     type Output = Self;
 
-    fn mul(self, rhs: F) -> Self::Output {
+    fn mul(self, rhs: &F) -> Self::Output {
         Self {
             terms: self
                 .terms
                 .into_iter()
                 .map(|expr| {
                     expr.map(|expr| {
-                        Expression::Product(Box::new(Expression::Constant(rhs)), Box::new(expr))
+                        Expression::Product(Box::new(Expression::Constant(*rhs)), Box::new(expr))
                     })
                 })
                 .collect(),
@@ -179,19 +192,26 @@ impl<F: PrimeField> Mul for GroupedPoly<F> {
     fn mul(self, rhs: GroupedPoly<F>) -> Self::Output {
         let mut res = GroupedPoly::default();
 
-        for (lhs_degree, lhs_expr) in self
+        let (lhs, rhs) = match self.terms.len().cmp(&rhs.terms.len()) {
+            Ordering::Equal | Ordering::Less => (self, rhs),
+            Ordering::Greater => (rhs, self),
+        };
+        let max_term = cmp::max(lhs.terms.len(), rhs.terms.len());
+
+        let timer = Instant::now();
+        let rhs_terms = rhs
+            .terms
+            .into_iter()
+            .enumerate()
+            .filter_map(|(degree, expr)| Some((degree, expr?)));
+
+        for (lhs_degree, lhs_expr) in lhs
             .terms
             .into_iter()
             .enumerate()
             .filter_map(|(degree, expr)| Some((degree, expr?)))
         {
-            for (rhs_degree, rhs_expr) in rhs
-                .terms
-                .clone()
-                .into_iter()
-                .enumerate()
-                .filter_map(|(degree, expr)| Some((degree, expr?)))
-            {
+            for (rhs_degree, rhs_expr) in rhs_terms.clone() {
                 let degree = lhs_degree + rhs_degree;
                 let expr = lhs_expr.clone() * rhs_expr.clone();
 
@@ -206,13 +226,19 @@ impl<F: PrimeField> Mul for GroupedPoly<F> {
 
                 match entry.take() {
                     Some(current) => {
-                        *entry = Some(Expression::Sum(Box::new(current), Box::new(expr)));
+                        *entry = Some(current + expr);
                     }
                     None => {
                         *entry = Some(expr);
                     }
                 }
             }
+        }
+        let elapsed = timer.elapsed();
+        if elapsed.as_secs().ne(&0) {
+            trace!("multiplied in {} secs for {max_term}", elapsed.as_secs());
+        } else {
+            trace!("multiplied in {} ns for {max_term}", elapsed.as_nanos());
         }
         res
     }
