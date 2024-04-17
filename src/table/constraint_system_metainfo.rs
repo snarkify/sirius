@@ -40,6 +40,14 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
                 )
             })
             .unwrap_or((0, false, vec![]));
+        debug!(
+            "num lookups: {num_lookups} & {}",
+            if has_vector_lookup {
+                "with vector lookup"
+            } else {
+                "without vector lookup"
+            }
+        );
 
         let exprs = cs
             .gates()
@@ -98,9 +106,7 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
         let folding_degree = poly.degree_for_folding(cs.num_fixed_columns() + cs.num_selectors());
 
         ConstraintSystemMetainfo {
-            num_challenges: custom_gates_lookup_compressed
-                .homogeneous()
-                .num_challenges(),
+            num_challenges: custom_gates_lookup_compressed.compressed().num_challenges(),
             round_sizes,
             folding_degree,
             poly,
