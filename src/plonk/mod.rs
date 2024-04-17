@@ -71,25 +71,28 @@ pub enum Error {
     },
 }
 
+/// This structure is a representation of a compressed set of custom gates & lookup
 #[derive(Clone, PartialEq, Serialize, Default)]
-pub struct CompressedCustomGatesLookupView<F: PrimeField> {
+pub(crate) struct CompressedGates<F: PrimeField> {
+    /// The original custom gates & lookup expressions grouped using random linear combination
     compressed: Expression<F>,
+    /// A homogeneous version of the `compressed` expression, achieved by adding another challenge
+    /// if necessary
     homogeneous: HomogeneousExpression<F>,
+    /// A degree-grouped version of the `homogeneous` expression, adds another expression, but
+    /// implicitly
     grouped: GroupedPoly<F>,
 }
 
-impl<F: PrimeField> CompressedCustomGatesLookupView<F> {
+impl<F: PrimeField> CompressedGates<F> {
     pub fn new(
         original_expressions: &[Expression<F>],
         num_selectors: usize,
         num_fixed: usize,
-        num_of_poly: usize,
+        num_of_fold_vars: usize,
         num_challenges: usize,
     ) -> Self {
-        let compressed = plonk::util::compress_expression(
-            original_expressions,
-            num_challenges.saturating_sub(1),
-        );
+        let compressed = plonk::util::compress_expression(original_expressions, num_challenges);
 
         let homogeneous =
             compressed.homogeneous(num_selectors, num_fixed, compressed.num_challenges());
@@ -102,7 +105,7 @@ impl<F: PrimeField> CompressedCustomGatesLookupView<F> {
                 &homogeneous,
                 num_selectors,
                 num_fixed,
-                num_of_poly,
+                num_of_fold_vars,
                 num_challenges,
             ),
             homogeneous,
@@ -145,7 +148,7 @@ pub struct PlonkStructure<F: PrimeField> {
     /// singla polynomial relation that combines custom gates and lookup relations
     pub(crate) poly: MultiPolynomial<F>,
 
-    pub(crate) custom_gates_lookup_compressed: CompressedCustomGatesLookupView<F>,
+    pub(crate) custom_gates_lookup_compressed: CompressedGates<F>,
 
     pub(crate) permutation_matrix: SparseMatrix<F>,
     pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
