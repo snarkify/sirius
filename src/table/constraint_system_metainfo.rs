@@ -3,8 +3,7 @@ use halo2_proofs::plonk::ConstraintSystem;
 use tracing::*;
 
 use crate::{
-    concat_vec,
-    plonk::{self, CompressedGates},
+    plonk::{lookup, CompressedGates},
     polynomial::{Expression, MultiPolynomial},
 };
 
@@ -26,20 +25,17 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
         let num_gates: usize = cs.gates().iter().map(|gate| gate.polynomials().len()).sum();
         info!("start build constraint system metainfo with {num_gates} custom gates");
 
-        let lookup_arguments = plonk::lookup::Arguments::compress_from(cs);
-        let (num_lookups, has_vector_lookup, lookup_exprs) = lookup_arguments
+        let (num_lookups, has_vector_lookup, lookup_exprs) = lookup::Arguments::compress_from(cs)
             .as_ref()
             .map(|arg| {
                 (
                     arg.lookup_polys.len(),
                     arg.has_vector_lookup,
-                    concat_vec!(
-                        &arg.vanishing_lookup_polys(cs),
-                        &arg.log_derivative_lhs_and_rhs(cs)
-                    ),
+                    arg.to_expressions(cs).collect(),
                 )
             })
             .unwrap_or((0, false, vec![]));
+
         debug!(
             "num lookups: {num_lookups} & {}",
             if has_vector_lookup {

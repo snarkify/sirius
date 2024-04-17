@@ -48,7 +48,6 @@ use serde::Serialize;
 use tracing::*;
 
 use crate::{
-    concat_vec,
     plonk::{
         eval::{Error, Eval, LookupEvalDomain},
         util::compress_halo2_expression,
@@ -124,6 +123,13 @@ impl<F: PrimeField> Arguments<F> {
         })
     }
 
+    /// TODO #159
+    pub fn to_expressions(&self, cs: &ConstraintSystem<F>) -> impl Iterator<Item = Expression<F>> {
+        self.vanishing_lookup_polys(cs)
+            .into_iter()
+            .chain(self.log_derivative_lhs_and_rhs(cs))
+    }
+
     /// L_i(x1,...,xa) - l_i which evaluates to zero on every row
     /// T_i(y1,...,yb) - t_i which evaluates to zero on every row
     pub fn vanishing_lookup_polys(&self, cs: &ConstraintSystem<F>) -> Vec<Expression<F>> {
@@ -145,16 +151,15 @@ impl<F: PrimeField> Arguments<F> {
             .lookup_polys
             .iter()
             .enumerate()
-            .map(|(i, L_i)| L_i.clone() - expression_of_l(i))
-            .collect::<Vec<_>>();
+            .map(|(i, L_i)| L_i.clone() - expression_of_l(i));
 
         let ts = self
             .table_polys
             .iter()
             .enumerate()
-            .map(|(i, T_i)| T_i.clone() - expression_of_t(i))
-            .collect::<Vec<_>>();
-        concat_vec!(&ls, &ts)
+            .map(|(i, T_i)| T_i.clone() - expression_of_t(i));
+
+        ls.chain(ts).collect()
     }
 
     pub fn num_lookups(&self) -> usize {
