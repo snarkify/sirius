@@ -72,7 +72,7 @@ impl<F: PrimeField> GroupedPoly<F> {
         expr: &Expression<F>,
         num_selectors: usize,
         num_fixed: usize,
-        num_of_poly: usize,
+        num_of_fold_vars: usize,
         num_challenges: usize,
     ) -> Self {
         expr.evaluate(
@@ -86,7 +86,7 @@ impl<F: PrimeField> GroupedPoly<F> {
 
                 if poly.is_advice(num_selectors, num_fixed) {
                     result.terms.push(Some(Expression::Polynomial(Query {
-                        index: poly.index + num_of_poly,
+                        index: poly.index + num_of_fold_vars,
                         rotation: poly.rotation,
                     })));
                 }
