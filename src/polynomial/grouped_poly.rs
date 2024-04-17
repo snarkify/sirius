@@ -75,7 +75,11 @@ impl<F: PrimeField> GroupedPoly<F> {
     /// ```
     pub fn new(expr: &Expression<F>, ctx: &QueryIndexContext) -> Self {
         use Expression::*;
-        match expr {
+
+        let timer = Instant::now();
+
+        trace!("start grouped {expr}");
+        let res = match expr {
             Constant(constant) => GroupedPoly {
                 terms: vec![Some(Expression::Constant(*constant))],
             },
@@ -112,7 +116,11 @@ impl<F: PrimeField> GroupedPoly<F> {
                 a * b
             }
             Scaled(a, k) => GroupedPoly::new(a, ctx) * k,
-        }
+        };
+
+        trace!("grouped {expr} in {} ns", timer.elapsed().as_nanos());
+
+        res
     }
 
     fn iter_with_degree(&self) -> impl Iterator<Item = (usize, &Expression<F>)> {

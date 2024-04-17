@@ -444,14 +444,14 @@ impl<F: PrimeField> Expression<F> {
                 match lhs_degree.cmp(&rhs_degree) {
                     Ordering::Greater => (
                         lhs + (rhs
-                            * challenge_degree(
+                            * challenge_in_degree(
                                 new_challenge_index,
                                 lhs_degree.checked_sub(rhs_degree).unwrap(),
                             )),
                         lhs_degree,
                     ),
                     Ordering::Less => (
-                        (lhs * challenge_degree(
+                        (lhs * challenge_in_degree(
                             new_challenge_index,
                             rhs_degree.checked_sub(lhs_degree).unwrap(),
                         )) + rhs,
@@ -534,7 +534,7 @@ impl_expression_ops!(Add, add, Sum, Expression<F>, std::convert::identity);
 impl_expression_ops!(Sub, sub, Sum, Expression<F>, Neg::neg);
 impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
 
-fn challenge_degree<F: PrimeField>(new_challenge_index: usize, degree: usize) -> Expression<F> {
+fn challenge_in_degree<F: PrimeField>(new_challenge_index: usize, degree: usize) -> Expression<F> {
     let challenge = Expression::Challenge(new_challenge_index);
     let mut result = challenge.clone();
 
@@ -544,6 +544,7 @@ fn challenge_degree<F: PrimeField>(new_challenge_index: usize, degree: usize) ->
 
     result
 }
+
 #[cfg(test)]
 mod tests {
     use std::array;
@@ -600,18 +601,15 @@ mod tests {
     fn test_homogeneous_simple() {
         use Expression::*;
 
-        let expr1 = Polynomial(Query {
-            index: 0,
-            rotation: Rotation(0),
-        }) + Constant(pallas::Base::from(1));
-
-        let expr2 = Polynomial(Query {
-            index: 0,
-            rotation: Rotation(0),
-        }) * Polynomial(Query {
-            index: 1,
-            rotation: Rotation(0),
+        let [a, b] = array::from_fn(|index| {
+            Expression::<pallas::Base>::Polynomial(Query {
+                index,
+                rotation: Rotation(0),
+            })
         });
+
+        let expr1 = a.clone() + Constant(pallas::Base::from(1));
+        let expr2 = a * b;
 
         let expr3 = expr1.clone() + expr2.clone();
         debug!("from {expr3}");
@@ -625,7 +623,7 @@ mod tests {
                     })
                     .expr
             ),
-            "((r_0 * (Z_0 + (r_0 * 0x1))) + (Z_0 * Z_1))"
+            "(((Z_0 + (0x1 * r_0)) * r_0) + (Z_0 * Z_1))"
         );
     }
 
@@ -655,7 +653,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", homogeneous),
-            "((r_0 * (r_0 * ((r_0 * ((r_0 * Z_0) + (Z_0 * Z_1))) + ((Z_0 * Z_1) * Z_2)))) + ((((Z_0 * Z_1) * Z_2) * Z_3) * Z_4))"
+            "((((((Z_0 * r_0) + (Z_0 * Z_1)) * r_0) + ((Z_0 * Z_1) * Z_2)) * (r_0 * r_0)) + ((((Z_0 * Z_1) * Z_2) * Z_3) * Z_4))"
         );
     }
 }
