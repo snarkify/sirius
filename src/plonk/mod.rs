@@ -92,6 +92,7 @@ impl<F: PrimeField> CompressedGates<F> {
         num_of_fold_vars: usize,
         num_challenges: usize,
     ) -> Self {
+        debug!("input num_challenges: {num_challenges}");
         let compressed = plonk::util::compress_expression(original_expressions, num_challenges);
 
         let homogeneous =
