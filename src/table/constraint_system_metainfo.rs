@@ -1,8 +1,9 @@
 use ff::PrimeField;
 use halo2_proofs::plonk::ConstraintSystem;
+use tracing::*;
 
 use crate::{
-    concat_vec, plonk,
+    plonk::{lookup, CompressedGates},
     polynomial::{Expression, MultiPolynomial},
 };
 
@@ -11,7 +12,7 @@ pub(crate) struct ConstraintSystemMetainfo<F: PrimeField> {
     pub round_sizes: Vec<usize>,
     pub folding_degree: usize,
     pub poly: MultiPolynomial<F>,
-    pub custom_gates_lookup_compressed: Expression<F>,
+    pub custom_gates_lookup_compressed: CompressedGates<F>,
 }
 
 impl<F: PrimeField> ConstraintSystemMetainfo<F> {
@@ -22,21 +23,27 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
         cs: &ConstraintSystem<F>,
     ) -> ConstraintSystemMetainfo<F> {
         let num_gates: usize = cs.gates().iter().map(|gate| gate.polynomials().len()).sum();
+        info!("start build constraint system metainfo with {num_gates} custom gates");
 
-        let lookup_arguments = plonk::lookup::Arguments::compress_from(cs);
-        let (num_lookups, has_vector_lookup, lookup_exprs) = lookup_arguments
+        let (num_lookups, has_vector_lookup, lookup_exprs) = lookup::Arguments::compress_from(cs)
             .as_ref()
             .map(|arg| {
                 (
                     arg.lookup_polys.len(),
                     arg.has_vector_lookup,
-                    concat_vec!(
-                        &arg.vanishing_lookup_polys(cs),
-                        &arg.log_derivative_lhs_and_rhs(cs)
-                    ),
+                    arg.to_expressions(cs).collect(),
                 )
             })
             .unwrap_or((0, false, vec![]));
+
+        debug!(
+            "num lookups: {num_lookups} & {}",
+            if has_vector_lookup {
+                "with vector lookup"
+            } else {
+                "without vector lookup"
+            }
+        );
 
         let exprs = cs
             .gates()
@@ -47,16 +54,6 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
             })
             .chain(lookup_exprs)
             .collect::<Vec<_>>();
-
-        let num_challenges = if has_vector_lookup {
-            3
-        } else if num_lookups > 0 {
-            2
-        } else if num_gates > 1 {
-            1
-        } else {
-            0
-        };
 
         // we have at most 3 prover rounds
         let nrow = 1 << k_table_size;
@@ -86,20 +83,26 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
 
         // we use r3 to combine all custom gates and lookup expressions
         // find the challenge index of r3
-        let challenge_index = if num_challenges > 0 {
-            num_challenges - 1
-        } else {
-            0
-        };
+        let custom_gates_lookup_compressed = CompressedGates::new(
+            &exprs,
+            cs.num_selectors(),
+            cs.num_fixed_columns(),
+            cs.num_advice_columns() + num_lookups * 5, // TODO #159
+            if has_vector_lookup {
+                2
+            } else if num_lookups > 0 {
+                1
+            } else {
+                0
+            },
+        );
 
-        let custom_gates_lookup_compressed =
-            plonk::util::compress_expression(&exprs, challenge_index);
-        let poly = custom_gates_lookup_compressed.expand();
+        let poly = custom_gates_lookup_compressed.compressed().expand();
 
         let folding_degree = poly.degree_for_folding(cs.num_fixed_columns() + cs.num_selectors());
 
         ConstraintSystemMetainfo {
-            num_challenges,
+            num_challenges: custom_gates_lookup_compressed.compressed().num_challenges(),
             round_sizes,
             folding_degree,
             poly,

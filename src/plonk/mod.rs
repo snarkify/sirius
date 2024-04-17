@@ -30,8 +30,13 @@ use crate::{
     commitment::CommitmentKey,
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
-    plonk::eval::{Error as EvalError, Eval, PlonkEvalDomain},
+    plonk::{
+        self,
+        eval::{Error as EvalError, Eval, PlonkEvalDomain},
+    },
     polynomial::{
+        expression::HomogeneousExpression,
+        grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
         Expression, MultiPolynomial,
     },
@@ -66,6 +71,60 @@ pub enum Error {
     },
 }
 
+/// This structure is a representation of a compressed set of custom gates & lookup
+#[derive(Clone, PartialEq, Serialize, Default)]
+pub(crate) struct CompressedGates<F: PrimeField> {
+    /// The original custom gates & lookup expressions grouped using random linear combination
+    compressed: Expression<F>,
+    /// A homogeneous version of the `compressed` expression, achieved by adding another challenge
+    /// if necessary
+    homogeneous: HomogeneousExpression<F>,
+    /// A degree-grouped version of the `homogeneous` expression, adds another expression, but
+    /// implicitly
+    grouped: GroupedPoly<F>,
+}
+
+impl<F: PrimeField> CompressedGates<F> {
+    pub fn new(
+        original_expressions: &[Expression<F>],
+        num_selectors: usize,
+        num_fixed: usize,
+        num_of_fold_vars: usize,
+        num_challenges: usize,
+    ) -> Self {
+        debug!("input num_challenges: {num_challenges}");
+        let compressed = plonk::util::compress_expression(original_expressions, num_challenges);
+
+        let homogeneous =
+            compressed.homogeneous(num_selectors, num_fixed, compressed.num_challenges());
+
+        let num_challenges = homogeneous.num_challenges();
+
+        Self {
+            compressed,
+            grouped: GroupedPoly::new(
+                &homogeneous,
+                num_selectors,
+                num_fixed,
+                num_of_fold_vars,
+                num_challenges,
+            ),
+            homogeneous,
+        }
+    }
+    pub fn compressed(&self) -> &Expression<F> {
+        &self.compressed
+    }
+
+    pub fn homogeneous(&self) -> &HomogeneousExpression<F> {
+        &self.homogeneous
+    }
+
+    pub fn grouped(&self) -> &GroupedPoly<F> {
+        &self.grouped
+    }
+}
+
 #[derive(Clone, PartialEq, Serialize, Default)]
 #[serde(bound(serialize = "
     F: Serialize
@@ -90,7 +149,7 @@ pub struct PlonkStructure<F: PrimeField> {
     /// singla polynomial relation that combines custom gates and lookup relations
     pub(crate) poly: MultiPolynomial<F>,
 
-    pub(crate) custom_gates_lookup_compressed: Expression<F>,
+    pub(crate) custom_gates_lookup_compressed: CompressedGates<F>,
 
     pub(crate) permutation_matrix: SparseMatrix<F>,
     pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
