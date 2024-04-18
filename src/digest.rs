@@ -2,10 +2,12 @@ use std::{io, iter, num::NonZeroUsize, ops::Deref};
 
 use bincode::Options;
 use bitter::{BitReader, LittleEndianReader};
-use digest::{typenum::U32, Digest, OutputSizeUser};
+use digest::{typenum::U32, OutputSizeUser};
 use ff::{Field, PrimeField};
 use halo2curves::CurveAffine;
 use serde::Serialize;
+
+pub use digest::Digest;
 
 pub use sha3::Sha3_256 as DefaultHasher;
 
@@ -49,7 +51,7 @@ pub trait DigestToCurve: Digest {
 }
 impl DigestToCurve for sha3::Sha3_256 {}
 
-fn into_curve_by_bits<C: CurveAffine>(input: &[u8], bits_count: NonZeroUsize) -> C {
+pub fn into_curve_by_bits<C: CurveAffine>(input: &[u8], bits_count: NonZeroUsize) -> C {
     let mut coeff = C::ScalarExt::ONE;
 
     let mut reader = LittleEndianReader::new(input);

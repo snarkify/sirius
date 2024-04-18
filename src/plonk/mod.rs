@@ -78,9 +78,11 @@ pub(crate) struct CompressedGates<F: PrimeField> {
     compressed: Expression<F>,
     /// A homogeneous version of the `compressed` expression, achieved by adding another challenge
     /// if necessary
+    #[serde(skip_serializing)]
     homogeneous: HomogeneousExpression<F>,
     /// A degree-grouped version of the `homogeneous` expression, adds another expression, but
     /// implicitly
+    #[serde(skip_serializing)]
     grouped: GroupedPoly<F>,
 }
 
