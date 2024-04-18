@@ -1,6 +1,5 @@
 use std::{fmt, io, marker::PhantomData, num::NonZeroUsize, ops::Deref};
 
-use bincode::Options;
 use ff::{Field, FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
 use halo2_proofs::plonk;
@@ -11,7 +10,7 @@ use tracing::*;
 use crate::{
     commitment::CommitmentKey,
     constants::NUM_HASH_BITS,
-    digest::{self, into_curve_by_bits, Digest, DigestToCurve},
+    digest::{self, into_curve_from_bits, DigestToBits, DigestToCurve},
     ivc::{
         self,
         instance_computation::RandomOracleComputationInstance,
@@ -353,16 +352,10 @@ where
             _p: PhantomData,
         };
 
-        let digest = digest::DefaultHasher::digest(
-            bincode::DefaultOptions::new()
-                .with_little_endian()
-                .with_fixint_encoding()
-                .serialize(&self_)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-        );
+        let digest = digest::DefaultHasher::digest_to_bits(&self_)?;
 
-        self_.digest_1 = into_curve_by_bits(digest.deref(), NUM_HASH_BITS);
-        self_.digest_2 = into_curve_by_bits(digest.deref(), NUM_HASH_BITS);
+        self_.digest_1 = into_curve_from_bits(digest.deref(), NUM_HASH_BITS);
+        self_.digest_2 = into_curve_from_bits(digest.deref(), NUM_HASH_BITS);
 
         Ok(self_)
     }
