@@ -1,14 +1,16 @@
+use std::marker::PhantomData;
+
 use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},
+    plonk::{self, Advice, Circuit, Column, ConstraintSystem, Instance, Selector},
     poly::Rotation,
 };
 use halo2curves::bn256::{Fr, G1Affine};
 use halo2curves::group::ff::FromUniformBytes;
-use std::marker::PhantomData;
+use some_to_err::*;
 
-use crate::nifs::{vanilla::VanillaFS, Error as NIFSError};
+use crate::nifs::{self, vanilla::VanillaFS};
 use crate::plonk::{
     PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness,
 };
@@ -16,6 +18,37 @@ use crate::table::CircuitRunner;
 use crate::util::create_ro;
 
 use super::*;
+
+#[derive(thiserror::Error, Debug)]
+enum Error<C: CurveAffine> {
+    #[error(transparent)]
+    Nifs(#[from] nifs::Error),
+    #[error(transparent)]
+    Plonk(#[from] plonk::Error),
+    #[error("while verify: {errors:?}")]
+    Verify {
+        errors: Vec<(&'static str, crate::plonk::Error)>,
+    },
+    #[error("not equal: {from_verify:?} != {from_prove:?}")]
+    VerifyProveNotMatch {
+        from_verify: Box<RelaxedPlonkInstance<C>>,
+        from_prove: Box<RelaxedPlonkInstance<C>>,
+    },
+}
+impl<C: CurveAffine> Error<C> {
+    fn check_equality(
+        from_verify: &RelaxedPlonkInstance<C>,
+        from_prove: &RelaxedPlonkInstance<C>,
+    ) -> Result<(), Self> {
+        from_verify
+            .ne(from_prove)
+            .then(|| Self::VerifyProveNotMatch {
+                from_verify: Box::new(from_verify.clone()),
+                from_prove: Box::new(from_prove.clone()),
+            })
+            .err_or(())
+    }
+}
 
 fn prepare_trace<C, F1, F2, CT>(
     K: u32,
@@ -31,7 +64,7 @@ fn prepare_trace<C, F1, F2, CT>(
         PlonkTrace<C>,
         PlonkTrace<C>,
     ),
-    NIFSError,
+    Error<C>,
 >
 where
     C: CurveAffine<ScalarExt = F1, Base = F2>,
@@ -60,32 +93,35 @@ where
     let mut ro_nark_decider = create_ro::<C::Base, T, RATE, R_F, R_P>();
 
     let (pp, _vp) = VanillaFS::setup_params(pp_digest, S.clone())?;
+
     let pair1 =
         VanillaFS::generate_plonk_trace(&ck, &public_inputs1, &W1, &pp, &mut ro_nark_prepare)?;
-    assert_eq!(
-        S.is_sat(&ck, &mut ro_nark_decider, &pair1.u, &pair1.w)
-            .err(),
-        None
-    );
     let pair1_relaxed = pair1.to_relax(S.k);
-    assert_eq!(
-        S.is_sat_perm(&pair1_relaxed.U, &pair1_relaxed.W).err(),
-        None
-    );
+
     let pair2 =
         VanillaFS::generate_plonk_trace(&ck, &public_inputs2, &W2, &pp, &mut ro_nark_prepare)?;
-    assert_eq!(
-        S.is_sat(&ck, &mut ro_nark_decider, &pair2.u, &pair2.w)
-            .err(),
-        None
-    );
     let pair2_relaxed = pair2.to_relax(S.k);
-    assert_eq!(
-        S.is_sat_perm(&pair2_relaxed.U, &pair2_relaxed.W).err(),
-        None
-    );
 
-    Ok((ck, S, pair1, pair2))
+    let mut errors = Vec::new();
+
+    if let Err(err) = S.is_sat(&ck, &mut ro_nark_decider, &pair1.u, &pair1.w) {
+        errors.push(("is_sat_pair1", err));
+    }
+    if let Err(err) = S.is_sat_perm(&pair1_relaxed.U, &pair1_relaxed.W) {
+        errors.push(("is_sat_perm_pair1", err));
+    }
+    if let Err(err) = S.is_sat(&ck, &mut ro_nark_decider, &pair2.u, &pair2.w) {
+        errors.push(("is_sat_pair2", err));
+    }
+    if let Err(err) = S.is_sat_perm(&pair2_relaxed.U, &pair2_relaxed.W) {
+        errors.push(("is_sat_perm_pair2", err));
+    }
+
+    if errors.is_empty() {
+        Ok((ck, S, pair1, pair2))
+    } else {
+        Err(Error::Verify { errors })
+    }
 }
 
 /// this function will fold two plonk witness-instance pairs consecutively
@@ -107,7 +143,7 @@ fn fold_instances<C, F1, F2>(
     pair1: &PlonkTrace<C>,
     pair2: &PlonkTrace<C>,
     pp_digest: C,
-) -> Result<(), NIFSError>
+) -> Result<(), Error<C>>
 where
     C: CurveAffine<ScalarExt = F1, Base = F2>,
     F1: PrimeField,
@@ -145,14 +181,19 @@ where
         &f_U,
         &pair1.u,
         &cross_term_commits,
-    )
-    .unwrap();
-    assert_eq!(U_from_prove, U_from_verify);
+    )?;
+    Error::check_equality(&U_from_verify, &U_from_prove)?;
 
     f_U = U_from_verify;
     f_W = W;
-    assert_eq!(S.is_sat_relaxed(ck, &f_U, &f_W).err(), None);
-    assert_eq!(S.is_sat_perm(&f_U, &f_W).err(), None);
+
+    let mut errors = Vec::new();
+    if let Err(err) = S.is_sat_relaxed(ck, &f_U, &f_W) {
+        errors.push(("is_sat_relaxed 1", err));
+    }
+    if let Err(err) = S.is_sat_perm(&f_U, &f_W) {
+        errors.push(("is_sat_perm 1", err));
+    }
 
     let (
         RelaxedPlonkTrace {
@@ -178,15 +219,23 @@ where
         &f_U,
         &pair2.u,
         &cross_term_commits,
-    )
-    .unwrap();
+    )?;
     assert_eq!(U_from_prove, U_from_verify);
 
     f_U = U_from_verify;
     f_W = _W;
-    assert_eq!(S.is_sat_relaxed(ck, &f_U, &f_W).err(), None);
-    assert_eq!(S.is_sat_perm(&f_U, &f_W).err(), None);
-    Ok(())
+
+    if let Err(err) = S.is_sat_relaxed(ck, &f_U, &f_W) {
+        errors.push(("is_sat_relaxed 2", err));
+    }
+    if let Err(err) = S.is_sat_perm(&f_U, &f_W) {
+        errors.push(("is_sat_perm 2", err));
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::Verify { errors })
+    }
 }
 
 /// calculate smallest w such that 2^w >= n*(2^K)
@@ -248,7 +297,7 @@ mod zero_round_test {
             &self,
             config: Self::Config,
             mut layouter: impl Layouter<F>,
-        ) -> Result<(), Error> {
+        ) -> Result<(), plonk::Error> {
             let pchip = MainGate::new(config.pconfig);
             let output = layouter.assign_region(
                 || "test",
@@ -264,7 +313,7 @@ mod zero_round_test {
 
     #[traced_test]
     #[test]
-    fn test_nifs() -> Result<(), NIFSError> {
+    fn test_nifs() -> Result<(), Error<G1Affine>> {
         const K: u32 = 4;
         let inputs1 = (1..10).map(Fr::from).collect();
         let inputs2 = (2..11).map(Fr::from).collect();
@@ -291,6 +340,8 @@ mod zero_round_test {
 // test multiple gates without lookup
 // test example adapted from https://github.com/icemelon/halo2-tutorial
 mod one_round_test {
+    use tracing_test::traced_test;
+
     use super::*;
 
     #[derive(Clone)]
@@ -355,7 +406,7 @@ mod one_round_test {
             a: F,
             b: F,
             nrows: usize,
-        ) -> Result<(Number<F>, Number<F>), Error> {
+        ) -> Result<(Number<F>, Number<F>), plonk::Error> {
             layouter.assign_region(
                 || "entire block",
                 |mut region| {
@@ -392,7 +443,7 @@ mod one_round_test {
             mut layouter: impl Layouter<F>,
             num: Number<F>,
             row: usize,
-        ) -> Result<(), Error> {
+        ) -> Result<(), plonk::Error> {
             layouter.constrain_instance(num.0.cell(), self.config.instance, row)
         }
     }
@@ -423,7 +474,7 @@ mod one_round_test {
             &self,
             config: Self::Config,
             mut layouter: impl Layouter<F>,
-        ) -> Result<(), Error> {
+        ) -> Result<(), plonk::Error> {
             let chip = FiboChip::construct(config);
             let nrows = (self.num + 1) / 2;
             let (_, b) = chip.load(layouter.namespace(|| "block"), self.a, self.b, nrows)?;
@@ -442,8 +493,9 @@ mod one_round_test {
         seq
     }
 
+    #[traced_test]
     #[test]
-    fn test_nifs() -> Result<(), NIFSError> {
+    fn test_nifs() -> Result<(), Error<G1Affine>> {
         const K: u32 = 4;
         const SIZE: usize = 16;
         // circuit 1
@@ -479,10 +531,11 @@ mod one_round_test {
 // test vector lookup
 // test example adapted from https://github.com/icemelon/halo2-tutorial
 mod three_rounds_test {
-    use super::*;
-    use halo2_proofs::circuit::Chip;
-    use halo2_proofs::plonk::TableColumn;
+    use halo2_proofs::{circuit::Chip, plonk::TableColumn};
     use num_bigint::BigUint as BigUintRaw;
+    use tracing_test::traced_test;
+
+    use super::*;
 
     pub fn f_to_u64<F: PrimeField>(f: &F) -> u64 {
         BigUintRaw::from_bytes_le(f.to_repr().as_ref())
@@ -581,7 +634,7 @@ mod three_rounds_test {
             a: F,
             b: F,
             c: F,
-        ) -> Result<(Number<F>, Number<F>, Number<F>), Error> {
+        ) -> Result<(Number<F>, Number<F>, Number<F>), plonk::Error> {
             let config = self.config();
 
             layouter.assign_region(
@@ -609,7 +662,7 @@ mod three_rounds_test {
             mut layouter: impl Layouter<F>,
             a: &Number<F>,
             b: &Number<F>,
-        ) -> Result<Number<F>, Error> {
+        ) -> Result<Number<F>, plonk::Error> {
             let config = self.config();
             layouter.assign_region(
                 || "add",
@@ -633,7 +686,7 @@ mod three_rounds_test {
             mut layouter: impl Layouter<F>,
             a: &Number<F>,
             b: &Number<F>,
-        ) -> Result<Number<F>, Error> {
+        ) -> Result<Number<F>, plonk::Error> {
             let config = self.config();
             layouter.assign_region(
                 || "xor",
@@ -658,7 +711,7 @@ mod three_rounds_test {
             )
         }
 
-        fn load_table(&self, mut layouter: impl Layouter<F>) -> Result<(), Error> {
+        fn load_table(&self, mut layouter: impl Layouter<F>) -> Result<(), plonk::Error> {
             layouter.assign_table(
                 || "xor",
                 |mut table| {
@@ -722,7 +775,7 @@ mod three_rounds_test {
             &self,
             config: Self::Config,
             mut layouter: impl Layouter<F>,
-        ) -> Result<(), Error> {
+        ) -> Result<(), plonk::Error> {
             let chip = FiboChip::construct(config);
             let (mut a, mut b, mut c) =
                 chip.load_private(layouter.namespace(|| "first row"), self.a, self.b, self.c)?;
@@ -749,8 +802,9 @@ mod three_rounds_test {
         seq
     }
 
+    #[traced_test]
     #[test]
-    fn test_nifs() -> Result<(), NIFSError> {
+    fn test_nifs() -> Result<(), Error<G1Affine>> {
         const K: u32 = 5;
         let num = 7;
 
