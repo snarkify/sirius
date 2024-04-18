@@ -35,11 +35,11 @@ jobs:
         command: clippy
         args: --all-targets --all-features -- -D warnings
 
-   - name: Install cargo-nextest
-        uses: baptiste0928/cargo-install@v1
-        with:
-          crate: cargo-nextest
-          locked: true
+    - name: Install cargo-nextest
+      uses: baptiste0928/cargo-install@v1
+      with:
+        crate: cargo-nextest
+        locked: true
 
     - name: Tests
       uses: actions-rs/cargo@v1
