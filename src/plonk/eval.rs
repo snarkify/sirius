@@ -1,11 +1,17 @@
-use crate::polynomial::{grouped_poly::GroupedPoly, ColumnIndex, Expression, MultiPolynomial};
+use crate::polynomial::{
+    graph_evaluator::GraphEvaluator, grouped_poly::GroupedPoly, ColumnIndex, Expression,
+    MultiPolynomial,
+};
 use ff::PrimeField;
 use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
     #[error("challenge index out of boundary: {challenge_index}")]
-    ChallengeIndexOutOfBoundary { challenge_index: usize },
+    ChallengeIndexOutOfBoundary {
+        challenge_index: usize,
+        challeges_len: usize,
+    },
     #[error("column variable index out of boundary: {column_index}")]
     ColumnVariableIndexOutOfBoundary { column_index: usize },
     #[error("column variable row index out of boundary: {row_index}")]
@@ -68,11 +74,14 @@ pub trait GetDataForEval<F: PrimeField> {
     }
 
     fn eval_challenge(&self, index: usize) -> Result<F, Error> {
-        self.get_challenges().as_ref().get(index).copied().ok_or(
-            Error::ChallengeIndexOutOfBoundary {
+        let challenges = self.get_challenges().as_ref();
+        challenges
+            .get(index)
+            .copied()
+            .ok_or(Error::ChallengeIndexOutOfBoundary {
                 challenge_index: index,
-            },
-        )
+                challeges_len: challenges.len(),
+            })
     }
 }
 
@@ -87,13 +96,15 @@ pub trait GetDataForEval<F: PrimeField> {
 /// * `POLY`: The type of polynomial or expression to be evaluated.
 ///
 pub trait Eval<F: PrimeField, POLY>: GetDataForEval<F> {
+    type Output;
     /// General method allowing to perform calculations of input polynomial type on the basis of
     /// data requested in `GetEvalData`. Depending on its representation the implementation may
     /// differ
-    fn eval(&self, poly: &POLY, row_index: usize) -> Result<F, Error>;
+    fn eval(&self, poly: &POLY, row_index: usize) -> Result<Self::Output, Error>;
 }
 
 impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, MultiPolynomial<F>> for E {
+    type Output = F;
     /// Evaluate virtual multi-polynomial (i.e. custom gates, cross-term expressions etc) on
     /// specific row to evaluate each monomial term of the form
     /// ```math
@@ -178,14 +189,21 @@ impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, MultiPolynomial<F>> for E {
 }
 
 impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, GroupedPoly<F>> for E {
-    fn eval(&self, _poly: &GroupedPoly<F>, _row_index: usize) -> Result<F, Error> {
-        todo!("#159")
+    type Output = Box<[F]>;
+    fn eval(&self, poly: &GroupedPoly<F>, row_index: usize) -> Result<Box<[F]>, Error> {
+        poly.iter()
+            .map(|expr| match expr {
+                Some(expr) => self.eval(expr, row_index),
+                None => Ok(F::ZERO),
+            })
+            .collect()
     }
 }
 
 impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, Expression<F>> for E {
-    fn eval(&self, _expr: &Expression<F>, _row_index: usize) -> Result<F, Error> {
-        todo!("#159")
+    type Output = F;
+    fn eval(&self, expr: &Expression<F>, row_index: usize) -> Result<F, Error> {
+        GraphEvaluator::new(expr).evaluate(self, row_index)
     }
 }
 
