@@ -226,11 +226,10 @@ impl<F: PrimeField> Arguments<F> {
         debug!("lookup_polys len: {} ", self.lookup_polys.len());
         self.lookup_polys
             .par_iter()
-            .map(|expr| expr.expand())
             .map(|poly| {
                 (0..nrow)
                     .into_par_iter()
-                    .map(|row| data.eval(&poly, row))
+                    .map(|row| data.eval(poly, row))
                     .collect::<Result<Vec<F>, Error>>()
             })
             .collect()
@@ -258,11 +257,10 @@ impl<F: PrimeField> Arguments<F> {
         let nrow = 1 << circuit_data.k;
         self.table_polys
             .par_iter()
-            .map(|expr| expr.expand())
             .map(|poly| {
                 (0..nrow)
                     .into_par_iter()
-                    .map(|row| data.eval(&poly, row))
+                    .map(|row| data.eval(poly, row))
                     .collect::<Result<Vec<_>, Error>>()
             })
             .collect()

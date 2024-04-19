@@ -101,7 +101,7 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
 
         let poly = custom_gates_lookup_compressed.compressed().expand();
 
-        let folding_degree = poly.degree_for_folding(cs.num_fixed_columns() + cs.num_selectors());
+        let folding_degree = custom_gates_lookup_compressed.grouped().len();
 
         ConstraintSystemMetainfo {
             num_challenges: custom_gates_lookup_compressed.compressed().num_challenges(),
