@@ -10,8 +10,6 @@ use ff::PrimeField;
 use halo2_proofs::{plonk::Expression as PE, poly::Rotation};
 use serde::Serialize;
 
-use super::{Monomial, MultiPolynomial};
-
 use crate::util::trim_leading_zeros;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum ColumnIndex {
@@ -217,63 +215,6 @@ impl<F: PrimeField> Expression<F> {
                 scaled(a, *scalar)
             }
         }
-    }
-
-    pub fn expand(&self) -> MultiPolynomial<F> {
-        let mut set = BTreeSet::new();
-        self.poly_set(&mut set);
-        let index_to_poly = set.into_iter().collect::<Box<[_]>>();
-
-        // index_to_poly is mapping from i to (rotation, column_index, type), see [`Monomial`]
-        self.evaluate(
-            &|c| {
-                let arity = index_to_poly.len();
-                MultiPolynomial {
-                    arity,
-                    monomials: vec![Monomial::new(index_to_poly.to_vec(), c, vec![0; arity])],
-                }
-            },
-            &|poly| {
-                let arity = index_to_poly.len();
-                let mut exponents = vec![0; arity];
-
-                let index = index_to_poly
-                    .iter()
-                    .position(|indexes| {
-                        indexes.eq(&ColumnIndex::Polynominal {
-                            rotation: poly.rotation.0,
-                            column_index: poly.index,
-                        })
-                    })
-                    .unwrap();
-                exponents[index] = 1;
-                MultiPolynomial {
-                    arity,
-                    monomials: vec![Monomial::new(index_to_poly.to_vec(), F::ONE, exponents)],
-                }
-            },
-            &|challenge_index| {
-                let arity = index_to_poly.len();
-                let mut exponents = vec![0; arity];
-                let index = index_to_poly
-                    .iter()
-                    .position(|indexes| {
-                        indexes.eq(&ColumnIndex::Challenge {
-                            column_index: challenge_index,
-                        })
-                    })
-                    .unwrap();
-                exponents[index] = 1;
-                MultiPolynomial {
-                    arity,
-                    monomials: vec![Monomial::new(index_to_poly.to_vec(), F::ONE, exponents)],
-                }
-            },
-            &|a| -a,
-            &|a, b| a + b,
-            &|a, b| a * b,
-            &|a, k| a * k,
-        )
     }
 
     // fold_transform will fold a polynomial expression P(f_1,...f_m, x_1,...,x_n)
@@ -566,28 +507,9 @@ mod tests {
             rotation: Rotation(0),
         }) * pallas::Base::from(2);
         let expr = expr1.clone() * expr1 + expr2;
-        assert_eq!(format!("{}", expr.expand()), "0x1 + (Z_0^2)");
-    }
-
-    #[traced_test]
-    #[test]
-    fn test_multi_polynomial_homogeneous() {
-        let expr1: Expression<Fp> =
-            Expression::Polynomial(Query {
-                index: 0,
-                rotation: Rotation(0),
-            }) + Expression::Constant(pallas::Base::from_str_vartime("1").unwrap());
-        let expr2: Expression<Fp> = Expression::<Fp>::Polynomial(Query {
-            index: 0,
-            rotation: Rotation(0),
-        }) * Expression::<Fp>::Polynomial(Query {
-            index: 1,
-            rotation: Rotation(0),
-        });
-        let expr3 = expr1.clone() + expr2.clone();
         assert_eq!(
-            format!("{}", expr3.expand().homogeneous(0)),
-            "(r_0^2) + (Z_0)(r_0) + (Z_0)(Z_1)"
+            expr.to_string(),
+            "(Z_0 - 0x1) * (Z_0 - 0x1) + \"0x2\" * Z_0"
         );
     }
 

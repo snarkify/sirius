@@ -39,7 +39,7 @@ use crate::{
         graph_evaluator::GraphEvaluator,
         grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
-        Expression, MultiPolynomial,
+        Expression,
     },
     poseidon::{AbsorbInRO, ROTrait},
     sps::{Error as SpsError, SpecialSoundnessVerifier},
@@ -151,9 +151,6 @@ pub struct PlonkStructure<F: PrimeField> {
     pub(crate) num_challenges: usize,
     /// specify the witness size of each prover round
     pub(crate) round_sizes: Vec<usize>,
-
-    /// singla polynomial relation that combines custom gates and lookup relations
-    pub(crate) poly: MultiPolynomial<F>,
 
     pub(crate) custom_gates_lookup_compressed: CompressedGates<F>,
 
