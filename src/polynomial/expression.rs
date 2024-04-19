@@ -528,6 +528,7 @@ impl_expression_ops!(Add, add, Sum, Expression<F>, std::convert::identity);
 impl_expression_ops!(Sub, sub, Sum, Expression<F>, Neg::neg);
 impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
 
+/// Multiply `Expression::Challenge(new_challenge_index)` by the `degree` time
 fn challenge_in_degree<F: PrimeField>(new_challenge_index: usize, degree: usize) -> Expression<F> {
     let challenge = Expression::Challenge(new_challenge_index);
     let mut result = challenge.clone();
