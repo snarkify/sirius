@@ -4,7 +4,7 @@ use tracing::*;
 
 use crate::{
     plonk::{lookup, CompressedGates},
-    polynomial::{Expression, MultiPolynomial},
+    polynomial::{expression::QueryIndexContext, Expression, MultiPolynomial},
 };
 
 pub(crate) struct ConstraintSystemMetainfo<F: PrimeField> {
@@ -83,19 +83,21 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
 
         // we use r3 to combine all custom gates and lookup expressions
         // find the challenge index of r3
-        let custom_gates_lookup_compressed = CompressedGates::new(
-            &exprs,
-            cs.num_selectors(),
-            cs.num_fixed_columns(),
-            cs.num_advice_columns() + num_lookups * 5, // TODO #159
-            if has_vector_lookup {
+        let mut ctx = QueryIndexContext {
+            num_selectors: cs.num_selectors(),
+            num_fixed: cs.num_fixed_columns(),
+            num_advice: cs.num_advice_columns(),
+            num_lookups,
+            num_challenges: if has_vector_lookup {
                 2
             } else if num_lookups > 0 {
                 1
             } else {
                 0
             },
-        );
+        };
+
+        let custom_gates_lookup_compressed = CompressedGates::new(&exprs, &mut ctx);
 
         let poly = custom_gates_lookup_compressed.compressed().expand();
 

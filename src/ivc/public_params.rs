@@ -1,4 +1,4 @@
-use std::{fmt, io, marker::PhantomData, num::NonZeroUsize};
+use std::{fmt, io, marker::PhantomData, num::NonZeroUsize, ops::Deref};
 
 use ff::{Field, FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
@@ -9,7 +9,8 @@ use tracing::*;
 
 use crate::{
     commitment::CommitmentKey,
-    digest::{self, DigestToCurve},
+    constants::NUM_HASH_BITS,
+    digest::{self, into_curve_from_bits, DigestToBits, DigestToCurve},
     ivc::{
         self,
         instance_computation::RandomOracleComputationInstance,
@@ -250,26 +251,31 @@ where
         limb_width: NonZeroUsize,
         limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
-        let primary_span = span!(Level::ERROR, "primary").entered();
-        let primary_S = CircuitRunner::new(
-            primary.k_table_size,
-            StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T> {
-                step_circuit: primary.step_circuit,
-                input: StepInputs::without_witness::<
-                    StepFoldingCircuit<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T>,
-                >(
-                    primary.k_table_size,
-                    NUM_IO,
-                    &StepParams::new(limb_width, limbs_count, primary.ro_constant.clone()),
-                ),
-            },
-            vec![C1::Scalar::ZERO; NUM_IO],
-        )
-        .try_collect_plonk_structure()?;
-        primary_span.exit();
+        let primary_S = {
+            let _primary_span = span!(Level::ERROR, "primary").entered();
+            info!("start");
+
+            CircuitRunner::new(
+                primary.k_table_size,
+                StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T> {
+                    step_circuit: primary.step_circuit,
+                    input: StepInputs::without_witness::<
+                        StepFoldingCircuit<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T>,
+                    >(
+                        primary.k_table_size,
+                        NUM_IO,
+                        &StepParams::new(limb_width, limbs_count, primary.ro_constant.clone()),
+                    ),
+                },
+                vec![C1::Scalar::ZERO; NUM_IO],
+            )
+            .try_collect_plonk_structure()
+            .inspect(|_| info!("end"))
+        }?;
 
         let (secondary_S, secondary_initial_plonk_trace) = {
             let _secondary_span = span!(Level::ERROR, "secondary").entered();
+            info!("start");
 
             let secondary_initial_step_params =
                 StepParams::new(limb_width, limbs_count, secondary.ro_constant.clone());
@@ -319,6 +325,7 @@ where
                 &mut RP1::OffCircuit::new(primary.ro_constant.clone()),
             )?;
 
+            info!("end");
             Result::<_, Error>::Ok((secondary_S, secondary_initial_plonk_trace))
         }?;
 
@@ -345,8 +352,10 @@ where
             _p: PhantomData,
         };
 
-        self_.digest_1 = self_.digest()?;
-        self_.digest_2 = self_.digest()?;
+        let digest = digest::DefaultHasher::digest_to_bits(&self_)?;
+
+        self_.digest_1 = into_curve_from_bits(digest.deref(), NUM_HASH_BITS);
+        self_.digest_2 = into_curve_from_bits(digest.deref(), NUM_HASH_BITS);
 
         Ok(self_)
     }

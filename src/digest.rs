@@ -1,21 +1,38 @@
-use std::{io, iter, num::NonZeroUsize, ops::Deref};
+use std::{io, iter, num::NonZeroUsize};
 
 use bincode::Options;
 use bitter::{BitReader, LittleEndianReader};
-use digest::{typenum::U32, Digest, OutputSizeUser};
+use digest::{typenum::U32, OutputSizeUser};
 use ff::{Field, PrimeField};
 use halo2curves::CurveAffine;
 use serde::Serialize;
+
+pub use digest::Digest;
 
 pub use sha3::Sha3_256 as DefaultHasher;
 
 use crate::constants::NUM_HASH_BITS;
 
+pub trait DigestToBits: Digest {
+    fn digest_to_bits(input: &impl Serialize) -> Result<Box<[u8]>, io::Error> {
+        Ok(Self::digest(
+            bincode::DefaultOptions::new()
+                .with_little_endian()
+                .with_fixint_encoding()
+                .serialize(input)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+        )
+        .into_iter()
+        .collect())
+    }
+}
+impl DigestToBits for sha3::Sha3_256 {}
+
 /// A trait for converting a digest to a prime field element.
 ///
 /// This trait is intended for use with types implementing the [`Digest`] trait,
 /// allowing the conversion of a digest to an element of a prime field.
-pub trait DigestToCurve: Digest {
+pub trait DigestToCurve: DigestToBits {
     /// Serialize input & calculate digest & convert into [`CurveAffine`]
     //
     // Allows you to use any hash function whose output is of size `[u8; 32]`
@@ -36,20 +53,15 @@ pub trait DigestToCurve: Digest {
             ));
         }
 
-        let digest = Self::digest(
-            bincode::DefaultOptions::new()
-                .with_little_endian()
-                .with_fixint_encoding()
-                .serialize(input)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-        );
-
-        Ok(into_curve_by_bits(digest.deref(), NUM_HASH_BITS))
+        Ok(into_curve_from_bits(
+            &Self::digest_to_bits(input)?,
+            NUM_HASH_BITS,
+        ))
     }
 }
 impl DigestToCurve for sha3::Sha3_256 {}
 
-fn into_curve_by_bits<C: CurveAffine>(input: &[u8], bits_count: NonZeroUsize) -> C {
+pub fn into_curve_from_bits<C: CurveAffine>(input: &[u8], bits_count: NonZeroUsize) -> C {
     let mut coeff = C::ScalarExt::ONE;
 
     let mut reader = LittleEndianReader::new(input);
@@ -77,7 +89,7 @@ mod tests {
     use serde::*;
     use tracing_test::traced_test;
 
-    use super::{into_curve_by_bits, DigestToCurve};
+    use super::{into_curve_from_bits, DigestToCurve};
 
     #[traced_test]
     #[test]
@@ -89,7 +101,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            into_curve_by_bits::<G1Affine>(
+            into_curve_from_bits::<G1Affine>(
                 &input.to_repr(),
                 NonZeroUsize::new(Fr::NUM_BITS as usize).unwrap()
             ),

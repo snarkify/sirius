@@ -14,7 +14,7 @@
 //!
 //! Additionally, it defines a method is_sat on PlonkStructure to determine if
 //! a given Plonk instance and witness satisfy the circuit constraints.
-use std::{iter, num::NonZeroUsize};
+use std::{iter, num::NonZeroUsize, time::Instant};
 
 use count_to_non_zero::*;
 use itertools::Itertools;
@@ -35,7 +35,7 @@ use crate::{
         eval::{Error as EvalError, Eval, PlonkEvalDomain},
     },
     polynomial::{
-        expression::HomogeneousExpression,
+        expression::{HomogeneousExpression, QueryIndexContext},
         grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
         Expression, MultiPolynomial,
@@ -78,37 +78,42 @@ pub(crate) struct CompressedGates<F: PrimeField> {
     compressed: Expression<F>,
     /// A homogeneous version of the `compressed` expression, achieved by adding another challenge
     /// if necessary
+    #[serde(skip_serializing)]
     homogeneous: HomogeneousExpression<F>,
     /// A degree-grouped version of the `homogeneous` expression, adds another expression, but
     /// implicitly
+    #[serde(skip_serializing)]
     grouped: GroupedPoly<F>,
 }
 
 impl<F: PrimeField> CompressedGates<F> {
-    pub fn new(
-        original_expressions: &[Expression<F>],
-        num_selectors: usize,
-        num_fixed: usize,
-        num_of_fold_vars: usize,
-        num_challenges: usize,
-    ) -> Self {
-        debug!("input num_challenges: {num_challenges}");
-        let compressed = plonk::util::compress_expression(original_expressions, num_challenges);
+    #[instrument(name = "compressing", skip_all)]
+    pub fn new(original_expressions: &[Expression<F>], ctx: &mut QueryIndexContext) -> Self {
+        let timer = Instant::now();
+        debug!("input num_challenges: {}", ctx.num_challenges);
+        let compressed = plonk::util::compress_expression(original_expressions, ctx.num_challenges);
+        info!(
+            "custom gates compressed in {} ns",
+            timer.elapsed().as_nanos()
+        );
+        ctx.num_challenges = compressed.num_challenges();
 
-        let homogeneous =
-            compressed.homogeneous(num_selectors, num_fixed, compressed.num_challenges());
+        let homogeneous = compressed.homogeneous(ctx);
+        info!(
+            "compressed made homogeneous in {} ns",
+            timer.elapsed().as_nanos()
+        );
+        ctx.num_challenges = homogeneous.num_challenges();
 
-        let num_challenges = homogeneous.num_challenges();
+        let grouped = GroupedPoly::new(&homogeneous, ctx);
+        info!(
+            "homogeneous made grouped in {} ns",
+            timer.elapsed().as_nanos()
+        );
 
         Self {
             compressed,
-            grouped: GroupedPoly::new(
-                &homogeneous,
-                num_selectors,
-                num_fixed,
-                num_of_fold_vars,
-                num_challenges,
-            ),
+            grouped,
             homogeneous,
         }
     }

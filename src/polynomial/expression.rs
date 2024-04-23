@@ -38,6 +38,29 @@ impl Ord for ColumnIndex {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Default)]
+pub struct QueryIndexContext {
+    pub num_selectors: usize,
+    pub num_fixed: usize,
+    pub num_advice: usize,
+    pub num_challenges: usize,
+    pub num_lookups: usize,
+}
+
+impl QueryIndexContext {
+    pub fn num_fold_vars(self) -> usize {
+        self.num_advice + self.num_lookups * 5
+    }
+
+    pub fn shift_advice_index(self, advice_poly_index: usize) -> usize {
+        advice_poly_index + self.num_fold_vars()
+    }
+
+    pub fn shift_lookup_index(self, lookup_poly_index: usize) -> usize {
+        lookup_poly_index + self.num_fold_vars()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Query {
     pub index: usize,
@@ -45,9 +68,28 @@ pub struct Query {
     pub rotation: Rotation,
 }
 
+pub enum QueryType {
+    Selector,
+    Fixed,
+    Advice,
+    Lookup,
+}
+
 impl Query {
-    pub fn is_advice(&self, num_selectors: usize, num_fixed: usize) -> bool {
-        self.index >= num_selectors + num_fixed
+    pub fn subtype(&self, ctx: &QueryIndexContext) -> QueryType {
+        if self.index < ctx.num_selectors {
+            QueryType::Selector
+        } else if self.index < ctx.num_selectors + ctx.num_fixed {
+            QueryType::Fixed
+        } else if self.index < ctx.num_selectors + ctx.num_fixed + ctx.num_advice {
+            QueryType::Advice
+        } else if self.index
+            < ctx.num_selectors + ctx.num_fixed + ctx.num_advice + (5 * ctx.num_lookups)
+        {
+            QueryType::Lookup
+        } else {
+            unreachable!("unknown index {} in {ctx:?}", self.index)
+        }
     }
 }
 
@@ -360,103 +402,86 @@ impl<F: PrimeField> Expression<F> {
     /// ```math
     /// $$a\cdot b+c\rightarrow a\cdot b+c\cdot u$$
     ///```
-    pub fn homogeneous(
-        &self,
-        num_selector: usize,
-        num_fixed: usize,
-        num_challenges: usize,
-    ) -> HomogeneousExpression<F> {
+    pub fn homogeneous(&self, ctx: &QueryIndexContext) -> HomogeneousExpression<F> {
         use Expression::*;
-        let new_challenge_index = num_challenges.saturating_sub(1);
+        let new_challenge_index = ctx.num_challenges;
 
-        fn multiply_by_challenge<F: PrimeField>(
-            expr: Expression<F>,
-            new_challenge_index: usize,
-            degree: usize,
-        ) -> Expression<F> {
-            match degree.checked_sub(1) {
-                Some(degree_sub_1) => multiply_by_challenge(
-                    Expression::Challenge(new_challenge_index) * expr,
-                    new_challenge_index,
-                    degree_sub_1,
-                ),
-                None => expr,
+        match self {
+            Constant(constant) => HomogeneousExpression {
+                expr: Constant(*constant),
+                degree: 0,
+            },
+            Polynomial(polynomial) => HomogeneousExpression {
+                expr: Polynomial(*polynomial),
+                degree: match polynomial.subtype(ctx) {
+                    QueryType::Advice | QueryType::Lookup => 1,
+                    _other => 0,
+                },
+            },
+            Expression::Challenge(challenge) => (Challenge(*challenge), 1).into(),
+            Expression::Negated(expr) => {
+                let HomogeneousExpression { expr, degree } = expr.homogeneous(ctx);
+                (Expression::Negated(Box::new(expr)), degree).into()
             }
-        }
-
-        self.evaluate(
-            &|constant| -> HomogeneousExpression<F> { (Constant(constant), 0).into() },
-            &|polynomial: Query| {
-                (
-                    Polynomial(polynomial),
-                    if polynomial.is_advice(num_selector, num_fixed) {
-                        1
-                    } else {
-                        0
+            Expression::Sum(lhs, rhs) => {
+                let (
+                    HomogeneousExpression {
+                        expr: lhs,
+                        degree: lhs_degree,
                     },
-                )
-                    .into()
-            },
-            &|challenge| (Challenge(challenge), 1).into(),
-            &|expr| {
-                let HomogeneousExpression { expr, degree } =
-                    expr.homogeneous(num_selector, num_fixed, num_challenges);
-                (-expr, degree).into()
-            },
-            &|lhs, rhs| {
-                let HomogeneousExpression {
-                    expr: lhs,
-                    degree: lhs_degree,
-                } = lhs.homogeneous(num_selector, num_fixed, num_challenges);
-                let HomogeneousExpression {
-                    expr: rhs,
-                    degree: rhs_degree,
-                } = rhs.homogeneous(num_selector, num_fixed, num_challenges);
+                    HomogeneousExpression {
+                        expr: rhs,
+                        degree: rhs_degree,
+                    },
+                ) = (lhs.homogeneous(ctx), rhs.homogeneous(ctx));
 
                 match lhs_degree.cmp(&rhs_degree) {
                     Ordering::Greater => (
-                        lhs + multiply_by_challenge(
-                            rhs,
-                            new_challenge_index,
-                            lhs_degree - rhs_degree,
-                        ),
+                        lhs + (rhs
+                            * challenge_in_degree(
+                                new_challenge_index,
+                                lhs_degree.checked_sub(rhs_degree).unwrap(),
+                            )),
                         lhs_degree,
                     ),
                     Ordering::Less => (
-                        multiply_by_challenge(lhs, new_challenge_index, rhs_degree - lhs_degree)
-                            + rhs,
+                        (lhs * challenge_in_degree(
+                            new_challenge_index,
+                            rhs_degree.checked_sub(lhs_degree).unwrap(),
+                        )) + rhs,
                         rhs_degree,
                     ),
                     Ordering::Equal => (lhs + rhs, lhs_degree),
                 }
                 .into()
-            },
-            &|lhs, rhs| {
-                let HomogeneousExpression {
-                    expr: lhs,
-                    degree: lhs_degree,
-                } = lhs.homogeneous(num_selector, num_fixed, num_challenges);
-                let HomogeneousExpression {
-                    expr: rhs,
-                    degree: rhs_degree,
-                } = rhs.homogeneous(num_selector, num_fixed, num_challenges);
+            }
+            Expression::Product(lhs, rhs) => {
+                let (
+                    HomogeneousExpression {
+                        expr: lhs,
+                        degree: lhs_degree,
+                    },
+                    HomogeneousExpression {
+                        expr: rhs,
+                        degree: rhs_degree,
+                    },
+                ) = (lhs.homogeneous(ctx), rhs.homogeneous(ctx));
 
                 (lhs * rhs, lhs_degree + rhs_degree).into()
-            },
-            &|expr, constant| {
-                let HomogeneousExpression { expr, degree } =
-                    expr.homogeneous(num_selector, num_fixed, num_challenges);
+            }
+            Expression::Scaled(expr, constant) => {
+                let HomogeneousExpression { expr, degree } = expr.homogeneous(ctx);
 
-                (Scaled(Box::new(expr), constant), degree).into()
-            },
-        )
+                (Scaled(Box::new(expr), *constant), degree).into()
+            }
+        }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Default)]
 pub struct HomogeneousExpression<F: PrimeField> {
     pub expr: Expression<F>,
-    degree: usize,
+    pub degree: usize,
 }
 
 impl<F: PrimeField> ops::Deref for HomogeneousExpression<F> {
@@ -502,6 +527,18 @@ macro_rules! impl_expression_ops {
 impl_expression_ops!(Add, add, Sum, Expression<F>, std::convert::identity);
 impl_expression_ops!(Sub, sub, Sum, Expression<F>, Neg::neg);
 impl_expression_ops!(Mul, mul, Product, Expression<F>, std::convert::identity);
+
+/// Multiply `Expression::Challenge(new_challenge_index)` by the `degree` time
+fn challenge_in_degree<F: PrimeField>(new_challenge_index: usize, degree: usize) -> Expression<F> {
+    let challenge = Expression::Challenge(new_challenge_index);
+    let mut result = challenge.clone();
+
+    for _ in 2..=degree {
+        result = result * challenge.clone();
+    }
+
+    result
+}
 
 #[cfg(test)]
 mod tests {
@@ -559,24 +596,27 @@ mod tests {
     fn test_homogeneous_simple() {
         use Expression::*;
 
-        let expr1 = Polynomial(Query {
-            index: 0,
-            rotation: Rotation(0),
-        }) + Constant(pallas::Base::from(1));
-
-        let expr2 = Polynomial(Query {
-            index: 0,
-            rotation: Rotation(0),
-        }) * Polynomial(Query {
-            index: 1,
-            rotation: Rotation(0),
+        let [a, b] = array::from_fn(|index| {
+            Expression::<pallas::Base>::Polynomial(Query {
+                index,
+                rotation: Rotation(0),
+            })
         });
 
-        let expr3 = expr1.clone() - expr2.clone();
+        let expr1 = a.clone() + Constant(pallas::Base::from(1));
+        let expr2 = a * b;
+
+        let expr3 = expr1.clone() + expr2.clone();
         debug!("from {expr3}");
         assert_eq!(
-            format!("{}", expr3.homogeneous(0, 0, 0).expr),
-            "r_0 * (Z_0 + r_0 * 0x1) - Z_0 * Z_1"
+            expr3
+                .homogeneous(&QueryIndexContext {
+                    num_advice: 2,
+                    ..Default::default()
+                })
+                .expr
+                .to_string(),
+            "(Z_0 + 0x1 * r_0) * r_0 + Z_0 * Z_1"
         );
     }
 
@@ -597,11 +637,16 @@ mod tests {
 
         debug!("from {expr}");
 
-        let homogeneous = expr.homogeneous(0, 0, 0).expr;
+        let homogeneous = expr
+            .homogeneous(&QueryIndexContext {
+                num_advice: 5,
+                ..Default::default()
+            })
+            .expr;
 
         assert_eq!(
-            format!("{}", homogeneous),
-            "r_0 * r_0 * (r_0 * (r_0 * Z_0 + Z_0 * Z_1) + Z_0 * Z_1 * Z_2) + Z_0 * Z_1 * Z_2 * Z_3 * Z_4"
+            homogeneous.to_string(),
+            "((Z_0 * r_0 + Z_0 * Z_1) * r_0 + Z_0 * Z_1 * Z_2) * r_0 * r_0 + Z_0 * Z_1 * Z_2 * Z_3 * Z_4"
         );
     }
 }
