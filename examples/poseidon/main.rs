@@ -24,9 +24,9 @@ use tracing::*;
 
 const ARITY: usize = 1;
 
-const CIRCUIT_TABLE_SIZE1: usize = 16;
-const CIRCUIT_TABLE_SIZE2: usize = 16;
-const COMMITMENT_KEY_SIZE: usize = 19;
+const CIRCUIT_TABLE_SIZE1: usize = 17;
+const CIRCUIT_TABLE_SIZE2: usize = 17;
+const COMMITMENT_KEY_SIZE: usize = 20;
 
 // Spec for user defined poseidon circuit
 const T1: usize = 3;
