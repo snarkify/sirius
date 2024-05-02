@@ -387,7 +387,7 @@ where
         debug!("start fold step with folding 'secondary' by 'primary'");
 
         #[cfg(feature = "profile")]
-        let timer = start_timer!(||"VanillaFS::prove: secondary_cross_terms");
+        let timer = start_timer!(|| "VanillaFS::prove: secondary_cross_terms");
         debug!("start prove secondary trace");
         let (secondary_new_trace, secondary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
             pp.secondary.ck(),
@@ -402,7 +402,7 @@ where
 
         // Prepare primary constraint system for folding
         #[cfg(feature = "profile")]
-        let timer = start_timer!(||"process_step: primary");
+        let timer = start_timer!(|| "process_step: primary");
         let primary_z_next = self
             .primary
             .step_circuit
@@ -411,7 +411,7 @@ where
         end_timer!(timer);
 
         #[cfg(feature = "profile")]
-        let timer = start_timer!(||"process primary instance");
+        let timer = start_timer!(|| "process primary instance");
         let primary_instance = [
             util::fe_to_fe(&self.secondary_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
@@ -430,7 +430,7 @@ where
         end_timer!(timer);
 
         #[cfg(feature = "profile")]
-        let timer = start_timer!(||"create primary ivc circuit");
+        let timer = start_timer!(|| "create primary ivc circuit");
         let primary_sfc = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: &self.primary.step_circuit,
             input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
@@ -468,7 +468,7 @@ where
         self.secondary.relaxed_trace = secondary_new_trace;
 
         #[cfg(feature = "profile")]
-        let timer = start_timer!(||"generate primary plonk trace");
+        let timer = start_timer!(|| "generate primary plonk trace");
         let primary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.primary.ck(),
             &primary_instance,
@@ -480,7 +480,7 @@ where
         end_timer!(timer);
 
         #[cfg(feature = "profile")]
-        let timer = start_timer!(||"VanillaFS::prove: primary_cross_term");
+        let timer = start_timer!(|| "VanillaFS::prove: primary_cross_term");
         debug!("start prove primary trace");
         let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
             pp.primary.ck(),
@@ -500,7 +500,7 @@ where
         debug!("prepare secondary td");
 
         #[cfg(feature = "profile")]
-        let timer = start_timer!(||"process_step: secondary");
+        let timer = start_timer!(|| "process_step: secondary");
         let next_secondary_z_i = self
             .secondary
             .step_circuit
@@ -509,7 +509,7 @@ where
         end_timer!(timer);
 
         #[cfg(feature = "profile")]
-        let timer = start_timer!(||"process secondary instance");
+        let timer = start_timer!(|| "process secondary instance");
         let secondary_instance = [
             util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
@@ -528,7 +528,7 @@ where
         end_timer!(timer);
 
         #[cfg(feature = "profile")]
-        let timer = start_timer!(||"create secondary ivc circuit");
+        let timer = start_timer!(|| "create secondary ivc circuit");
         let secondary_sfc = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
             step_circuit: &self.secondary.step_circuit,
             input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
@@ -566,7 +566,7 @@ where
         self.primary.relaxed_trace = primary_new_trace;
 
         #[cfg(feature = "profile")]
-        let timer = start_timer!(||"generate secondary plonk trace");
+        let timer = start_timer!(|| "generate secondary plonk trace");
         self.secondary_trace = VanillaFS::generate_plonk_trace(
             pp.secondary.ck(),
             &secondary_instance,

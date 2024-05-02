@@ -1,6 +1,6 @@
-use std::marker::PhantomData;
 #[cfg(feature = "profile")]
 use ark_std::{end_timer, start_timer};
+use std::marker::PhantomData;
 
 use super::*;
 use crate::commitment::CommitmentKey;
@@ -100,7 +100,7 @@ impl<C: CurveAffine> VanillaFS<C> {
         let normalized = S.poly.fold_transform(offset, S.num_fold_vars());
         #[cfg(feature = "profile")]
         end_timer!(timer);
-        
+
         let r_index = normalized.num_challenges() - 1;
         let degree = S.poly.degree_for_folding(offset);
         #[cfg(feature = "profile")]
