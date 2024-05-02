@@ -1279,7 +1279,7 @@ mod tests {
 
             assert_eq!(off_circuit_W, on_circuit_W_cell);
 
-            folded_W = plonk.W_commitments.clone();
+            folded_W.clone_from(&plonk.W_commitments);
         }
     }
 
