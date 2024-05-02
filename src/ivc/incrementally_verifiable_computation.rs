@@ -1,3 +1,5 @@
+#[cfg(feature = "profile")]
+use ark_std::{end_timer, start_timer};
 use std::{io, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
@@ -140,17 +142,29 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(|| "create IVC object");
         let mut ivc = Self::new(pp, primary, primary_z_0, secondary, secondary_z_0, true)?;
         trace!("IVC created");
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
 
         for step in 1..=num_steps.get() {
+            #[cfg(feature = "profile")]
+            let timer = start_timer!(|| format!("Fold {} step", step));
             trace!("Start fold {step} step");
             ivc.fold_step(pp)?;
+            #[cfg(feature = "profile")]
+            end_timer!(timer);
         }
 
         trace!("Finish folding, start verify");
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(|| "Veirfy IVC folding");
         ivc.verify(pp)?;
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
 
         Ok(())
     }
@@ -372,6 +386,8 @@ where
         let primary_span = span!(Level::ERROR, "primary", step = self.step).entered();
         debug!("start fold step with folding 'secondary' by 'primary'");
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(||"VanillaFS::prove: secondary_cross_terms");
         debug!("start prove secondary trace");
         let (secondary_new_trace, secondary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
             pp.secondary.ck(),
@@ -380,15 +396,22 @@ where
             &self.secondary.relaxed_trace,
             &self.secondary_trace,
         )?;
-
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
         debug!("prepare primary td");
 
         // Prepare primary constraint system for folding
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(||"process_step: primary");
         let primary_z_next = self
             .primary
             .step_circuit
             .process_step(&self.primary.z_i, pp.primary.k_table_size())?;
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(||"process primary instance");
         let primary_instance = [
             util::fe_to_fe(&self.secondary_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
@@ -403,7 +426,11 @@ where
             }
             .generate_with_inspect(|buf| debug!("primary X1 {}+1-step: {buf:?}", self.step)),
         ];
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(||"create primary ivc circuit");
         let primary_sfc = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: &self.primary.step_circuit,
             input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
@@ -417,6 +444,8 @@ where
                 cross_term_commits: secondary_cross_term_commits,
             },
         };
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
 
         if self.debug_mode {
             MockProver::run(
@@ -438,6 +467,8 @@ where
         self.primary.z_i = primary_z_next;
         self.secondary.relaxed_trace = secondary_new_trace;
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(||"generate primary plonk trace");
         let primary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.primary.ck(),
             &primary_instance,
@@ -445,7 +476,11 @@ where
             &self.primary_nifs_pp,
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?;
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(||"VanillaFS::prove: primary_cross_term");
         debug!("start prove primary trace");
         let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
             pp.primary.ck(),
@@ -454,18 +489,27 @@ where
             &self.primary.relaxed_trace,
             &primary_plonk_trace,
         )?;
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
 
         primary_span.exit();
+
         let _secondary_span = span!(Level::ERROR, "secondary", step = self.step).entered();
 
         debug!("start fold step with folding 'primary' by 'secondary'");
         debug!("prepare secondary td");
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(||"process_step: secondary");
         let next_secondary_z_i = self
             .secondary
             .step_circuit
             .process_step(&self.secondary.z_i, pp.secondary.k_table_size())?;
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(||"process secondary instance");
         let secondary_instance = [
             util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
             RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
@@ -480,7 +524,11 @@ where
             }
             .generate_with_inspect(|buf| debug!("secondary X1 {}+1-step: {buf:?}", self.step)),
         ];
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(||"create secondary ivc circuit");
         let secondary_sfc = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
             step_circuit: &self.secondary.step_circuit,
             input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
@@ -494,6 +542,8 @@ where
                 cross_term_commits: primary_cross_term_commits,
             },
         };
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
 
         if self.debug_mode {
             MockProver::run(
@@ -515,6 +565,8 @@ where
         self.secondary.z_i = next_secondary_z_i;
         self.primary.relaxed_trace = primary_new_trace;
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(||"generate secondary plonk trace");
         self.secondary_trace = VanillaFS::generate_plonk_trace(
             pp.secondary.ck(),
             &secondary_instance,
@@ -522,6 +574,7 @@ where
             &self.secondary_nifs_pp,
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
         )?;
+        end_timer!(timer);
 
         self.step += 1;
 

@@ -25,6 +25,7 @@ sha3 = "0.10"
 some-to-err = "0.2.1"
 thiserror = "1.0.48"
 tracing = { version = "0.1.40", features = ["attributes"] }
+ark-std = { version = "0.4.0", features = ["print-trace"], optional = true }
 
 [dev-dependencies]
 prettytable-rs = "0.10.0"
@@ -39,3 +40,7 @@ maplit = "1.0.2"
 version = "1"
 default-features = false # Disable features which are enabled by default
 features = ["prepush-hook", "run-cargo-fmt", "run-cargo-test", "run-cargo-clippy"]
+
+[features]
+default = ["profile"]
+profile = ["dep:ark-std"]

@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+#[cfg(feature = "profile")]
+use ark_std::{end_timer, start_timer};
 use std::{array, fs, io, num::NonZeroUsize, path::Path};
 
 use ff::PrimeField;
@@ -64,6 +66,7 @@ fn main() {
     tracing_subscriber::fmt::init();
 
     info!("Start");
+
     // C1
     let sc1 = step_circuit::trivial::Circuit::<ARITY, _>::default();
     // C2
@@ -72,6 +75,8 @@ fn main() {
     let primary_spec = RandomOracleConstant::<<C1 as CurveExt>::ScalarExt>::new(10, 10);
     let secondary_spec = RandomOracleConstant::<<C2 as CurveExt>::ScalarExt>::new(10, 10);
 
+    #[cfg(feature = "profile")]
+    let timer = start_timer!(|| "commitment key gen/retrive");
     info!("Start generate");
     let primary_commitment_key = get_or_create_commitment_key(COMMITMENT_KEY_SIZE, "grumpkin")
         .expect("Failed to get primary key");
@@ -79,7 +84,11 @@ fn main() {
     let secondary_commitment_key = get_or_create_commitment_key(COMMITMENT_KEY_SIZE, "bn256")
         .expect("Failed to get secondary key");
     info!("Secondary generated");
+    #[cfg(feature = "profile")]
+    end_timer!(timer);
 
+    #[cfg(feature = "profile")]
+    let timer = start_timer!(|| "generate PublicParams");
     let pp = PublicParams::<
         '_,
         ARITY,
@@ -109,7 +118,11 @@ fn main() {
     )
     .unwrap();
     info!("public params: {pp:?}");
+    #[cfg(feature = "profile")]
+    end_timer!(timer);
 
+    #[cfg(feature = "profile")]
+    let timer = start_timer!(|| "fold_with_debug_mode");
     debug!("start ivc");
     IVC::fold_with_debug_mode(
         &pp,
@@ -120,4 +133,6 @@ fn main() {
         NonZeroUsize::new(5).unwrap(),
     )
     .unwrap();
+    #[cfg(feature = "profile")]
+    end_timer!(timer);
 }

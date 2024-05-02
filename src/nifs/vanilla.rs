@@ -1,4 +1,6 @@
 use std::marker::PhantomData;
+#[cfg(feature = "profile")]
+use ark_std::{end_timer, start_timer};
 
 use super::*;
 use crate::commitment::CommitmentKey;
@@ -93,9 +95,16 @@ impl<C: CurveAffine> VanillaFS<C> {
             W2s: &W2.W,
         };
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(|| "fold transform");
         let normalized = S.poly.fold_transform(offset, S.num_fold_vars());
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
+        
         let r_index = normalized.num_challenges() - 1;
         let degree = S.poly.degree_for_folding(offset);
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(|| "cross term evaluation");
         let cross_terms: Vec<Vec<C::ScalarExt>> = (1..degree)
             .map(|k| {
                 normalized.coeff_of(
@@ -112,6 +121,8 @@ impl<C: CurveAffine> VanillaFS<C> {
                     .collect::<Result<Vec<C::ScalarExt>, EvalError>>()
             })
             .collect::<Result<Vec<Vec<C::ScalarExt>>, EvalError>>()?;
+        #[cfg(feature = "profile")]
+        end_timer!(timer);
         let cross_term_commits: Vec<C> =
             cross_terms.iter().map(|v| ck.commit(v).unwrap()).collect();
         Ok((cross_terms, cross_term_commits))
@@ -187,13 +198,19 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         let U2 = &incoming.u;
         let W2 = &incoming.w;
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(|| "commit cross term");
         let (cross_terms, cross_term_commits) =
             Self::commit_cross_terms(ck, &pp.S, U1, W1, U2, W2)?;
+        end_timer!(timer);
 
         let r = VanillaFS::generate_challenge(&pp.pp_digest, ro_acc, U1, U2, &cross_term_commits)?;
 
+        #[cfg(feature = "profile")]
+        let timer = start_timer!(|| "fold instance-witness pair");
         let U = U1.fold(U2, &cross_term_commits, &r);
         let W = W1.fold(W2, &cross_terms, &r);
+        end_timer!(timer);
         Ok((RelaxedPlonkTrace { U, W }, cross_term_commits))
     }
 
