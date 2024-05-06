@@ -1,7 +1,4 @@
-use crate::polynomial::{
-    graph_evaluator::GraphEvaluator, grouped_poly::GroupedPoly, ColumnIndex, Expression,
-    MultiPolynomial,
-};
+use crate::polynomial::{ColumnIndex, MultiPolynomial};
 use ff::PrimeField;
 use std::collections::HashMap;
 
@@ -185,25 +182,6 @@ impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, MultiPolynomial<F>> for E {
                     )
             })
             .try_fold(F::ZERO, |acc, value| Ok(acc + value?))
-    }
-}
-
-impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, GroupedPoly<F>> for E {
-    type Output = Box<[F]>;
-    fn eval(&self, poly: &GroupedPoly<F>, row_index: usize) -> Result<Box<[F]>, Error> {
-        poly.iter()
-            .map(|expr| match expr {
-                Some(expr) => self.eval(expr, row_index),
-                None => Ok(F::ZERO),
-            })
-            .collect()
-    }
-}
-
-impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, Expression<F>> for E {
-    type Output = F;
-    fn eval(&self, expr: &Expression<F>, row_index: usize) -> Result<F, Error> {
-        GraphEvaluator::new(expr).evaluate(self, row_index)
     }
 }
 

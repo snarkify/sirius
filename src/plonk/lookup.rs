@@ -49,11 +49,11 @@ use tracing::*;
 
 use crate::{
     plonk::{
-        eval::{Error, Eval, LookupEvalDomain},
+        eval::{Error, LookupEvalDomain},
         util::compress_halo2_expression,
         PlonkStructure,
     },
-    polynomial::{Expression, Query},
+    polynomial::{graph_evaluator::GraphEvaluator, Expression, Query},
 };
 
 /// Lookup Argument
@@ -229,7 +229,7 @@ impl<F: PrimeField> Arguments<F> {
             .map(|poly| {
                 (0..nrow)
                     .into_par_iter()
-                    .map(|row| data.eval(poly, row))
+                    .map(|row| GraphEvaluator::new(poly).evaluate(&data, row))
                     .collect::<Result<Vec<F>, Error>>()
             })
             .collect()
@@ -260,7 +260,7 @@ impl<F: PrimeField> Arguments<F> {
             .map(|poly| {
                 (0..nrow)
                     .into_par_iter()
-                    .map(|row| data.eval(poly, row))
+                    .map(|row| GraphEvaluator::new(poly).evaluate(&data, row))
                     .collect::<Result<Vec<_>, Error>>()
             })
             .collect()
