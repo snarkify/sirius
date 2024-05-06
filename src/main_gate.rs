@@ -198,7 +198,7 @@ pub enum WrapValue<F: PrimeField> {
 }
 
 impl<F: PrimeField> WrapValue<F> {
-    pub fn from_point<C: CurveAffine>(input: &C) -> Option<(Self, Self)>
+    pub fn from_point<C>(input: &C) -> Option<(Self, Self)>
     where
         C: CurveAffine<Base = F>,
     {
@@ -209,7 +209,7 @@ impl<F: PrimeField> WrapValue<F> {
         ))
     }
 
-    pub fn from_assigned_point<C: CurveAffine>(input: &AssignedPoint<C>) -> [Self; 2]
+    pub fn from_assigned_point<C>(input: &AssignedPoint<C>) -> [Self; 2]
     where
         C: CurveAffine<Base = F>,
     {
