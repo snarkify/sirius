@@ -227,9 +227,10 @@ impl<F: PrimeField> Arguments<F> {
         self.lookup_polys
             .par_iter()
             .map(|poly| {
+                let evaluator = GraphEvaluator::new(poly);
                 (0..nrow)
                     .into_par_iter()
-                    .map(|row| GraphEvaluator::new(poly).evaluate(&data, row))
+                    .map(|row| evaluator.evaluate(&data, row))
                     .collect::<Result<Vec<F>, Error>>()
             })
             .collect()
@@ -258,9 +259,10 @@ impl<F: PrimeField> Arguments<F> {
         self.table_polys
             .par_iter()
             .map(|poly| {
+                let evaluator = GraphEvaluator::new(poly);
                 (0..nrow)
                     .into_par_iter()
-                    .map(|row| GraphEvaluator::new(poly).evaluate(&data, row))
+                    .map(|row| evaluator.evaluate(&data, row))
                     .collect::<Result<Vec<_>, Error>>()
             })
             .collect()
