@@ -88,10 +88,7 @@ pub fn fe_to_fe_safe<F1: PrimeField, F2: PrimeField>(fe: &F1) -> Option<F2> {
     }
 }
 
-fn invert<F: Field>(
-    poly: &[Assigned<F>],
-    inv_denoms: impl Iterator<Item = F> + ExactSizeIterator,
-) -> Vec<F> {
+fn invert<F: Field>(poly: &[Assigned<F>], inv_denoms: impl ExactSizeIterator<Item = F>) -> Vec<F> {
     assert_eq!(inv_denoms.len(), poly.len());
     poly.iter()
         .zip(inv_denoms)
@@ -268,13 +265,8 @@ mod tests {
     }
 }
 
-pub(crate) fn create_ro<
-    F: PrimeField,
-    const T: usize,
-    const RATE: usize,
-    const R_F: usize,
-    const R_P: usize,
->() -> PoseidonHash<F, T, RATE>
+pub(crate) fn create_ro<F, const T: usize, const RATE: usize, const R_F: usize, const R_P: usize>(
+) -> PoseidonHash<F, T, RATE>
 where
     F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {

@@ -360,11 +360,15 @@ impl<F: PrimeField> GraphEvaluator<F> {
     }
 
     #[instrument(name = "GraphEvaluator::evaluate", skip_all)]
-    pub fn evaluate(&self, getter: &impl GetDataForEval<F>, idx: usize) -> Result<F, EvalError> {
+    pub fn evaluate(
+        &self,
+        getter: &impl GetDataForEval<F>,
+        row_index: usize,
+    ) -> Result<F, EvalError> {
         let mut data = self.instance();
         // All rotation index values
         for (rot_idx, rot) in self.rotations.iter().enumerate() {
-            data.rotations[rot_idx] = get_rotation_idx(idx, *rot, getter.row_size());
+            data.rotations[rot_idx] = get_rotation_idx(row_index, *rot, getter.row_size());
         }
 
         // All calculations, with cached intermediate results

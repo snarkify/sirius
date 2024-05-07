@@ -32,10 +32,11 @@ use crate::{
     constants::NUM_CHALLENGE_BITS,
     plonk::{
         self,
-        eval::{Error as EvalError, Eval, PlonkEvalDomain},
+        eval::{Error as EvalError, PlonkEvalDomain},
     },
     polynomial::{
         expression::{HomogeneousExpression, QueryIndexContext},
+        graph_evaluator::GraphEvaluator,
         grouped_poly::GroupedPoly,
         sparse::{matrix_multiply, SparseMatrix},
         Expression, MultiPolynomial,
@@ -317,10 +318,12 @@ impl<F: PrimeField> PlonkStructure<F> {
 
         let total_row = 1 << self.k;
 
+        let evaluator = GraphEvaluator::new(self.custom_gates_lookup_compressed.compressed());
         (0..total_row)
             .into_par_iter()
             .map(|row| {
-                data.eval(self.custom_gates_lookup_compressed.compressed(), row)
+                evaluator
+                    .evaluate(&data, row)
                     .map(|row_result| if row_result.eq(&F::ZERO) { 0 } else { 1 })
             })
             .try_reduce(
@@ -371,11 +374,11 @@ impl<F: PrimeField> PlonkStructure<F> {
             W2s: &vec![],
         };
 
-        let poly = self.custom_gates_lookup_compressed.homogeneous();
+        let evaluator = GraphEvaluator::new(self.custom_gates_lookup_compressed.homogeneous());
         (0..total_row)
             .into_par_iter()
             .map(|row| {
-                data.eval(poly, row).map(|eval_of_row| {
+                evaluator.evaluate(&data, row).map(|eval_of_row| {
                     let expected = W.E[row];
 
                     if eval_of_row.eq(&expected) {
