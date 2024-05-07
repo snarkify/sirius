@@ -34,7 +34,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
         }
     }
 
-    #[instrument(name = "CircuitRunner::collect_plonk", skip_all)]
+    #[instrument(name = "circuit_collect_plonk_struct", skip_all)]
     pub fn try_collect_plonk_structure(&self) -> Result<PlonkStructure<F>, Error> {
         debug!("start build metainfo");
         let ConstraintSystemMetainfo {
@@ -67,7 +67,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
         })
     }
 
-    #[instrument(name = "CircuitRunner::collect_witness", skip_all)]
+    #[instrument(name = "circuit_collect_witness", skip_all)]
     pub fn try_collect_witness(&self) -> Result<Witness<F>, Error> {
         let mut witness = WitnessCollector {
             instance: self.instance.clone(),

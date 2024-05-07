@@ -1,9 +1,10 @@
-use std::{array, fs, io, marker::PhantomData, num::NonZeroUsize, path::Path};
+use std::{array, env, fs, io, marker::PhantomData, num::NonZeroUsize, path::Path};
 
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 
+use metadata::LevelFilter;
 use rayon::prelude::*;
 
 use bn256::G1 as C1;
@@ -20,7 +21,7 @@ use sirius::{
     poseidon::{self, poseidon_circuit::PoseidonChip, ROPair, Spec},
 };
 use tracing::*;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 const ARITY: usize = 1;
 
@@ -92,6 +93,7 @@ type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
 type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
 type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
 
+#[instrument]
 fn get_or_create_commitment_key<C: CurveAffine>(
     k: usize,
     label: &'static str,
@@ -100,35 +102,42 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 
     let file_path = Path::new(FOLDER).join(label).join(format!("{k}.bin"));
 
-    let key = if file_path.exists() {
-        debug!("{file_path:?} exists, load key");
-        unsafe { CommitmentKey::load_from_file(&file_path, k) }?
+    if file_path.exists() {
+        info!("{file_path:?} exists, load key");
+        let key = unsafe { CommitmentKey::load_from_file(&file_path, k) }?;
+        assert!(
+            key.par_iter().all(|p: &C| p.is_on_curve().into()),
+            "loaded from cache ({file_path:?}) key is corrupted: points out of curve"
+        );
+        Ok(key)
     } else {
-        debug!("{file_path:?} not exists, start generate");
+        info!("{file_path:?} not exists, start generate");
         let key = CommitmentKey::setup(k, label.as_bytes());
         fs::create_dir_all(file_path.parent().unwrap())?;
         unsafe {
             key.save_to_file(&file_path)?;
         }
-        key
-    };
-
-    assert!(key.par_iter().all(|p: &C| p.is_on_curve().into()));
-
-    Ok(key)
+        Ok(key)
+    }
 }
 
 fn main() {
-    tracing_subscriber::fmt()
-        .event_format(
-            tracing_subscriber::fmt::format()
-                .with_file(true)
-                .with_line_number(true),
-        )
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    let builder = tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        );
 
-    info!("Start");
+    if env::args().any(|arg| arg.eq("--json")) {
+        builder.json().init();
+    } else {
+        builder.init();
+    }
+
+    let _span = info_span!("poseidon_example").entered();
+
     // C1
     let sc1 = TestPoseidonCircuit::default();
     // C2
@@ -137,15 +146,12 @@ fn main() {
     let primary_spec = RandomOracleConstant::<<C2 as CurveExt>::Base>::new(10, 10);
     let secondary_spec = RandomOracleConstant::<<C1 as CurveExt>::Base>::new(10, 10);
 
-    info!("Start generate");
     let primary_commitment_key =
         get_or_create_commitment_key::<bn256::G1Affine>(COMMITMENT_KEY_SIZE, "bn256")
             .expect("Failed to get primary key");
-    info!("Primary generated");
     let secondary_commitment_key =
         get_or_create_commitment_key::<grumpkin::G1Affine>(COMMITMENT_KEY_SIZE, "grumpkin")
             .expect("Failed to get secondary key");
-    info!("Secondary generated");
 
     let pp = PublicParams::<
         '_,
