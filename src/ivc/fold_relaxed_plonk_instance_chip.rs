@@ -342,13 +342,13 @@ pub enum Error {
 
     #[error("Error constructing elliptic curve coordinates for {variable_name}: {variable_str}")]
     CantBuildCoordinates {
-        variable_name: &'static str,
+        variable_name: String,
         variable_str: String,
     },
 
     #[error("Error converting scalar to base field element for {variable_name}: {variable_str}")]
     WhileScalarToBase {
-        variable_name: &'static str,
+        variable_name: String,
         variable_str: String,
     },
 }
@@ -989,7 +989,7 @@ pub(crate) fn assign_next_advice_from_point<C: CurveAffine, AR: Into<String>>(
 ) -> Result<AssignedPoint<C>, Error> {
     let coordinates: Coordinates<C> =
         Option::from(input.coordinates()).ok_or(Error::CantBuildCoordinates {
-            variable_name: "point",
+            variable_name: annotation().into(),
             variable_str: format!("{:?}", input),
         })?;
 
@@ -1006,7 +1006,7 @@ fn assign_next_advice_from_diff_field<C: CurveAffine, AR: Into<String>>(
     annotation: impl Fn() -> AR,
 ) -> Result<AssignedValue<C::Base>, Error> {
     let val: C::Base = util::fe_to_fe_safe(input).ok_or(Error::WhileScalarToBase {
-        variable_name: "scalar field",
+        variable_name: annotation().into(),
         variable_str: format!("{:?}", input),
     })?;
 
@@ -1435,7 +1435,7 @@ mod tests {
                     let assigned_fold_instances = relaxed_plonk
                         .instance
                         .iter()
-                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "folded instance"))
+                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "folded instance".to_owned()))
                         .collect::<Result<Vec<_>, _>>()
                         .unwrap()
                         .try_into()
@@ -1443,7 +1443,7 @@ mod tests {
 
                     let assigned_input_instance = input_instances
                         .iter()
-                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "input instance"))
+                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "input instance".to_owned()))
                         .collect::<Result<Vec<_>, _>>()?
                         .try_into()
                         .unwrap();
@@ -1576,13 +1576,13 @@ mod tests {
                     let assigned_fold_challenges = relaxed_plonk
                         .challenges
                         .iter()
-                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "folded instance"))
+                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "folded instance".to_owned()))
                         .collect::<Result<Vec<_>, _>>()
                         .unwrap();
 
                     let assigned_input_instance = input_challenges
                         .iter()
-                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "input instance"))
+                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "input instance".to_owned()))
                         .collect::<Result<Vec<_>, _>>()?;
 
                     ctx.next();
