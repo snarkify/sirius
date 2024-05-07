@@ -156,6 +156,10 @@ impl<F: PrimeField> GroupedPoly<F> {
     pub fn is_empty(&self) -> bool {
         self.terms.is_empty()
     }
+
+    pub fn get(&self, index: usize) -> Option<&Expression<F>> {
+        self.iter().nth(index).flatten()
+    }
 }
 
 macro_rules! impl_poly_ops {
@@ -306,16 +310,16 @@ mod test {
             5 => Expression::Constant(Fq::ONE),
         }))
         .iter_with_degree()
-        .map(|(degree, term)| format!("{degree};{}", term.expand()))
+        .map(|(degree, term)| format!("{degree};{term}"))
         .collect::<Vec<_>>();
 
         assert_eq!(
             actual,
             vec![
-                "0;0xffffffffffffffffffffffffffffffff + (r_0)",
-                "1;(Z_0)",
-                "2;(Z_5[-2])",
-                "5;0x1 + (r_0)"
+                "0;0xffffffffffffffffffffffffffffffff + r_0",
+                "1;Z_0",
+                "2;Z_5[-2]",
+                "5;r_0 + 0x1"
             ]
         );
     }
@@ -339,16 +343,16 @@ mod test {
             5 => Expression::Challenge(0),
         }))
         .iter_with_degree()
-        .map(|(degree, term)| format!("{degree};{}", term.expand()))
+        .map(|(degree, term)| format!("{degree};{term}"))
         .collect::<Vec<_>>();
 
         assert_eq!(
             actual,
             vec![
-                "0;0xffffffffffffffffffffffffffffffff + 0x40000000000000000000000000000000224698fc0994a8dd8c46eb2100000000(r_0)",
-                "1;(Z_0)",
-                "2;0x40000000000000000000000000000000224698fc0994a8dd8c46eb2100000000(Z_5[-2])",
-                "5;0x1 + 0x40000000000000000000000000000000224698fc0994a8dd8c46eb2100000000(r_0)"
+                "0;0xffffffffffffffffffffffffffffffff - r_0",
+                "1;Z_0",
+                "2;-Z_5[-2]",
+                "5;0x1 - r_0"
             ]
         );
     }
@@ -368,10 +372,10 @@ mod test {
             ),
         }))
         .iter_with_degree()
-        .map(|(degree, term)| format!("{degree};{}", term.expand()))
+        .map(|(degree, term)| format!("{degree};{term}"))
         .collect::<Vec<_>>();
 
-        assert_eq!(actual, vec!["18;(Z_0)(Z_2)(Z_3) + (Z_2)(Z_3)(Z_1[+1])"]);
+        assert_eq!(actual, vec!["18;Z_2 * Z_3 * (Z_0 + Z_1[+1])"]);
     }
 
     #[test]
@@ -387,17 +391,17 @@ mod test {
             4 => Expression::Polynomial(Query { index: 5, rotation: Rotation(0) }),
         }))
         .iter_with_degree()
-        .map(|(degree, term)| format!("{degree};{}", term.expand()))
+        .map(|(degree, term)| format!("{degree};{term}"))
         .collect::<Vec<_>>();
 
         assert_eq!(
             actual,
             vec![
-                "4;(Z_0)(Z_3)",
-                "5;(Z_1)(Z_3) + (Z_0)(Z_4)",
-                "6;(Z_2)(Z_3) + (Z_1)(Z_4) + (Z_0)(Z_5)",
-                "7;(Z_2)(Z_4) + (Z_1)(Z_5)",
-                "8;(Z_2)(Z_5)"
+                "4;Z_3 * Z_0",
+                "5;Z_4 * Z_0 + Z_3 * Z_1",
+                "6;Z_5 * Z_0 + Z_4 * Z_1 + Z_3 * Z_2",
+                "7;Z_5 * Z_1 + Z_4 * Z_2",
+                "8;Z_5 * Z_2"
             ]
         );
     }
@@ -443,15 +447,15 @@ mod test {
 
         let actual = grouped_poly
             .iter_with_degree()
-            .map(|(degree, term)| format!("{degree};{}", term.expand()))
+            .map(|(degree, term)| format!("{degree};{term}"))
             .collect::<Vec<_>>();
 
         assert_eq!(
             actual,
             vec![
-                "0;(Z_0)(Z_3) + (Z_1)(Z_3) + (Z_2)(Z_3) + (Z_0)(Z_4) + (Z_1)(Z_4) + (Z_2)(Z_4)",
-                "1;(Z_3)(Z_5) + (Z_4)(Z_5) + (Z_3)(Z_6) + (Z_4)(Z_6) + (Z_3)(Z_7) + (Z_4)(Z_7) + (Z_0)(Z_8) + (Z_1)(Z_8) + (Z_2)(Z_8) + (Z_0)(Z_9) + (Z_1)(Z_9) + (Z_2)(Z_9)",
-                "2;(Z_5)(Z_8) + (Z_6)(Z_8) + (Z_7)(Z_8) + (Z_5)(Z_9) + (Z_6)(Z_9) + (Z_7)(Z_9)"
+                "0;(Z_3 + Z_4 + 0x) * (Z_0 + Z_1 + Z_2 + 0x)",
+                "1;(Z_8 + Z_9) * (Z_0 + Z_1 + Z_2 + 0x) + (Z_3 + Z_4 + 0x) * (Z_5 + Z_6 + Z_7)",
+                "2;(Z_8 + Z_9) * (Z_5 + Z_6 + Z_7)"
             ]
         );
     }
