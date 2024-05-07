@@ -1435,7 +1435,9 @@ mod tests {
                     let assigned_fold_instances = relaxed_plonk
                         .instance
                         .iter()
-                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "folded instance".to_owned()))
+                        .map(|instance| {
+                            assign_scalar_as_bn!(&mut ctx, instance, "folded instance".to_owned())
+                        })
                         .collect::<Result<Vec<_>, _>>()
                         .unwrap()
                         .try_into()
@@ -1443,7 +1445,9 @@ mod tests {
 
                     let assigned_input_instance = input_instances
                         .iter()
-                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "input instance".to_owned()))
+                        .map(|instance| {
+                            assign_scalar_as_bn!(&mut ctx, instance, "input instance".to_owned())
+                        })
                         .collect::<Result<Vec<_>, _>>()?
                         .try_into()
                         .unwrap();
@@ -1576,13 +1580,17 @@ mod tests {
                     let assigned_fold_challenges = relaxed_plonk
                         .challenges
                         .iter()
-                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "folded instance".to_owned()))
+                        .map(|instance| {
+                            assign_scalar_as_bn!(&mut ctx, instance, "folded instance".to_owned())
+                        })
                         .collect::<Result<Vec<_>, _>>()
                         .unwrap();
 
                     let assigned_input_instance = input_challenges
                         .iter()
-                        .map(|instance| assign_scalar_as_bn!(&mut ctx, instance, "input instance".to_owned()))
+                        .map(|instance| {
+                            assign_scalar_as_bn!(&mut ctx, instance, "input instance".to_owned())
+                        })
                         .collect::<Result<Vec<_>, _>>()?;
 
                     ctx.next();

@@ -7,6 +7,8 @@ use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 
+use rayon::prelude::*;
+
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
 
@@ -21,12 +23,13 @@ use sirius::{
     poseidon::{self, poseidon_circuit::PoseidonChip, ROPair, Spec},
 };
 use tracing::*;
+use tracing_subscriber::EnvFilter;
 
 const ARITY: usize = 1;
 
-const CIRCUIT_TABLE_SIZE1: usize = 17;
-const CIRCUIT_TABLE_SIZE2: usize = 17;
-const COMMITMENT_KEY_SIZE: usize = 20;
+const CIRCUIT_TABLE_SIZE1: usize = 20;
+const CIRCUIT_TABLE_SIZE2: usize = 20;
+const COMMITMENT_KEY_SIZE: usize = 27;
 
 // Spec for user defined poseidon circuit
 const T1: usize = 3;
@@ -100,9 +103,9 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 
     let file_path = Path::new(FOLDER).join(label).join(format!("{k}.bin"));
 
-    if file_path.exists() {
+    let key = if file_path.exists() {
         debug!("{file_path:?} exists, load key");
-        unsafe { CommitmentKey::load_from_file(&file_path, k) }
+        unsafe { CommitmentKey::load_from_file(&file_path, k) }?
     } else {
         debug!("{file_path:?} not exists, start generate");
         let key = CommitmentKey::setup(k, label.as_bytes());
@@ -110,12 +113,23 @@ fn get_or_create_commitment_key<C: CurveAffine>(
         unsafe {
             key.save_to_file(&file_path)?;
         }
-        Ok(key)
-    }
+        key
+    };
+
+    assert!(key.par_iter().all(|p: &C| p.is_on_curve().into()));
+
+    Ok(key)
 }
 
 fn main() {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .event_format(
+            tracing_subscriber::fmt::format()
+                .with_file(true)
+                .with_line_number(true),
+        )
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
     info!("Start");
     // C1
@@ -127,11 +141,13 @@ fn main() {
     let secondary_spec = RandomOracleConstant::<<C1 as CurveExt>::Base>::new(10, 10);
 
     info!("Start generate");
-    let primary_commitment_key = get_or_create_commitment_key(COMMITMENT_KEY_SIZE, "grumpkin")
-        .expect("Failed to get primary key");
+    let primary_commitment_key =
+        get_or_create_commitment_key::<bn256::G1Affine>(COMMITMENT_KEY_SIZE, "bn256")
+            .expect("Failed to get primary key");
     info!("Primary generated");
-    let secondary_commitment_key = get_or_create_commitment_key(COMMITMENT_KEY_SIZE, "bn256")
-        .expect("Failed to get secondary key");
+    let secondary_commitment_key =
+        get_or_create_commitment_key::<grumpkin::G1Affine>(COMMITMENT_KEY_SIZE, "grumpkin")
+            .expect("Failed to get secondary key");
     info!("Secondary generated");
 
     let pp = PublicParams::<
