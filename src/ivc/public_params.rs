@@ -471,7 +471,7 @@ mod pp_test {
         let spec1 = RandomOracleConstant::<5, 4, Scalar1>::new(10, 10);
         let spec2 = RandomOracleConstant::<5, 4, Scalar2>::new(10, 10);
 
-        const K: usize = 16;
+        const K: usize = 17;
 
         PublicParams::<
             '_,

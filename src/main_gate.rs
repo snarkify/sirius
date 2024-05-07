@@ -198,7 +198,7 @@ pub enum WrapValue<F: PrimeField> {
 }
 
 impl<F: PrimeField> WrapValue<F> {
-    pub fn from_point<C: CurveAffine>(input: &C) -> Option<(Self, Self)>
+    pub fn from_point<C>(input: &C) -> Option<(Self, Self)>
     where
         C: CurveAffine<Base = F>,
     {
@@ -209,7 +209,7 @@ impl<F: PrimeField> WrapValue<F> {
         ))
     }
 
-    pub fn from_assigned_point<C: CurveAffine>(input: &AssignedPoint<C>) -> [Self; 2]
+    pub fn from_assigned_point<C>(input: &AssignedPoint<C>) -> [Self; 2]
     where
         C: CurveAffine<Base = F>,
     {
@@ -799,7 +799,10 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::polynomial::{ColumnIndex, Expression};
+    use crate::{
+        plonk::CompressedGates,
+        polynomial::{expression::QueryIndexContext, Expression},
+    };
     use halo2curves::pasta::Fp;
     use tracing_test::traced_test;
 
@@ -815,7 +818,7 @@ mod tests {
         assert!(config.into_smaller_size::<{ T + 1 }>().is_none());
     }
 
-    fn main_gate_expressions() -> (Vec<Vec<Expression<Fp>>>, (usize, usize, usize)) {
+    fn main_gate_expressions() -> (Vec<Vec<Expression<Fp>>>, usize, QueryIndexContext) {
         const T: usize = 2;
         const RATE: usize = 2;
         let mut cs = ConstraintSystem::<Fp>::default();
@@ -834,12 +837,22 @@ mod tests {
                     .collect()
             })
             .collect();
-        (gates, (num_fixed, num_instance, num_advice))
+        (
+            gates,
+            num_instance,
+            QueryIndexContext {
+                num_fixed,
+                num_advice,
+                num_selectors: cs.num_selectors(),
+                num_challenges: cs.num_challenges(),
+                num_lookups: 0,
+            },
+        )
     }
 
     #[test]
     fn test_main_gate_expr() {
-        let (gates, _) = main_gate_expressions();
+        let (gates, _, _) = main_gate_expressions();
         for (i, gate) in gates.iter().enumerate() {
             for (j, poly) in gate.iter().enumerate() {
                 if i == 0 && j == 0 {
@@ -856,35 +869,21 @@ mod tests {
 
     #[test]
     fn test_main_gate_cross_term() {
-        let (gates, meta) = main_gate_expressions();
+        let (gates, _num_instance, mut ctx) = main_gate_expressions();
         let expr = gates[0][0].clone();
-        let multipoly = expr.expand();
-        let num_fixed = meta.0;
-        let num_vars = meta.1 + meta.2;
-        let res = multipoly.fold_transform(num_fixed, num_vars);
-        let r_index = res.num_challenges() - 1;
-        let e1 = res.coeff_of(
-            ColumnIndex::Challenge {
-                column_index: r_index,
-            },
-            0,
-        );
-        let e2 = res.coeff_of(
-            ColumnIndex::Challenge {
-                column_index: r_index,
-            },
-            5,
-        );
-        // E1: "(u1^5)(rc) + (q1_0)(u1^4)(s1_0) + (q5_0)(s1_0^5) + (u1^4)(q1_1)(s1_1) + (u1^3)(qm)(s1_0)(s1_1) + (q5_1)(s1_1^5) + (u1^4)(qi)(in1) + (u1^4)(qo)(out1)"
+        let compressed = CompressedGates::new(&[expr], &mut ctx);
+
+        let e1 = compressed.grouped().get(0).unwrap();
+        let e2 = compressed.grouped().get(5).unwrap();
+
         assert_eq!(
             e1.to_string(),
-            "(r_0^5)(Z_8) + (Z_0)(r_0^4)(Z_9) + (Z_2)(Z_9^5) + (r_0^4)(Z_1)(Z_10) + (r_0^3)(Z_4)(Z_9)(Z_10) + (Z_3)(Z_10^5) + (r_0^4)(Z_6)(Z_11) + (r_0^4)(Z_7)(Z_12)"
+            "r_0 * r_0 * r_0 * (Z_10 * Z_9 * Z_4 + r_0 * Z_11 * Z_6 + r_0 * r_0 * Z_8 + r_0 * Z_12 * Z_7) + r_0 * r_0 * r_0 * r_0 * Z_9 * Z_0 + Z_9 * Z_9 * Z_9 * Z_9 * Z_9 * Z_2 + r_0 * r_0 * r_0 * r_0 * Z_10 * Z_1 + Z_10 * Z_10 * Z_10 * Z_10 * Z_10 * Z_3"
         );
 
-        // E2: "(u2^5)(rc) + (q1_0)(u2^4)(s2_0) + (q5_0)(s2_0^5) + (q1_1)(u2^4)(s2_1) + (u2^3)(qm)(s2_0)(s2_1) + (q5_1)(s2_1^5) + (u2^4)(qi)(in2) + (u2^4)(qo)(out2)"
         assert_eq!(
             e2.to_string(),
-            "(r_1^5)(Z_8) + (Z_0)(r_1^4)(Z_13) + (Z_2)(Z_13^5) + (Z_1)(r_1^4)(Z_14) + (r_1^3)(Z_4)(Z_13)(Z_14) + (Z_3)(Z_14^5) + (r_1^4)(Z_6)(Z_15) + (r_1^4)(Z_7)(Z_16)"
+            "r_1 * r_1 * r_1 * (Z_14 * Z_13 * Z_4 + r_1 * Z_15 * Z_6 + r_1 * r_1 * Z_8 + r_1 * Z_16 * Z_7) + r_1 * r_1 * r_1 * r_1 * Z_13 * Z_0 + Z_13 * Z_13 * Z_13 * Z_13 * Z_13 * Z_2 + r_1 * r_1 * r_1 * r_1 * Z_14 * Z_1 + Z_14 * Z_14 * Z_14 * Z_14 * Z_14 * Z_3"
         );
     }
 }

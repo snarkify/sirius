@@ -1,11 +1,13 @@
-use crate::polynomial::{grouped_poly::GroupedPoly, ColumnIndex, Expression, MultiPolynomial};
+use crate::polynomial::ColumnIndex;
 use ff::PrimeField;
-use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
     #[error("challenge index out of boundary: {challenge_index}")]
-    ChallengeIndexOutOfBoundary { challenge_index: usize },
+    ChallengeIndexOutOfBoundary {
+        challenge_index: usize,
+        challeges_len: usize,
+    },
     #[error("column variable index out of boundary: {column_index}")]
     ColumnVariableIndexOutOfBoundary { column_index: usize },
     #[error("column variable row index out of boundary: {row_index}")]
@@ -68,124 +70,14 @@ pub trait GetDataForEval<F: PrimeField> {
     }
 
     fn eval_challenge(&self, index: usize) -> Result<F, Error> {
-        self.get_challenges().as_ref().get(index).copied().ok_or(
-            Error::ChallengeIndexOutOfBoundary {
+        let challenges = self.get_challenges().as_ref();
+        challenges
+            .get(index)
+            .copied()
+            .ok_or(Error::ChallengeIndexOutOfBoundary {
                 challenge_index: index,
-            },
-        )
-    }
-}
-
-/// The `Eval` trait is used to evaluate multi-variable polynomials in a Evaluation Domain defined
-/// over a prime field `F`
-///
-/// This trait encapsulates the necessary functionality to evaluate polynomials
-///
-/// # Generic Parameters
-///
-/// * `F`: The prime field over which the evaluations are carried out.
-/// * `POLY`: The type of polynomial or expression to be evaluated.
-///
-pub trait Eval<F: PrimeField, POLY>: GetDataForEval<F> {
-    /// General method allowing to perform calculations of input polynomial type on the basis of
-    /// data requested in `GetEvalData`. Depending on its representation the implementation may
-    /// differ
-    fn eval(&self, poly: &POLY, row_index: usize) -> Result<F, Error>;
-}
-
-impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, MultiPolynomial<F>> for E {
-    /// Evaluate virtual multi-polynomial (i.e. custom gates, cross-term expressions etc) on
-    /// specific row to evaluate each monomial term of the form
-    /// ```math
-    /// $c*x1[row]^{k1}*x2[row]^{k2}*\cdots$
-    /// ```
-    /// we first lookup the value of `$x[row]$` from the Evaluation domain, then calculate the
-    /// value of monomial. to speedup, we will save the x and `x^k` in a HashMap
-    fn eval(&self, poly: &MultiPolynomial<F>, row_index: usize) -> Result<F, Error> {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-        struct Index<'l> {
-            column_index: &'l ColumnIndex,
-            exp: &'l usize,
-        }
-        let mut evals = HashMap::<Index<'_>, _>::with_capacity(poly.degree() * poly.arity());
-
-        let row_size = self.row_size() as i32;
-        poly.monomials
-            .iter()
-            .map(|mono| {
-                mono.index_to_poly
-                    .iter()
-                    .take(mono.arity)
-                    .zip(mono.exponents.iter())
-                    .map(|(column_index, exp)| {
-                        if *exp == 0 {
-                            return Ok(F::ONE);
-                        }
-                        if let Some(vn) = evals.get(&Index { column_index, exp }) {
-                            Ok(*vn)
-                        } else if let Some(v1) = evals.get(&Index {
-                            column_index,
-                            exp: &1,
-                        }) {
-                            let vn = v1.pow([*exp as u64, 0, 0, 0]);
-                            evals.insert(Index { column_index, exp }, vn);
-                            Ok(vn)
-                        } else {
-                            let v1 = match column_index {
-                                // evaluation for challenge variable
-                                ColumnIndex::Challenge { column_index } => {
-                                    self.eval_challenge(*column_index)
-                                }
-                                // evaluation for column polynomial variable
-                                ColumnIndex::Polynominal {
-                                    rotation,
-                                    column_index,
-                                } => {
-                                    let rotation_plus_row = rotation + (row_index as i32);
-                                    // TODO: double check how halo2 handle
-                                    // (1): row+rot < 0
-                                    // (2): row+rot >= row_size = 2^K
-                                    let row = if rotation_plus_row < 0 {
-                                        rotation_plus_row + row_size
-                                    } else if rotation_plus_row >= row_size {
-                                        rotation_plus_row - row_size
-                                    } else {
-                                        rotation_plus_row
-                                    };
-                                    self.eval_column_var(row as usize, *column_index)
-                                }
-                            }?;
-
-                            evals
-                                .entry(Index {
-                                    column_index,
-                                    exp: &1,
-                                })
-                                .or_insert_with(|| v1.pow([1, 0, 0, 0]));
-
-                            Ok(*evals
-                                .entry(Index { column_index, exp })
-                                .or_insert_with(|| v1.pow([*exp as u64, 0, 0, 0])))
-                        }
-                    })
-                    .try_fold(
-                        mono.coeff,
-                        |acc, result_with_var| Ok(acc * result_with_var?),
-                    )
+                challeges_len: challenges.len(),
             })
-            .try_fold(F::ZERO, |acc, value| Ok(acc + value?))
-    }
-}
-
-impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, GroupedPoly<F>> for E {
-    fn eval(&self, _poly: &GroupedPoly<F>, _row_index: usize) -> Result<F, Error> {
-        todo!("#159")
-    }
-}
-
-impl<F: PrimeField, E: GetDataForEval<F>> Eval<F, Expression<F>> for E {
-    fn eval(&self, _expr: &Expression<F>, _row_index: usize) -> Result<F, Error> {
-        todo!("#159")
     }
 }
 
