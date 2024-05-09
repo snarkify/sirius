@@ -42,14 +42,14 @@ class SpanNode:
         }
 
     def to_human_readable(
-        self, time_filter: timedelta, indent: int = 0, max_length: int = 80
+        self, min_runtime: timedelta, indent: int = 0, max_length: int = 80
     ) -> List[str]:
         """
         Generates a human-readable representation of the SpanNode and its children.
         Returns a list of formatted strings.
         """
 
-        if self.time_busy and self.time_busy < time_filter:
+        if self.time_busy and self.time_busy < min_runtime:
             return []
 
         start_line = "··" * indent + f"Start:  {self.name}"
@@ -69,7 +69,7 @@ class SpanNode:
         for child in self.children:
             result.extend(
                 child.to_human_readable(
-                    time_filter=time_filter, indent=indent + 1, max_length=max_length
+                    min_runtime=min_runtime, indent=indent + 1, max_length=max_length
                 )
             )
         result.append(end_line)
@@ -81,14 +81,14 @@ class SpanTree:
         self.roots: List[SpanNode] = []
         self.span_mapping: Dict[str, SpanNode] = {}
 
-    def to_human_readable(self, time_filter: timedelta, max_length: int = 80) -> str:
+    def to_human_readable(self, min_runtime: timedelta, max_length: int = 80) -> str:
         """
         Generates a human-readable representation of the entire SpanTree.
         """
         result = []
         for root in self.roots:
             result.extend(
-                root.to_human_readable(max_length=max_length, time_filter=time_filter)
+                root.to_human_readable(max_length=max_length, min_runtime=min_runtime)
             )
         return "\n".join(result)
 
@@ -155,7 +155,9 @@ class LogProcessor:
                 if parent_span:
                     parent_span.add_child(new_span)
                 else:
-                    raise ValueError(f"Can't find parent for {parent_span}, can't find {spans_info[-2]}")
+                    raise ValueError(
+                        f"Can't find parent for {parent_span}, can't find {spans_info[-2]}"
+                    )
 
             # Store the span node in the mapping
             self.span_tree.span_mapping[span_key] = new_span
@@ -285,22 +287,22 @@ def main():
         description="Process log files and filter spans based on time_busy."
     )
     parser.add_argument(
-        "--min-busy",
+        "--min-runtime",
         type=str,
         default="1s",
-        help="Minimum busy time to display (default: 1s)",
+        help="Minimum runtime time to display (default: 1s)",
     )
     args = parser.parse_args()
 
-    min_busy = parse_timedelta(args.min_busy)
-    if min_busy is None:
-        raise ValueError(f"Can't parse {args.min_busy} as min busy")
+    min_runtime = parse_timedelta(args.min_runtime)
+    if min_runtime is None:
+        raise ValueError(f"Can't parse {args.min_runtime} as min runtime")
 
     log_processor = LogProcessor()
     for line in sys.stdin:
         log_processor.process_log_line(line.strip())
 
-    print(log_processor.span_tree.to_human_readable(time_filter=min_busy))
+    print(log_processor.span_tree.to_human_readable(min_runtime=min_runtime))
 
 
 if __name__ == "__main__":
