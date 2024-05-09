@@ -155,7 +155,7 @@ class LogProcessor:
                 if parent_span:
                     parent_span.add_child(new_span)
                 else:
-                    raise ValueError(f"")
+                    raise ValueError(f"Can't find parent for {parent_span}, can't find {spans_info[-2]}")
 
             # Store the span node in the mapping
             self.span_tree.span_mapping[span_key] = new_span
@@ -169,7 +169,7 @@ class LogProcessor:
                 time_busy_timedelta = parse_timedelta(time_busy_str)
 
                 if time_busy_timedelta is None:
-                    raise ValueError(f"can't parse: {time_busy_str}")
+                    raise ValueError(f"Can't parse: {time_busy_str}")
 
                 span_node.set_time_busy(time_busy_timedelta)
 
