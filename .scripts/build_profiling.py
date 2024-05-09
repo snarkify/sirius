@@ -10,17 +10,22 @@ from typing import Dict, List, Optional
 from datetime import timedelta, datetime
 
 
-
 class SpanNode:
-    def __init__(self, name: str, start: datetime, level: str, fields: Optional[Dict[str, str]] = None):
+    def __init__(
+        self,
+        name: str,
+        start: datetime,
+        level: str,
+        fields: Optional[Dict[str, str]] = None,
+    ):
         self.name = name
         self.start = start
         self.level = level
         self.fields = fields or {}
-        self.children: List['SpanNode'] = []
+        self.children: List["SpanNode"] = []
         self.time_busy: Optional[timedelta] = None
 
-    def add_child(self, child: 'SpanNode'):
+    def add_child(self, child: "SpanNode"):
         self.children.append(child)
 
     def set_time_busy(self, time_busy: timedelta):
@@ -28,15 +33,17 @@ class SpanNode:
 
     def to_dict(self) -> Dict:
         return {
-            'name': self.name,
-            'level': self.level,
-            'start': self.start,
-            'fields': self.fields,
-            'children': [child.to_dict() for child in self.children],
-            'time_busy': self.time_busy
+            "name": self.name,
+            "level": self.level,
+            "start": self.start,
+            "fields": self.fields,
+            "children": [child.to_dict() for child in self.children],
+            "time_busy": self.time_busy,
         }
 
-    def to_human_readable(self, time_filter: timedelta, indent: int = 0, max_length: int = 80) -> List[str]:
+    def to_human_readable(
+        self, time_filter: timedelta, indent: int = 0, max_length: int = 80
+    ) -> List[str]:
         """
         Generates a human-readable representation of the SpanNode and its children.
         Returns a list of formatted strings.
@@ -46,7 +53,7 @@ class SpanNode:
             return []
 
         start_line = "··" * indent + f"Start:  {self.name}"
-        end_line = "··" * indent   + f"End:    {self.name}"
+        end_line = "··" * indent + f"End:    {self.name}"
 
         # Time busy formatting
         if self.time_busy:
@@ -56,13 +63,18 @@ class SpanNode:
 
         # Align time busy
         fill_dots = max_length - len(end_line) - len(time_busy_str)
-        end_line += '.' * max(0, fill_dots) + time_busy_str
+        end_line += "." * max(0, fill_dots) + time_busy_str
 
         result = [start_line]
         for child in self.children:
-            result.extend(child.to_human_readable(time_filter=time_filter, indent=indent + 1, max_length=max_length))
+            result.extend(
+                child.to_human_readable(
+                    time_filter=time_filter, indent=indent + 1, max_length=max_length
+                )
+            )
         result.append(end_line)
         return result
+
 
 class SpanTree:
     def __init__(self):
@@ -75,8 +87,11 @@ class SpanTree:
         """
         result = []
         for root in self.roots:
-            result.extend(root.to_human_readable(max_length=max_length, time_filter=time_filter))
+            result.extend(
+                root.to_human_readable(max_length=max_length, time_filter=time_filter)
+            )
         return "\n".join(result)
+
 
 class LogProcessor:
     def __init__(self):
@@ -94,7 +109,8 @@ class LogProcessor:
         Find the most recent unfinished SpanNode with the given key.
         """
         candidates = [
-            node for node_id, node in self.span_tree.span_mapping.items()
+            node
+            for node_id, node in self.span_tree.span_mapping.items()
             if node_id == key and node.time_busy is None
         ]
         if candidates:
@@ -125,7 +141,7 @@ class LogProcessor:
                 name=node_name,
                 level=level,
                 start=parse_timestamp(start),
-                fields={**span_info, **{"target": target}}
+                fields={**span_info, **{"target": target}},
             )
 
             # Fix for determining root node
@@ -150,12 +166,13 @@ class LogProcessor:
             span_node = self.find_unfinished_span_node(span_key)
             if span_node:
                 time_busy_str = log.get("fields", {}).get("time.busy", "0s")
-                time_busy_timedelta = parse_timedelta(time_busy_str) 
+                time_busy_timedelta = parse_timedelta(time_busy_str)
 
                 if time_busy_timedelta is None:
                     raise ValueError(f"can't parse: {time_busy_str}")
 
                 span_node.set_time_busy(time_busy_timedelta)
+
 
 def parse_timedelta(time_str: str) -> Optional[timedelta]:
     """
@@ -177,6 +194,7 @@ def parse_timedelta(time_str: str) -> Optional[timedelta]:
 
     return None
 
+
 def parse_timestamp(timestamp_str: str) -> datetime:
     """
     Parse the timestamp string into a datetime object.
@@ -186,12 +204,15 @@ def parse_timestamp(timestamp_str: str) -> datetime:
 
 def main():
     import sys
+
     log_processor = LogProcessor()
     for line in sys.stdin:
         log_processor.process_log_line(line.strip())
 
     import json
+
     print(json.dumps(log_processor.get_result_tree(), indent=2))
+
 
 class TestLogProcessor(unittest.TestCase):
     def setUp(self):
@@ -220,36 +241,55 @@ class TestLogProcessor(unittest.TestCase):
         self.assertEqual(len(roots), 1)
         root_span = roots[0]
         self.assertEqual(root_span.name, "poseidon_example")
-        self.assertEqual(root_span.start, parse_timestamp("2024-05-09T17:59:30.817151Z"))
+        self.assertEqual(
+            root_span.start, parse_timestamp("2024-05-09T17:59:30.817151Z")
+        )
         self.assertIsNone(root_span.time_busy)
 
         # Check the child "get_or_create_commitment_key_bn256"
         child_bn256 = root_span.children[0]
         self.assertEqual(child_bn256.name, "get_or_create_commitment_key")
-        self.assertEqual(child_bn256.start, parse_timestamp("2024-05-09T17:59:30.820519Z"))
+        self.assertEqual(
+            child_bn256.start, parse_timestamp("2024-05-09T17:59:30.820519Z")
+        )
         self.assertEqual(child_bn256.time_busy, timedelta(seconds=3.47))
 
         # Check the child "get_or_create_commitment_key_grumpkin"
         child_grumpkin = root_span.children[1]
         self.assertEqual(child_grumpkin.name, "get_or_create_commitment_key")
-        self.assertEqual(child_grumpkin.start, parse_timestamp("2024-05-09T17:59:34.294652Z"))
+        self.assertEqual(
+            child_grumpkin.start, parse_timestamp("2024-05-09T17:59:34.294652Z")
+        )
         self.assertEqual(child_grumpkin.time_busy, timedelta(seconds=2.24))
 
         # Check the grandchild "pp_new"
         grandchild_pp_new = root_span.children[2]
         self.assertEqual(grandchild_pp_new.name, "pp_new")
-        self.assertEqual(grandchild_pp_new.start, parse_timestamp("2024-05-09T17:59:36.536088Z"))
+        self.assertEqual(
+            grandchild_pp_new.start, parse_timestamp("2024-05-09T17:59:36.536088Z")
+        )
         self.assertIsNone(grandchild_pp_new.time_busy)
 
         # Check the grand-grandchild "primary"
         grandgrandchild_primary = grandchild_pp_new.children[0]
         self.assertEqual(grandgrandchild_primary.name, "primary")
-        self.assertEqual(grandgrandchild_primary.start, parse_timestamp("2024-05-09T17:59:36.536095Z"))
+        self.assertEqual(
+            grandgrandchild_primary.start,
+            parse_timestamp("2024-05-09T17:59:36.536095Z"),
+        )
         self.assertEqual(grandgrandchild_primary.time_busy, timedelta(seconds=1.28))
 
+
 def main():
-    parser = argparse.ArgumentParser(description='Process log files and filter spans based on time_busy.')
-    parser.add_argument('--min-busy', type=str, default='1s', help='Minimum busy time to display (default: 1s)')
+    parser = argparse.ArgumentParser(
+        description="Process log files and filter spans based on time_busy."
+    )
+    parser.add_argument(
+        "--min-busy",
+        type=str,
+        default="1s",
+        help="Minimum busy time to display (default: 1s)",
+    )
     args = parser.parse_args()
 
     min_busy = parse_timedelta(args.min_busy)
@@ -262,5 +302,6 @@ def main():
 
     print(log_processor.span_tree.to_human_readable(time_filter=min_busy))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
