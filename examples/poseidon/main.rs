@@ -1,7 +1,4 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
-use std::{array, fs, io, iter, marker::PhantomData, num::NonZeroUsize, path::Path};
+use std::{array, fs, io, marker::PhantomData, num::NonZeroUsize, path::Path};
 
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 
@@ -13,13 +10,13 @@ use bn256::G1 as C1;
 use grumpkin::G1 as C2;
 
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value as hValue},
-    plonk::{Circuit, Column, ConstraintSystem, Instance},
+    circuit::{AssignedCell, Layouter},
+    plonk::ConstraintSystem,
 };
 use sirius::{
     commitment::CommitmentKey,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
-    main_gate::{AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
+    main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
     poseidon::{self, poseidon_circuit::PoseidonChip, ROPair, Spec},
 };
 use tracing::*;
