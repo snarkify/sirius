@@ -486,7 +486,7 @@ where
             input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
                 step: C1::Base::from_u128(self.step as u128),
                 step_pp: pp.secondary.params(),
-                public_params_hash: pp.digest().map_err(Error::WhileHash)?,
+                public_params_hash: pp.digest_1(),
                 z_0: self.secondary.z_0,
                 z_i: self.secondary.z_i,
                 U: self.primary.relaxed_trace.U.clone(),

@@ -4,8 +4,9 @@ use std::{array, fs, io, num::NonZeroUsize, path::Path};
 
 use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
-
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
+use rayon::prelude::*;
+use tracing::*;
 
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
@@ -15,13 +16,12 @@ use sirius::{
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, IVC},
     poseidon::{self, ROPair},
 };
-use tracing::*;
 
 const ARITY: usize = BLOCK_SIZE / 2;
 
-const CIRCUIT_TABLE_SIZE1: usize = 16;
-const CIRCUIT_TABLE_SIZE2: usize = 16;
-const COMMITMENT_KEY_SIZE: usize = 19;
+const CIRCUIT_TABLE_SIZE1: usize = 20;
+const CIRCUIT_TABLE_SIZE2: usize = 20;
+const COMMITMENT_KEY_SIZE: usize = 27;
 const T: usize = 5;
 const RATE: usize = 4;
 
@@ -47,10 +47,15 @@ fn get_or_create_commitment_key<C: CurveAffine>(
     let file_path = Path::new(FOLDER).join(label).join(format!("{k}.bin"));
 
     if file_path.exists() {
-        debug!("{file_path:?} exists, load key");
-        unsafe { CommitmentKey::load_from_file(&file_path, k) }
+        info!("{file_path:?} exists, load key");
+        let key = unsafe { CommitmentKey::load_from_file(&file_path, k) }?;
+        assert!(
+            key.par_iter().all(|p: &C| p.is_on_curve().into()),
+            "loaded from cache ({file_path:?}) key is corrupted: points out of curve"
+        );
+        Ok(key)
     } else {
-        debug!("{file_path:?} not exists, start generate");
+        info!("{file_path:?} not exists, start generate");
         let key = CommitmentKey::setup(k, label.as_bytes());
         fs::create_dir_all(file_path.parent().unwrap())?;
         unsafe {
