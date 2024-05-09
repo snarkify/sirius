@@ -7,7 +7,6 @@ use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 use rayon::prelude::*;
 use tracing::*;
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
