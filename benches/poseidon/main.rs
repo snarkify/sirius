@@ -1,30 +1,82 @@
-#![allow(dead_code)]
-
-use std::{array, io, num::NonZeroUsize, path::Path};
+use std::{array, io, marker::PhantomData, num::NonZeroUsize, path::Path};
 
 use criterion::{black_box, criterion_group, Criterion};
-use ff::PrimeField;
-use halo2_gadgets::sha256::BLOCK_SIZE;
+use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
+
+use metadata::LevelFilter;
 
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
 
-use metadata::LevelFilter;
+use halo2_proofs::{
+    circuit::{AssignedCell, Layouter},
+    plonk::ConstraintSystem,
+};
 use sirius::{
     commitment::CommitmentKey,
-    ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, IVC},
-    poseidon::{self, ROPair},
+    ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
+    main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
+    poseidon::{self, poseidon_circuit::PoseidonChip, ROPair, Spec},
 };
 use tracing::*;
 use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
-const ARITY: usize = BLOCK_SIZE / 2;
+const ARITY: usize = 1;
 
-const CIRCUIT_TABLE_SIZE1: usize = 17;
-const CIRCUIT_TABLE_SIZE2: usize = 17;
+const CIRCUIT_TABLE_SIZE1: usize = 20;
+const CIRCUIT_TABLE_SIZE2: usize = 20;
 const COMMITMENT_KEY_SIZE: usize = 27;
+
+// Spec for user defined poseidon circuit
+const T1: usize = 3;
+const RATE1: usize = 2;
+const R_F1: usize = 4;
+const R_P1: usize = 3;
+
+#[derive(Clone, Debug)]
+struct TestPoseidonCircuitConfig {
+    pconfig: MainGateConfig<T1>,
+}
+
+#[derive(Default, Debug, Clone)]
+struct TestPoseidonCircuit<F: PrimeFieldBits> {
+    _p: PhantomData<F>,
+}
+
+impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPoseidonCircuit<F> {
+    type Config = TestPoseidonCircuitConfig;
+
+    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+        let pconfig = MainGate::configure(meta);
+        Self::Config { pconfig }
+    }
+
+    fn synthesize_step(
+        &self,
+        config: Self::Config,
+        layouter: &mut impl Layouter<F>,
+        z_in: &[AssignedCell<F, F>; ARITY],
+    ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
+        let spec = Spec::<F, T1, RATE1>::new(R_F1, R_P1);
+        let mut pchip = PoseidonChip::new(config.pconfig, spec);
+        let input = z_in.iter().map(|x| x.into()).collect::<Vec<WrapValue<F>>>();
+        pchip.update(&input);
+        let output = layouter
+            .assign_region(
+                || "poseidon hash",
+                |region| {
+                    let ctx = &mut RegionCtx::new(region, 0);
+                    pchip.squeeze(ctx)
+                },
+            )
+            .map_err(SynthesisError::Halo2)?;
+        Ok([output])
+    }
+}
+
+// specs for IVC circuit
 const T: usize = 5;
 const RATE: usize = 4;
 
@@ -33,7 +85,7 @@ type RandomOracle = poseidon::PoseidonRO<T, RATE>;
 type RandomOracleConstant<F> = <RandomOracle as ROPair<F>>::Args;
 
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
-const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
+const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
 type C1Affine = <C1 as halo2curves::group::prime::PrimeCurve>::Affine;
 type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
@@ -52,11 +104,11 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-    let _span = info_span!("trivial_bench").entered();
+    let _span = info_span!("poseidon_bench").entered();
     let prepare_span = info_span!("prepare").entered();
 
     // C1
-    let sc1 = step_circuit::trivial::Circuit::<ARITY, _>::default();
+    let sc1 = TestPoseidonCircuit::default();
     // C2
     let sc2 = step_circuit::trivial::Circuit::<ARITY, _>::default();
 
@@ -77,7 +129,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         T,
         C1Affine,
         C2Affine,
-        step_circuit::trivial::Circuit<ARITY, _>,
+        TestPoseidonCircuit<_>,
         step_circuit::trivial::Circuit<ARITY, _>,
         RandomOracle,
         RandomOracle,
@@ -85,17 +137,17 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         CircuitPublicParamsInput::new(
             CIRCUIT_TABLE_SIZE1 as u32,
             &primary_commitment_key,
-            primary_spec.clone(),
+            primary_spec,
             &sc1,
         ),
         CircuitPublicParamsInput::new(
             CIRCUIT_TABLE_SIZE2 as u32,
             &secondary_commitment_key,
-            secondary_spec.clone(),
+            secondary_spec,
             &sc2,
         ),
         LIMB_WIDTH,
-        LIMBS_COUNT_LIMIT,
+        LIMBS_COUNT,
     )
     .unwrap();
 
@@ -106,8 +158,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function("trivial", move |b| {
         b.iter(|| {
-            let _span = info_span!("bench").entered();
-
             IVC::fold_with_debug_mode(
                 &pp,
                 sc1.clone(),
