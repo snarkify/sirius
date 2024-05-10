@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use std::{array, env, fs, io, num::NonZeroUsize, path::Path};
+use std::{array, io, num::NonZeroUsize, path::Path};
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, Criterion};
 use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
 
@@ -52,8 +52,6 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-    tracing_subscriber::fmt::init();
-
     let prepare_span = info_span!("prepare").entered();
 
     // C1
