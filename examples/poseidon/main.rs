@@ -1,11 +1,10 @@
-use std::{array, env, fs, io, marker::PhantomData, num::NonZeroUsize, path::Path};
+use std::{array, env, io, marker::PhantomData, num::NonZeroUsize, path::Path};
 
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 
 use metadata::LevelFilter;
-use rayon::prelude::*;
 
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
@@ -93,32 +92,14 @@ type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
 type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
 type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
 
+const FOLDER: &str = ".cache/examples";
+
 #[instrument]
 fn get_or_create_commitment_key<C: CurveAffine>(
     k: usize,
     label: &'static str,
 ) -> io::Result<CommitmentKey<C>> {
-    const FOLDER: &str = ".cache/examples";
-
-    let file_path = Path::new(FOLDER).join(label).join(format!("{k}.bin"));
-
-    if file_path.exists() {
-        info!("{file_path:?} exists, load key");
-        let key = unsafe { CommitmentKey::load_from_file(&file_path, k) }?;
-        assert!(
-            key.par_iter().all(|p: &C| p.is_on_curve().into()),
-            "loaded from cache ({file_path:?}) key is corrupted: points out of curve"
-        );
-        Ok(key)
-    } else {
-        info!("{file_path:?} not exists, start generate");
-        let key = CommitmentKey::setup(k, label.as_bytes());
-        fs::create_dir_all(file_path.parent().unwrap())?;
-        unsafe {
-            key.save_to_file(&file_path)?;
-        }
-        Ok(key)
-    }
+    unsafe { CommitmentKey::load_or_setup_cache(Path::new(FOLDER), label, k) }
 }
 
 fn main() {

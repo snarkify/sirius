@@ -1,7 +1,8 @@
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{self, Read, Write},
     iter, ops,
+    ops::Not,
     path::Path,
     slice,
 };
@@ -12,6 +13,7 @@ use halo2_proofs::arithmetic::{best_multiexp, CurveAffine, CurveExt};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha3::Shake256;
+use some_to_err::*;
 use tracing::*;
 
 use crate::util::parallelize;
@@ -120,6 +122,49 @@ impl<C: CurveAffine> CommitmentKey<C> {
         Ok(Self {
             ck: ck.into_boxed_slice(),
         })
+    }
+
+    /// Load or if missing setup and store commitment key in `cache_folder`
+    ///
+    /// The rule for the name is that for each `label`, a subfolder is created where all keys named
+    /// `{k}.bin`, where `k` is the size of key
+    ///
+    /// # Safety
+    /// - Safe only if the cache file is created with [`CommitmentKey::save_to_file`]
+    /// - Check [`std::slice::from_raw_parts`] & [`std::slice::from_raw_parts_mut`] for details
+    pub unsafe fn load_or_setup_cache(
+        cache_folder: &Path,
+        label: &'static str,
+        k: usize,
+    ) -> io::Result<Self> {
+        let file_path = cache_folder.join(label).join(format!("{k}.bin"));
+
+        if file_path.exists() {
+            info!("{file_path:?} exists, load key");
+            let key = unsafe { Self::load_from_file(&file_path, k) }?;
+
+            key.par_iter()
+                .all(|p: &C| p.is_on_curve().into())
+                .not()
+                .then(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Wrong file in cache, some ptr out of curve",
+                    )
+                })
+                .err_or(key)
+        } else {
+            info!("{file_path:?} not exists, start generate");
+            let key = Self::setup(k, label.as_bytes());
+
+            fs::create_dir_all(file_path.parent().unwrap())?;
+
+            unsafe {
+                key.save_to_file(&file_path)?;
+            }
+
+            Ok(key)
+        }
     }
 }
 

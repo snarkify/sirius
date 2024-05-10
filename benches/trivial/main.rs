@@ -1,27 +1,29 @@
 #![allow(dead_code)]
 
-use std::{array, env, io, num::NonZeroUsize, path::Path};
+use std::{array, env, fs, io, num::NonZeroUsize, path::Path};
 
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
+
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
-use metadata::LevelFilter;
-use tracing::*;
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
 
+use metadata::LevelFilter;
 use sirius::{
     commitment::CommitmentKey,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, IVC},
     poseidon::{self, ROPair},
 };
+use tracing::*;
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 const ARITY: usize = BLOCK_SIZE / 2;
 
-const CIRCUIT_TABLE_SIZE1: usize = 20;
-const CIRCUIT_TABLE_SIZE2: usize = 20;
+const CIRCUIT_TABLE_SIZE1: usize = 17;
+const CIRCUIT_TABLE_SIZE2: usize = 17;
 const COMMITMENT_KEY_SIZE: usize = 27;
 const T: usize = 5;
 const RATE: usize = 4;
@@ -49,22 +51,10 @@ fn get_or_create_commitment_key<C: CurveAffine>(
     unsafe { CommitmentKey::load_or_setup_cache(Path::new(FOLDER), label, k) }
 }
 
-fn main() {
-    let builder = tracing_subscriber::fmt()
-        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
-        .with_env_filter(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy(),
-        );
+pub fn criterion_benchmark(c: &mut Criterion) {
+    tracing_subscriber::fmt::init();
 
-    if env::args().any(|arg| arg.eq("--json")) {
-        builder.json().init();
-    } else {
-        builder.init();
-    }
-
-    let _span = info_span!("trivial_example").entered();
+    let prepare_span = info_span!("prepare").entered();
 
     // C1
     let sc1 = step_circuit::trivial::Circuit::<ARITY, _>::default();
@@ -75,13 +65,11 @@ fn main() {
     let secondary_spec = RandomOracleConstant::<<C2 as CurveExt>::ScalarExt>::new(10, 10);
 
     let primary_commitment_key =
-        get_or_create_commitment_key::<C1Affine>(COMMITMENT_KEY_SIZE, "bn256")
-            .expect("Failed to get primary key");
-    info!("Primary generated");
-    let secondary_commitment_key =
-        get_or_create_commitment_key::<C2Affine>(COMMITMENT_KEY_SIZE, "grumpkin")
+        get_or_create_commitment_key::<bn256::G1Affine>(COMMITMENT_KEY_SIZE, "bn256")
             .expect("Failed to get secondary key");
-    info!("Secondary generated");
+    let secondary_commitment_key =
+        get_or_create_commitment_key::<grumpkin::G1Affine>(COMMITMENT_KEY_SIZE, "grumpkin")
+            .expect("Failed to get primary key");
 
     let pp = PublicParams::<
         '_,
@@ -98,29 +86,60 @@ fn main() {
         CircuitPublicParamsInput::new(
             CIRCUIT_TABLE_SIZE1 as u32,
             &primary_commitment_key,
-            primary_spec,
+            primary_spec.clone(),
             &sc1,
         ),
         CircuitPublicParamsInput::new(
             CIRCUIT_TABLE_SIZE2 as u32,
             &secondary_commitment_key,
-            secondary_spec,
+            secondary_spec.clone(),
             &sc2,
         ),
         LIMB_WIDTH,
         LIMBS_COUNT_LIMIT,
     )
     .unwrap();
-    info!("public params: {pp:?}");
 
-    debug!("start ivc");
-    IVC::fold_with_debug_mode(
-        &pp,
-        sc1,
-        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
-        sc2,
-        array::from_fn(|i| C2Scalar::from_u128(i as u128)),
-        NonZeroUsize::new(5).unwrap(),
-    )
-    .unwrap();
+    prepare_span.exit();
+
+    let mut group = c.benchmark_group("sample-size-example");
+    group.significance_level(0.1).sample_size(10);
+
+    group.bench_function("trivial", move |b| {
+        b.iter(|| {
+            let _span = info_span!("bench").entered();
+
+            IVC::fold_with_debug_mode(
+                &pp,
+                sc1.clone(),
+                black_box(array::from_fn(|i| C1Scalar::from_u128(i as u128))),
+                sc2.clone(),
+                black_box(array::from_fn(|i| C2Scalar::from_u128(i as u128))),
+                NonZeroUsize::new(1).unwrap(),
+            )
+            .unwrap();
+        })
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, criterion_benchmark);
+
+fn main() {
+    tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .json()
+        .init();
+
+    benches();
+
+    criterion::Criterion::default()
+        .configure_from_args()
+        .final_summary();
 }
