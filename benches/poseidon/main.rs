@@ -1,7 +1,7 @@
 use std::{array, io, marker::PhantomData, num::NonZeroUsize, path::Path};
 
 use criterion::{black_box, criterion_group, Criterion};
-use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
+use ff::{Field, FromUniformBytes, PrimeFieldBits};
 
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 
@@ -153,18 +153,40 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     prepare_span.exit();
 
-    let mut group = c.benchmark_group("sample-size-example");
+    let mut group = c.benchmark_group("ivc_of_poseidon");
     group.significance_level(0.1).sample_size(10);
 
-    group.bench_function("trivial", move |b| {
+    group.bench_function("fold_1_step", |b| {
+        let mut rnd = rand::thread_rng();
+        let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
+        let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
+
         b.iter(|| {
-            IVC::fold_with_debug_mode(
+            IVC::fold(
                 &pp,
                 sc1.clone(),
-                black_box(array::from_fn(|i| C1Scalar::from_u128(i as u128))),
+                black_box(primary_z_0),
                 sc2.clone(),
-                black_box(array::from_fn(|i| C2Scalar::from_u128(i as u128))),
+                black_box(secondary_z_0),
                 NonZeroUsize::new(1).unwrap(),
+            )
+            .unwrap();
+        })
+    });
+
+    group.bench_function("fold_2_step", |b| {
+        let mut rnd = rand::thread_rng();
+        let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
+        let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
+
+        b.iter(|| {
+            IVC::fold(
+                &pp,
+                sc1.clone(),
+                black_box(primary_z_0),
+                sc2.clone(),
+                black_box(secondary_z_0),
+                NonZeroUsize::new(2).unwrap(),
             )
             .unwrap();
         })
