@@ -1,12 +1,14 @@
 #![allow(dead_code)]
 
-use std::{array, fs, io, num::NonZeroUsize, path::Path};
+use std::{array, env, fs, io, num::NonZeroUsize, path::Path};
 
 use ff::PrimeField;
 use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
+use metadata::LevelFilter;
 use rayon::prelude::*;
 use tracing::*;
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
@@ -38,6 +40,7 @@ type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
 type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
 type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
 
+#[instrument]
 fn get_or_create_commitment_key<C: CurveAffine>(
     k: usize,
     label: &'static str,
@@ -66,9 +69,22 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 }
 
 fn main() {
-    tracing_subscriber::fmt::init();
+    let builder = tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        );
 
-    info!("Start");
+    if env::args().any(|arg| arg.eq("--json")) {
+        builder.json().init();
+    } else {
+        builder.init();
+    }
+
+    let _span = info_span!("trivial_example").entered();
+
     // C1
     let sc1 = step_circuit::trivial::Circuit::<ARITY, _>::default();
     // C2
@@ -77,12 +93,13 @@ fn main() {
     let primary_spec = RandomOracleConstant::<<C1 as CurveExt>::ScalarExt>::new(10, 10);
     let secondary_spec = RandomOracleConstant::<<C2 as CurveExt>::ScalarExt>::new(10, 10);
 
-    info!("Start generate");
-    let primary_commitment_key = get_or_create_commitment_key(COMMITMENT_KEY_SIZE, "grumpkin")
-        .expect("Failed to get primary key");
+    let primary_commitment_key =
+        get_or_create_commitment_key::<C1Affine>(COMMITMENT_KEY_SIZE, "bn256")
+            .expect("Failed to get primary key");
     info!("Primary generated");
-    let secondary_commitment_key = get_or_create_commitment_key(COMMITMENT_KEY_SIZE, "bn256")
-        .expect("Failed to get secondary key");
+    let secondary_commitment_key =
+        get_or_create_commitment_key::<C2Affine>(COMMITMENT_KEY_SIZE, "grumpkin")
+            .expect("Failed to get secondary key");
     info!("Secondary generated");
 
     let pp = PublicParams::<

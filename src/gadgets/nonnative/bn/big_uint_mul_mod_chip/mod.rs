@@ -326,7 +326,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             lhs_limbs_count + rhs_limbs_count - 1
         );
 
-        info!(
+        debug!(
             "Production cells: {:?}",
             production_cells
                 .iter()

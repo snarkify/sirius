@@ -6,6 +6,7 @@ use digest::{typenum::U32, OutputSizeUser};
 use ff::{Field, PrimeField};
 use halo2curves::CurveAffine;
 use serde::Serialize;
+use tracing::*;
 
 pub use digest::Digest;
 
@@ -14,6 +15,7 @@ pub use sha3::Sha3_256 as DefaultHasher;
 use crate::constants::NUM_HASH_BITS;
 
 pub trait DigestToBits: Digest {
+    #[instrument(skip_all)]
     fn digest_to_bits(input: &impl Serialize) -> Result<Box<[u8]>, io::Error> {
         Ok(Self::digest(
             bincode::DefaultOptions::new()

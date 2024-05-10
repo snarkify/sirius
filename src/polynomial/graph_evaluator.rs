@@ -193,7 +193,7 @@ impl<F: PrimeField> Default for GraphEvaluator<F> {
 }
 
 impl<F: PrimeField> GraphEvaluator<F> {
-    #[instrument(name = "GraphEvaluator::new", skip_all)]
+    #[instrument(name = "graph_evaluator_new", skip_all, level = Level::DEBUG)]
     pub fn new(expr: &Expression<F>) -> Self {
         let mut self_ = GraphEvaluator::default();
 
@@ -359,7 +359,6 @@ impl<F: PrimeField> GraphEvaluator<F> {
         }
     }
 
-    #[instrument(name = "GraphEvaluator::evaluate", skip_all)]
     pub fn evaluate(
         &self,
         getter: &impl GetDataForEval<F>,

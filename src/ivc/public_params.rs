@@ -244,7 +244,7 @@ where
     RP1: ROPair<C1::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
     RP2: ROPair<C2::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
 {
-    #[instrument(name = "creating pp", skip_all)]
+    #[instrument(name = "pp_new", skip_all)]
     pub fn new(
         primary: CircuitPublicParamsInput<'key, '_, A1, C1, RP1::Args, SC1>,
         secondary: CircuitPublicParamsInput<'key, '_, A2, C2, RP2::Args, SC2>,
@@ -252,8 +252,7 @@ where
         limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
         let primary_S = {
-            let _primary_span = span!(Level::ERROR, "primary").entered();
-            info!("start");
+            let _primary_span = info_span!("primary").entered();
 
             CircuitRunner::new(
                 primary.k_table_size,
@@ -270,12 +269,10 @@ where
                 vec![C1::Scalar::ZERO; NUM_IO],
             )
             .try_collect_plonk_structure()
-            .inspect(|_| info!("end"))
         }?;
 
         let (secondary_S, secondary_initial_plonk_trace) = {
-            let _secondary_span = span!(Level::ERROR, "secondary").entered();
-            info!("start");
+            let _secondary_span = info_span!("secondary").entered();
 
             let secondary_initial_step_params =
                 StepParams::new(limb_width, limbs_count, secondary.ro_constant.clone());
@@ -325,7 +322,6 @@ where
                 &mut RP1::OffCircuit::new(primary.ro_constant.clone()),
             )?;
 
-            info!("end");
             Result::<_, Error>::Ok((secondary_S, secondary_initial_plonk_trace))
         }?;
 
@@ -352,10 +348,13 @@ where
             _p: PhantomData,
         };
 
-        let digest = digest::DefaultHasher::digest_to_bits(&self_)?;
+        {
+            let _primary_span = info_span!("digest").entered();
+            let digest = digest::DefaultHasher::digest_to_bits(&self_)?;
 
-        self_.digest_1 = into_curve_from_bits(digest.deref(), NUM_HASH_BITS);
-        self_.digest_2 = into_curve_from_bits(digest.deref(), NUM_HASH_BITS);
+            self_.digest_1 = into_curve_from_bits(digest.deref(), NUM_HASH_BITS);
+            self_.digest_2 = into_curve_from_bits(digest.deref(), NUM_HASH_BITS);
+        }
 
         Ok(self_)
     }

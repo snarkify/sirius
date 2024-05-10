@@ -81,6 +81,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     /// equal to that specified in the IVC fold call. However, if these calculations are long and resource
     /// intensive, it is possible to implement this logic off-circuit "honestly" with regular code, which may
     /// be more lightweight, but will require consistency testing.
+    #[instrument(skip_all)]
     fn process_step(
         &self,
         z_i: &[F; ARITY],

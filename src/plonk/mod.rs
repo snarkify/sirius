@@ -88,7 +88,7 @@ pub(crate) struct CompressedGates<F: PrimeField> {
 }
 
 impl<F: PrimeField> CompressedGates<F> {
-    #[instrument(name = "compressing", skip_all)]
+    #[instrument(name = "compressed_gates", skip_all)]
     pub fn new(original_expressions: &[Expression<F>], ctx: &mut QueryIndexContext) -> Self {
         let timer = Instant::now();
         debug!("input num_challenges: {}", ctx.num_challenges);
@@ -751,6 +751,7 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
     /// # Returns
     /// The folded `RelaxedPlonkInstance` after combining the instances and commitments.
     /// for detail of how fold works, please refer to: [nifs](https://hackmd.io/d7syox5tTeaxkepc9nLvHw?view#31-NIFS)
+    #[instrument(name = "fold_plonk_instance", skip_all)]
     pub fn fold(&self, U2: &PlonkInstance<C>, cross_term_commits: &[C], r: &C::ScalarExt) -> Self {
         let W_commitments = self
             .W_commitments
@@ -811,7 +812,7 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
         }
     }
 
-    #[instrument(name = "relaxed::fold", skip_all)]
+    #[instrument(name = "fold_witness", skip_all)]
     pub fn fold(&self, W2: &PlonkWitness<F>, cross_terms: &[Box<[F]>], r: &F) -> Self {
         debug!("start W: {} len", self.W.len());
         let W = self

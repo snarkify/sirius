@@ -181,6 +181,7 @@ where
         Ok(())
     }
 
+    #[instrument(name = "ivc_new", skip_all, fields(step = 0))]
     fn new<const T: usize, RP1, RP2>(
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
         primary: SC1,
@@ -193,8 +194,7 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        let primary_span = span!(Level::ERROR, "primary", step = 0).entered();
-        debug!("start creation of IVC");
+        let primary_span = info_span!("primary").entered();
         // For use as first version of `U` in primary circuit synthesize
         let secondary_pre_round_plonk_trace = pp.secondary_initial_plonk_trace();
 
@@ -204,22 +204,25 @@ where
         // Will be used as input & output `U` of zero-step of IVC
         let secondary_relaxed_trace =
             secondary_pre_round_plonk_trace.to_relax(pp.secondary.k_table_size() as usize);
+
         // Prepare primary constraint system for folding
-        let primary_instance = [
-            util::fe_to_fe(&secondary_pre_round_plonk_trace.u.instance[1]).unwrap(),
-            RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
-                random_oracle_constant: pp.primary.params().ro_constant().clone(),
-                public_params_hash: &pp.digest_2(),
-                step: 1,
-                z_0: &primary_z_0,
-                z_i: &primary_z_output,
-                relaxed: &secondary_relaxed_trace.U,
-                limb_width: pp.primary.params().limb_width(),
-                limbs_count: pp.primary.params().limbs_count(),
-            }
-            .generate_with_inspect(|buf| debug!("primary X1 zero-step: {buf:?}")),
-        ];
-        debug!("primary instance calculated");
+        let primary_instance = {
+            let _s = info_span!("generate_instance").entered();
+            [
+                util::fe_to_fe(&secondary_pre_round_plonk_trace.u.instance[1]).unwrap(),
+                RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
+                    random_oracle_constant: pp.primary.params().ro_constant().clone(),
+                    public_params_hash: &pp.digest_2(),
+                    step: 1,
+                    z_0: &primary_z_0,
+                    z_i: &primary_z_output,
+                    relaxed: &secondary_relaxed_trace.U,
+                    limb_width: pp.primary.params().limb_width(),
+                    limbs_count: pp.primary.params().limbs_count(),
+                }
+                .generate_with_inspect(|buf| debug!("primary X1 zero-step: {buf:?}")),
+            ]
+        };
 
         let primary_sfc = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: &primary,
@@ -239,6 +242,7 @@ where
         };
 
         if debug_mode {
+            let _s = debug_span!("debug").entered();
             MockProver::run(
                 pp.primary.k_table_size(),
                 &primary_sfc,
@@ -254,9 +258,7 @@ where
             primary_instance.to_vec(),
         )
         .try_collect_witness()?;
-        debug!("primary witness calculated");
 
-        // Start secondary
         let (primary_nifs_pp, _primary_off_circuit_vp) =
             VanillaFS::setup_params(pp.digest_1(), pp.primary.S().clone())?;
 
@@ -268,29 +270,33 @@ where
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?;
 
+        let primary_relaxed_trace =
+            primary_plonk_trace.to_relax(pp.primary.k_table_size() as usize);
+
+        primary_span.exit();
+        let _secondary_span = info_span!("secondary").entered();
+
         let secondary_z_output =
             secondary.process_step(&secondary_z_0, pp.secondary.k_table_size())?;
 
         // Will be used as input & output `U` of zero-step of IVC
-        let primary_relaxed_trace =
-            primary_plonk_trace.to_relax(pp.primary.k_table_size() as usize);
-        let secondary_instance = [
-            util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
-            RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
-                random_oracle_constant: pp.secondary.params().ro_constant().clone(),
-                public_params_hash: &pp.digest_1(),
-                step: 1,
-                z_0: &secondary_z_0,
-                z_i: &secondary_z_output,
-                relaxed: &primary_relaxed_trace.U,
-                limb_width: pp.secondary.params().limb_width(),
-                limbs_count: pp.secondary.params().limbs_count(),
-            }
-            .generate_with_inspect(|buf| debug!("secondary X1 zero-step: {buf:?}")),
-        ];
-
-        primary_span.exit();
-        let _secondary_span = span!(Level::ERROR, "secondary", step = 0).entered();
+        let secondary_instance = {
+            let _s = info_span!("generate_instance");
+            [
+                util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
+                RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
+                    random_oracle_constant: pp.secondary.params().ro_constant().clone(),
+                    public_params_hash: &pp.digest_1(),
+                    step: 1,
+                    z_0: &secondary_z_0,
+                    z_i: &secondary_z_output,
+                    relaxed: &primary_relaxed_trace.U,
+                    limb_width: pp.secondary.params().limb_width(),
+                    limbs_count: pp.secondary.params().limbs_count(),
+                }
+                .generate_with_inspect(|buf| debug!("secondary X1 zero-step: {buf:?}")),
+            ]
+        };
 
         let secondary_sfc = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
             step_circuit: &secondary,
@@ -313,6 +319,7 @@ where
         };
 
         if debug_mode {
+            let _s = debug_span!("debug").entered();
             MockProver::run(
                 pp.secondary.k_table_size(),
                 &secondary_sfc,
@@ -361,6 +368,7 @@ where
         })
     }
 
+    #[instrument(name = "ivc_fold_step", skip_all, fields(step = self.step))]
     fn fold_step<const T: usize, RP1, RP2>(
         &mut self,
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
@@ -369,10 +377,9 @@ where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
         RP2: ROPair<C2::Scalar, Config = MainGateConfig<T>>,
     {
-        let primary_span = span!(Level::ERROR, "primary", step = self.step).entered();
+        let primary_span = info_span!("primary").entered();
         debug!("start fold step with folding 'secondary' by 'primary'");
 
-        debug!("start prove secondary trace");
         let (secondary_new_trace, secondary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
             pp.secondary.ck(),
             &self.secondary_nifs_pp,
@@ -389,20 +396,23 @@ where
             .step_circuit
             .process_step(&self.primary.z_i, pp.primary.k_table_size())?;
 
-        let primary_instance = [
-            util::fe_to_fe(&self.secondary_trace.u.instance[1]).unwrap(),
-            RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
-                random_oracle_constant: pp.primary.params().ro_constant().clone(),
-                public_params_hash: &pp.digest_2(),
-                step: self.step + 1,
-                z_0: &self.primary.z_0,
-                z_i: &primary_z_next,
-                relaxed: &secondary_new_trace.U,
-                limb_width: pp.secondary.params().limb_width(),
-                limbs_count: pp.secondary.params().limbs_count(),
-            }
-            .generate_with_inspect(|buf| debug!("primary X1 {}+1-step: {buf:?}", self.step)),
-        ];
+        let primary_instance = {
+            let _s = info_span!("generate_instance").entered();
+            [
+                util::fe_to_fe(&self.secondary_trace.u.instance[1]).unwrap(),
+                RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
+                    random_oracle_constant: pp.primary.params().ro_constant().clone(),
+                    public_params_hash: &pp.digest_2(),
+                    step: self.step + 1,
+                    z_0: &self.primary.z_0,
+                    z_i: &primary_z_next,
+                    relaxed: &secondary_new_trace.U,
+                    limb_width: pp.secondary.params().limb_width(),
+                    limbs_count: pp.secondary.params().limbs_count(),
+                }
+                .generate_with_inspect(|buf| debug!("primary X1 {}+1-step: {buf:?}", self.step)),
+            ]
+        };
 
         let primary_sfc = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: &self.primary.step_circuit,
@@ -419,6 +429,7 @@ where
         };
 
         if self.debug_mode {
+            let _s = debug_span!("debug").entered();
             MockProver::run(
                 pp.primary.k_table_size(),
                 &primary_sfc,
@@ -446,7 +457,6 @@ where
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?;
 
-        debug!("start prove primary trace");
         let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
             pp.primary.ck(),
             &self.primary_nifs_pp,
@@ -456,30 +466,32 @@ where
         )?;
 
         primary_span.exit();
-        let _secondary_span = span!(Level::ERROR, "secondary", step = self.step).entered();
+        let _secondary_span = info_span!("secondary").entered();
 
         debug!("start fold step with folding 'primary' by 'secondary'");
-        debug!("prepare secondary td");
 
         let next_secondary_z_i = self
             .secondary
             .step_circuit
             .process_step(&self.secondary.z_i, pp.secondary.k_table_size())?;
 
-        let secondary_instance = [
-            util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
-            RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
-                random_oracle_constant: pp.secondary.params().ro_constant().clone(),
-                public_params_hash: &pp.digest_1(),
-                step: self.step + 1,
-                z_0: &self.secondary.z_0,
-                z_i: &next_secondary_z_i,
-                relaxed: &primary_new_trace.U,
-                limb_width: pp.primary.params().limb_width(),
-                limbs_count: pp.primary.params().limbs_count(),
-            }
-            .generate_with_inspect(|buf| debug!("secondary X1 {}+1-step: {buf:?}", self.step)),
-        ];
+        let secondary_instance = {
+            let _s = info_span!("generate_instance");
+            [
+                util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
+                RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
+                    random_oracle_constant: pp.secondary.params().ro_constant().clone(),
+                    public_params_hash: &pp.digest_1(),
+                    step: self.step + 1,
+                    z_0: &self.secondary.z_0,
+                    z_i: &next_secondary_z_i,
+                    relaxed: &primary_new_trace.U,
+                    limb_width: pp.primary.params().limb_width(),
+                    limbs_count: pp.primary.params().limbs_count(),
+                }
+                .generate_with_inspect(|buf| debug!("secondary X1 {}+1-step: {buf:?}", self.step)),
+            ]
+        };
 
         let secondary_sfc = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
             step_circuit: &self.secondary.step_circuit,
@@ -496,6 +508,7 @@ where
         };
 
         if self.debug_mode {
+            let _s = debug_span!("debug").entered();
             MockProver::run(
                 pp.secondary.k_table_size(),
                 &secondary_sfc,
@@ -528,6 +541,7 @@ where
         Ok(())
     }
 
+    #[instrument(name = "ivc_vefify", skip_all)]
     fn verify<const T: usize, RP1, RP2>(
         &mut self,
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,

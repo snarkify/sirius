@@ -72,6 +72,7 @@ impl<C: CurveAffine> VanillaFS<C> {
     /// of the two instance-witness pairs. They play a crucial role
     /// in the folding process, allowing two polynomial relations
     /// to be combined into one.
+    #[instrument(skip_all)]
     pub fn commit_cross_terms(
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
@@ -122,6 +123,7 @@ impl<C: CurveAffine> VanillaFS<C> {
     }
 
     /// Absorb all fields into RandomOracle `RO` & generate challenge based on that
+    #[instrument(skip_all)]
     pub(crate) fn generate_challenge(
         pp_digest: &C,
         ro_acc: &mut impl ROTrait<C::Base>,
@@ -152,6 +154,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         Ok((VanillaFSProverParam { S, pp_digest }, pp_digest))
     }
 
+    #[instrument(skip_all)]
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
         instance: &[C::ScalarExt],
@@ -179,6 +182,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     ///
     /// # Returns
     /// A tuple containing folded accumulator and proof for the folding scheme verifier
+    #[instrument(skip_all)]
     fn prove(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
@@ -198,6 +202,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
 
         let U = U1.fold(U2, &cross_term_commits, &r);
         let W = W1.fold(W2, &cross_terms, &r);
+
         Ok((RelaxedPlonkTrace { U, W }, cross_term_commits))
     }
 
