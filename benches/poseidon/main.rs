@@ -25,7 +25,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 const ARITY: usize = 1;
 
-const CIRCUIT_TABLE_SIZE1: usize = 22;
+const CIRCUIT_TABLE_SIZE1: usize = 20;
 const CIRCUIT_TABLE_SIZE2: usize = 20;
 const COMMITMENT_KEY_SIZE: usize = 27;
 
@@ -95,7 +95,7 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPos
                     |region| {
                         let ctx = &mut RegionCtx::new(region, 0);
                         let res = pchip.squeeze(ctx)?;
-                        error!("while internal {step} step offset is {}", ctx.offset());
+                        debug!("while internal {step} step offset is {}", ctx.offset());
                         Ok(res)
                     },
                 )
@@ -226,7 +226,7 @@ fn main() {
         .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
         .with_env_filter(
             EnvFilter::builder()
-                .with_default_directive(LevelFilter::ERROR.into())
+                .with_default_directive(LevelFilter::INFO.into())
                 .from_env_lossy(),
         )
         .json()
