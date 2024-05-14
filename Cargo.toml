@@ -34,8 +34,17 @@ bincode = "1.3"
 tempfile = "3.9.0"
 tracing-subscriber = { version = "0.3.18", features = ["json"] }
 maplit = "1.0.2"
+criterion = "0.5.1"
 
 [dev-dependencies.cargo-husky]
 version = "1"
 default-features = false # Disable features which are enabled by default
 features = ["prepush-hook", "run-cargo-fmt", "run-cargo-test", "run-cargo-clippy"]
+
+[[bench]]
+name = "trivial"
+harness = false
+
+[[bench]]
+name = "poseidon"
+harness = false

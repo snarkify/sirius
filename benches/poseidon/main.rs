@@ -1,6 +1,7 @@
-use std::{array, env, io, marker::PhantomData, num::NonZeroUsize, path::Path};
+use std::{array, io, marker::PhantomData, num::NonZeroUsize, path::Path};
 
-use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
+use criterion::{black_box, criterion_group, Criterion};
+use ff::{Field, FromUniformBytes, PrimeFieldBits};
 
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 
@@ -39,7 +40,7 @@ struct TestPoseidonCircuitConfig {
     pconfig: MainGateConfig<T1>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 struct TestPoseidonCircuit<F: PrimeFieldBits> {
     _p: PhantomData<F>,
 }
@@ -102,37 +103,24 @@ fn get_or_create_commitment_key<C: CurveAffine>(
     unsafe { CommitmentKey::load_or_setup_cache(Path::new(FOLDER), label, k) }
 }
 
-fn main() {
-    let builder = tracing_subscriber::fmt()
-        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
-        .with_env_filter(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy(),
-        );
-
-    if env::args().any(|arg| arg.eq("--json")) {
-        builder.json().init();
-    } else {
-        builder.init();
-    }
-
-    let _span = info_span!("poseidon_example").entered();
+pub fn criterion_benchmark(c: &mut Criterion) {
+    let _span = info_span!("poseidon_bench").entered();
+    let prepare_span = info_span!("prepare").entered();
 
     // C1
     let sc1 = TestPoseidonCircuit::default();
     // C2
     let sc2 = step_circuit::trivial::Circuit::<ARITY, _>::default();
 
-    let primary_spec = RandomOracleConstant::<<C2 as CurveExt>::Base>::new(10, 10);
-    let secondary_spec = RandomOracleConstant::<<C1 as CurveExt>::Base>::new(10, 10);
+    let primary_spec = RandomOracleConstant::<<C1 as CurveExt>::ScalarExt>::new(10, 10);
+    let secondary_spec = RandomOracleConstant::<<C2 as CurveExt>::ScalarExt>::new(10, 10);
 
     let primary_commitment_key =
         get_or_create_commitment_key::<bn256::G1Affine>(COMMITMENT_KEY_SIZE, "bn256")
-            .expect("Failed to get primary key");
+            .expect("Failed to get secondary key");
     let secondary_commitment_key =
         get_or_create_commitment_key::<grumpkin::G1Affine>(COMMITMENT_KEY_SIZE, "grumpkin")
-            .expect("Failed to get secondary key");
+            .expect("Failed to get primary key");
 
     let pp = PublicParams::<
         '_,
@@ -162,17 +150,67 @@ fn main() {
         LIMBS_COUNT,
     )
     .unwrap();
-    info!("public params: {pp:?}");
 
-    IVC::fold(
-        &pp,
-        sc1,
-        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
-        sc2,
-        array::from_fn(|i| C2Scalar::from_u128(i as u128)),
-        NonZeroUsize::new(1).unwrap(),
-    )
-    .unwrap();
+    prepare_span.exit();
 
-    debug!("base case ready");
+    let mut group = c.benchmark_group("ivc_of_poseidon");
+    group.significance_level(0.1).sample_size(10);
+
+    group.bench_function("fold_1_step", |b| {
+        let mut rnd = rand::thread_rng();
+        let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
+        let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
+
+        b.iter(|| {
+            IVC::fold(
+                &pp,
+                sc1.clone(),
+                black_box(primary_z_0),
+                sc2.clone(),
+                black_box(secondary_z_0),
+                NonZeroUsize::new(1).unwrap(),
+            )
+            .unwrap();
+        })
+    });
+
+    group.bench_function("fold_2_step", |b| {
+        let mut rnd = rand::thread_rng();
+        let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
+        let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
+
+        b.iter(|| {
+            IVC::fold(
+                &pp,
+                sc1.clone(),
+                black_box(primary_z_0),
+                sc2.clone(),
+                black_box(secondary_z_0),
+                NonZeroUsize::new(2).unwrap(),
+            )
+            .unwrap();
+        })
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, criterion_benchmark);
+
+fn main() {
+    tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .json()
+        .init();
+
+    benches();
+
+    criterion::Criterion::default()
+        .configure_from_args()
+        .final_summary();
 }
