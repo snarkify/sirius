@@ -33,8 +33,8 @@ The `Sirius` folding framework is designed with a three-tiered architecture.
 - [x] 2023Q4 - [halo2](https://github.com/privacy-scaling-explorations/halo2) frontend support
 - [x] 2023Q4 - folding scheme for plonkish custom gates
 - [x] 2023Q4 - folding scheme for lookup arguments
-- [ ] 2024Q1 - IVC circuit
-- [ ] 2024Q1 - IVC Benchmarks
+- [x] 2024Q1 - IVC circuit
+- [x] 2024Q1 - IVC Benchmarks
 - [ ] 2024Q1 - [Snarkify Cloud](https://cloud.snarkify.io/) integration and GPU acceleration
 - [ ] 2024Q2 - Agg circuit
 - [ ] 2024Q2 - high-degree gates optimization from [Protogalaxy](https://eprint.iacr.org/2023/1106)
