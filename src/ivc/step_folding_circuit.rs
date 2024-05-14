@@ -3,7 +3,7 @@ use std::{fmt, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
-    circuit::{Layouter, Value},
+    circuit::{floor_planner, Layouter, Value},
     plonk::{Circuit, Column, ConstraintSystem, Instance},
 };
 use halo2curves::CurveAffine;
@@ -24,7 +24,7 @@ use crate::{
     table::ConstraintSystemMetainfo,
 };
 
-use super::{instance_computation::AssignedRandomOracleComputationInstance, SimpleFloorPlanner};
+use super::instance_computation::AssignedRandomOracleComputationInstance;
 
 #[derive(Serialize)]
 #[serde(bound(serialize = "RO::Args: Serialize"))]
@@ -206,10 +206,30 @@ where
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
 {
     type Config = StepConfig<ARITY, C::Base, SC, T>;
-    type FloorPlanner = SimpleFloorPlanner;
+    type FloorPlanner = floor_planner::V1;
 
     fn without_witnesses(&self) -> Self {
-        todo!("`without_witnesses` not implemented yet")
+        Self {
+            step_circuit: self.step_circuit,
+            input: StepInputs {
+                step: C::Base::ZERO,
+                step_pp: self.input.step_pp,
+                public_params_hash: C::identity(),
+                z_0: [C::Base::ZERO; ARITY],
+                z_i: [C::Base::ZERO; ARITY],
+                cross_term_commits: vec![C::identity(); self.input.cross_term_commits.len()],
+                U: RelaxedPlonkInstance::new(
+                    self.input.U.instance.len(),
+                    self.input.U.challenges.len(),
+                    self.input.U.W_commitments.len(),
+                ),
+                u: PlonkInstance::new(
+                    self.input.u.instance.len(),
+                    self.input.u.challenges.len(),
+                    self.input.u.W_commitments.len(),
+                ),
+            },
+        }
     }
 
     fn configure(cs: &mut ConstraintSystem<C::Base>) -> Self::Config {
