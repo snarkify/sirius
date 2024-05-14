@@ -42,20 +42,20 @@ struct TestPoseidonCircuitConfig {
 
 #[derive(Debug, Clone)]
 struct TestPoseidonCircuit<F: PrimeFieldBits> {
-    repeat_count: NonZeroUsize,
+    repeat_count: usize,
     _p: PhantomData<F>,
 }
 impl<F: PrimeFieldBits> Default for TestPoseidonCircuit<F> {
     fn default() -> Self {
         Self {
-            repeat_count: NonZeroUsize::new(1).unwrap(),
+            repeat_count: 1,
             _p: Default::default(),
         }
     }
 }
 
 impl<F: PrimeFieldBits> TestPoseidonCircuit<F> {
-    pub fn new(repeat_count: NonZeroUsize) -> Self {
+    pub fn new(repeat_count: usize) -> Self {
         Self {
             repeat_count,
             _p: Default::default(),
@@ -81,7 +81,7 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPos
         let mut pchip = PoseidonChip::new(config.pconfig, spec);
         let mut z_i = z_in.clone();
 
-        for step in 1..=self.repeat_count.get() {
+        for step in 0..=self.repeat_count {
             pchip.update(
                 &z_i.iter()
                     .cloned()
@@ -186,12 +186,11 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group(format!("ivc_of_poseidon with k={CIRCUIT_TABLE_SIZE1}"));
     group.significance_level(0.1).sample_size(10);
 
-    for repeat_count in (1..=800).step_by(50) {
+    for repeat_count in (0..=800).step_by(50) {
         let mut rnd = rand::thread_rng();
         let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
         let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
 
-        let repeat_count = NonZeroUsize::new(repeat_count).unwrap();
         group.bench_with_input(
             criterion::BenchmarkId::new("fold step with poseidon repeat_count", repeat_count),
             &repeat_count,
@@ -209,6 +208,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 .unwrap();
 
                 b.iter(|| {
+                    let _span =
+                        info_span!("bench_fold_step", repeat_count = repeat_count).entered();
                     ivc.fold_step(&pp).unwrap();
                 })
             },
