@@ -1,6 +1,6 @@
-use std::{array, io, iter, marker::PhantomData, num::NonZeroUsize, ops::Add, path::Path};
+use std::{array, io, marker::PhantomData, num::NonZeroUsize, path::Path};
 
-use criterion::{black_box, criterion_group, BenchmarkId, Criterion};
+use criterion::{black_box, criterion_group, Criterion};
 use ff::{Field, FromUniformBytes, PrimeFieldBits};
 
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
@@ -79,18 +79,28 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPos
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
         let spec = Spec::<F, T1, RATE1>::new(R_F1, R_P1);
         let mut pchip = PoseidonChip::new(config.pconfig, spec);
-        let input = z_in.iter().map(|x| x.into()).collect::<Vec<WrapValue<F>>>();
-        pchip.update(&input);
-        let output = layouter
-            .assign_region(
-                || "poseidon hash",
-                |region| {
-                    let ctx = &mut RegionCtx::new(region, 0);
-                    pchip.squeeze(ctx)
-                },
-            )
-            .map_err(SynthesisError::Halo2)?;
-        Ok([output])
+        let mut z_i = z_in.clone();
+
+        for _ in 1..=self.repeat_count.get() {
+            pchip.update(
+                &z_i.iter()
+                    .cloned()
+                    .map(WrapValue::Assigned)
+                    .collect::<Vec<WrapValue<F>>>(),
+            );
+
+            z_i = [layouter
+                .assign_region(
+                    || "poseidon hash",
+                    |region| {
+                        let ctx = &mut RegionCtx::new(region, 0);
+                        pchip.squeeze(ctx)
+                    },
+                )
+                .map_err(SynthesisError::Halo2)?];
+        }
+
+        Ok(z_i)
     }
 }
 
