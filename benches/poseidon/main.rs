@@ -25,7 +25,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 const ARITY: usize = 1;
 
-const CIRCUIT_TABLE_SIZE1: usize = 20;
+const CIRCUIT_TABLE_SIZE1: usize = 22;
 const CIRCUIT_TABLE_SIZE2: usize = 20;
 const COMMITMENT_KEY_SIZE: usize = 27;
 
@@ -220,7 +220,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         })
     });
 
-    for k in [1, 2, 10, 10_000, 20_000] {
+    for k in [1, 2, 10, 10_000, 20_000, 100_000] {
         let k = NonZeroUsize::new(k).unwrap();
         let mut rnd = rand::thread_rng();
         let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
