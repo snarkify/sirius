@@ -251,7 +251,7 @@ fn main() {
         .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
         .with_env_filter(
             EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
+                .with_default_directive(LevelFilter::ERROR.into())
                 .from_env_lossy(),
         )
         .json()
