@@ -16,7 +16,6 @@ use halo2_proofs::{
 };
 use sirius::{
     commitment::CommitmentKey,
-    error,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
     main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
     poseidon::{self, poseidon_circuit::PoseidonChip, ROPair, Spec},
@@ -187,7 +186,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group(format!("ivc_of_poseidon with k={CIRCUIT_TABLE_SIZE1}"));
     group.significance_level(0.1).sample_size(10);
 
-    for repeat_count in [1, 2, 10, 10_000, 20_000, 100_000].into_iter().rev() {
+    for repeat_count in [1, 2, 500, 800].into_iter().rev() {
         let mut rnd = rand::thread_rng();
         let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
         let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
