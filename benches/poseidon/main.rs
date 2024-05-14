@@ -16,6 +16,7 @@ use halo2_proofs::{
 };
 use sirius::{
     commitment::CommitmentKey,
+    error,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
     main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
     poseidon::{self, poseidon_circuit::PoseidonChip, ROPair, Spec},
@@ -81,7 +82,7 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPos
         let mut pchip = PoseidonChip::new(config.pconfig, spec);
         let mut z_i = z_in.clone();
 
-        for _ in 1..=self.repeat_count.get() {
+        for step in 1..=self.repeat_count.get() {
             pchip.update(
                 &z_i.iter()
                     .cloned()
@@ -94,7 +95,9 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPos
                     || "poseidon hash",
                     |region| {
                         let ctx = &mut RegionCtx::new(region, 0);
-                        pchip.squeeze(ctx)
+                        let res = pchip.squeeze(ctx)?;
+                        error!("while internal {step} step offset is {}", ctx.offset());
+                        Ok(res)
                     },
                 )
                 .map_err(SynthesisError::Halo2)?];
