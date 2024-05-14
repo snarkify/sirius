@@ -1,6 +1,6 @@
-use std::{array, io, marker::PhantomData, num::NonZeroUsize, path::Path};
+use std::{array, io, iter, marker::PhantomData, num::NonZeroUsize, ops::Add, path::Path};
 
-use criterion::{black_box, criterion_group, Criterion};
+use criterion::{black_box, criterion_group, BenchmarkId, Criterion};
 use ff::{Field, FromUniformBytes, PrimeFieldBits};
 
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
@@ -40,9 +40,27 @@ struct TestPoseidonCircuitConfig {
     pconfig: MainGateConfig<T1>,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 struct TestPoseidonCircuit<F: PrimeFieldBits> {
+    repeat_count: NonZeroUsize,
     _p: PhantomData<F>,
+}
+impl<F: PrimeFieldBits> Default for TestPoseidonCircuit<F> {
+    fn default() -> Self {
+        Self {
+            repeat_count: NonZeroUsize::new(1).unwrap(),
+            _p: Default::default(),
+        }
+    }
+}
+
+impl<F: PrimeFieldBits> TestPoseidonCircuit<F> {
+    pub fn new(repeat_count: NonZeroUsize) -> Self {
+        Self {
+            repeat_count,
+            _p: Default::default(),
+        }
+    }
 }
 
 impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPoseidonCircuit<F> {
@@ -182,7 +200,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             IVC::fold(
                 &pp,
-                sc1.clone(),
+                TestPoseidonCircuit::default(),
                 black_box(primary_z_0),
                 sc2.clone(),
                 black_box(secondary_z_0),
@@ -191,6 +209,27 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             .unwrap();
         })
     });
+
+    for k in [1, 2, 10, 10_000, 20_000] {
+        let k = NonZeroUsize::new(k).unwrap();
+        let mut rnd = rand::thread_rng();
+        let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
+        let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
+
+        group.bench_with_input(criterion::BenchmarkId::from_parameter(k), &k, |b, k| {
+            b.iter(|| {
+                IVC::fold(
+                    &pp,
+                    TestPoseidonCircuit::new(*k),
+                    black_box(primary_z_0),
+                    sc2.clone(),
+                    black_box(secondary_z_0),
+                    NonZeroUsize::new(1).unwrap(),
+                )
+                .unwrap();
+            })
+        });
+    }
 
     group.finish();
 }
