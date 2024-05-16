@@ -25,7 +25,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 const ARITY: usize = 1;
 
-const CIRCUIT_TABLE_SIZE1: usize = 20;
+const CIRCUIT_TABLE_SIZE1: usize = 21;
 const CIRCUIT_TABLE_SIZE2: usize = 20;
 const COMMITMENT_KEY_SIZE: usize = 27;
 
@@ -99,7 +99,10 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPos
                         Ok(res)
                     },
                 )
-                .map_err(SynthesisError::Halo2)?];
+                .map_err(|err| {
+                    error!("{err:?}");
+                    SynthesisError::Halo2(err)
+                })?];
         }
 
         Ok(z_i)
@@ -184,9 +187,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     prepare_span.exit();
 
     let mut group = c.benchmark_group(format!("ivc_of_poseidon with k={CIRCUIT_TABLE_SIZE1}"));
-    group.significance_level(0.1).sample_size(10);
+    group.significance_level(0.1).sample_size(15);
 
-    for repeat_count in (0..=800).step_by(50) {
+    for repeat_count in (0..=586).step_by(5) {
         let mut rnd = rand::thread_rng();
         let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
         let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
