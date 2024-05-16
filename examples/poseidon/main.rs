@@ -24,7 +24,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 const ARITY: usize = 1;
 
-const CIRCUIT_TABLE_SIZE1: usize = 20;
+const CIRCUIT_TABLE_SIZE1: usize = 21;
 const CIRCUIT_TABLE_SIZE2: usize = 20;
 const COMMITMENT_KEY_SIZE: usize = 27;
 
@@ -59,19 +59,51 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPos
         z_in: &[AssignedCell<F, F>; ARITY],
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
         let spec = Spec::<F, T1, RATE1>::new(R_F1, R_P1);
-        let mut pchip = PoseidonChip::new(config.pconfig, spec);
-        let input = z_in.iter().map(|x| x.into()).collect::<Vec<WrapValue<F>>>();
-        pchip.update(&input);
-        let output = layouter
+
+        layouter
             .assign_region(
                 || "poseidon hash",
-                |region| {
+                move |region| {
+                    let mut z_i = z_in.clone();
                     let ctx = &mut RegionCtx::new(region, 0);
-                    pchip.squeeze(ctx)
+
+                    const REPEAT_COUNT: usize = 87380;
+                    for step in 0..=REPEAT_COUNT {
+                        let mut pchip = PoseidonChip::new(config.pconfig.clone(), spec.clone());
+
+                        pchip.update(
+                            &z_i.iter()
+                                .cloned()
+                                .map(WrapValue::Assigned)
+                                .collect::<Vec<WrapValue<F>>>(),
+                        );
+
+                        info!(
+                            "offset for {} hash repeat count is {} (log2 = {})",
+                            step,
+                            ctx.offset(),
+                            (ctx.offset() as f64).log2()
+                        );
+
+                        z_i = [pchip.squeeze(ctx).inspect_err(|err| {
+                            error!("at step {step}: {err:?}");
+                        })?];
+                    }
+
+                    info!(
+                        "total offset for {} hash repeat count is {} (log2 = {})",
+                        REPEAT_COUNT,
+                        ctx.offset(),
+                        (ctx.offset() as f64).log2()
+                    );
+
+                    Ok(z_i)
                 },
             )
-            .map_err(SynthesisError::Halo2)?;
-        Ok([output])
+            .map_err(|err| {
+                error!("while synth {err:?}");
+                SynthesisError::Halo2(err)
+            })
     }
 }
 
