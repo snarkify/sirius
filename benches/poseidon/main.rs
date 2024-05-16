@@ -213,7 +213,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         group.bench_with_input(
             criterion::BenchmarkId::new(
                 format!("fold step with repeated hashed {repeat_count} & k"),
-                24 * repeat_count,
+                ((24 * repeat_count) as f64).log2(),
             ),
             &repeat_count,
             |b, repeat_count| {
