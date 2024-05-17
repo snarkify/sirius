@@ -11,6 +11,7 @@ pub(crate) struct ConstraintSystemMetainfo<F: PrimeField> {
     pub num_challenges: usize,
     pub round_sizes: Vec<usize>,
     pub folding_degree: usize,
+    pub gates: Vec<Expression<F>>,
     pub custom_gates_lookup_compressed: CompressedGates<F>,
 }
 
@@ -44,7 +45,7 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
             }
         );
 
-        let exprs = cs
+        let gates = cs
             .gates()
             .iter()
             .flat_map(|gate| gate.polynomials().iter())
@@ -96,7 +97,7 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
             },
         };
 
-        let custom_gates_lookup_compressed = CompressedGates::new(&exprs, &mut ctx);
+        let custom_gates_lookup_compressed = CompressedGates::new(&gates, &mut ctx);
 
         let folding_degree = custom_gates_lookup_compressed.grouped().len();
 
@@ -104,6 +105,7 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
             num_challenges: custom_gates_lookup_compressed.compressed().num_challenges(),
             round_sizes,
             folding_degree,
+            gates,
             custom_gates_lookup_compressed,
         }
     }

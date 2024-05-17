@@ -154,6 +154,11 @@ pub struct PlonkStructure<F: PrimeField> {
 
     pub(crate) custom_gates_lookup_compressed: CompressedGates<F>,
 
+    /// we use uncompressed gates instead of
+    /// custom_gates_lookup_compressed in protogalaxy folding scheme
+    #[serde(skip_serializing)]
+    pub(crate) gates: Vec<Expression<F>>,
+
     pub(crate) permutation_matrix: SparseMatrix<F>,
     pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
 }
