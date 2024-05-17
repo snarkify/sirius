@@ -78,7 +78,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
 
 ## Setup and run `IVC` instance
 
-For runnable example, please check [examples](examples) folder.
+For runnable examples, please check [examples](examples) folder.
 
 An example of using the API of IVC:
 ```rust
@@ -138,12 +138,11 @@ fn main() {
 }
 ```
 
-This code will run `fold_step_count` of folding steps, and also check the proof
-after execution.
+This code will run `fold_step_count` of folding steps, and also check the proof after execution.
 
 # Run examples
 
-For runnable example, please check [examples](examples) folder.
+For runnable examples, please check [examples](examples) folder.
 
 ```bash
 # Alias for run the IVC for trivial `StepCircuit` (just returns its input unchanged)
