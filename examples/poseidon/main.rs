@@ -88,13 +88,12 @@ use tracing::*;
 use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 /// `K` table size for primary circuit
-const PRIMARY_CIRCUIT_TABLE_SIZE: usize = 20;
-
+const PRIMARY_CIRCUIT_TABLE_SIZE: usize = 17;
 /// `K` table size for secondary circuit
-const SECONDARY_CIRCUIT_TABLE_SIZE: usize = 20;
+const SECONDARY_CIRCUIT_TABLE_SIZE: usize = 17;
 
 /// Разрмер commitment key
-const COMMITMENT_KEY_SIZE: usize = 27;
+const COMMITMENT_KEY_SIZE: usize = 21;
 
 use poseidon_step_circuit::{TestPoseidonCircuit, ARITY};
 
