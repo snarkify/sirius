@@ -24,7 +24,8 @@ const ARITY: usize = BLOCK_SIZE / 2;
 
 const CIRCUIT_TABLE_SIZE1: usize = 17;
 const CIRCUIT_TABLE_SIZE2: usize = 17;
-const COMMITMENT_KEY_SIZE: usize = 27;
+const COMMITMENT_KEY_SIZE: usize = 20;
+
 const T: usize = 5;
 const RATE: usize = 4;
 

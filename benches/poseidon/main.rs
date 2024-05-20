@@ -25,9 +25,9 @@ use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 const ARITY: usize = 1;
 
-const CIRCUIT_TABLE_SIZE1: usize = 20;
-const CIRCUIT_TABLE_SIZE2: usize = 20;
-const COMMITMENT_KEY_SIZE: usize = 27;
+const CIRCUIT_TABLE_SIZE1: usize = 17;
+const CIRCUIT_TABLE_SIZE2: usize = 17;
+const COMMITMENT_KEY_SIZE: usize = 20;
 
 // Spec for user defined poseidon circuit
 const T1: usize = 3;
