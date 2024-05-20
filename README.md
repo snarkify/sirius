@@ -37,13 +37,26 @@ The `Sirius` folding framework is designed with a three-tiered architecture.
 - [x] 2024Q1 - IVC Benchmarks
 - [ ] 2024Q1 - [Snarkify Cloud](https://cloud.snarkify.io/) integration and GPU acceleration
 - [ ] 2024Q2 - Agg circuit
-- [ ] 2024Q2 - high-degree gates optimization from [Protogalaxy](https://eprint.iacr.org/2023/1106)
+- [ ] [2024Q2](https://github.com/snarkify/sirius/milestone/2) - high-degree gates optimization from [Protogalaxy](https://eprint.iacr.org/2023/1106)
 - [ ] 2024Q3 - IOP + PCS SNARK support ([Spartan](https://eprint.iacr.org/2019/550) / [Hyperplonk](https://eprint.iacr.org/2022/1355))
 - [ ] 2024Q4 - on-chain verifier support
 
 _The estimated timeline is subject to change_.
 
 # Getting Started
+
+## Install Rust
+
+Use [rustup](https://rustup.rs/)
+
+## Add dependency
+
+```bash
+cargo add --git https://github.com/snarkify/sirius.git --tag v0.1.0 sirius
+```
+
+## Implement `StepCircuit` trait
+
 ```rust
 /// To allow your circuit to be folded, impl this trait
 /// `ARITY` - size of input & output
@@ -62,6 +75,113 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError>;
 }
 ``` 
+
+## Setup and run `IVC` instance
+
+For runnable examples, please check [examples](examples) folder.
+
+An example of using the API of IVC:
+```rust
+fn main() {
+    let primary = poseidon_step_circuit::TestPoseidonCircuit::default();
+    let secondary = step_circuit::trivial::Circuit::<ARITY2, _>::default();
+
+    // Specifications for random oracle used as part of the IVC algorithm
+    let primary_spec = RandomOracleConstant::<C1Scalar>::new(10, 10);
+    let secondary_spec = RandomOracleConstant::<C2Scalar>::new(10, 10);
+
+    let primary_commitment_key = get_or_create_commitment_key::<C1Affine>(COMMITMENT_KEY_SIZE, "bn256");
+    let secondary_commitment_key = get_or_create_commitment_key::<C2Affine>(COMMITMENT_KEY_SIZE, "grumpkin");
+
+    let pp = PublicParams::<
+        '_,
+        ARITY1,
+        ARITY2,
+        MAIN_GATE_SIZE,
+        C1Affine,
+        C2Affine,
+        TestPoseidonCircuit<_>,
+        step_circuit::trivial::Circuit<ARITY, _>,
+        RandomOracle,
+        RandomOracle,
+    >::new(
+        CircuitPublicParamsInput::new(
+            PRIMARY_CIRCUIT_TABLE_SIZE as u32,
+            &primary_commitment_key,
+            primary_spec,
+            &primary,
+        ),
+        CircuitPublicParamsInput::new(
+            SECONDARY_CIRCUIT_TABLE_SIZE as u32,
+            &secondary_commitment_key,
+            secondary_spec,
+            &secondary,
+        ),
+        LIMB_WIDTH,
+        LIMBS_COUNT,
+    )
+    .expect("failed to create public params");
+
+    let primary_input = array::from_fn(|i| C1Scalar::from_u128(i as u128));
+    let secondary_input = array::from_fn(|i| C2Scalar::from_u128(i as u128));
+    let fold_step_count = NonZeroUsize::new(10).unwrap();
+
+    IVC::fold(
+        &pp,
+        primary,
+        primary_input,
+        secondary,
+        secondary_input,
+        fold_step_count,
+    )
+    .expect("failed to run IVC");
+}
+```
+
+This code will run `fold_step_count` of folding steps, and also check the proof after execution.
+
+# Run examples
+
+For runnable examples, please check [examples](examples) folder.
+
+```bash
+# Alias for run the IVC for trivial `StepCircuit` (just returns its input unchanged)
+cargo trivial-example
+
+# Alias for run the IVC for the poseidon-circuit
+cargo poseidon-example
+```
+
+# Time-Profiling 
+
+Span lifetime tracking implemented, which allows you to understand in detail
+how long a particular step takes to complete.
+
+```bash
+# By default, it will output all spans with a lifetime greater than 1s
+cargo poseidon-example | python3 .scripts/build_profiling.py
+
+# It is possible to specify the bottom border of the output span
+cargo poseidon-example | python3 .scripts/build_profiling.py --min-runtime 0.1s
+
+# You can also store logs and process them at a later date
+cargo poseidon-example > log; cat log | python3 .scripts/build_profiling.py 
+```
+
+# Benchmark 
+
+For benches, please check [benches](benches) folder.
+
+```bash
+cargo bench
+```
+
+## Criterion
+You can also get a more detailed report. Please check for info [criterion.rs](https://github.com/bheisler/criterion.rs)
+
+```bash
+cargo criterion
+```
 
 # Getting Involved
 
