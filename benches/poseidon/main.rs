@@ -205,7 +205,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group(format!("ivc_of_poseidon with k={CIRCUIT_TABLE_SIZE1}"));
     group.significance_level(0.1).sample_size(15);
 
-    for repeat_count in (0..=10922).rev().step_by(1000).chain(iter::once(0)) {
+    for repeat_count in (0..=10_900).rev().step_by(1000).chain(iter::once(0)) {
         let mut rnd = rand::thread_rng();
         let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
         let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
