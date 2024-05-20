@@ -182,7 +182,7 @@ where
     }
 
     #[instrument(name = "ivc_new", skip_all, fields(step = 0))]
-    fn new<const T: usize, RP1, RP2>(
+    pub fn new<const T: usize, RP1, RP2>(
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
         primary: SC1,
         primary_z_0: [C1::Scalar; A1],
@@ -369,7 +369,7 @@ where
     }
 
     #[instrument(name = "ivc_fold_step", skip_all, fields(step = self.step))]
-    fn fold_step<const T: usize, RP1, RP2>(
+    pub fn fold_step<const T: usize, RP1, RP2>(
         &mut self,
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
     ) -> Result<(), Error>

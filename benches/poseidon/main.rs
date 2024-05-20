@@ -1,4 +1,4 @@
-use std::{array, io, marker::PhantomData, num::NonZeroUsize, path::Path};
+use std::{array, io, iter, marker::PhantomData, num::NonZeroUsize, path::Path};
 
 use criterion::{black_box, criterion_group, Criterion};
 use ff::{Field, FromUniformBytes, PrimeFieldBits};
@@ -25,7 +25,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 const ARITY: usize = 1;
 
-const CIRCUIT_TABLE_SIZE1: usize = 17;
+const CIRCUIT_TABLE_SIZE1: usize = 18;
 const CIRCUIT_TABLE_SIZE2: usize = 17;
 const COMMITMENT_KEY_SIZE: usize = 21;
 
@@ -40,9 +40,28 @@ struct TestPoseidonCircuitConfig {
     pconfig: MainGateConfig<T1>,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 struct TestPoseidonCircuit<F: PrimeFieldBits> {
+    repeat_count: usize,
     _p: PhantomData<F>,
+}
+
+impl<F: PrimeFieldBits> Default for TestPoseidonCircuit<F> {
+    fn default() -> Self {
+        Self {
+            repeat_count: 1,
+            _p: Default::default(),
+        }
+    }
+}
+
+impl<F: PrimeFieldBits> TestPoseidonCircuit<F> {
+    pub fn new(repeat_count: usize) -> Self {
+        Self {
+            repeat_count,
+            _p: Default::default(),
+        }
+    }
 }
 
 impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPoseidonCircuit<F> {
@@ -60,19 +79,49 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPos
         z_in: &[AssignedCell<F, F>; ARITY],
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
         let spec = Spec::<F, T1, RATE1>::new(R_F1, R_P1);
-        let mut pchip = PoseidonChip::new(config.pconfig, spec);
-        let input = z_in.iter().map(|x| x.into()).collect::<Vec<WrapValue<F>>>();
-        pchip.update(&input);
-        let output = layouter
+        layouter
             .assign_region(
                 || "poseidon hash",
-                |region| {
+                move |region| {
+                    let mut z_i = z_in.clone();
                     let ctx = &mut RegionCtx::new(region, 0);
-                    pchip.squeeze(ctx)
+
+                    for step in 0..=self.repeat_count {
+                        let mut pchip = PoseidonChip::new(config.pconfig.clone(), spec.clone());
+
+                        pchip.update(
+                            &z_i.iter()
+                                .cloned()
+                                .map(WrapValue::Assigned)
+                                .collect::<Vec<WrapValue<F>>>(),
+                        );
+
+                        info!(
+                            "offset for {} hash repeat count is {} (log2 = {})",
+                            step,
+                            ctx.offset(),
+                            (ctx.offset() as f64).log2()
+                        );
+
+                        z_i = [pchip.squeeze(ctx).inspect_err(|err| {
+                            error!("at step {step}: {err:?}");
+                        })?];
+                    }
+
+                    info!(
+                        "total offset for {} hash repeat count is {} (log2 = {})",
+                        self.repeat_count,
+                        ctx.offset(),
+                        (ctx.offset() as f64).log2()
+                    );
+
+                    Ok(z_i)
                 },
             )
-            .map_err(SynthesisError::Halo2)?;
-        Ok([output])
+            .map_err(|err| {
+                error!("while synth {err:?}");
+                SynthesisError::Halo2(err)
+            })
     }
 }
 
@@ -153,44 +202,41 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     prepare_span.exit();
 
-    let mut group = c.benchmark_group("ivc_of_poseidon");
-    group.significance_level(0.1).sample_size(10);
+    let mut group = c.benchmark_group(format!("ivc_of_poseidon with k={CIRCUIT_TABLE_SIZE1}"));
+    group.significance_level(0.1).sample_size(15);
 
-    group.bench_function("fold_1_step", |b| {
+    for repeat_count in (0..=10922).rev().step_by(1000).chain(iter::once(0)) {
         let mut rnd = rand::thread_rng();
         let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
         let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
 
-        b.iter(|| {
-            IVC::fold(
-                &pp,
-                sc1.clone(),
-                black_box(primary_z_0),
-                sc2.clone(),
-                black_box(secondary_z_0),
-                NonZeroUsize::new(1).unwrap(),
-            )
-            .unwrap();
-        })
-    });
+        group.bench_with_input(
+            criterion::BenchmarkId::new(
+                format!("fold step with repeated hashed {repeat_count} & k"),
+                ((24 * repeat_count) as f64).log2(),
+            ),
+            &repeat_count,
+            |b, repeat_count| {
+                let sc1 = TestPoseidonCircuit::new(*repeat_count);
 
-    group.bench_function("fold_2_step", |b| {
-        let mut rnd = rand::thread_rng();
-        let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
-        let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
+                let mut ivc = IVC::new(
+                    &pp,
+                    sc1,
+                    black_box(primary_z_0),
+                    sc2.clone(),
+                    black_box(secondary_z_0),
+                    false,
+                )
+                .unwrap();
 
-        b.iter(|| {
-            IVC::fold(
-                &pp,
-                sc1.clone(),
-                black_box(primary_z_0),
-                sc2.clone(),
-                black_box(secondary_z_0),
-                NonZeroUsize::new(2).unwrap(),
-            )
-            .unwrap();
-        })
-    });
+                b.iter(|| {
+                    let _span =
+                        info_span!("bench_fold_step", repeat_count = repeat_count).entered();
+                    ivc.fold_step(&pp).unwrap();
+                })
+            },
+        );
+    }
 
     group.finish();
 }
