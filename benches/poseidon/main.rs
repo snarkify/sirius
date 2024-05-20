@@ -27,7 +27,7 @@ const ARITY: usize = 1;
 
 const CIRCUIT_TABLE_SIZE1: usize = 18;
 const CIRCUIT_TABLE_SIZE2: usize = 17;
-const COMMITMENT_KEY_SIZE: usize = 21;
+const COMMITMENT_KEY_SIZE: usize = 22;
 
 // Spec for user defined poseidon circuit
 const T1: usize = 3;
