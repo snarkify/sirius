@@ -35,11 +35,12 @@ The `Sirius` folding framework is designed with a three-tiered architecture.
 - [x] 2023Q4 - folding scheme for lookup arguments
 - [x] 2024Q1 - IVC circuit
 - [x] 2024Q1 - IVC Benchmarks
-- [ ] 2024Q1 - [Snarkify Cloud](https://cloud.snarkify.io/) integration and GPU acceleration
-- [ ] 2024Q2 - Agg circuit
 - [ ] [2024Q2](https://github.com/snarkify/sirius/milestone/2) - high-degree gates optimization from [Protogalaxy](https://eprint.iacr.org/2023/1106)
-- [ ] 2024Q3 - IOP + PCS SNARK support ([Spartan](https://eprint.iacr.org/2019/550) / [Hyperplonk](https://eprint.iacr.org/2022/1355))
-- [ ] 2024Q4 - on-chain verifier support
+- [ ] [2024Q3](https://github.com/snarkify/sirius/milestone/3) - IVC with cyclefold
+- [ ] 2024Q3 - [Snarkify Cloud](https://cloud.snarkify.io/) integration and GPU acceleration
+- [ ] 2024Q4 - Agg circuit
+- [ ] 2024Q4 - IOP + PCS SNARK support ([Spartan](https://eprint.iacr.org/2019/550) / [Hyperplonk](https://eprint.iacr.org/2022/1355))
+- [ ] 2025Q1 - on-chain verifier support
 
 _The estimated timeline is subject to change_.
 
