@@ -154,6 +154,14 @@ pub struct PlonkStructure<F: PrimeField> {
 
     pub(crate) custom_gates_lookup_compressed: CompressedGates<F>,
 
+    /// TODO #262: after we switch from Sangaria IVC to IVC with cyclefold + protogalaxy
+    /// we will remove the field custom_gates_lookup_compressed and make gates field serializable
+    /// instead
+    /// we use uncompressed gates instead of
+    /// custom_gates_lookup_compressed in protogalaxy folding scheme
+    #[serde(skip_serializing)]
+    pub(crate) gates: Vec<Expression<F>>,
+
     pub(crate) permutation_matrix: SparseMatrix<F>,
     pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
 }
