@@ -1,10 +1,13 @@
 use ff::PrimeField;
+use std::iter;
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 
 use super::*;
 use crate::commitment::CommitmentKey;
 use crate::plonk::{PlonkStructure, RelaxedPlonkInstance};
 use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
+use crate::polynomial::Expression;
 use halo2_proofs::arithmetic::CurveAffine;
 
 /// ProtoGalaxy: Non Interactive Folding Scheme that implements main protocol defined in paper
@@ -132,4 +135,51 @@ impl<C: CurveAffine> MultifoldingScheme<C> for ProtoGalaxy<C> {
     ) -> Result<Self::AccumulatorInstance, Error> {
         todo!()
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PowError {
+    #[error("Input `t` is not enought for represent `i`")]
+    TooLittleT,
+}
+
+/// Constructs the polynomial term `pow_i` for a given index `i`.
+/// # Mathematical Representation
+///
+/// Given an integer `i`, its binary representation `[i]_2 = (b_0, b_1, ..., b_{t-1})`, and an
+/// input expression `input`, the polynomial term `pow_i` is defined as:
+///
+/// ```math
+/// pow_i(\boldsymbol{\beta})=
+///     pow_i(\beta,\cdots,\beta^{2^{t-1}})=
+///     \prod_{j=0}^{t-1}(1-b_j+b_j\cdot\beta^{2^j})
+/// ```
+pub fn pow_i<F: PrimeField>(
+    i: usize,
+    t: NonZeroUsize,
+    beta: Expression<F>,
+) -> Result<Expression<F>, PowError> {
+    if t.get() < i.to_le_bytes().len() {
+        return Err(PowError::TooLittleT);
+    }
+
+    Ok(i.to_le_bytes()
+        .into_iter()
+        .chain(iter::repeat(0))
+        .take(t.get())
+        .map(|b| Expression::Constant(F::from(b as u64)))
+        .zip(iter::successors(Some(beta.clone()), |val| {
+            Some(val.clone() * val.clone())
+        }))
+        .map(|(b_j, beta_in_2j)| Expression::Constant(F::ONE) - b_j.clone() + b_j * beta_in_2j)
+        .reduce(|acc, coeff| acc * coeff)
+        .unwrap())
+}
+
+pub fn iter_pow_i<F: PrimeField>(
+    t: NonZeroUsize,
+    n: NonZeroUsize,
+    beta: Expression<F>,
+) -> impl Iterator<Item = Result<Expression<F>, PowError>> {
+    (0..n.get()).map(move |i| pow_i(i, t, beta.clone()))
 }
