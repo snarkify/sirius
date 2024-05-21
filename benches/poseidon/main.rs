@@ -2,6 +2,7 @@ use std::{array, io, marker::PhantomData, num::NonZeroUsize, path::Path};
 
 use criterion::{black_box, criterion_group, Criterion};
 use ff::{Field, FromUniformBytes, PrimeFieldBits};
+use itertools::Itertools;
 
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 
@@ -205,7 +206,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group(format!("ivc_of_poseidon with k={CIRCUIT_TABLE_SIZE1}"));
     group.significance_level(0.1).sample_size(15);
 
-    for repeat_count in (0..=10_900).rev().step_by(1000).chain((0..1000).step_by(100).rev()) {
+    for repeat_count in (0..=10_900)
+        .rev()
+        .step_by(1000)
+        .chain((0..1000).step_by(100).rev())
+        .unique()
+    {
         let mut rnd = rand::thread_rng();
         let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
         let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
