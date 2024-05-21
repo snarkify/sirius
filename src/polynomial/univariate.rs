@@ -3,7 +3,8 @@ use std::iter;
 use ff::Field;
 
 /// Represents a univariate polynomial
-/// The coefficients are stored in a vector, with the first element being the constant term.
+///
+/// Coefficients of the polynomial are presented from smaller to larger
 pub struct UnivariatePoly<F: Field>(pub(crate) Box<[F]>);
 
 impl<F: Field> FromIterator<F> for UnivariatePoly<F> {
