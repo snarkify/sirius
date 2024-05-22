@@ -8,6 +8,14 @@ use crate::fft;
 /// the `challenge` point
 ///
 /// Panic, if challenge will be equal to any element of cyclic subgroup, because division by zero
+///
+///
+/// # Mathematical Representation
+///
+/// ```math
+/// L_i(X)=\frac{\omega^i}{n}\frac{X^k-1}{X-\omega^i}
+/// ```
+/// where {1, \omega, \omega^2, ..., \omega^n} - cyclic group
 pub fn iter_eval_lagrange_polynomials_for_cyclic_group<F: PrimeField>(
     challenge: F,
     n: NonZeroUsize,
