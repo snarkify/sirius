@@ -26,3 +26,31 @@ pub fn iter_eval_lagrange_polynomials_for_cyclic_group<F: PrimeField>(
         })
         .take(n)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+
+    use ff::Field;
+    use halo2_proofs::halo2curves::bn256::Fr;
+
+    use super::*;
+
+    fn to_nz(input: usize) -> NonZeroUsize {
+        NonZeroUsize::new(input).unwrap()
+    }
+
+    #[test]
+    fn basic_lagrange_test() {
+        // Test with n = 4 and challenge = 2
+        let challenge = Fr::from(2u64);
+        let n = to_nz(4);
+
+        assert_eq!(
+            iter_eval_lagrange_polynomials_for_cyclic_group(challenge, n)
+                .next()
+                .unwrap(),
+            Fr::from(15u64) * Fr::from(4u64).invert().unwrap(),
+        );
+    }
+}
