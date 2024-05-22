@@ -1,14 +1,16 @@
+use std::{iter, marker::PhantomData, num::NonZeroUsize};
+
+use bitter::{BitReader, LittleEndianReader};
 use ff::PrimeField;
-use std::iter;
-use std::marker::PhantomData;
-use std::num::NonZeroUsize;
+use halo2_proofs::arithmetic::CurveAffine;
+
+use crate::{
+    commitment::CommitmentKey,
+    plonk::{PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace},
+    polynomial::Expression,
+};
 
 use super::*;
-use crate::commitment::CommitmentKey;
-use crate::plonk::{PlonkStructure, RelaxedPlonkInstance};
-use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
-use crate::polynomial::Expression;
-use halo2_proofs::arithmetic::CurveAffine;
 
 /// ProtoGalaxy: Non Interactive Folding Scheme that implements main protocol defined in paper
 /// [protogalaxy](https://eprint.iacr.org/2023/1106)
@@ -178,10 +180,11 @@ pub fn pow_i<F: PrimeField>(
         });
     }
 
-    Ok(i.to_le_bytes()
-        .into_iter()
-        .chain(iter::repeat(0))
-        .take(t.get())
+    let bytes = i.to_le_bytes();
+    let mut reader = LittleEndianReader::new(&bytes);
+
+    Ok(iter::repeat_with(|| reader.read_bit().unwrap_or_default())
+        .take(t.get()) // safe, because we checked `leading_ones` before
         .map(|b| Expression::Constant(F::from(b as u64)))
         .zip(iter::successors(Some(challenge.clone()), |val| {
             Some(val.clone() * val.clone())
@@ -192,6 +195,12 @@ pub fn pow_i<F: PrimeField>(
 }
 
 /// Constructs an iterator yielding polynomial terms `pow_i` for indices from 0 to `n`.
+///
+/// # Params
+/// - `t` - lenght of binary representation of `i`. If `t` is too small to represent `i`, then
+///       [`PowError::TooLittleT`] will return.
+/// - `n` - limit for `pow_i` relations
+/// - `challenge` - challenge for `pow_i` relation
 ///
 /// # Mathematical Representation
 ///
