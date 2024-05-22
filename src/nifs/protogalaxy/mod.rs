@@ -1,16 +1,17 @@
-use std::{iter, marker::PhantomData, num::NonZeroUsize};
+use std::marker::PhantomData;
 
-use bitter::{BitReader, LittleEndianReader};
 use ff::PrimeField;
 use halo2_proofs::arithmetic::CurveAffine;
 
 use crate::{
     commitment::CommitmentKey,
     plonk::{PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace},
-    polynomial::Expression,
 };
 
 use super::*;
+
+mod pow_i;
+pub use pow_i::{iter_eval_of_pow_i, Error as PowIError};
 
 /// ProtoGalaxy: Non Interactive Folding Scheme that implements main protocol defined in paper
 /// [protogalaxy](https://eprint.iacr.org/2023/1106)
@@ -137,98 +138,4 @@ impl<C: CurveAffine> MultifoldingScheme<C> for ProtoGalaxy<C> {
     ) -> Result<Self::AccumulatorInstance, Error> {
         todo!()
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum PowError {
-    #[error("Input `t` is not enought for represent `i`")]
-    TooLittleT {
-        t: NonZeroUsize,
-        representation_lenght: NonZeroUsize,
-    },
-}
-
-/// Constructs the polynomial term `pow_i` for a given index `i`.
-///
-/// # Params
-/// - `t` - lenght of binary representation of `i`. If `t` is too small to represent `i`, then
-///       [`PowError::TooLittleT`] will return.
-/// - `i` - index of `pow_i` relation
-/// - `challenge` - challenge for `pow_i` relation
-///
-/// # Mathematical Representation
-///
-/// Given an integer `i`, its binary representation `[i]_2 = (b_0, b_1, ..., b_{t-1})`, and an
-/// input expression `input`, the polynomial term `pow_i` is defined as:
-///
-/// `beta` is `challenge`
-/// ```math
-/// pow_i(\boldsymbol{\beta})=
-///     pow_i(\beta,\cdots,\beta^{2^{t-1}})=
-///     \prod_{j=0}^{t-1}(1-b_j+b_j\cdot\beta^{2^j})
-/// ```
-/// where `b_j` is the j-th bit of the binary representation of the integer `i`.
-pub fn pow_i<F: PrimeField>(
-    t: NonZeroUsize,
-    i: usize,
-    challenge: Expression<F>,
-) -> Result<Expression<F>, PowError> {
-    if t.get() < i.leading_ones() as usize {
-        return Err(PowError::TooLittleT {
-            t,
-            representation_lenght: NonZeroUsize::new(i.leading_ones() as usize).unwrap(),
-        });
-    }
-
-    let bytes = i.to_le_bytes();
-    let mut reader = LittleEndianReader::new(&bytes);
-
-    Ok(iter::repeat_with(|| reader.read_bit().unwrap_or_default())
-        .take(t.get()) // safe, because we checked `leading_ones` before
-        .map(|b| Expression::Constant(F::from(b as u64)))
-        .zip(iter::successors(Some(challenge.clone()), |val| {
-            Some(val.clone() * val.clone())
-        }))
-        .map(|(b_j, beta_in_2j)| Expression::Constant(F::ONE) - b_j.clone() + b_j * beta_in_2j)
-        .reduce(|acc, coeff| acc * coeff)
-        .unwrap())
-}
-
-/// Constructs an iterator yielding polynomial terms `pow_i` for indices from 0 to `n`.
-///
-/// # Params
-/// - `t` - lenght of binary representation of `i`. If `t` is too small to represent `i`, then
-///       [`PowError::TooLittleT`] will return.
-/// - `n` - limit for `pow_i` relations
-/// - `challenge` - challenge for `pow_i` relation
-///
-/// # Mathematical Representation
-///
-/// For an integer `i` ranging from 0 to `n`, its binary representation `[i]_2 = (b_0, b_1, ..., b_{t-1})`,
-/// and an input expression `challenge`, the polynomial term `pow_i` is defined as:
-///
-/// `beta` is `challenge`
-/// ```math
-/// pow_i(\boldsymbol{\beta}) =
-///     pow_i(\beta, \cdots, \beta^{2^{t-1}}) =
-///     \prod_{j=0}^{t-1}(1 - b_j + b_j \cdot \beta^{2^j})
-/// ```
-/// where `b_j` is the j-th bit of the binary representation of the integer `i`.
-pub fn iter_pow_i<F: PrimeField>(
-    t: NonZeroUsize,
-    n: NonZeroUsize,
-    challenge: Expression<F>,
-) -> Result<impl Iterator<Item = Expression<F>>, PowError> {
-    let n = n.get();
-
-    if t.get() < n.leading_ones() as usize {
-        return Err(PowError::TooLittleT {
-            t,
-            representation_lenght: NonZeroUsize::new(n.leading_ones() as usize).unwrap(),
-        });
-    }
-
-    Ok((0..=n).map(move |i| {
-        pow_i(t, i, challenge.clone()).expect("Safe, because we checked condition above")
-    }))
 }
