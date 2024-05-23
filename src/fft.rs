@@ -1,4 +1,4 @@
-use crate::util::parallelize;
+use crate::util;
 use ff::{Field, PrimeField};
 use group::{GroupOpsOwned, ScalarMulOwned};
 pub use halo2curves::{CurveAffine, CurveExt};
@@ -6,6 +6,7 @@ pub use halo2curves::{CurveAffine, CurveExt};
 /// Given FFT domain size k, return the omega in case of fft
 /// or return the omega_inv in case if ifft
 pub(crate) fn get_omega_or_inv<F: PrimeField>(k: u32, is_inverse: bool) -> F {
+    assert!(k <= F::S, "k={} should no larger than F::S={}", k, F::S);
     let mut omega_or_inv = if is_inverse {
         F::ROOT_OF_UNITY_INV
     } else {
@@ -18,21 +19,18 @@ pub(crate) fn get_omega_or_inv<F: PrimeField>(k: u32, is_inverse: bool) -> F {
 }
 
 pub(crate) fn get_ifft_divisor<F: PrimeField>(k: u32) -> F {
-    F::TWO_INV.pow_vartime([k as u64, 0, 0, 0])
+    F::TWO_INV.pow_vartime([k as u64])
 }
 
 /// This represents an element of a group with basic operations that can be
 /// performed. This allows an FFT implementation (for example) to operate
 /// generically over either a field or elliptic curve group.
-pub trait FftGroup<Scalar: Field>:
-    Copy + Send + Sync + 'static + GroupOpsOwned + ScalarMulOwned<Scalar>
-{
-}
+pub trait FftGroup<Scalar: Field>: Copy + Send + GroupOpsOwned + ScalarMulOwned<Scalar> {}
 
 impl<T, Scalar> FftGroup<Scalar> for T
 where
     Scalar: Field,
-    T: Copy + Send + Sync + 'static + GroupOpsOwned + ScalarMulOwned<Scalar>,
+    T: Copy + Send + GroupOpsOwned + ScalarMulOwned<Scalar>,
 {
 }
 
@@ -47,13 +45,14 @@ where
 ///
 /// This will use multithreading if beneficial.
 pub(crate) fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, log_n: u32) {
-    fn bitreverse(mut n: usize, l: usize) -> usize {
-        let mut r = 0;
-        for _ in 0..l {
-            r = (r << 1) | (n & 1);
-            n >>= 1;
-        }
-        r
+    fn bitreverse(input: usize, limit: usize) -> usize {
+        assert!(
+            limit <= usize::BITS as usize,
+            "Bit length exceeds `usize` capacity"
+        );
+
+        let mask = (1 << limit) - 1;
+        input.reverse_bits() >> (usize::BITS as usize - limit) & mask
     }
 
     let threads = rayon::current_num_threads();
@@ -154,8 +153,7 @@ pub(crate) fn recursive_butterfly_arithmetic<Scalar: Field, G: FftGroup<Scalar>>
 /// fft with input size 1 << log_n
 /// This is a wrapper around fn best_fft
 pub fn fft<F: PrimeField>(a: &mut [F], log_n: u32) {
-    let omega = get_omega_or_inv(log_n, false);
-    best_fft(a, omega, log_n);
+    best_fft(a, get_omega_or_inv(log_n, false), log_n);
 }
 
 /// inverse fft with input size 1 << log_n
@@ -163,7 +161,7 @@ pub fn ifft<F: PrimeField>(a: &mut [F], log_n: u32) {
     let omega_inv = get_omega_or_inv(log_n, true);
     let divisor = get_ifft_divisor(log_n);
     best_fft(a, omega_inv, log_n);
-    parallelize(a, |(a, _)| {
+    util::parallelize(a, |(a, _)| {
         for a in a {
             *a *= &divisor;
         }
@@ -172,10 +170,51 @@ pub fn ifft<F: PrimeField>(a: &mut [F], log_n: u32) {
 
 #[cfg(test)]
 mod tests {
+    use std::array;
+
     use super::*;
     use halo2curves::bn256::Fr;
     use itertools::Itertools;
     use rand_core::OsRng;
+
+    #[test]
+    fn fft_simple_input_test() {
+        let test_vector = [
+            Fr::from_str_vartime("28").unwrap(),
+            Fr::from_str_vartime(
+                "68918385373930674424918168212551896122229959265833979749191472831399925654",
+            )
+            .unwrap(),
+            Fr::from_str_vartime("17631683881184975370165255887551781615748388533673675138856").unwrap(),
+            Fr::from_str_vartime(
+                "68918385373930639161550405842601155791718184162270748252414405484049647934",
+            )
+            .unwrap(),
+            Fr::from_str_vartime(
+                "21888242871839275222246405745257275088548364400416034343698204186575808495613",
+            )
+            .unwrap(),
+            Fr::from_str_vartime(
+                "21819324486465344583084855339414673932756646216253763595445789781091758847675",
+            )
+            .unwrap(),
+            Fr::from_str_vartime(
+                "21888242871839275204614721864072299718383108512864252727949815652902133356753",
+            )
+            .unwrap(),
+            Fr::from_str_vartime(
+                "21819324486465344547821487577044723192426134441150200363949012713744408569955",
+            )
+            .unwrap(),
+        ];
+
+        let mut a: [Fr; 8] = array::from_fn(|idx| Fr::from_u128(idx as u128));
+        fft(&mut a, 3);
+
+        a.iter().zip_eq(test_vector.iter()).for_each(|(lhs, rhs)| {
+            assert_eq!(*lhs, *rhs);
+        });
+    }
 
     fn generate_random_input<F: PrimeField>(k: u32) -> Vec<F> {
         let n = 1 << k;
@@ -183,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fft() {
+    fn fft_random_input_test() {
         for k in [4, 5, 6, 7, 8] {
             let input: Vec<Fr> = generate_random_input(k);
             let mut a: Vec<Fr> = input.clone();
