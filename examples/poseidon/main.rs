@@ -189,6 +189,8 @@ struct Args {
     json: bool,
     #[arg(long, default_value_t = 1)]
     repeat_count: usize,
+    #[arg(long, default_value_t = 1)]
+    folding_steps: usize,
 }
 
 fn main() {
@@ -266,7 +268,7 @@ fn main() {
 
     let primary_input = array::from_fn(|i| C1Scalar::from_u128(i as u128));
     let secondary_input = array::from_fn(|i| C2Scalar::from_u128(i as u128));
-    let fold_step_count = NonZeroUsize::new(10).unwrap();
+    let fold_step_count = NonZeroUsize::new(args.folding_steps).unwrap();
 
     IVC::fold(
         &pp,
