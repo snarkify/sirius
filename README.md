@@ -169,6 +169,17 @@ cargo poseidon-example | python3 .scripts/build_profiling.py --min-runtime 0.1s
 cargo poseidon-example > log; cat log | python3 .scripts/build_profiling.py 
 ```
 
+# Memory-Profiling 
+The [dhat](https://valgrind.org/docs/manual/dh-manual.html) utility and the [dhat-rs](https://github.com/nnethercote/dhat-rs) experimental crate are used
+
+```bash
+# Runs the dhat for the poseidon example
+cargo poseidon-dhat
+
+# check available params of run
+cargo poseidon-dhat --help
+```
+
 # Benchmark 
 
 For benches, please check [benches](benches) folder.
