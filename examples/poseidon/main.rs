@@ -1,3 +1,7 @@
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 /// This module represents an implementation of `StepCircuit` based on the poseidon chip
 mod poseidon_step_circuit {
     use std::marker::PhantomData;
@@ -13,6 +17,7 @@ mod poseidon_step_circuit {
         main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
         poseidon::{poseidon_circuit::PoseidonChip, Spec},
     };
+    use tracing::*;
 
     /// Input and output size for `StepCircuit` within each step
     pub const ARITY: usize = 1;
@@ -31,9 +36,28 @@ mod poseidon_step_circuit {
         pconfig: MainGateConfig<POSEIDON_PERMUTATION_WIDTH>,
     }
 
-    #[derive(Default, Debug)]
+    #[derive(Debug)]
     pub struct TestPoseidonCircuit<F: PrimeFieldBits> {
+        repeat_count: usize,
         _p: PhantomData<F>,
+    }
+
+    impl<F: PrimeFieldBits> Default for TestPoseidonCircuit<F> {
+        fn default() -> Self {
+            Self {
+                repeat_count: 1,
+                _p: Default::default(),
+            }
+        }
+    }
+
+    impl<F: PrimeFieldBits> TestPoseidonCircuit<F> {
+        pub fn new(repeat_count: usize) -> Self {
+            Self {
+                repeat_count,
+                _p: Default::default(),
+            }
+        }
     }
 
     impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPoseidonCircuit<F> {
@@ -50,30 +74,60 @@ mod poseidon_step_circuit {
             layouter: &mut impl Layouter<F>,
             z_in: &[AssignedCell<F, F>; ARITY],
         ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
-            let spec = CircuitPoseidonSpec::<F>::new(R_F1, R_P1);
-            let mut pchip = PoseidonChip::new(config.pconfig, spec);
-            let input = z_in.iter().map(|x| x.into()).collect::<Vec<WrapValue<F>>>();
-            pchip.update(&input);
-            let output = layouter
+            let spec = CircuitPoseidonSpec::new(R_F1, R_P1);
+            layouter
                 .assign_region(
                     || "poseidon hash",
-                    |region| {
+                    move |region| {
+                        let mut z_i = z_in.clone();
                         let ctx = &mut RegionCtx::new(region, 0);
-                        pchip.squeeze(ctx)
+
+                        for step in 0..=self.repeat_count {
+                            let mut pchip = PoseidonChip::new(config.pconfig.clone(), spec.clone());
+
+                            pchip.update(
+                                &z_i.iter()
+                                    .cloned()
+                                    .map(WrapValue::Assigned)
+                                    .collect::<Vec<WrapValue<F>>>(),
+                            );
+
+                            info!(
+                                "offset for {} hash repeat count is {} (log2 = {})",
+                                step,
+                                ctx.offset(),
+                                (ctx.offset() as f64).log2()
+                            );
+
+                            z_i = [pchip.squeeze(ctx).inspect_err(|err| {
+                                error!("at step {step}: {err:?}");
+                            })?];
+                        }
+
+                        info!(
+                            "total offset for {} hash repeat count is {} (log2 = {})",
+                            self.repeat_count,
+                            ctx.offset(),
+                            (ctx.offset() as f64).log2()
+                        );
+
+                        Ok(z_i)
                     },
                 )
-                .map_err(SynthesisError::Halo2)?;
-            Ok([output])
+                .map_err(|err| {
+                    error!("while synth {err:?}");
+                    SynthesisError::Halo2(err)
+                })
         }
     }
 }
 
-use std::{array, env, io, num::NonZeroUsize, path::Path};
+use std::{array, io, num::NonZeroUsize, path::Path};
 
 use ff::PrimeField;
 
+use clap::Parser;
 use halo2curves::{bn256, grumpkin, CurveAffine};
-
 use metadata::LevelFilter;
 
 use bn256::G1 as C1;
@@ -128,7 +182,19 @@ fn get_or_create_commitment_key<C: CurveAffine>(
     unsafe { CommitmentKey::load_or_setup_cache(Path::new(CACHE_FOLDER), label, k) }
 }
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(long, default_value_t = false)]
+    json: bool,
+    #[arg(long, default_value_t = 1)]
+    repeat_count: usize,
+}
+
 fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let builder = tracing_subscriber::fmt()
         // Adds events to track the entry and exit of the span, which are used to build
         // time-profiling
@@ -140,11 +206,13 @@ fn main() {
                 .from_env_lossy(),
         );
 
+    let args = Args::parse();
+
     // Structured logs are needed for time-profiling, while for simple run regular logs are
     // more convenient.
     //
     // So this expr keeps track of the --json argument for turn-on json-logs
-    if env::args().any(|arg| arg.eq("--json")) {
+    if args.json {
         builder.json().init();
     } else {
         builder.init();
@@ -153,7 +221,7 @@ fn main() {
     // To osterize the total execution time of the example
     let _span = info_span!("poseidon_example").entered();
 
-    let primary = poseidon_step_circuit::TestPoseidonCircuit::default();
+    let primary = poseidon_step_circuit::TestPoseidonCircuit::new(args.repeat_count);
     let secondary = step_circuit::trivial::Circuit::<ARITY, _>::default();
 
     // Specifications for random oracle used as part of the IVC algorithm

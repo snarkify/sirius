@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::{array, env, io, num::NonZeroUsize, path::Path};
 
 use ff::PrimeField;

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::{array, io, num::NonZeroUsize, path::Path};
 
 use criterion::{black_box, criterion_group, Criterion};
