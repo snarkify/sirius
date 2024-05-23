@@ -1,3 +1,4 @@
 [alias]
 poseidon-example = ["run", "--example", "poseidon", "--release", "--", "--json"]
 trivial-example = ["run", "--example", "trivial", "--release", "--", "--json"]
+poseidon-dhat = ["run", "--example", "poseidon", "--release", "--features", "dhat-heap", "--"]
