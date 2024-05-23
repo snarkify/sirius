@@ -141,14 +141,6 @@ use sirius::{
 use tracing::*;
 use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
-/// `K` table size for primary circuit
-const PRIMARY_CIRCUIT_TABLE_SIZE: usize = 17;
-/// `K` table size for secondary circuit
-const SECONDARY_CIRCUIT_TABLE_SIZE: usize = 17;
-
-/// Разрмер commitment key
-const COMMITMENT_KEY_SIZE: usize = 21;
-
 use poseidon_step_circuit::{TestPoseidonCircuit, ARITY};
 
 /// Specification for the random oracle used within IVC
@@ -191,6 +183,12 @@ struct Args {
     repeat_count: usize,
     #[arg(long, default_value_t = 1)]
     folding_steps: usize,
+    #[arg(long, default_value_t = 17)]
+    primary_circuit_k_table_size: u32,
+    #[arg(long, default_value_t = 17)]
+    secondary_circuit_k_table_size: u32,
+    #[arg(long, default_value_t = 21)]
+    commitment_key_size: usize,
 }
 
 fn main() {
@@ -231,10 +229,10 @@ fn main() {
     let secondary_spec = RandomOracleConstant::<C2Scalar>::new(10, 10);
 
     let primary_commitment_key =
-        get_or_create_commitment_key::<C1Affine>(COMMITMENT_KEY_SIZE, "bn256")
+        get_or_create_commitment_key::<C1Affine>(args.commitment_key_size, "bn256")
             .expect("Failed to get primary key");
     let secondary_commitment_key =
-        get_or_create_commitment_key::<C2Affine>(COMMITMENT_KEY_SIZE, "grumpkin")
+        get_or_create_commitment_key::<C2Affine>(args.commitment_key_size, "grumpkin")
             .expect("Failed to get secondary key");
 
     let pp = PublicParams::<
@@ -250,13 +248,13 @@ fn main() {
         RandomOracle,
     >::new(
         CircuitPublicParamsInput::new(
-            PRIMARY_CIRCUIT_TABLE_SIZE as u32,
+            args.primary_circuit_k_table_size,
             &primary_commitment_key,
             primary_spec,
             &primary,
         ),
         CircuitPublicParamsInput::new(
-            SECONDARY_CIRCUIT_TABLE_SIZE as u32,
+            args.secondary_circuit_k_table_size,
             &secondary_commitment_key,
             secondary_spec,
             &secondary,
