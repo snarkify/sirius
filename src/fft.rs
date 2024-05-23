@@ -5,6 +5,7 @@ pub use halo2curves::{CurveAffine, CurveExt};
 
 /// Given FFT domain size k, return the omega in case of fft
 /// or return the omega_inv in case if ifft
+/// TODO: can consider hardcode if this fn is called multiple times
 pub(crate) fn get_omega_or_inv<F: PrimeField>(k: u32, is_inverse: bool) -> F {
     assert!(k <= F::S, "k={} should no larger than F::S={}", k, F::S);
     let mut omega_or_inv = if is_inverse {
@@ -185,7 +186,8 @@ mod tests {
                 "68918385373930674424918168212551896122229959265833979749191472831399925654",
             )
             .unwrap(),
-            Fr::from_str_vartime("17631683881184975370165255887551781615748388533673675138856").unwrap(),
+            Fr::from_str_vartime("17631683881184975370165255887551781615748388533673675138856")
+                .unwrap(),
             Fr::from_str_vartime(
                 "68918385373930639161550405842601155791718184162270748252414405484049647934",
             )
