@@ -6,6 +6,7 @@
 pub mod commitment;
 pub mod constants;
 pub mod digest;
+pub mod fft;
 pub mod gadgets;
 pub mod ivc;
 pub mod main_gate;
