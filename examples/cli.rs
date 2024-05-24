@@ -1,3 +1,7 @@
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 use std::{array, num::NonZeroUsize};
 
 use clap::{Parser, ValueEnum};
@@ -154,6 +158,9 @@ fn fold(
 }
 
 fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let args = Args::parse();
 
     let builder = tracing_subscriber::fmt()

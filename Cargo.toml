@@ -30,6 +30,7 @@ tracing = { version = "0.1.40", features = ["attributes"] }
 bincode = "1.3"
 clap = { version = "4.5.4", features = ["derive"] }
 criterion = "0.5.1"
+dhat = "0.3.3"
 halo2_gadgets = { git = "https://github.com/snarkify/halo2", branch = "snarkify/dev", features = ["unstable"] }
 maplit = "1.0.2"
 prettytable-rs = "0.10.0"
@@ -49,3 +50,6 @@ harness = false
 [[bench]]
 name = "poseidon"
 harness = false
+
+[features]
+dhat-heap = []
