@@ -10,7 +10,7 @@ count-to-non-zero = "0.3.0"
 digest = "0.10"
 ff = "0.13"
 group = "0.13"
-halo2_proofs = { git = "https://github.com/snarkify/halo2", branch = "snarkify/dev" }
+halo2_proofs = { git = "https://github.com/snarkify/halo2", branch = "snarkify/dev", features = ["dev-graph"] }
 halo2curves = { git = 'https://github.com/privacy-scaling-explorations/halo2curves', tag = "v0.6.0", features = ["derive_serde"] }
 itertools = "0.12.1"
 num-bigint = "0.4.3"
@@ -25,6 +25,10 @@ sha3 = "0.10"
 some-to-err = "0.2.1"
 thiserror = "1.0.48"
 tracing = { version = "0.1.40", features = ["attributes"] }
+
+# Developer tooling dependencies
+plotters = { version = "0.3.0", default-features = false }
+tabbycat = { version = "0.1", features = ["attributes"] }
 
 [dev-dependencies]
 prettytable-rs = "0.10.0"

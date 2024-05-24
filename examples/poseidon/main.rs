@@ -1,6 +1,7 @@
 /// This module represents an implementation of `StepCircuit` based on the poseidon chip
 mod poseidon_step_circuit {
     use std::marker::PhantomData;
+    use tracing::*;
 
     use ff::{FromUniformBytes, PrimeFieldBits};
 
@@ -21,8 +22,6 @@ mod poseidon_step_circuit {
     const POSEIDON_PERMUTATION_WIDTH: usize = 3;
     const POSEIDON_RATE: usize = POSEIDON_PERMUTATION_WIDTH - 1;
 
-    type CircuitPoseidonSpec<F> = Spec<F, POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE>;
-
     const R_F1: usize = 4;
     const R_P1: usize = 3;
 
@@ -31,9 +30,28 @@ mod poseidon_step_circuit {
         pconfig: MainGateConfig<POSEIDON_PERMUTATION_WIDTH>,
     }
 
-    #[derive(Default, Debug)]
+    #[derive(Debug, Clone)]
     pub struct TestPoseidonCircuit<F: PrimeFieldBits> {
+        repeat_count: usize,
         _p: PhantomData<F>,
+    }
+
+    impl<F: PrimeFieldBits> Default for TestPoseidonCircuit<F> {
+        fn default() -> Self {
+            Self {
+                repeat_count: 1,
+                _p: Default::default(),
+            }
+        }
+    }
+
+    impl<F: PrimeFieldBits> TestPoseidonCircuit<F> {
+        pub fn new(repeat_count: usize) -> Self {
+            Self {
+                repeat_count,
+                _p: Default::default(),
+            }
+        }
     }
 
     impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPoseidonCircuit<F> {
@@ -50,20 +68,50 @@ mod poseidon_step_circuit {
             layouter: &mut impl Layouter<F>,
             z_in: &[AssignedCell<F, F>; ARITY],
         ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
-            let spec = CircuitPoseidonSpec::<F>::new(R_F1, R_P1);
-            let mut pchip = PoseidonChip::new(config.pconfig, spec);
-            let input = z_in.iter().map(|x| x.into()).collect::<Vec<WrapValue<F>>>();
-            pchip.update(&input);
-            let output = layouter
+            let spec = Spec::<F, POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE>::new(R_F1, R_P1);
+            layouter
                 .assign_region(
                     || "poseidon hash",
-                    |region| {
+                    move |region| {
+                        let mut z_i = z_in.clone();
                         let ctx = &mut RegionCtx::new(region, 0);
-                        pchip.squeeze(ctx)
+
+                        for step in 0..=self.repeat_count {
+                            let mut pchip = PoseidonChip::new(config.pconfig.clone(), spec.clone());
+
+                            pchip.update(
+                                &z_i.iter()
+                                    .cloned()
+                                    .map(WrapValue::Assigned)
+                                    .collect::<Vec<WrapValue<F>>>(),
+                            );
+
+                            info!(
+                                "offset for {} hash repeat count is {} (log2 = {})",
+                                step,
+                                ctx.offset(),
+                                (ctx.offset() as f64).log2()
+                            );
+
+                            z_i = [pchip.squeeze(ctx).inspect_err(|err| {
+                                error!("at step {step}: {err:?}");
+                            })?];
+                        }
+
+                        info!(
+                            "total offset for {} hash repeat count is {} (log2 = {})",
+                            self.repeat_count,
+                            ctx.offset(),
+                            (ctx.offset() as f64).log2()
+                        );
+
+                        Ok(z_i)
                     },
                 )
-                .map_err(SynthesisError::Halo2)?;
-            Ok([output])
+                .map_err(|err| {
+                    error!("while synth {err:?}");
+                    SynthesisError::Halo2(err)
+                })
         }
     }
 }
@@ -153,7 +201,9 @@ fn main() {
     // To osterize the total execution time of the example
     let _span = info_span!("poseidon_example").entered();
 
-    let primary = poseidon_step_circuit::TestPoseidonCircuit::default();
+    let repeat_count = 5;
+    let primary: TestPoseidonCircuit<C1Scalar> = TestPoseidonCircuit::new(repeat_count);
+
     let secondary = step_circuit::trivial::Circuit::<ARITY, _>::default();
 
     // Specifications for random oracle used as part of the IVC algorithm
@@ -198,7 +248,7 @@ fn main() {
 
     let primary_input = array::from_fn(|i| C1Scalar::from_u128(i as u128));
     let secondary_input = array::from_fn(|i| C2Scalar::from_u128(i as u128));
-    let fold_step_count = NonZeroUsize::new(10).unwrap();
+    let fold_step_count = NonZeroUsize::new(2).unwrap();
 
     IVC::fold(
         &pp,
