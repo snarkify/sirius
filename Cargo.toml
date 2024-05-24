@@ -29,6 +29,7 @@ tracing = { version = "0.1.40", features = ["attributes"] }
 # Developer tooling dependencies
 plotters = { version = "0.3.0", default-features = false }
 tabbycat = { version = "0.1", features = ["attributes"] }
+sysinfo = "0.30.12"
 
 [dev-dependencies]
 prettytable-rs = "0.10.0"

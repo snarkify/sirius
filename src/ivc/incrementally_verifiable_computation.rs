@@ -6,6 +6,7 @@ use halo2_proofs::dev::MockProver;
 use halo2curves::CurveAffine;
 use serde::Serialize;
 use tracing::*;
+use sysinfo::System;
 
 use crate::{
     ivc::{
@@ -155,6 +156,7 @@ where
         Ok(())
     }
     pub fn fold<const T: usize, RP1, RP2>(
+        system: &mut System,
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
         primary: SC1,
         primary_z_0: [C1::Scalar; A1],
@@ -171,7 +173,10 @@ where
 
         for step in 1..=num_steps.get() {
             trace!("Start fold {step} step");
+            system.refresh_memory();
             ivc.fold_step(pp)?;
+            let used_memory_after = system.used_memory() / 1024 / 1024 / 1024;
+            println!("Used memory after fold step {}: {} GB", step, used_memory_after);
         }
 
         trace!("Finish folding, start verify");

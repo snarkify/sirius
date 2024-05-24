@@ -177,6 +177,15 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 }
 
 fn main() {
+    use sysinfo::System;
+    let mut system = System::new_all();
+    system.refresh_all();
+    let total_memory = system.total_memory() / 1024 / 1024 / 1024;
+    let used_memory = system.used_memory() / 1024 / 1024 / 1024;
+    println!("Initial Total memory: {} GB", total_memory);
+    println!("Initial Used memory: {} GB", used_memory);
+
+
     let builder = tracing_subscriber::fmt()
         // Adds events to track the entry and exit of the span, which are used to build
         // time-profiling
@@ -201,7 +210,7 @@ fn main() {
     // To osterize the total execution time of the example
     let _span = info_span!("poseidon_example").entered();
 
-    let repeat_count = 5;
+    let repeat_count = 5000;
     let primary: TestPoseidonCircuit<C1Scalar> = TestPoseidonCircuit::new(repeat_count);
 
     let secondary = step_circuit::trivial::Circuit::<ARITY, _>::default();
@@ -216,6 +225,10 @@ fn main() {
     let secondary_commitment_key =
         get_or_create_commitment_key::<C2Affine>(COMMITMENT_KEY_SIZE, "grumpkin")
             .expect("Failed to get secondary key");
+
+    system.refresh_memory();
+    let used_memory_after = system.used_memory() / 1024 / 1024 / 1024;
+    println!("Used memory after loading commtiment key: {} GB", used_memory_after);
 
     let pp = PublicParams::<
         '_,
@@ -246,11 +259,16 @@ fn main() {
     )
     .unwrap();
 
+    system.refresh_memory();
+    let used_memory_after = system.used_memory() / 1024 / 1024 / 1024;
+    println!("Used memory after pp::new: {} GB", used_memory_after);
+
     let primary_input = array::from_fn(|i| C1Scalar::from_u128(i as u128));
     let secondary_input = array::from_fn(|i| C2Scalar::from_u128(i as u128));
-    let fold_step_count = NonZeroUsize::new(2).unwrap();
+    let fold_step_count = NonZeroUsize::new(7).unwrap();
 
     IVC::fold(
+        &mut system,
         &pp,
         primary,
         primary_input,
