@@ -5,7 +5,7 @@ pub use halo2curves::{CurveAffine, CurveExt};
 
 /// Given FFT domain size k, return the omega in case of fft
 /// or return the omega_inv in case if ifft
-/// TODO: can consider hardcode if this fn is called multiple times
+/// TODO #274: can consider hardcode if this fn is called multiple times
 pub(crate) fn get_omega_or_inv<F: PrimeField>(k: u32, is_inverse: bool) -> F {
     assert!(k <= F::S, "k={} should no larger than F::S={}", k, F::S);
     let mut omega_or_inv = if is_inverse {
@@ -181,34 +181,16 @@ mod tests {
     #[test]
     fn fft_simple_input_test() {
         let test_vector = [
-            Fr::from_str_vartime("28").unwrap(),
-            Fr::from_str_vartime(
-                "68918385373930674424918168212551896122229959265833979749191472831399925654",
-            )
-            .unwrap(),
-            Fr::from_str_vartime("17631683881184975370165255887551781615748388533673675138856")
-                .unwrap(),
-            Fr::from_str_vartime(
-                "68918385373930639161550405842601155791718184162270748252414405484049647934",
-            )
-            .unwrap(),
-            Fr::from_str_vartime(
-                "21888242871839275222246405745257275088548364400416034343698204186575808495613",
-            )
-            .unwrap(),
-            Fr::from_str_vartime(
-                "21819324486465344583084855339414673932756646216253763595445789781091758847675",
-            )
-            .unwrap(),
-            Fr::from_str_vartime(
-                "21888242871839275204614721864072299718383108512864252727949815652902133356753",
-            )
-            .unwrap(),
-            Fr::from_str_vartime(
-                "21819324486465344547821487577044723192426134441150200363949012713744408569955",
-            )
-            .unwrap(),
-        ];
+            "28",
+            "68918385373930674424918168212551896122229959265833979749191472831399925654",
+            "17631683881184975370165255887551781615748388533673675138856",
+            "68918385373930639161550405842601155791718184162270748252414405484049647934",
+            "21888242871839275222246405745257275088548364400416034343698204186575808495613",
+            "21819324486465344583084855339414673932756646216253763595445789781091758847675",
+            "21888242871839275204614721864072299718383108512864252727949815652902133356753",
+            "21819324486465344547821487577044723192426134441150200363949012713744408569955",
+        ]
+        .map(|s| Fr::from_str_vartime(s).unwrap());
 
         let mut a: [Fr; 8] = array::from_fn(|idx| Fr::from_u128(idx as u128));
         fft(&mut a, 3);
