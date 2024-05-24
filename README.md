@@ -146,6 +146,9 @@ This code will run `fold_step_count` of folding steps, and also check the proof 
 For runnable examples, please check [examples](examples) folder.
 
 ```bash
+# Alias to run IVC with parameterization via cli arguments
+cargo cli-example --help
+
 # Alias for run the IVC for trivial `StepCircuit` (just returns its input unchanged)
 cargo trivial-example
 
