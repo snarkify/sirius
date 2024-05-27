@@ -1,56 +1,80 @@
-use std::{iter, num::NonZeroUsize};
+use std::{iter, num::NonZeroU32};
 
 use ff::PrimeField;
 
 use crate::fft;
 
-/// Lazy eval the values of the Lagrange polynomial for a cyclic subgroup of length `n` at
+/// Lazy eval the values of the Lagrange polynomial for a cyclic subgroup of length `n` (`2.pow(log_n)`) at
 /// the `challenge` point
-///
-/// Panic, if challenge will be equal to any element of cyclic subgroup, because division by zero
-///
 ///
 /// # Mathematical Representation
 ///
 /// ```math
-/// L_i(X)=\frac{\omega^i}{n}\frac{X^k-1}{X-\omega^i}
+/// L_i(X)=\frac{\omega^i}{n}\frac{X^n-1}{X-\omega^i}
 /// ```
 /// where {1, \omega, \omega^2, ..., \omega^n} - cyclic group
 pub fn iter_eval_lagrange_polynomials_for_cyclic_group<F: PrimeField>(
     challenge: F,
-    n: NonZeroUsize,
+    log_n: NonZeroU32,
 ) -> impl Iterator<Item = F> {
-    let n = n.get();
+    let generator: F = fft::get_omega_or_inv(log_n.get(), false);
+    let n = 2usize.pow(log_n.get());
 
-    let generator: F = fft::get_omega_or_inv(n.ilog2(), false);
     let cyclic_subgroup = iter::successors(Some(F::ONE), move |val| Some(*val * generator));
 
-    let inverted_n = F::from(n as u64).invert().unwrap();
+    let inverted_n = F::from_u128(n as u128).invert().unwrap();
     let X_pow_n_sub_1 = challenge.pow([n as u64]) - F::ONE;
 
     cyclic_subgroup
         .map(move |value| {
-            (value * inverted_n) * (X_pow_n_sub_1 * (challenge - value).invert().unwrap())
+            let challenge_sub_value = challenge - value;
+            if X_pow_n_sub_1.is_zero_vartime() && challenge_sub_value.is_zero_vartime() {
+                F::ONE
+            } else {
+                value * inverted_n * (X_pow_n_sub_1 * challenge_sub_value.invert().unwrap())
+            }
         })
         .take(n)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroUsize;
-
+    use ff::Field;
     use halo2_proofs::halo2curves::bn256::Fr;
+    use tracing_test::traced_test;
 
     use super::*;
 
-    fn to_nz(input: usize) -> NonZeroUsize {
-        NonZeroUsize::new(input).unwrap()
+    fn to_nz(input: u32) -> NonZeroU32 {
+        NonZeroU32::new(input).unwrap()
+    }
+
+    #[traced_test]
+    #[test]
+    fn correctness_for_cyclic_element() {
+        const LOG_N: u32 = 8;
+
+        let generator: Fr = fft::get_omega_or_inv(LOG_N, false);
+
+        let log_n = NonZeroU32::new(LOG_N).unwrap();
+        let n = 2usize.pow(LOG_N);
+
+        iter::successors(Some(Fr::ONE), move |val| Some(*val * generator))
+            .enumerate()
+            .take(n)
+            .for_each(|(j, w_j)| {
+                iter_eval_lagrange_polynomials_for_cyclic_group(w_j, log_n)
+                    .enumerate()
+                    .for_each(|(i, L_i)| {
+                        assert_eq!(L_i, if i == j { Fr::ONE } else { Fr::ZERO });
+                    })
+            });
     }
 
     #[test]
     fn basic_lagrange_test() {
         assert_eq!(
-            iter_eval_lagrange_polynomials_for_cyclic_group(Fr::from(2u64), to_nz(4))
+            iter_eval_lagrange_polynomials_for_cyclic_group(Fr::from(2u64), to_nz(2))
                 .collect::<Vec<_>>(),
             [
                 "5472060717959818805561601436314318772137091100104008585924551046643952123908",
