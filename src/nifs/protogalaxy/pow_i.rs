@@ -1,22 +1,22 @@
-use std::{iter, num::NonZeroUsize};
+use std::{iter, mem, num::NonZeroUsize, ops::Mul};
 
 use bitter::{BitReader, LittleEndianReader};
 use ff::PrimeField;
 use tracing::*;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
     #[error("Input `t` is not enought for represent `i`")]
     TooLittleT {
         t: NonZeroUsize,
-        representation_lenght: NonZeroUsize,
+        needed_t: NonZeroUsize,
     },
 }
 
-fn pow_i<F: PrimeField>(
+fn pow_i<'l, F: PrimeField>(
     i: usize,
     t: NonZeroUsize,
-    challenges_powers: impl Iterator<Item = F>,
+    challenges_powers: impl Iterator<Item = &'l F>,
 ) -> F {
     let bytes = i.to_le_bytes();
     let mut reader = LittleEndianReader::new(&bytes);
@@ -24,7 +24,7 @@ fn pow_i<F: PrimeField>(
     iter::repeat_with(|| reader.read_bit().unwrap_or(false))
         .zip(challenges_powers)
         .map(|(b_j, beta_in_2j)| match b_j {
-            true => beta_in_2j,
+            true => *beta_in_2j,
             false => F::ONE,
         })
         .take(t.get())
@@ -57,12 +57,17 @@ pub fn iter_eval_of_pow_i<F: PrimeField>(
     n: NonZeroUsize,
     challenge: F,
 ) -> Result<impl Iterator<Item = F>, Error> {
-    let n = n.get();
+    let representation_lenght = NonZeroUsize::new(
+        mem::size_of::<usize>()
+            .mul(8)
+            .saturating_sub(n.leading_zeros() as usize),
+    )
+    .expect("`leading_zeros` can't be greater then bits count");
 
-    if t.get() < n.leading_ones() as usize {
+    if t < representation_lenght {
         return Err(Error::TooLittleT {
             t,
-            representation_lenght: NonZeroUsize::new(n.leading_ones() as usize).unwrap(),
+            needed_t: representation_lenght,
         });
     }
 
@@ -70,11 +75,13 @@ pub fn iter_eval_of_pow_i<F: PrimeField>(
         .take(t.get())
         .collect::<Box<[_]>>();
 
-    Ok((0..=n).map(move |i| pow_i(i, t, challenges.iter().copied())))
+    Ok((0..=n.get()).map(move |i| pow_i(i, t, challenges.iter())))
 }
 
 #[cfg(test)]
 mod test {
+    use std::ops::Sub;
+
     use halo2_proofs::halo2curves::bn256::Fr;
     use tracing_test::traced_test;
 
@@ -84,14 +91,17 @@ mod test {
         NonZeroUsize::new(input).unwrap()
     }
 
-    fn to_ch(input: Fr) -> impl Iterator<Item = Fr> {
+    fn to_challenges(input: Fr) -> Box<[Fr]> {
         iter::successors(Some(input), |val| Some(val.square()))
+            .take(100)
+            .collect()
     }
 
     #[traced_test]
     #[test]
     fn pow_5() {
-        assert_eq!(pow_i::<Fr>(5, to_nz(3), to_ch(Fr::one())), Fr::one());
+        let challenges = to_challenges(Fr::one());
+        assert_eq!(pow_i::<Fr>(5, to_nz(3), challenges.iter()), Fr::one());
     }
 
     #[traced_test]
@@ -108,16 +118,30 @@ mod test {
     #[traced_test]
     #[test]
     fn pow_7() {
+        let challenges = to_challenges(Fr::one());
         // Test with i = 7 (binary 111) and t = 3
-        assert_eq!(pow_i::<Fr>(7, to_nz(3), to_ch(Fr::one())), Fr::one());
+        assert_eq!(pow_i::<Fr>(7, to_nz(3), challenges.iter()), Fr::one());
     }
 
     #[traced_test]
     #[test]
     fn pow_11() {
+        let challenges = to_challenges(Fr::from(3));
+        assert_eq!(pow_i::<Fr>(11, to_nz(4), challenges.iter()), 177_147.into());
+    }
+
+    #[traced_test]
+    #[test]
+    fn too_little_t() {
+        let too_little_t = to_nz(mem::size_of::<usize>().mul(8).sub(1));
         assert_eq!(
-            pow_i::<Fr>(11, to_nz(4), to_ch(Fr::from(3))),
-            177_147.into()
+            iter_eval_of_pow_i::<Fr>(too_little_t, to_nz(usize::MAX), Fr::one())
+                .err()
+                .unwrap(),
+            Error::TooLittleT {
+                t: too_little_t,
+                needed_t: to_nz(mem::size_of::<usize>().mul(8))
+            }
         );
     }
 }
