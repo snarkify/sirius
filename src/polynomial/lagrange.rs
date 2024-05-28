@@ -33,7 +33,7 @@ pub fn iter_cyclic_subgroup<F: PrimeField>(log_n: NonZeroU32) -> impl Iterator<I
 ///
 /// You can look at [`fft::get_omega_or_inv`] to see how the target cyclic group is formed
 ///
-/// # Arguments
+/// # Parameters
 ///
 /// - `log_n` - `log2(n)`, where `n` - size of cyclic subgroup
 /// - `challenge` - eval Lagrange polynomials at this point
@@ -48,7 +48,8 @@ pub fn iter_cyclic_subgroup<F: PrimeField>(log_n: NonZeroU32) -> impl Iterator<I
 /// ```math
 /// L_i(X)=\frac{\omega^i}{n}\frac{X^n-1}{X-\omega^i}
 /// ```
-/// where {1, \omega, \omega^2, ..., \omega^n} - cyclic group
+/// where {1, \omega, \omega^2, ..., \omega^n} - cyclic group, check [`iter_cyclic_subgroup`] for
+/// more details
 pub fn iter_eval_lagrange_polynomials_for_cyclic_group<F: PrimeField>(
     challenge: F,
     log_n: NonZeroU32,
