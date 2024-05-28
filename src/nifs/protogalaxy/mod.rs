@@ -1,11 +1,17 @@
-use ff::PrimeField;
 use std::marker::PhantomData;
 
-use super::*;
-use crate::commitment::CommitmentKey;
-use crate::plonk::{PlonkStructure, RelaxedPlonkInstance};
-use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
+use ff::PrimeField;
 use halo2_proofs::arithmetic::CurveAffine;
+
+use crate::{
+    commitment::CommitmentKey,
+    plonk::{PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace},
+};
+
+use super::*;
+
+mod pow_i;
+pub use pow_i::{iter_eval_of_pow_i, Error as PowIError};
 
 /// ProtoGalaxy: Non Interactive Folding Scheme that implements main protocol defined in paper
 /// [protogalaxy](https://eprint.iacr.org/2023/1106)
