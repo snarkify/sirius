@@ -139,3 +139,54 @@ impl<C: CurveAffine> MultifoldingScheme<C> for ProtoGalaxy<C> {
         todo!()
     }
 }
+
+mod poly {
+    use std::num::NonZeroUsize;
+
+    use ff::{Field, PrimeField};
+    use halo2curves::CurveAffine;
+
+    use crate::{
+        fft,
+        plonk::{self, GetChallenges, GetWitness, PlonkStructure},
+        polynomial::{lagrange, univariate::UnivariatePoly},
+    };
+
+    use super::pow_i;
+
+    fn compute_F_poly<C: CurveAffine>(
+        beta: C::ScalarExt,
+        delta: C::ScalarExt,
+        S: &PlonkStructure<C::ScalarExt>,
+        trace: &(impl GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>),
+    ) -> UnivariatePoly<C::ScalarExt> {
+        let n = NonZeroUsize::new(2usize.pow(S.k as u32)).unwrap();
+        // TODO check
+        let t = NonZeroUsize::new(<C::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap();
+
+        // TODO Rm collect
+        let witness = plonk::iter_evaluate_witness::<C>(S, trace)
+            .collect::<Result<Box<[_]>, _>>()
+            .unwrap();
+
+        let mut coeff: Box<[C::ScalarExt]> =
+            lagrange::iter_cyclic_subgroup::<C::ScalarExt>(S.k as u32)
+                .map(|X| beta + X * delta)
+                .map(|challenge| {
+                    pow_i::iter_eval_of_pow_i(t, n, challenge)
+                        .unwrap()
+                        .zip(witness.iter())
+                        .fold(
+                            C::ScalarExt::ZERO,
+                            |acc, (evaluated_pow_i, evaluated_witness)| {
+                                acc + evaluated_pow_i * evaluated_witness
+                            },
+                        )
+                })
+                .collect::<Box<[_]>>();
+
+        fft::ifft(&mut coeff, S.k as u32);
+
+        UnivariatePoly(coeff)
+    }
+}
