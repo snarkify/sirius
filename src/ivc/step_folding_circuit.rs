@@ -3,7 +3,7 @@ use std::{fmt, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
-    circuit::{floor_planner, Layouter, Value},
+    circuit::{floor_planner, Layouter, Value, SimpleFloorPlanner},
     plonk::{Circuit, Column, ConstraintSystem, Instance},
 };
 use halo2curves::CurveAffine;
@@ -206,7 +206,7 @@ where
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
 {
     type Config = StepConfig<ARITY, C::Base, SC, T>;
-    type FloorPlanner = floor_planner::V1;
+    type FloorPlanner = SimpleFloorPlanner; //floor_planner::V1;
 
     fn without_witnesses(&self) -> Self {
         Self {
