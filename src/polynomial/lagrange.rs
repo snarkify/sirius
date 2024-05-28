@@ -1,4 +1,4 @@
-use std::{iter, num::NonZeroU32};
+use std::iter;
 
 use ff::PrimeField;
 
@@ -21,10 +21,10 @@ use crate::fft;
 /// - The function first computes a generator of the cyclic subgroup using the [`fft::get_omega_or_inv`]
 /// - The size of the cyclic subgroup `n` is computed as `2^log_n`.
 /// - The iterator returns `n` elements, covering the full cycle of the cyclic subgroup
-pub fn iter_cyclic_subgroup<F: PrimeField>(log_n: NonZeroU32) -> impl Iterator<Item = F> {
-    let generator: F = fft::get_omega_or_inv(log_n.get(), false);
+pub fn iter_cyclic_subgroup<F: PrimeField>(log_n: u32) -> impl Iterator<Item = F> {
+    let generator: F = fft::get_omega_or_inv(log_n, false);
 
-    let n = 2usize.pow(log_n.get());
+    let n = 2usize.pow(log_n);
     iter::successors(Some(F::ONE), move |val| Some(*val * generator)).take(n)
 }
 
@@ -52,9 +52,9 @@ pub fn iter_cyclic_subgroup<F: PrimeField>(log_n: NonZeroU32) -> impl Iterator<I
 /// more details
 pub fn iter_eval_lagrange_polynomials_for_cyclic_group<F: PrimeField>(
     challenge: F,
-    log_n: NonZeroU32,
+    log_n: u32,
 ) -> impl Iterator<Item = F> {
-    let n = 2usize.pow(log_n.get());
+    let n = 2usize.pow(log_n);
 
     let inverted_n = F::from_u128(n as u128)
         .invert()
@@ -84,10 +84,6 @@ mod tests {
 
     use super::*;
 
-    fn to_nz(input: u32) -> NonZeroU32 {
-        NonZeroU32::new(input).unwrap()
-    }
-
     #[traced_test]
     #[test]
     fn correctness_for_cyclic_element() {
@@ -95,14 +91,13 @@ mod tests {
 
         let generator: Fr = fft::get_omega_or_inv(LOG_N, false);
 
-        let log_n = NonZeroU32::new(LOG_N).unwrap();
         let n = 2usize.pow(LOG_N);
 
         iter::successors(Some(Fr::ONE), move |val| Some(*val * generator))
             .enumerate()
             .take(n)
             .for_each(|(j, w_j)| {
-                iter_eval_lagrange_polynomials_for_cyclic_group(w_j, log_n)
+                iter_eval_lagrange_polynomials_for_cyclic_group(w_j, LOG_N)
                     .enumerate()
                     .for_each(|(i, L_i)| {
                         assert_eq!(L_i, if i == j { Fr::ONE } else { Fr::ZERO });
@@ -113,8 +108,7 @@ mod tests {
     #[test]
     fn basic_lagrange_test() {
         assert_eq!(
-            iter_eval_lagrange_polynomials_for_cyclic_group(Fr::from(2u64), to_nz(2))
-                .collect::<Vec<_>>(),
+            iter_eval_lagrange_polynomials_for_cyclic_group(Fr::from(2u64), 2).collect::<Vec<_>>(),
             [
                 "5472060717959818805561601436314318772137091100104008585924551046643952123908",
                 "5472060717959818798949719980869953008325120142272090480018905346516323946831",
