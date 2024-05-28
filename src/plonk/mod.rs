@@ -32,7 +32,7 @@ use crate::{
     constants::NUM_CHALLENGE_BITS,
     plonk::{
         self,
-        eval::{Error as EvalError, PlonkEvalDomain},
+        eval::{Error as EvalError, GetDataForEval, PlonkEvalDomain},
     },
     polynomial::{
         expression::{HomogeneousExpression, QueryIndexContext},
@@ -927,7 +927,6 @@ pub(crate) fn iter_evaluate_witness<'link, C: CurveAffine>(
 
         let evaluator = GraphEvaluator::new(gate);
 
-        use crate::plonk::eval::GetDataForEval;
         (0..data.row_size()).map(move |row_index| -> Result<C::ScalarExt, eval::Error> {
             evaluator.evaluate(&data, row_index)
         })
@@ -937,11 +936,7 @@ pub(crate) fn iter_evaluate_witness<'link, C: CurveAffine>(
 #[cfg(test)]
 mod test_eval_witness {
 
-    use halo2_gadgets::sha256::Table16Config;
-    use halo2_proofs::{
-        circuit::{Layouter, SimpleFloorPlanner},
-        plonk::{Circuit, ConstraintSystem},
-    };
+    use ff::Field as _Field;
     use halo2curves::{bn256, CurveAffine};
 
     use crate::{
@@ -954,55 +949,120 @@ mod test_eval_witness {
         table::CircuitRunner,
     };
 
-    struct MyCircuit {}
-
     type Curve = bn256::G1Affine;
     type Field = <Curve as CurveAffine>::ScalarExt;
 
-    impl Circuit<Field> for MyCircuit {
-        type Config = Table16Config;
-        type FloorPlanner = SimpleFloorPlanner;
+    pub mod poseidon_circuit {
+        use std::{array, marker::PhantomData};
 
-        fn without_witnesses(&self) -> Self {
-            MyCircuit {}
+        use ff::{FromUniformBytes, PrimeFieldBits};
+
+        use crate::{
+            main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
+            poseidon::{poseidon_circuit::PoseidonChip, Spec},
+        };
+        use halo2_proofs::{
+            circuit::{Layouter, SimpleFloorPlanner, Value},
+            plonk::{Circuit, ConstraintSystem},
+        };
+
+        /// Input and output size for `StepCircuit` within each step
+        pub const ARITY: usize = 1;
+
+        /// Spec for on-circuit poseidon circuit
+        const POSEIDON_PERMUTATION_WIDTH: usize = 3;
+        const POSEIDON_RATE: usize = POSEIDON_PERMUTATION_WIDTH - 1;
+
+        pub type CircuitPoseidonSpec<F> = Spec<F, POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE>;
+
+        const R_F1: usize = 4;
+        const R_P1: usize = 3;
+
+        #[derive(Clone, Debug)]
+        pub struct TestPoseidonCircuitConfig {
+            pconfig: MainGateConfig<POSEIDON_PERMUTATION_WIDTH>,
         }
 
-        fn configure(_meta: &mut ConstraintSystem<Field>) -> Self::Config {
-            todo!()
+        #[derive(Debug, Default)]
+        pub struct TestPoseidonCircuit<F: PrimeFieldBits> {
+            _p: PhantomData<F>,
         }
 
-        fn synthesize(
-            &self,
-            _config: Self::Config,
-            mut _layouter: impl Layouter<Field>,
-        ) -> Result<(), halo2_proofs::plonk::Error> {
-            todo!()
+        impl<F: PrimeFieldBits + FromUniformBytes<64>> Circuit<F> for TestPoseidonCircuit<F> {
+            type Config = TestPoseidonCircuitConfig;
+            type FloorPlanner = SimpleFloorPlanner;
+
+            fn without_witnesses(&self) -> Self {
+                todo!()
+            }
+
+            fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+                let pconfig = MainGate::configure(meta);
+                Self::Config { pconfig }
+            }
+
+            fn synthesize(
+                &self,
+                config: Self::Config,
+                mut layouter: impl Layouter<F>,
+            ) -> Result<(), halo2_proofs::plonk::Error> {
+                let spec = CircuitPoseidonSpec::<F>::new(R_F1, R_P1);
+
+                layouter.assign_region(
+                    || "poseidon hash",
+                    move |region| {
+                        let z_i: [F; 10] = array::from_fn(|i| F::from(i as u64));
+                        let ctx = &mut RegionCtx::new(region, 0);
+
+                        let mut pchip = PoseidonChip::new(config.pconfig.clone(), spec.clone());
+
+                        pchip.update(
+                            &z_i.iter()
+                                .cloned()
+                                .map(|f: F| WrapValue::Unassigned(Value::known(f)))
+                                .collect::<Vec<WrapValue<F>>>(),
+                        );
+
+                        pchip.squeeze(ctx)?;
+
+                        Ok(())
+                    },
+                )
+            }
         }
     }
-    /// Spec for on-circuit poseidon circuit
+    /// Spec for off-circuit poseidon
     const POSEIDON_PERMUTATION_WIDTH: usize = 3;
     const POSEIDON_RATE: usize = POSEIDON_PERMUTATION_WIDTH - 1;
 
-    pub type CircuitPoseidonSpec =
+    const R_F1: usize = 4;
+    const R_P1: usize = 3;
+    pub type PoseidonSpec =
         Spec<<Curve as halo2curves::CurveAffine>::Base, POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE>;
+
     type RO = <PoseidonRO<POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE> as random_oracle::ROPair<
         <Curve as halo2curves::CurveAffine>::Base,
     >>::OffCircuit;
 
     #[test]
     fn basic() {
-        let runner = CircuitRunner::<Field, _>::new(10, MyCircuit {}, vec![]);
+        let runner = CircuitRunner::<Field, _>::new(
+            12,
+            poseidon_circuit::TestPoseidonCircuit::default(),
+            vec![],
+        );
 
         let S = runner.try_collect_plonk_structure().unwrap();
 
         let witness = runner.try_collect_witness().unwrap();
 
+        const K: usize = 12;
         let (u, w) = S
             .run_sps_protocol(
-                &CommitmentKey::<Curve>::setup(11, b"k"),
+                &CommitmentKey::<Curve>::setup(15, b"k"),
                 &[],
                 &witness,
-                &mut RO::new(CircuitPoseidonSpec::new(10, 10)),
+                &mut RO::new(PoseidonSpec::new(R_F1, R_P1)),
                 S.num_challenges,
             )
             .unwrap();
@@ -1010,7 +1070,7 @@ mod test_eval_witness {
         let trace = PlonkTrace { u, w };
 
         super::iter_evaluate_witness::<Curve>(&S, &trace).for_each(|v| {
-            v.unwrap();
+            assert_eq!(v, Ok(Field::ZERO));
         });
     }
 }
