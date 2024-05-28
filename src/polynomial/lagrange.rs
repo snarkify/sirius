@@ -4,8 +4,44 @@ use ff::PrimeField;
 
 use crate::fft;
 
+/// Returns an iterator over elements of a cyclic subgroup of a specified order in a given prime
+/// field:
+/// `{1, \omega, \omega^2, ..., \omega^n}` where `n = 2^log2(n)`
+///
+/// # Parameters
+///
+/// - `log_n` - `log2(n)`, where `n` - size of cyclic subgroup
+///
+/// # Returns
+///
+/// An iterator that yields elements of the cyclic subgroup
+///
+/// # Details
+///
+/// - The function first computes a generator of the cyclic subgroup using the [`fft::get_omega_or_inv`]
+/// - The size of the cyclic subgroup `n` is computed as `2^log_n`.
+/// - The iterator returns `n` elements, covering the full cycle of the cyclic subgroup
+pub fn iter_cyclic_subgroup<F: PrimeField>(log_n: NonZeroU32) -> impl Iterator<Item = F> {
+    let generator: F = fft::get_omega_or_inv(log_n.get(), false);
+
+    let n = 2usize.pow(log_n.get());
+    iter::successors(Some(F::ONE), move |val| Some(*val * generator)).take(n)
+}
+
 /// Lazy eval the values of the Lagrange polynomial for a cyclic subgroup of length `n` (`2.pow(log_n)`) at
 /// the `challenge` point
+///
+/// You can look at [`fft::get_omega_or_inv`] to see how the target cyclic group is formed
+///
+/// # Arguments
+///
+/// - `log_n` - `log2(n)`, where `n` - size of cyclic subgroup
+/// - `challenge` - eval Lagrange polynomials at this point
+///
+/// # Result
+///
+/// Iterator eval Lagrange polynomial values at the `challenge` point:
+/// `L_0(challenge), L_1(challenge), ..., L_n(challenge)`
 ///
 /// # Mathematical Representation
 ///
@@ -17,21 +53,23 @@ pub fn iter_eval_lagrange_polynomials_for_cyclic_group<F: PrimeField>(
     challenge: F,
     log_n: NonZeroU32,
 ) -> impl Iterator<Item = F> {
-    let generator: F = fft::get_omega_or_inv(log_n.get(), false);
     let n = 2usize.pow(log_n.get());
 
-    let cyclic_subgroup = iter::successors(Some(F::ONE), move |val| Some(*val * generator));
-
-    let inverted_n = F::from_u128(n as u128).invert().unwrap();
+    let inverted_n = F::from_u128(n as u128)
+        .invert()
+        .expect("safe because it's `2^log_n`");
     let X_pow_n_sub_1 = challenge.pow([n as u64]) - F::ONE;
 
-    cyclic_subgroup
-        .map(move |value| {
-            let challenge_sub_value = challenge - value;
-            if X_pow_n_sub_1.is_zero_vartime() && challenge_sub_value.is_zero_vartime() {
+    iter_cyclic_subgroup(log_n)
+        .map(move |value: F| {
+            let challenge_sub_value_inverted = challenge.sub(value).invert();
+
+            // During the calculation, this part of the expression should be reduced to 1, but we
+            // get 0/0 here, so we insert an explicit `if`.
+            if X_pow_n_sub_1.is_zero_vartime() && challenge_sub_value_inverted.is_none().into() {
                 F::ONE
             } else {
-                value * inverted_n * (X_pow_n_sub_1 * challenge_sub_value.invert().unwrap())
+                value * inverted_n * (X_pow_n_sub_1 * challenge_sub_value_inverted.unwrap())
             }
         })
         .take(n)
