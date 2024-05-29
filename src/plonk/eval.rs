@@ -95,13 +95,13 @@ pub struct PlonkEvalDomain<'a, F: PrimeField> {
     pub(crate) num_advice: usize,
     pub(crate) num_lookup: usize,
     // concatenation of challenges from two RelaxedPlonkInstance
-    pub(crate) challenges: Vec<F>,
-    pub(crate) selectors: &'a Vec<Vec<bool>>,
-    pub(crate) fixed: &'a Vec<Vec<F>>,
+    pub(crate) challenges: &'a [F],
+    pub(crate) selectors: &'a [Vec<bool>],
+    pub(crate) fixed: &'a [Vec<F>],
     // [`RelaxedPlonkWitness::W`] for first instance
-    pub(crate) W1s: &'a Vec<Vec<F>>,
+    pub(crate) W1s: &'a [Vec<F>],
     // [`RelaxedPlonkWitness::W`] for second instance
-    pub(crate) W2s: &'a Vec<Vec<F>>,
+    pub(crate) W2s: &'a [Vec<F>],
 }
 
 impl<'a, F: PrimeField> GetDataForEval<F> for LookupEvalDomain<'a, F> {
@@ -144,11 +144,11 @@ impl<'a, F: PrimeField> GetDataForEval<F> for PlonkEvalDomain<'a, F> {
     }
 
     fn get_selectors(&self) -> &impl AsRef<[Vec<bool>]> {
-        self.selectors
+        &self.selectors
     }
 
     fn get_fixed(&self) -> &impl AsRef<[Vec<F>]> {
-        self.fixed
+        &self.fixed
     }
 
     fn eval_advice_var(&self, row: usize, index: usize) -> Result<F, Error> {

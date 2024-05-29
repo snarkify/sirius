@@ -314,11 +314,11 @@ impl<F: PrimeField> PlonkStructure<F> {
         let data = PlonkEvalDomain {
             num_advice: self.num_advice_columns,
             num_lookup: self.num_lookups(),
-            challenges: U.challenges.clone(),
+            challenges: &U.challenges,
             selectors: &self.selectors,
             fixed: &self.fixed_columns,
             W1s: &W.W,
-            W2s: &vec![],
+            W2s: &[],
         };
 
         let total_row = 1 << self.k;
@@ -372,11 +372,11 @@ impl<F: PrimeField> PlonkStructure<F> {
         let data = PlonkEvalDomain {
             num_advice: self.num_advice_columns,
             num_lookup: self.num_lookups(),
-            challenges: concat_vec!(&U.challenges, &[U.u]),
+            challenges: &concat_vec!(&U.challenges, &[U.u]),
             selectors: &self.selectors,
             fixed: &self.fixed_columns,
             W1s: &W.W,
-            W2s: &vec![],
+            W2s: &[],
         };
 
         let evaluator = GraphEvaluator::new(self.custom_gates_lookup_compressed.homogeneous());

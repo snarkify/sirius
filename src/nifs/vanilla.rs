@@ -84,7 +84,7 @@ impl<C: CurveAffine> VanillaFS<C> {
         let data = PlonkEvalDomain {
             num_advice: S.num_advice_columns,
             num_lookup: S.num_lookups(),
-            challenges: concat_vec!(&U1.challenges, &[U1.u], &U2.challenges, &[U2.to_relax().u]),
+            challenges: &concat_vec!(&U1.challenges, &[U1.u], &U2.challenges, &[U2.to_relax().u]),
             selectors: &S.selectors,
             fixed: &S.fixed_columns,
             W1s: &W1.W,
