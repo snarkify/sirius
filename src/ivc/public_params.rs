@@ -47,6 +47,7 @@ where
     RP: ROPair<C::Scalar>,
 {
     S: PlonkStructure<C::Scalar>,
+    #[serde(skip_serializing)]
     ck: &'key CommitmentKey<C>,
     params: StepParams<C::Scalar, RP::OnCircuit>,
 }
