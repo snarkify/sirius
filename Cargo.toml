@@ -2,8 +2,8 @@
 name = "sirius"
 version = "0.1.0"
 authors = [
-    "chaosma mc8305@gmail.com",
-    "cyphersnake cyphersnake@pm.me",
+    "chaosma chao@snarkify.io",
+    "cyphersnake mikhail@snarkify.io",
 ]
 repository = "https://github.com/snarkify/sirius"
 description = "A Plonkish folding framework for Incrementally Verifiable Computation (IVC)."
