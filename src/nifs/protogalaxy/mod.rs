@@ -145,6 +145,7 @@ mod poly {
 
     use ff::{Field, PrimeField};
     use halo2curves::CurveAffine;
+    use itertools::Itertools;
     use rayon::prelude::*;
 
     use crate::{
@@ -161,21 +162,14 @@ mod poly {
         S: &PlonkStructure<C::ScalarExt>,
         trace: &(impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>),
     ) -> Result<UnivariatePoly<C::ScalarExt>, eval::Error> {
-        let count_of_rows = 2usize.pow(S.k as u32);
-        let count_of_gates = S.gates.len();
-
-        let n = NonZeroUsize::new(count_of_rows * count_of_gates).unwrap();
-        let log_n = NonZeroU32::new(n.ilog2()).unwrap();
-        let points_count = (log_n.get() + 1) as usize;
-
         struct ZipWitnessPowIterators<F, I, P, E>
         where
             F: PrimeField,
             I: Iterator<Item = Result<F, E>>,
             P: Iterator<Item = F>,
         {
-            witness: I,
-            pow: Box<[P]>,
+            evaluated_witness: I,
+            pow_i: Box<[P]>,
         }
 
         impl<F, I, P, E> Iterator for ZipWitnessPowIterators<F, I, P, E>
@@ -184,51 +178,54 @@ mod poly {
             I: Iterator<Item = Result<F, E>>,
             P: Iterator<Item = F>,
         {
-            type Item = (Result<F, E>, Box<[F]>);
+            type Item = Result<Box<[F]>, E>;
 
             fn next(&mut self) -> Option<Self::Item> {
-                let w = self.witness.next()?;
+                let evaluated_witness = match self.evaluated_witness.next()? {
+                    Ok(w) => w,
+                    Err(err) => {
+                        return Some(Err(err));
+                    }
+                };
 
-                let pows = self
-                    .pow
+                Ok(self
+                    .pow_i
                     .iter_mut()
-                    .map(|p| p.next())
-                    .collect::<Option<Box<[F]>>>()?;
-
-                Some((w, pows))
+                    .map(move |p| {
+                        p.next()
+                            .map(|evaluated_pow_i| evaluated_pow_i * evaluated_witness)
+                    })
+                    .collect::<Option<Box<[_]>>>())
+                .transpose()
             }
         }
 
+        let count_of_rows = 2usize.pow(S.k as u32);
+        let count_of_gates = S.gates.len();
+
+        let n = NonZeroUsize::new(count_of_rows * count_of_gates).unwrap();
+        let log_n = NonZeroU32::new(n.ilog2()).unwrap();
+        let points_count = (log_n.get() + 1) as usize;
+
         let mut evaluated_points = ZipWitnessPowIterators {
-            witness: plonk::iter_evaluate_witness::<C>(S, trace),
-            pow: lagrange::iter_cyclic_subgroup::<C::ScalarExt>(log_n.get())
-                .take(points_count)
+            evaluated_witness: plonk::iter_evaluate_witness::<C>(S, trace),
+            pow_i: lagrange::iter_cyclic_subgroup::<C::ScalarExt>(log_n.get())
                 .map(|X| beta + X * delta)
                 .map(|challenge| pow_i::iter_eval_of_pow_i(log_n, challenge).unwrap())
+                .take(points_count)
                 .collect(),
         }
         .par_bridge()
-        .try_fold(
+        .try_reduce(
             || vec![C::ScalarExt::ZERO; points_count].into_boxed_slice(),
-            move |mut poly, (w_0, challenges)| {
-                let w_0 = w_0?;
-
+            |mut poly, evaluated_witness_mul_pow_i| {
                 poly.iter_mut()
-                    .zip(challenges.iter())
-                    .for_each(move |(poly, challange_pow_i)| {
-                        *poly += *challange_pow_i * w_0;
+                    .zip_eq(evaluated_witness_mul_pow_i.iter())
+                    .for_each(|(poly, el)| {
+                        *poly += el;
                     });
 
                 Ok(poly)
-            },
-        )
-        .try_reduce(
-            || vec![C::ScalarExt::ZERO; points_count].into_boxed_slice(),
-            |mut acc, el| {
-                acc.iter_mut().zip(el.iter()).for_each(|(coeff, el)| {
-                    *coeff += el;
-                });
-                Ok(acc)
             },
         )?;
 
