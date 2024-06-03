@@ -24,8 +24,7 @@ use crate::fft;
 pub fn iter_cyclic_subgroup<F: PrimeField>(log_n: u32) -> impl Iterator<Item = F> {
     let generator: F = fft::get_omega_or_inv(log_n, false);
 
-    let n = 2usize.pow(log_n);
-    iter::successors(Some(F::ONE), move |val| Some(*val * generator)).take(n)
+    iter::successors(Some(F::ONE), move |val| Some(*val * generator))
 }
 
 /// Lazy eval the values of the Lagrange polynomial for a cyclic subgroup of length `n` (`2.pow(log_n)`) at

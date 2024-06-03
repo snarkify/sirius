@@ -7,6 +7,17 @@ use ff::Field;
 /// Coefficients of the polynomial are presented from smaller to larger
 pub struct UnivariatePoly<F: Field>(pub(crate) Box<[F]>);
 
+impl<F: Field> UnivariatePoly<F> {
+    pub fn new(size: usize) -> Self {
+        // TODO #259 Make it more productive due to large `size`.
+        let vec = vec![F::ZERO; size];
+        Self(vec.into_boxed_slice())
+    }
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut F> {
+        self.0.iter_mut()
+    }
+}
+
 impl<F: Field> FromIterator<F> for UnivariatePoly<F> {
     fn from_iter<T: IntoIterator<Item = F>>(iter: T) -> Self {
         Self(iter.into_iter().collect())

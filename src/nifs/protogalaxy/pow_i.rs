@@ -1,4 +1,4 @@
-use std::{iter, mem, num::NonZeroUsize, ops::Mul};
+use std::{iter, mem, num::NonZeroU32, ops::Mul};
 
 use bitter::{BitReader, LittleEndianReader};
 use ff::PrimeField;
@@ -7,15 +7,12 @@ use tracing::*;
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
     #[error("Input `t` is not enought for represent `i`")]
-    TooLittleT {
-        t: NonZeroUsize,
-        needed_t: NonZeroUsize,
-    },
+    TooLittleT { t: NonZeroU32, needed_t: NonZeroU32 },
 }
 
 fn pow_i<'l, F: PrimeField>(
     i: usize,
-    t: NonZeroUsize,
+    t: NonZeroU32,
     challenges_powers: impl Iterator<Item = &'l F>,
 ) -> F {
     let bytes = i.to_le_bytes();
@@ -27,7 +24,7 @@ fn pow_i<'l, F: PrimeField>(
             true => *beta_in_2j,
             false => F::ONE,
         })
-        .take(t.get())
+        .take(t.get() as usize)
         .reduce(|acc, coeff| acc * coeff)
         .unwrap()
 }
@@ -53,29 +50,30 @@ fn pow_i<'l, F: PrimeField>(
 /// ```
 /// where `b_j` is the j-th bit of the binary representation of the integer `i`.
 pub fn iter_eval_of_pow_i<F: PrimeField>(
-    t: NonZeroUsize,
-    n: NonZeroUsize,
+    log_n: NonZeroU32,
     challenge: F,
 ) -> Result<impl Iterator<Item = F>, Error> {
-    let representation_lenght = NonZeroUsize::new(
+    let n = 2usize.pow(log_n.get());
+
+    let representation_lenght = NonZeroU32::new(
         mem::size_of::<usize>()
             .mul(8)
-            .saturating_sub(n.leading_zeros() as usize),
+            .saturating_sub(n.leading_zeros() as usize) as u32,
     )
     .expect("`leading_zeros` can't be greater then bits count");
 
-    if t < representation_lenght {
+    if log_n < representation_lenght {
         return Err(Error::TooLittleT {
-            t,
+            t: log_n,
             needed_t: representation_lenght,
         });
     }
 
     let challenges = iter::successors(Some(challenge), |v| Some(v.square()))
-        .take(t.get())
+        .take(log_n.get() as usize)
         .collect::<Box<[_]>>();
 
-    Ok((0..=n.get()).map(move |i| pow_i(i, t, challenges.iter())))
+    Ok((0..=n).map(move |i| pow_i(i, log_n, challenges.iter())))
 }
 
 #[cfg(test)]
@@ -87,8 +85,8 @@ mod test {
 
     use super::*;
 
-    fn to_nz(input: usize) -> NonZeroUsize {
-        NonZeroUsize::new(input).unwrap()
+    fn to_nz(input: u32) -> NonZeroU32 {
+        NonZeroU32::new(input).unwrap()
     }
 
     fn to_challenges(input: Fr) -> Box<[Fr]> {
@@ -108,7 +106,7 @@ mod test {
     #[test]
     fn iter_pow_i_test() {
         assert_eq!(
-            iter_eval_of_pow_i::<Fr>(to_nz(2), to_nz(3), Fr::one())
+            iter_eval_of_pow_i::<Fr>(to_nz(2), Fr::one())
                 .unwrap()
                 .collect::<Vec<Fr>>(),
             [Fr::one(), Fr::one(), Fr::one(), Fr::one()]
@@ -133,14 +131,14 @@ mod test {
     #[traced_test]
     #[test]
     fn too_little_t() {
-        let too_little_t = to_nz(mem::size_of::<usize>().mul(8).sub(1));
+        let too_little_t = to_nz(mem::size_of::<usize>().mul(8).sub(1) as u32);
         assert_eq!(
-            iter_eval_of_pow_i::<Fr>(too_little_t, to_nz(usize::MAX), Fr::one())
+            iter_eval_of_pow_i::<Fr>(too_little_t, Fr::one())
                 .err()
                 .unwrap(),
             Error::TooLittleT {
                 t: too_little_t,
-                needed_t: to_nz(mem::size_of::<usize>().mul(8))
+                needed_t: to_nz(mem::size_of::<usize>().mul(8) as u32)
             }
         );
     }

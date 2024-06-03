@@ -141,14 +141,15 @@ impl<C: CurveAffine> MultifoldingScheme<C> for ProtoGalaxy<C> {
 }
 
 mod poly {
-    use std::num::NonZeroUsize;
+    use std::num::{NonZeroU32, NonZeroUsize};
 
     use ff::{Field, PrimeField};
     use halo2curves::CurveAffine;
+    use rayon::prelude::*;
 
     use crate::{
         fft,
-        plonk::{self, GetChallenges, GetWitness, PlonkStructure},
+        plonk::{self, eval, GetChallenges, GetWitness, PlonkStructure},
         polynomial::{lagrange, univariate::UnivariatePoly},
     };
 
@@ -158,35 +159,81 @@ mod poly {
         beta: C::ScalarExt,
         delta: C::ScalarExt,
         S: &PlonkStructure<C::ScalarExt>,
-        trace: &(impl GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>),
-    ) -> UnivariatePoly<C::ScalarExt> {
-        let n = NonZeroUsize::new(2usize.pow(S.k as u32)).unwrap();
-        // TODO check
-        let t = NonZeroUsize::new(<C::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap();
+        trace: &(impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>),
+    ) -> Result<UnivariatePoly<C::ScalarExt>, eval::Error> {
+        let count_of_rows = 2usize.pow(S.k as u32);
+        let count_of_gates = S.gates.len();
 
-        // TODO Rm collect
-        let witness = plonk::iter_evaluate_witness::<C>(S, trace)
-            .collect::<Result<Box<[_]>, _>>()
-            .unwrap();
+        let n = NonZeroUsize::new(count_of_rows * count_of_gates).unwrap();
+        let log_n = NonZeroU32::new(n.ilog2()).unwrap();
+        let points_count = (log_n.get() + 1) as usize;
 
-        let mut coeff: Box<[C::ScalarExt]> =
-            lagrange::iter_cyclic_subgroup::<C::ScalarExt>(S.k as u32)
+        struct ZipWitnessPowIterators<F, I, P, E>
+        where
+            F: PrimeField,
+            I: Iterator<Item = Result<F, E>>,
+            P: Iterator<Item = F>,
+        {
+            witness: I,
+            pow: Box<[P]>,
+        }
+
+        impl<F, I, P, E> Iterator for ZipWitnessPowIterators<F, I, P, E>
+        where
+            F: PrimeField,
+            I: Iterator<Item = Result<F, E>>,
+            P: Iterator<Item = F>,
+        {
+            type Item = (Result<F, E>, Box<[F]>);
+
+            fn next(&mut self) -> Option<Self::Item> {
+                let w = self.witness.next()?;
+
+                let pows = self
+                    .pow
+                    .iter_mut()
+                    .map(|p| p.next())
+                    .collect::<Option<Box<[F]>>>()?;
+
+                Some((w, pows))
+            }
+        }
+
+        let mut evaluated_points = ZipWitnessPowIterators {
+            witness: plonk::iter_evaluate_witness::<C>(S, trace),
+            pow: lagrange::iter_cyclic_subgroup::<C::ScalarExt>(log_n.get())
+                .take(points_count)
                 .map(|X| beta + X * delta)
-                .map(|challenge| {
-                    pow_i::iter_eval_of_pow_i(t, n, challenge)
-                        .unwrap()
-                        .zip(witness.iter())
-                        .fold(
-                            C::ScalarExt::ZERO,
-                            |acc, (evaluated_pow_i, evaluated_witness)| {
-                                acc + evaluated_pow_i * evaluated_witness
-                            },
-                        )
-                })
-                .collect::<Box<[_]>>();
+                .map(|challenge| pow_i::iter_eval_of_pow_i(log_n, challenge).unwrap())
+                .collect(),
+        }
+        .par_bridge()
+        .try_fold(
+            || vec![C::ScalarExt::ZERO; points_count].into_boxed_slice(),
+            move |mut poly, (w_0, challenges)| {
+                let w_0 = w_0?;
 
-        fft::ifft(&mut coeff, S.k as u32);
+                poly.iter_mut()
+                    .zip(challenges.iter())
+                    .for_each(move |(poly, challange_pow_i)| {
+                        *poly += *challange_pow_i * w_0;
+                    });
 
-        UnivariatePoly(coeff)
+                Ok(poly)
+            },
+        )
+        .try_reduce(
+            || vec![C::ScalarExt::ZERO; points_count].into_boxed_slice(),
+            |mut acc, el| {
+                acc.iter_mut().zip(el.iter()).for_each(|(coeff, el)| {
+                    *coeff += el;
+                });
+                Ok(acc)
+            },
+        )?;
+
+        fft::ifft(&mut evaluated_points, log_n.get());
+
+        Ok(UnivariatePoly(evaluated_points))
     }
 }
