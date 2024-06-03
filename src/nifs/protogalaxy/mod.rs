@@ -1,11 +1,20 @@
+use std::iter;
 use std::marker::PhantomData;
+use std::num::NonZeroU32;
 
 use ff::PrimeField;
 use halo2_proofs::arithmetic::CurveAffine;
 
 use crate::{
     commitment::CommitmentKey,
-    plonk::{PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace},
+    fft::{get_omega_or_inv, ifft},
+    plonk::{
+        GetChallenges, GetWitness, PlonkStructure, PlonkTrace, RelaxedPlonkInstance,
+        RelaxedPlonkTrace,
+    },
+    polynomial::{
+        expression::QueryIndexContext, lagrange::iter_eval_lagrange_polynomials_for_cyclic_group,
+    },
 };
 
 use super::*;
@@ -137,5 +146,60 @@ impl<C: CurveAffine> MultifoldingScheme<C> for ProtoGalaxy<C> {
         _proof: &Self::Proof,
     ) -> Result<Self::AccumulatorInstance, Error> {
         todo!()
+    }
+}
+
+// TODO: consider remove this scope before merge
+mod compute_g {
+    use super::*;
+
+    /// given a vector of vector {w_i}, i.e. w_i is vector
+    /// compute and return vector sum_i L_i(gamma)w_i
+    fn fold_vectors<F: PrimeField>(gamma: F, log_n: NonZeroU32, ws: &[Vec<F>]) -> Vec<F> {
+        let ll: Vec<F> = iter_eval_lagrange_polynomials_for_cyclic_group(gamma, log_n).collect();
+        (0..ws[0].len())
+            .into_par_iter()
+            .map(|idx| {
+                ll.iter()
+                    .zip(ws.iter())
+                    .map(|(l_i, w_i)| *l_i * w_i[idx])
+                    .fold(F::ZERO, |sum, val| sum + val)
+            })
+            .collect()
+    }
+
+    fn evaluate_G_poly<F: PrimeField>(
+        _beta: F,
+        _gamma: F,
+        _S: &PlonkStructure<F>,
+        _traces: &[(impl GetChallenges<F> + GetWitness<F>)],
+    ) -> F {
+        todo!()
+    }
+
+    fn compute_G_poly<F: PrimeField>(
+        log_n: NonZeroU32,
+        beta: F,
+        S: &PlonkStructure<F>,
+        traces: &[(impl GetChallenges<F> + GetWitness<F>)],
+    ) -> Vec<F> {
+        let ctx = QueryIndexContext {
+            num_fixed: S.fixed_columns.len(),
+            num_advice: S.num_advice_columns,
+            num_selectors: S.selectors.len(),
+            num_challenges: S.num_challenges,
+            num_lookups: S.num_lookups(),
+        };
+        let d = S.gates.iter().map(|poly| poly.degree(&ctx)).max().unwrap();
+        let num_pts = (log_n.get() as usize * d + 1).next_power_of_two();
+        let log_n = num_pts.checked_ilog2().unwrap();
+        let generator: F = get_omega_or_inv(log_n, true);
+        // TODO: skip log_n evaluations because we know the evaluation of G
+        let mut a: Vec<F> = iter::successors(Some(F::ONE), move |val| Some(*val * generator))
+            .take(num_pts)
+            .map(|pt| evaluate_G_poly(beta, pt, S, traces))
+            .collect();
+        ifft(&mut a, log_n);
+        a
     }
 }

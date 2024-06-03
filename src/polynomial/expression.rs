@@ -1,8 +1,7 @@
 use std::{
     cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd},
     collections::{BTreeSet, HashSet},
-    fmt,
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display},
     ops::{self, Add, Mul, Neg, Sub},
 };
 
@@ -416,6 +415,25 @@ impl<F: PrimeField> Expression<F> {
                 (Scaled(Box::new(expr), *constant), degree).into()
             }
         }
+    }
+
+    pub fn degree(&self, ctx: &QueryIndexContext) -> usize {
+        self.evaluate(
+            &|_| 0,
+            &|poly| match poly.subtype(ctx) {
+                QueryType::Advice | QueryType::Lookup => 1,
+                _other => 0,
+            },
+            &|_| 1,
+            &|a| a,
+            &|a, b| match a.cmp(&b) {
+                Ordering::Greater => a,
+                Ordering::Less => b,
+                Ordering::Equal => a,
+            },
+            &|a, b| a + b,
+            &|a, _| a,
+        )
     }
 }
 
