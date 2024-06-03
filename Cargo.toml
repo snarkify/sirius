@@ -1,21 +1,34 @@
 [package]
 name = "sirius"
 version = "0.1.0"
+authors = [
+    "chaosma chao@snarkify.io",
+    "cyphersnake mikhail@snarkify.io",
+]
+repository = "https://github.com/snarkify/sirius"
+description = "A Plonkish folding framework for Incrementally Verifiable Computation (IVC)."
+keywords = [
+    "cryptography",
+    "ivc",
+    "nova",
+    "proof-system",
+    "protogalaxy",
+    "zero-knowledge-proofs",
+    "zkp",
+]
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 bincode = "1.3"
-bitter = "0.6.1"
+bitter = "0.7.0"
 count-to-non-zero = "0.3.0"
 digest = "0.10"
 ff = "0.13"
 group = "0.13"
-halo2_proofs = { git = "https://github.com/snarkify/halo2", branch = "snarkify/dev" }
-halo2curves = { git = 'https://github.com/privacy-scaling-explorations/halo2curves', tag = "v0.6.0", features = ["derive_serde"] }
-itertools = "0.12.1"
+itertools = "0.13.0"
 num-bigint = "0.4.3"
 num-traits = "0.2.16"
-poseidon = { git = "https://github.com/privacy-scaling-explorations/poseidon", rev = "807f8f555313f726ca03bdf941f798098f488ba4" }
 rand = "0.8"
 rand_core = { version = "0.6", default-features = false }
 rayon = "1.5.3"
@@ -26,12 +39,23 @@ some-to-err = "0.2.1"
 thiserror = "1.0.48"
 tracing = { version = "0.1.40", features = ["attributes"] }
 
+[dependencies.poseidon]
+git = "https://github.com/privacy-scaling-explorations/poseidon"
+rev = "807f8f555313f726ca03bdf941f798098f488ba4"
+
+[dependencies.halo2curves]
+git = "https://github.com/privacy-scaling-explorations/halo2curves"
+features = ["derive_serde"]
+
+[dependencies.halo2_proofs]
+git = "https://github.com/snarkify/halo2"
+branch = "snarkify/dev"
+
 [dev-dependencies]
 bincode = "1.3"
 clap = { version = "4.5.4", features = ["derive"] }
 criterion = "0.5.1"
 dhat = "0.3.3"
-halo2_gadgets = { git = "https://github.com/snarkify/halo2", branch = "snarkify/dev", features = ["unstable"] }
 maplit = "1.0.2"
 prettytable-rs = "0.10.0"
 tempfile = "3.9.0"
@@ -40,7 +64,7 @@ tracing-test = "0.2.4"
 
 [dev-dependencies.cargo-husky]
 version = "1"
-default-features = false # Disable features which are enabled by default
+default-features = false
 features = ["prepush-hook", "run-cargo-fmt", "run-cargo-test", "run-cargo-clippy"]
 
 [[bench]]
@@ -52,4 +76,5 @@ name = "poseidon"
 harness = false
 
 [features]
+# Allows cli-example to check memory usage with dhat
 dhat-heap = []

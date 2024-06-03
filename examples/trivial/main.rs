@@ -3,7 +3,6 @@
 use std::{array, env, io, num::NonZeroUsize, path::Path};
 
 use ff::PrimeField;
-use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 use metadata::LevelFilter;
 use tracing::*;
@@ -19,6 +18,7 @@ use sirius::{
 };
 
 const ARITY: usize = BLOCK_SIZE / 2;
+const BLOCK_SIZE: usize = 16;
 
 const CIRCUIT_TABLE_SIZE1: usize = 17;
 const CIRCUIT_TABLE_SIZE2: usize = 17;

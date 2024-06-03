@@ -3,7 +3,6 @@
 use std::{array, io, iter, marker::PhantomData, num::NonZeroUsize, path::Path};
 
 use ff::PrimeField;
-use halo2_gadgets::sha256::BLOCK_SIZE;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::ConstraintSystem,
@@ -23,6 +22,7 @@ use tracing::*;
 
 mod table16;
 
+const BLOCK_SIZE: usize = 16;
 const DIGEST_SIZE: usize = 8;
 
 pub mod sha256 {
