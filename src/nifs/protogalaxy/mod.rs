@@ -10,7 +10,9 @@ use crate::{
 
 use super::*;
 
+pub(crate) mod poly;
 mod pow_i;
+
 pub use pow_i::{iter_eval_of_pow_i, Error as PowIError};
 
 /// ProtoGalaxy: Non Interactive Folding Scheme that implements main protocol defined in paper
@@ -137,100 +139,5 @@ impl<C: CurveAffine> MultifoldingScheme<C> for ProtoGalaxy<C> {
         _proof: &Self::Proof,
     ) -> Result<Self::AccumulatorInstance, Error> {
         todo!()
-    }
-}
-
-mod poly {
-    use std::num::{NonZeroU32, NonZeroUsize};
-
-    use ff::{Field, PrimeField};
-    use halo2curves::CurveAffine;
-    use itertools::Itertools;
-    use rayon::prelude::*;
-
-    use crate::{
-        fft,
-        plonk::{self, eval, GetChallenges, GetWitness, PlonkStructure},
-        polynomial::{lagrange, univariate::UnivariatePoly},
-    };
-
-    use super::pow_i;
-
-    fn compute_F_poly<C: CurveAffine>(
-        beta: C::ScalarExt,
-        delta: C::ScalarExt,
-        S: &PlonkStructure<C::ScalarExt>,
-        trace: &(impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>),
-    ) -> Result<UnivariatePoly<C::ScalarExt>, eval::Error> {
-        struct ZipWitnessPowIterators<F, I, P, E>
-        where
-            F: PrimeField,
-            I: Iterator<Item = Result<F, E>>,
-            P: Iterator<Item = F>,
-        {
-            evaluated_witness: I,
-            pow_i: Box<[P]>,
-        }
-
-        impl<F, I, P, E> Iterator for ZipWitnessPowIterators<F, I, P, E>
-        where
-            F: PrimeField,
-            I: Iterator<Item = Result<F, E>>,
-            P: Iterator<Item = F>,
-        {
-            type Item = Result<Box<[F]>, E>;
-
-            fn next(&mut self) -> Option<Self::Item> {
-                let evaluated_witness = match self.evaluated_witness.next()? {
-                    Ok(w) => w,
-                    Err(err) => {
-                        return Some(Err(err));
-                    }
-                };
-
-                Ok(self
-                    .pow_i
-                    .iter_mut()
-                    .map(move |p| {
-                        p.next()
-                            .map(|evaluated_pow_i| evaluated_pow_i * evaluated_witness)
-                    })
-                    .collect::<Option<Box<[_]>>>())
-                .transpose()
-            }
-        }
-
-        let count_of_rows = 2usize.pow(S.k as u32);
-        let count_of_gates = S.gates.len();
-
-        let n = NonZeroUsize::new(count_of_rows * count_of_gates).unwrap();
-        let log_n = NonZeroU32::new(n.ilog2()).unwrap();
-        let points_count = (log_n.get() + 1) as usize;
-
-        let mut evaluated_points = ZipWitnessPowIterators {
-            evaluated_witness: plonk::iter_evaluate_witness::<C>(S, trace),
-            pow_i: lagrange::iter_cyclic_subgroup::<C::ScalarExt>(log_n.get())
-                .map(|X| beta + X * delta)
-                .map(|challenge| pow_i::iter_eval_of_pow_i(log_n, challenge).unwrap())
-                .take(points_count)
-                .collect(),
-        }
-        .par_bridge()
-        .try_reduce(
-            || vec![C::ScalarExt::ZERO; points_count].into_boxed_slice(),
-            |mut poly, evaluated_witness_mul_pow_i| {
-                poly.iter_mut()
-                    .zip_eq(evaluated_witness_mul_pow_i.iter())
-                    .for_each(|(poly, el)| {
-                        *poly += el;
-                    });
-
-                Ok(poly)
-            },
-        )?;
-
-        fft::ifft(&mut evaluated_points, log_n.get());
-
-        Ok(UnivariatePoly(evaluated_points))
     }
 }

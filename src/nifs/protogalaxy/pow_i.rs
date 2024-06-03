@@ -4,7 +4,7 @@ use bitter::{BitReader, LittleEndianReader};
 use ff::PrimeField;
 use tracing::*;
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum Error {
     #[error("Input `t` is not enought for represent `i`")]
     TooLittleT { t: NonZeroU32, needed_t: NonZeroU32 },
