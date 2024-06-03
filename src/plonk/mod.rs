@@ -244,6 +244,13 @@ pub struct PlonkTrace<C: CurveAffine> {
     pub w: PlonkWitness<C::Scalar>,
 }
 
+/// Generalized trait to get witness
+///
+/// Used to generalize:
+/// - [`PlonkWitness`]
+/// - [`RelaxedPlonkWitness`]
+/// - [`RelaxedPlonkTrace`]
+/// - [`PlonkTrace`]
 pub(crate) trait GetWitness<F: PrimeField> {
     fn get_witness(&self) -> &[Vec<F>];
 }
@@ -268,6 +275,13 @@ impl<C: CurveAffine> GetWitness<C::ScalarExt> for RelaxedPlonkTrace<C> {
     }
 }
 
+/// Generalized trait to get challenges
+///
+/// Used to generalize:
+/// - [`PlonkWitness`]
+/// - [`RelaxedPlonkWitness`]
+/// - [`RelaxedPlonkTrace`]
+/// - [`PlonkTrace`]
 pub(crate) trait GetChallenges<F: PrimeField> {
     fn get_challenges(&self) -> &[F];
 }
@@ -910,12 +924,33 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
     }
 }
 
+// Evaluates the witness data for each gate in the PLONK structure.
+///
+/// This function iterates through the gates of a provided [`PlonkStructure`],
+/// evaluating the witness data for each gate. It returns an iterator over the results
+/// of these evaluations.
+///
+/// # Type Parameters
+/// - `C`: A curve affine type that implements the [`CurveAffine`] trait.
+///
+/// # Parameters
+/// - `S`: A reference to a [`PlonkStructure`] containing the circuit structure and gates.
+/// - `trace`: An object that provides both challenges and witness values through the
+///            [`GetChallenges`] and [`GetWitness`] traits. In can be: [`PlonkWitness`],
+///            [`RelaxedPlonkWitness`], [`RelaxedPlonkTrace`], [`PlonkTrace`] etc
+///
+/// # Returns
+/// An iterator that produces [`Result<C::ScalarExt, eval::Error>`] items. Each item is either the
+/// result of evaluating the witness for a specific gate and row, or an error if the evaluation
+/// fails.
+///
+/// In other words iterator: `[gate1(row0), ..., gate1(rowN), gate2(0), ...]`
 pub(crate) fn iter_evaluate_witness<'link, C: CurveAffine>(
     S: &'link PlonkStructure<C::ScalarExt>,
     trace: &'link (impl GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>),
 ) -> impl 'link + Iterator<Item = Result<C::ScalarExt, eval::Error>> {
     S.gates.iter().flat_map(|gate| {
-        let data = PlonkEvalDomain {
+        let eval_domain = PlonkEvalDomain {
             num_advice: S.num_advice_columns,
             num_lookup: S.num_lookups(),
             selectors: &S.selectors,
@@ -927,9 +962,8 @@ pub(crate) fn iter_evaluate_witness<'link, C: CurveAffine>(
 
         let evaluator = GraphEvaluator::new(gate);
 
-        (0..data.row_size()).map(move |row_index| -> Result<C::ScalarExt, eval::Error> {
-            evaluator.evaluate(&data, row_index)
-        })
+        (0..eval_domain.row_size())
+            .map(move |row_index| evaluator.evaluate(&eval_domain, row_index))
     })
 }
 
