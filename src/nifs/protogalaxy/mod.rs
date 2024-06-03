@@ -178,9 +178,12 @@ mod compute_g {
     }
 
     fn compute_G_poly<F: PrimeField>(
-        log_n: NonZeroU32,
+        // number of instances to be folded
+        k: usize,
+        // beta: the folded beta value
         beta: F,
         S: &PlonkStructure<F>,
+        // first one is accumulator, the rest k traces are instances to be folded
         traces: &[(impl GetChallenges<F> + GetWitness<F>)],
     ) -> Vec<F> {
         let ctx = QueryIndexContext {
@@ -191,10 +194,11 @@ mod compute_g {
             num_lookups: S.num_lookups(),
         };
         let d = S.gates.iter().map(|poly| poly.degree(&ctx)).max().unwrap();
-        let num_pts = (log_n.get() as usize * d + 1).next_power_of_two();
+        let num_pts = (k * d + 1).next_power_of_two();
         let log_n = num_pts.checked_ilog2().unwrap();
         let generator: F = get_omega_or_inv(log_n, true);
-        // TODO: skip log_n evaluations because we know the evaluation of G
+        // TODO: we can skip k+1 of the evaluations because already know them to be:
+        // {F(alpha), 0,...,0}
         let mut a: Vec<F> = iter::successors(Some(F::ONE), move |val| Some(*val * generator))
             .take(num_pts)
             .map(|pt| evaluate_G_poly(beta, pt, S, traces))
