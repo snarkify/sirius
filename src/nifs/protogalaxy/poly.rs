@@ -1,6 +1,6 @@
-use std::num::{NonZeroU32, NonZeroUsize};
+use std::num::NonZeroU32;
 
-use ff::{Field, PrimeField};
+use ff::Field;
 use halo2curves::CurveAffine;
 use itertools::Itertools;
 use rayon::prelude::*;
@@ -18,10 +18,29 @@ use super::pow_i;
 pub enum Error {
     #[error(transparent)]
     Eval(#[from] eval::Error),
-    #[error(transparent)]
-    Pow(#[from] pow_i::Error),
     #[error("pow_i iterator ended before witnesses")]
     PowiEndedBeforeWitnesses,
+}
+
+/// Analog of [`itertools::structs::MultiProduct`], but:
+/// - without [`Clone`] require
+/// - without logic for diff len of iterators
+struct MultiProduct<Item, Iter>
+where
+    Iter: Iterator<Item = Item>,
+{
+    iterators: Box<[Iter]>,
+}
+
+impl<Item, Iter> Iterator for MultiProduct<Item, Iter>
+where
+    Iter: Iterator<Item = Item>,
+{
+    type Item = Box<[Item]>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iterators.iter_mut().map(|p| p.next()).collect()
+    }
 }
 
 #[instrument(skip_all)]
@@ -31,61 +50,13 @@ pub(crate) fn compute_F<C: CurveAffine>(
     S: &PlonkStructure<C::ScalarExt>,
     trace: &(impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>),
 ) -> Result<UnivariatePoly<C::ScalarExt>, Error> {
-    struct MultiProduct<F, I, P>
-    where
-        F: PrimeField,
-        I: Iterator<Item = Result<F, eval::Error>>,
-        P: Iterator<Item = F>,
-    {
-        evaluated_witness: I,
-        iters_with_pow_i: Box<[P]>,
-    }
-
-    impl<F, I, P> Iterator for MultiProduct<F, I, P>
-    where
-        F: PrimeField,
-        I: Iterator<Item = Result<F, eval::Error>>,
-        P: Iterator<Item = F>,
-    {
-        type Item = Result<Box<[F]>, Error>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            let evaluated_witness = match self.evaluated_witness.next()? {
-                Ok(w) => w,
-                Err(err) => {
-                    return Some(Err(err.into()));
-                }
-            };
-
-            match self
-                .iters_with_pow_i
-                .iter_mut()
-                .map(move |p| {
-                    p.next()
-                        .map(|evaluated_pow_i| evaluated_pow_i * evaluated_witness)
-                })
-                .collect()
-            {
-                Some(evaluated) => Some(Ok(evaluated)),
-                None => Some(Err(Error::PowiEndedBeforeWitnesses)),
-            }
-        }
-    }
-
     let count_of_rows = 2usize.pow(S.k as u32);
     let count_of_gates = S.gates.len();
 
-    let count_of_evaluation = match NonZeroUsize::new(count_of_rows * count_of_gates) {
-        Some(val) => val,
-        None => {
-            return Ok(UnivariatePoly::new(0));
-        }
-    };
-
-    let log_n = NonZeroU32::new(count_of_evaluation.get().ilog2()).unwrap();
+    let count_of_evaluation = count_of_rows * count_of_gates;
+    let log_n = NonZeroU32::new(count_of_evaluation.ilog2()).unwrap();
 
     let points_count = count_of_evaluation
-        .get()
         .next_power_of_two()
         .ilog2()
         .next_power_of_two() as usize;
@@ -99,23 +70,26 @@ pub(crate) fn compute_F<C: CurveAffine>(
         points_count: {points_count}"
     );
 
-    use itertools::*;
-    let iters_with_pow_i = lagrange::iter_cyclic_subgroup::<C::ScalarExt>(log_n.get())
-        .map(|X| beta + X * delta)
-        .map(|challenge| pow_i::iter_eval_of_pow_i(log_n, count_of_evaluation, challenge))
-        .take(points_count)
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .multi_cartesian_product();
-
     let mut evaluated_points = MultiProduct {
-        evaluated_witness: plonk::iter_evaluate_witness::<C>(S, trace),
-        iters_with_pow_i: lagrange::iter_cyclic_subgroup::<C::ScalarExt>(log_n.get())
-            .map(|X| beta + X * delta)
-            .map(|challenge| pow_i::iter_eval_of_pow_i(log_n, count_of_evaluation, challenge))
+        iterators: lagrange::iter_cyclic_subgroup::<C::ScalarExt>(log_n.get())
+            .map(|X| pow_i::iter_eval_of_pow_i(log_n, beta + X * delta))
             .take(points_count)
-            .collect::<Result<Box<[_]>, _>>()?,
+            .collect::<Box<[_]>>(),
     }
+    .zip(plonk::iter_evaluate_witness::<C>(S, trace))
+    .map(
+        |(mut evaluated_pow_i_per_challenge, result_with_evaluated_w_i)| {
+            let evaluated_w_i = result_with_evaluated_w_i?;
+
+            evaluated_pow_i_per_challenge
+                .iter_mut()
+                .for_each(|evaluated_pow_i| {
+                    *evaluated_pow_i *= evaluated_w_i;
+                });
+
+            Result::<_, Error>::Ok(evaluated_pow_i_per_challenge)
+        },
+    )
     .par_bridge()
     .try_reduce(
         || vec![C::ScalarExt::ZERO; points_count].into_boxed_slice(),
