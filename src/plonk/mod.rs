@@ -968,7 +968,7 @@ pub(crate) fn iter_evaluate_witness<'link, C: CurveAffine>(
 }
 
 #[cfg(test)]
-mod test_eval_witness {
+pub(crate) mod test_eval_witness {
     pub mod poseidon_circuit {
         use std::{array, marker::PhantomData};
 

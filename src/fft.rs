@@ -151,13 +151,14 @@ pub(crate) fn recursive_butterfly_arithmetic<Scalar: Field, G: FftGroup<Scalar>>
     }
 }
 
-/// fft with input size 1 << log_n
-/// This is a wrapper around fn best_fft
+/// FFT with input size 1 << log_n
+///
+/// This is a wrapper around fn [`best_fft`]
 pub fn fft<F: PrimeField>(a: &mut [F], log_n: u32) {
     best_fft(a, get_omega_or_inv(log_n, false), log_n);
 }
 
-/// inverse fft with input size 1 << log_n
+/// Inverse fft with input size 1 << log_n
 pub fn ifft<F: PrimeField>(a: &mut [F], log_n: u32) {
     let omega_inv = get_omega_or_inv(log_n, true);
     let divisor = get_ifft_divisor(log_n);
