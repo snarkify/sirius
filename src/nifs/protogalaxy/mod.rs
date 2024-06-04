@@ -1,6 +1,5 @@
 use std::iter;
 use std::marker::PhantomData;
-use std::num::NonZeroU32;
 
 use ff::PrimeField;
 use halo2_proofs::arithmetic::CurveAffine;
@@ -153,9 +152,20 @@ impl<C: CurveAffine> MultifoldingScheme<C> for ProtoGalaxy<C> {
 mod compute_g {
     use super::*;
 
-    /// given a vector of vector {w_i}, i.e. w_i is vector
-    /// compute and return vector sum_i L_i(gamma)w_i
-    fn fold_vectors<F: PrimeField>(gamma: F, log_n: NonZeroU32, ws: &[Vec<F>]) -> Vec<F> {
+    /// given a vector of {w_i}, here w_i is a vector
+    /// compute weighted sum: sum_i L_i(gamma)c_i
+    /// Here w_i can be vector of challenges or vector of witnesses
+    /// # Parameters
+    ///
+    /// - `gamma` - eval Lagrange polynomials at this point
+    /// - `log_n` - `log2(n+1)`, where `n` - number of instances to be folded
+    /// - `ws` - `{w_0,..., w_n}`, vector of vector of F
+    ///
+    /// # Result
+    ///
+    /// the vector of weighted sum
+    /// `L_0(gamma)w_0 + L_1(gamma)w_1, ..., L_n(gamma)w_n`
+    fn fold_vectors<F: PrimeField>(gamma: F, log_n: usize, ws: &[Vec<F>]) -> Vec<F> {
         let ll: Vec<F> = iter_eval_lagrange_polynomials_for_cyclic_group(gamma, log_n).collect();
         (0..ws[0].len())
             .into_par_iter()
@@ -168,13 +178,36 @@ mod compute_g {
             .collect()
     }
 
+    /// given a vector of {w_i}, here witness w_i is vector of vector
+    /// compute and return vector sum_i L_i(gamma)w_i
+    fn fold_witnesses<F: PrimeField>(gamma: F, log_n: usize, wss: &[&[Vec<F>]]) -> Vec<Vec<F>> {
+        let ll: Vec<F> = iter_eval_lagrange_polynomials_for_cyclic_group(gamma, log_n).collect();
+        (0..wss[0].len())
+            .into_par_iter()
+            .map(|ii| {
+                (0..wss[0][ii].len())
+                    .into_par_iter()
+                    .map(|jj| {
+                        ll.iter()
+                            .zip(wss.iter())
+                            .map(|(l_k, w_k)| *l_k * w_k[ii][jj])
+                            .fold(F::ZERO, |sum, val| sum + val)
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
     fn evaluate_G_poly<F: PrimeField>(
-        _beta: F,
-        _gamma: F,
-        _S: &PlonkStructure<F>,
-        _traces: &[(impl GetChallenges<F> + GetWitness<F>)],
+        beta: F,
+        gamma: F,
+        S: &PlonkStructure<F>,
+        traces: &[(impl GetChallenges<F> + GetWitness<F>)],
     ) -> F {
-        todo!()
+        let num_instances = traces.len().next_power_of_two();
+        //let witnesses = traces.iter().map(|trace| trace.get_witness()).collect();
+        //let folded_w = fold_vectors(gamma, num_instances, witnesses);
+        F::ZERO
     }
 
     fn compute_G_poly<F: PrimeField>(
@@ -197,7 +230,7 @@ mod compute_g {
         let num_pts = (k * d + 1).next_power_of_two();
         let log_n = num_pts.checked_ilog2().unwrap();
         let generator: F = get_omega_or_inv(log_n, true);
-        // TODO: we can skip k+1 of the evaluations because already know them to be:
+        // TODO: we can skip k+1 of the evaluations because already know them:
         // {F(alpha), 0,...,0}
         let mut a: Vec<F> = iter::successors(Some(F::ONE), move |val| Some(*val * generator))
             .take(num_pts)
