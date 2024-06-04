@@ -21,7 +21,7 @@ use itertools::Itertools;
 use rayon::prelude::*;
 use serde::Serialize;
 use some_to_err::*;
-use tracing::*;
+use tracing::{debug, error, info, instrument, warn};
 
 use ff::{Field, PrimeField};
 use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
@@ -32,7 +32,7 @@ use crate::{
     constants::NUM_CHALLENGE_BITS,
     plonk::{
         self,
-        eval::{Error as EvalError, PlonkEvalDomain},
+        eval::{Error as EvalError, GetDataForEval, PlonkEvalDomain},
     },
     polynomial::{
         expression::{HomogeneousExpression, QueryIndexContext},
@@ -242,6 +242,69 @@ pub struct RelaxedPlonkTrace<C: CurveAffine> {
 pub struct PlonkTrace<C: CurveAffine> {
     pub u: PlonkInstance<C>,
     pub w: PlonkWitness<C::Scalar>,
+}
+
+/// Generalized trait to get witness
+///
+/// Used to generalize:
+/// - [`PlonkWitness`]
+/// - [`RelaxedPlonkWitness`]
+/// - [`RelaxedPlonkTrace`]
+/// - [`PlonkTrace`]
+pub(crate) trait GetWitness<F: PrimeField> {
+    fn get_witness(&self) -> &[Vec<F>];
+}
+impl<F: PrimeField> GetWitness<F> for PlonkWitness<F> {
+    fn get_witness(&self) -> &[Vec<F>] {
+        &self.W
+    }
+}
+impl<F: PrimeField> GetWitness<F> for RelaxedPlonkWitness<F> {
+    fn get_witness(&self) -> &[Vec<F>] {
+        &self.W
+    }
+}
+impl<C: CurveAffine> GetWitness<C::ScalarExt> for PlonkTrace<C> {
+    fn get_witness(&self) -> &[Vec<C::ScalarExt>] {
+        self.w.get_witness()
+    }
+}
+impl<C: CurveAffine> GetWitness<C::ScalarExt> for RelaxedPlonkTrace<C> {
+    fn get_witness(&self) -> &[Vec<C::ScalarExt>] {
+        self.W.get_witness()
+    }
+}
+
+/// Generalized trait to get challenges
+///
+/// Used to generalize:
+/// - [`PlonkWitness`]
+/// - [`RelaxedPlonkWitness`]
+/// - [`RelaxedPlonkTrace`]
+/// - [`PlonkTrace`]
+pub(crate) trait GetChallenges<F: PrimeField> {
+    fn get_challenges(&self) -> &[F];
+}
+impl<C: CurveAffine> GetChallenges<C::ScalarExt> for PlonkInstance<C> {
+    fn get_challenges(&self) -> &[C::ScalarExt] {
+        &self.challenges
+    }
+}
+impl<C: CurveAffine> GetChallenges<C::ScalarExt> for RelaxedPlonkInstance<C> {
+    fn get_challenges(&self) -> &[C::ScalarExt] {
+        &self.challenges
+    }
+}
+
+impl<C: CurveAffine> GetChallenges<C::ScalarExt> for PlonkTrace<C> {
+    fn get_challenges(&self) -> &[C::ScalarExt] {
+        self.u.get_challenges()
+    }
+}
+impl<C: CurveAffine> GetChallenges<C::ScalarExt> for RelaxedPlonkTrace<C> {
+    fn get_challenges(&self) -> &[C::ScalarExt] {
+        self.U.get_challenges()
+    }
 }
 
 impl<C: CurveAffine> PlonkTrace<C> {
@@ -858,5 +921,190 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
             .collect();
 
         RelaxedPlonkWitness { W, E }
+    }
+}
+
+// Evaluates the witness data for each gate in the PLONK structure.
+///
+/// This function iterates through the gates of a provided [`PlonkStructure`],
+/// evaluating the witness data for each gate. It returns an iterator over the results
+/// of these evaluations.
+///
+/// # Type Parameters
+/// - `C`: A curve affine type that implements the [`CurveAffine`] trait.
+///
+/// # Parameters
+/// - `S`: A reference to a [`PlonkStructure`] containing the circuit structure and gates.
+/// - `trace`: An object that provides both challenges and witness values through the
+///            [`GetChallenges`] and [`GetWitness`] traits. In can be: [`PlonkWitness`],
+///            [`RelaxedPlonkWitness`], [`RelaxedPlonkTrace`], [`PlonkTrace`] etc
+///
+/// # Returns
+/// An iterator that produces [`Result<C::ScalarExt, eval::Error>`] items. Each item is either the
+/// result of evaluating the witness for a specific gate and row, or an error if the evaluation
+/// fails.
+///
+/// In other words iterator: `[gate1(row0), ..., gate1(rowN), gate2(0), ...]`
+pub(crate) fn iter_evaluate_witness<'link, C: CurveAffine>(
+    S: &'link PlonkStructure<C::ScalarExt>,
+    trace: &'link (impl GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>),
+) -> impl 'link + Iterator<Item = Result<C::ScalarExt, eval::Error>> {
+    S.gates.iter().flat_map(|gate| {
+        let eval_domain = PlonkEvalDomain {
+            num_advice: S.num_advice_columns,
+            num_lookup: S.num_lookups(),
+            selectors: &S.selectors,
+            fixed: &S.fixed_columns,
+            challenges: trace.get_challenges(),
+            W1s: trace.get_witness(),
+            W2s: &[],
+        };
+
+        let evaluator = GraphEvaluator::new(gate);
+
+        (0..eval_domain.row_size())
+            .map(move |row_index| evaluator.evaluate(&eval_domain, row_index))
+    })
+}
+
+#[cfg(test)]
+mod test_eval_witness {
+
+    use ff::Field as _Field;
+    use halo2curves::{bn256, CurveAffine};
+
+    use crate::{
+        commitment::CommitmentKey,
+        plonk::PlonkTrace,
+        poseidon::{
+            random_oracle::{self, ROTrait},
+            PoseidonRO, Spec,
+        },
+        table::CircuitRunner,
+    };
+
+    type Curve = bn256::G1Affine;
+    type Field = <Curve as CurveAffine>::ScalarExt;
+
+    pub mod poseidon_circuit {
+        use std::{array, marker::PhantomData};
+
+        use ff::{FromUniformBytes, PrimeFieldBits};
+
+        use crate::{
+            main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
+            poseidon::{poseidon_circuit::PoseidonChip, Spec},
+        };
+        use halo2_proofs::{
+            circuit::{Layouter, SimpleFloorPlanner, Value},
+            plonk::{Circuit, ConstraintSystem},
+        };
+
+        /// Input and output size for `StepCircuit` within each step
+        pub const ARITY: usize = 1;
+
+        /// Spec for on-circuit poseidon circuit
+        const POSEIDON_PERMUTATION_WIDTH: usize = 3;
+        const POSEIDON_RATE: usize = POSEIDON_PERMUTATION_WIDTH - 1;
+
+        pub type CircuitPoseidonSpec<F> = Spec<F, POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE>;
+
+        const R_F1: usize = 4;
+        const R_P1: usize = 3;
+
+        #[derive(Clone, Debug)]
+        pub struct TestPoseidonCircuitConfig {
+            pconfig: MainGateConfig<POSEIDON_PERMUTATION_WIDTH>,
+        }
+
+        #[derive(Debug, Default)]
+        pub struct TestPoseidonCircuit<F: PrimeFieldBits> {
+            _p: PhantomData<F>,
+        }
+
+        impl<F: PrimeFieldBits + FromUniformBytes<64>> Circuit<F> for TestPoseidonCircuit<F> {
+            type Config = TestPoseidonCircuitConfig;
+            type FloorPlanner = SimpleFloorPlanner;
+
+            fn without_witnesses(&self) -> Self {
+                todo!()
+            }
+
+            fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+                let pconfig = MainGate::configure(meta);
+                Self::Config { pconfig }
+            }
+
+            fn synthesize(
+                &self,
+                config: Self::Config,
+                mut layouter: impl Layouter<F>,
+            ) -> Result<(), halo2_proofs::plonk::Error> {
+                let spec = CircuitPoseidonSpec::<F>::new(R_F1, R_P1);
+
+                layouter.assign_region(
+                    || "poseidon hash",
+                    move |region| {
+                        let z_i: [F; 10] = array::from_fn(|i| F::from(i as u64));
+                        let ctx = &mut RegionCtx::new(region, 0);
+
+                        let mut pchip = PoseidonChip::new(config.pconfig.clone(), spec.clone());
+
+                        pchip.update(
+                            &z_i.iter()
+                                .cloned()
+                                .map(|f: F| WrapValue::Unassigned(Value::known(f)))
+                                .collect::<Vec<WrapValue<F>>>(),
+                        );
+
+                        pchip.squeeze(ctx)?;
+
+                        Ok(())
+                    },
+                )
+            }
+        }
+    }
+    /// Spec for off-circuit poseidon
+    const POSEIDON_PERMUTATION_WIDTH: usize = 3;
+    const POSEIDON_RATE: usize = POSEIDON_PERMUTATION_WIDTH - 1;
+
+    const R_F1: usize = 4;
+    const R_P1: usize = 3;
+    pub type PoseidonSpec =
+        Spec<<Curve as halo2curves::CurveAffine>::Base, POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE>;
+
+    type RO = <PoseidonRO<POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE> as random_oracle::ROPair<
+        <Curve as halo2curves::CurveAffine>::Base,
+    >>::OffCircuit;
+
+    #[test]
+    fn basic() {
+        let runner = CircuitRunner::<Field, _>::new(
+            12,
+            poseidon_circuit::TestPoseidonCircuit::default(),
+            vec![],
+        );
+
+        let S = runner.try_collect_plonk_structure().unwrap();
+
+        let witness = runner.try_collect_witness().unwrap();
+
+        const K: usize = 12;
+        let (u, w) = S
+            .run_sps_protocol(
+                &CommitmentKey::<Curve>::setup(15, b"k"),
+                &[],
+                &witness,
+                &mut RO::new(PoseidonSpec::new(R_F1, R_P1)),
+                S.num_challenges,
+            )
+            .unwrap();
+
+        let trace = PlonkTrace { u, w };
+
+        super::iter_evaluate_witness::<Curve>(&S, &trace).for_each(|v| {
+            assert_eq!(v, Ok(Field::ZERO));
+        });
     }
 }
