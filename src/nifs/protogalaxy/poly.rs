@@ -54,12 +54,13 @@ pub(crate) fn compute_F<C: CurveAffine>(
     let count_of_gates = S.gates.len();
 
     let count_of_evaluation = count_of_rows * count_of_gates;
-    let log_n = NonZeroU32::new(count_of_evaluation.ilog2()).unwrap();
 
     let points_count = count_of_evaluation
         .next_power_of_two()
         .ilog2()
         .next_power_of_two() as usize;
+
+    let log_n = NonZeroU32::new(points_count.ilog2()).unwrap();
 
     debug!(
         "
@@ -104,7 +105,7 @@ pub(crate) fn compute_F<C: CurveAffine>(
         },
     )?;
 
-    fft::ifft(&mut evaluated_points, points_count.ilog2());
+    fft::ifft(&mut evaluated_points, log_n.get());
 
     Ok(UnivariatePoly(evaluated_points))
 }
