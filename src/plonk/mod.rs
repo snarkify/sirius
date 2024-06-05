@@ -1028,7 +1028,7 @@ pub(crate) mod test_eval_witness {
                 layouter.assign_region(
                     || "poseidon hash",
                     move |region| {
-                        let z_i: [F; 10] = array::from_fn(|i| F::from(i as u64));
+                        let z_i: [F; 50] = array::from_fn(|i| F::from(i as u64));
                         let ctx = &mut RegionCtx::new(region, 0);
 
                         let mut pchip = PoseidonChip::new(config.pconfig.clone(), spec.clone());

@@ -1,9 +1,12 @@
-use std::{iter, num::NonZeroU32};
+use std::{
+    iter,
+    num::{NonZeroU32, NonZeroUsize},
+    sync::Arc,
+};
 
 use ff::{Field, PrimeField};
 use halo2curves::CurveAffine;
 use itertools::Itertools;
-use rayon::prelude::*;
 use tracing::*;
 
 use crate::{
@@ -47,7 +50,8 @@ fn powers_of<F: PrimeField>(val: F) -> impl Iterator<Item = F> {
 ///
 /// $$F(X)=\sum_{i=0}^{n-1}pow_{i}(\boldsymbol{\beta}+X\cdot\boldsymbol{\delta})f_i(w)$$
 ///
-/// - `f_i` - iteratively all gates for all rows sequentially. The order is taken from [`plonk::iter_evaluate_witness`].
+/// - `f_i` - iteratively all gates for all rows sequentially. The order is taken from
+///           [`plonk::iter_evaluate_witness`].
 /// - `pow_i` - `i` degree of challenge
 ///
 /// # Algorithm
@@ -86,48 +90,83 @@ pub(crate) fn compute_F<C: CurveAffine>(
         points_count: {points_count}"
     );
 
-    let mut evaluated_points = plonk::iter_evaluate_witness::<C>(S, trace)
-        .zip(MultiProduct {
-            iterators: lagrange::iter_cyclic_subgroup::<C::ScalarExt>(fft_domain_size.get())
-                .map(|X| powers_of(beta + X * delta))
-                .take(points_count)
-                .collect::<Box<[_]>>(),
+    let challenges = lagrange::iter_cyclic_subgroup::<C::ScalarExt>(fft_domain_size.get())
+        .map(|X| {
+            iter::successors(Some(beta + X * delta), |ch| Some(ch.double()))
+                .take(count_of_evaluation.next_power_of_two().ilog2() as usize)
+                .collect::<Box<_>>()
         })
-        .map(
-            |(result_with_evaluated_w_i, mut evaluated_pow_i_per_challenge)| {
-                let evaluated_w_i = result_with_evaluated_w_i?;
+        .take(points_count)
+        .collect::<Arc<[_]>>();
 
-                evaluated_pow_i_per_challenge
-                    .iter_mut()
-                    .for_each(|evaluated_pow_i| {
-                        *evaluated_pow_i *= evaluated_w_i;
-                    });
+    enum Node<F: PrimeField> {
+        Original(F),
+        Calculated {
+            points: Box<[F]>,
+            level: NonZeroUsize,
+        },
+    }
 
-                Result::<_, Error>::Ok(evaluated_pow_i_per_challenge)
-            },
-        )
-        .par_bridge()
-        .try_reduce(
-            || vec![C::ScalarExt::ZERO; points_count].into_boxed_slice(),
-            |mut poly, evaluated_witness_mul_pow_i| {
-                poly.iter_mut()
-                    .zip_eq(evaluated_witness_mul_pow_i.iter())
-                    .for_each(|(poly, el)| {
-                        *poly += el;
-                    });
+    let evaluated = plonk::iter_evaluate_witness::<C>(S, trace)
+        .map(|result_with_evaluated_gate| result_with_evaluated_gate.map(Node::Original))
+        .tree_reduce(|left_w, right_w| {
+            let (left_w, right_w) = (left_w?, right_w?);
 
-                Ok(poly)
-            },
-        )?;
+            match (left_w, right_w) {
+                (Node::Original(left), Node::Original(right)) => Ok(Node::Calculated {
+                    points: challenges
+                        .iter()
+                        .map(|challenge_powers| left + (right * challenge_powers[0]))
+                        .collect(),
+                    level: NonZeroUsize::new(1).unwrap(),
+                }),
+                (
+                    Node::Calculated {
+                        points: mut left,
+                        level: l_height,
+                    },
+                    Node::Calculated {
+                        points: right,
+                        level: r_height,
+                    },
+                ) => {
+                    assert_eq!(l_height, r_height);
 
-    fft::ifft(&mut evaluated_points, fft_domain_size.get());
+                    itertools::multizip((challenges.iter(), left.iter_mut(), right.iter()))
+                        .for_each(|(challenge_powers, left, right)| {
+                            *left += *right * challenge_powers[l_height.get()]
+                        });
 
-    Ok(UnivariatePoly(evaluated_points))
+                    Ok(Node::Calculated {
+                        points: left,
+                        level: l_height.saturating_add(1),
+                    })
+                }
+                (Node::Original(_), Node::Calculated { .. })
+                | (Node::Calculated { .. }, Node::Original(_)) => {
+                    unreachable!("tree must be binary")
+                }
+            }
+        });
+
+    match evaluated {
+        Some(Ok(Node::Calculated { mut points, .. })) => {
+            fft::ifft(&mut points, fft_domain_size.get());
+            Ok(UnivariatePoly(points))
+        }
+        Some(Err(err)) => Err(err.into()),
+        _ => unreachable!(),
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::plonk::test_eval_witness::poseidon_circuit;
+    use std::iter;
+
+    use crate::{
+        plonk::{test_eval_witness::poseidon_circuit, PlonkStructure},
+        polynomial::univariate::UnivariatePoly,
+    };
 
     use ff::Field as _Field;
     use halo2curves::{bn256, CurveAffine};
@@ -159,22 +198,25 @@ mod test {
         <Curve as halo2curves::CurveAffine>::Base,
     >>::OffCircuit;
 
-    #[traced_test]
-    #[test]
-    fn test_compute_f() {
+    fn poseidon_trace() -> (PlonkStructure<Field>, PlonkTrace<Curve>) {
         let runner = CircuitRunner::<Field, _>::new(
-            12,
+            22,
             poseidon_circuit::TestPoseidonCircuit::default(),
             vec![],
         );
 
         let S = runner.try_collect_plonk_structure().unwrap();
-
         let witness = runner.try_collect_witness().unwrap();
+
+        const FOLDER: &str = ".cache/examples";
+        let ck = unsafe {
+            CommitmentKey::load_or_setup_cache(std::path::Path::new(FOLDER), "bn256", 27)
+        }
+        .unwrap();
 
         let (u, w) = S
             .run_sps_protocol(
-                &CommitmentKey::<Curve>::setup(15, b"k"),
+                &ck,
                 &[],
                 &witness,
                 &mut RO::new(PoseidonSpec::new(R_F1, R_P1)),
@@ -182,13 +224,42 @@ mod test {
             )
             .unwrap();
 
+        (S, PlonkTrace { u, w })
+    }
+
+    #[traced_test]
+    #[test]
+    fn zero_f() {
+        let (S, trace) = poseidon_trace();
         let mut rnd = rand::thread_rng();
-        super::compute_F::<Curve>(
+
+        assert!(super::compute_F::<Curve>(
             Field::random(&mut rnd),
             Field::random(&mut rnd),
             &S,
-            &PlonkTrace { u, w },
+            &trace,
         )
-        .unwrap();
+        .unwrap()
+        .iter()
+        .all(|f| f.is_zero().into()));
+    }
+
+    #[traced_test]
+    #[test]
+    fn non_zero_f() {
+        let (S, mut trace) = poseidon_trace();
+        let mut rnd = rand::thread_rng();
+        trace
+            .w
+            .W
+            .iter_mut()
+            .for_each(|row| row.iter_mut().for_each(|el| *el = Field::random(&mut rnd)));
+
+        assert_ne!(
+            super::compute_F::<Curve>(Field::random(&mut rnd), Field::random(&mut rnd), &S, &trace,),
+            Ok(UnivariatePoly::from_iter(
+                iter::repeat(Field::ZERO).take(16)
+            ))
+        );
     }
 }

@@ -5,6 +5,7 @@ use ff::Field;
 /// Represents a univariate polynomial
 ///
 /// Coefficients of the polynomial are presented from smaller to larger
+#[derive(Debug, PartialEq, Eq)]
 pub struct UnivariatePoly<F: Field>(pub(crate) Box<[F]>);
 
 impl<F: Field> UnivariatePoly<F> {
@@ -12,6 +13,9 @@ impl<F: Field> UnivariatePoly<F> {
         // TODO #259 Make it more productive due to large `size`.
         let vec = vec![F::ZERO; size];
         Self(vec.into_boxed_slice())
+    }
+    pub fn iter(&self) -> impl Iterator<Item = &F> {
+        self.0.iter()
     }
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut F> {
         self.0.iter_mut()
