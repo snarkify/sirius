@@ -1,6 +1,6 @@
-use std::num::NonZeroU32;
+use std::{iter, num::NonZeroU32};
 
-use ff::Field;
+use ff::{Field, PrimeField};
 use halo2curves::CurveAffine;
 use itertools::Itertools;
 use rayon::prelude::*;
@@ -12,14 +12,10 @@ use crate::{
     polynomial::{lagrange, univariate::UnivariatePoly},
 };
 
-use super::pow_i;
-
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum Error {
     #[error(transparent)]
     Eval(#[from] eval::Error),
-    #[error("pow_i iterator ended before witnesses")]
-    PowiEndedBeforeWitnesses,
 }
 
 /// Analog of [`itertools::structs::MultiProduct`], but:
@@ -43,6 +39,25 @@ where
     }
 }
 
+fn powers_of<F: PrimeField>(val: F) -> impl Iterator<Item = F> {
+    iter::successors(Some(F::ONE), move |v| Some(*v * val))
+}
+
+/// This function calculates F(X), which mathematically looks like this:
+///
+/// $$F(X)=\sum_{i=0}^{n-1}pow_{i}(\boldsymbol{\beta}+X\cdot\boldsymbol{\delta})f_i(w)$$
+///
+/// - `f_i` - iteratively all gates for all rows sequentially. The order is taken from [`plonk::iter_evaluate_witness`].
+/// - `pow_i` - `i` degree of challenge
+///
+/// # Algorithm
+///
+/// We use [`MultiProduct`] helper class & create `points_count` iterators for `pow_i`, where each
+/// iterator uses a different challenge (`X`) from the cyclic group, and then iterate over all
+/// these iterators at once.
+/// I.e. item `i` from this iterator is a collection of [pow_i(X0), pow_i(X1), ...]
+///
+/// Then we do a zip with the witness and gets
 #[instrument(skip_all)]
 pub(crate) fn compute_F<C: CurveAffine>(
     beta: C::ScalarExt,
@@ -60,52 +75,52 @@ pub(crate) fn compute_F<C: CurveAffine>(
         .ilog2()
         .next_power_of_two() as usize;
 
-    let log_n = NonZeroU32::new(points_count.ilog2()).unwrap();
+    let fft_domain_size = NonZeroU32::new(points_count.ilog2()).unwrap();
 
     debug!(
         "
         count_of_rows: {count_of_rows};
         count_of_gates: {count_of_gates};
         count_of_evaluation: {count_of_evaluation};
-        log_n: {log_n};
+        fft_domain_size: {fft_domain_size};
         points_count: {points_count}"
     );
 
-    let mut evaluated_points = MultiProduct {
-        iterators: lagrange::iter_cyclic_subgroup::<C::ScalarExt>(log_n.get())
-            .map(|X| pow_i::iter_eval_of_pow_i(log_n, beta + X * delta))
-            .take(points_count)
-            .collect::<Box<[_]>>(),
-    }
-    .zip(plonk::iter_evaluate_witness::<C>(S, trace))
-    .map(
-        |(mut evaluated_pow_i_per_challenge, result_with_evaluated_w_i)| {
-            let evaluated_w_i = result_with_evaluated_w_i?;
+    let mut evaluated_points = plonk::iter_evaluate_witness::<C>(S, trace)
+        .zip(MultiProduct {
+            iterators: lagrange::iter_cyclic_subgroup::<C::ScalarExt>(fft_domain_size.get())
+                .map(|X| powers_of(beta + X * delta))
+                .take(points_count)
+                .collect::<Box<[_]>>(),
+        })
+        .map(
+            |(result_with_evaluated_w_i, mut evaluated_pow_i_per_challenge)| {
+                let evaluated_w_i = result_with_evaluated_w_i?;
 
-            evaluated_pow_i_per_challenge
-                .iter_mut()
-                .for_each(|evaluated_pow_i| {
-                    *evaluated_pow_i *= evaluated_w_i;
-                });
+                evaluated_pow_i_per_challenge
+                    .iter_mut()
+                    .for_each(|evaluated_pow_i| {
+                        *evaluated_pow_i *= evaluated_w_i;
+                    });
 
-            Result::<_, Error>::Ok(evaluated_pow_i_per_challenge)
-        },
-    )
-    .par_bridge()
-    .try_reduce(
-        || vec![C::ScalarExt::ZERO; points_count].into_boxed_slice(),
-        |mut poly, evaluated_witness_mul_pow_i| {
-            poly.iter_mut()
-                .zip_eq(evaluated_witness_mul_pow_i.iter())
-                .for_each(|(poly, el)| {
-                    *poly += el;
-                });
+                Result::<_, Error>::Ok(evaluated_pow_i_per_challenge)
+            },
+        )
+        .par_bridge()
+        .try_reduce(
+            || vec![C::ScalarExt::ZERO; points_count].into_boxed_slice(),
+            |mut poly, evaluated_witness_mul_pow_i| {
+                poly.iter_mut()
+                    .zip_eq(evaluated_witness_mul_pow_i.iter())
+                    .for_each(|(poly, el)| {
+                        *poly += el;
+                    });
 
-            Ok(poly)
-        },
-    )?;
+                Ok(poly)
+            },
+        )?;
 
-    fft::ifft(&mut evaluated_points, log_n.get());
+    fft::ifft(&mut evaluated_points, fft_domain_size.get());
 
     Ok(UnivariatePoly(evaluated_points))
 }
