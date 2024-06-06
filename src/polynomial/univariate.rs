@@ -9,16 +9,8 @@ use ff::Field;
 pub struct UnivariatePoly<F: Field>(pub(crate) Box<[F]>);
 
 impl<F: Field> UnivariatePoly<F> {
-    pub fn new(size: usize) -> Self {
-        // TODO #259 Make it more productive due to large `size`.
-        let vec = vec![F::ZERO; size];
-        Self(vec.into_boxed_slice())
-    }
     pub fn iter(&self) -> impl Iterator<Item = &F> {
         self.0.iter()
-    }
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut F> {
-        self.0.iter_mut()
     }
 }
 
