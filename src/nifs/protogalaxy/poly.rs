@@ -175,7 +175,7 @@ mod test {
 
     fn poseidon_trace() -> (PlonkStructure<Field>, PlonkTrace<Curve>) {
         let runner = CircuitRunner::<Field, _>::new(
-            22,
+            12,
             poseidon_circuit::TestPoseidonCircuit::default(),
             vec![],
         );
@@ -183,15 +183,9 @@ mod test {
         let S = runner.try_collect_plonk_structure().unwrap();
         let witness = runner.try_collect_witness().unwrap();
 
-        const FOLDER: &str = ".cache/examples";
-        let ck = unsafe {
-            CommitmentKey::load_or_setup_cache(std::path::Path::new(FOLDER), "bn256", 27)
-        }
-        .unwrap();
-
         let (u, w) = S
             .run_sps_protocol(
-                &ck,
+                &CommitmentKey::setup(17, b""),
                 &[],
                 &witness,
                 &mut RO::new(PoseidonSpec::new(R_F1, R_P1)),
