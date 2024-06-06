@@ -21,31 +21,6 @@ pub enum Error {
     Eval(#[from] eval::Error),
 }
 
-/// Analog of [`itertools::structs::MultiProduct`], but:
-/// - without [`Clone`] require
-/// - without logic for diff len of iterators
-struct MultiProduct<Item, Iter>
-where
-    Iter: Iterator<Item = Item>,
-{
-    iterators: Box<[Iter]>,
-}
-
-impl<Item, Iter> Iterator for MultiProduct<Item, Iter>
-where
-    Iter: Iterator<Item = Item>,
-{
-    type Item = Box<[Item]>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iterators.iter_mut().map(|p| p.next()).collect()
-    }
-}
-
-fn powers_of<F: PrimeField>(val: F) -> impl Iterator<Item = F> {
-    iter::successors(Some(F::ONE), move |v| Some(*v * val))
-}
-
 /// This function calculates F(X), which mathematically looks like this:
 ///
 /// $$F(X)=\sum_{i=0}^{n-1}pow_{i}(\boldsymbol{\beta}+X\cdot\boldsymbol{\delta})f_i(w)$$
