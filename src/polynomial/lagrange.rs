@@ -1,4 +1,4 @@
-use std::{iter, num::NonZeroU32};
+use std::iter;
 
 use ff::PrimeField;
 
@@ -80,6 +80,7 @@ pub fn iter_eval_lagrange_polynomials_for_cyclic_group<F: PrimeField>(
 mod tests {
     use ff::Field;
     use halo2_proofs::halo2curves::bn256::Fr;
+    use std::num::NonZeroU32;
     use tracing_test::traced_test;
 
     use super::*;

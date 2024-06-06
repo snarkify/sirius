@@ -2,16 +2,6 @@ use std::{iter, mem, num::NonZeroUsize, ops::Mul};
 
 use bitter::{BitReader, LittleEndianReader};
 use ff::PrimeField;
-use tracing::*;
-
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub enum Error {
-    #[error("Input `t` is not enought for represent `i`")]
-    TooLittleT {
-        t: NonZeroUsize,
-        needed_t: NonZeroUsize,
-    },
-}
 
 fn pow_i<'l, F: PrimeField>(
     i: usize,
@@ -56,32 +46,28 @@ pub fn iter_eval_of_pow_i<F: PrimeField>(
     t: NonZeroUsize,
     n: NonZeroUsize,
     challenge: F,
-) -> Result<impl Iterator<Item = F>, Error> {
-    let representation_lenght = NonZeroUsize::new(
+) -> impl Iterator<Item = F> {
+    let representation_length = NonZeroUsize::new(
         mem::size_of::<usize>()
             .mul(8)
             .saturating_sub(n.leading_zeros() as usize),
     )
     .expect("`leading_zeros` can't be greater then bits count");
 
-    if t < representation_lenght {
-        return Err(Error::TooLittleT {
-            t,
-            needed_t: representation_lenght,
-        });
-    }
+    assert!(
+        t < representation_length,
+        "Input `t` is not enough to represent `i`"
+    );
 
     let challenges = iter::successors(Some(challenge), |v| Some(v.square()))
         .take(t.get())
         .collect::<Box<[_]>>();
 
-    Ok((0..=n.get()).map(move |i| pow_i(i, t, challenges.iter())))
+    (0..=n.get()).map(move |i| pow_i(i, t, challenges.iter()))
 }
 
 #[cfg(test)]
 mod test {
-    use std::ops::Sub;
-
     use halo2_proofs::halo2curves::bn256::Fr;
     use tracing_test::traced_test;
 
@@ -108,9 +94,7 @@ mod test {
     #[test]
     fn iter_pow_i_test() {
         assert_eq!(
-            iter_eval_of_pow_i::<Fr>(to_nz(2), to_nz(3), Fr::one())
-                .unwrap()
-                .collect::<Vec<Fr>>(),
+            iter_eval_of_pow_i::<Fr>(to_nz(2), to_nz(3), Fr::one()).collect::<Vec<Fr>>(),
             [Fr::one(), Fr::one(), Fr::one(), Fr::one()]
         );
     }
@@ -128,20 +112,5 @@ mod test {
     fn pow_11() {
         let challenges = to_challenges(Fr::from(3));
         assert_eq!(pow_i::<Fr>(11, to_nz(4), challenges.iter()), 177_147.into());
-    }
-
-    #[traced_test]
-    #[test]
-    fn too_little_t() {
-        let too_little_t = to_nz(mem::size_of::<usize>().mul(8).sub(1));
-        assert_eq!(
-            iter_eval_of_pow_i::<Fr>(too_little_t, to_nz(usize::MAX), Fr::one())
-                .err()
-                .unwrap(),
-            Error::TooLittleT {
-                t: too_little_t,
-                needed_t: to_nz(mem::size_of::<usize>().mul(8))
-            }
-        );
     }
 }

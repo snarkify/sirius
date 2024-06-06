@@ -5,11 +5,13 @@ use std::num::NonZeroUsize;
 use ff::PrimeField;
 use halo2_proofs::arithmetic::CurveAffine;
 
+use super::*;
 use crate::{
     commitment::CommitmentKey,
     fft::{get_omega_or_inv, ifft},
+    nifs::protogalaxy::pow_i::iter_eval_of_pow_i,
     plonk::{
-        eval::{GetDataForEval, PlonkEvalDomain},
+        eval::{self, GetDataForEval, PlonkEvalDomain},
         GetChallenges, GetWitness, PlonkStructure, PlonkTrace, RelaxedPlonkInstance,
         RelaxedPlonkTrace,
     },
@@ -19,10 +21,7 @@ use crate::{
     },
 };
 
-use super::*;
-
 mod pow_i;
-pub use pow_i::{iter_eval_of_pow_i, Error as PowIError};
 
 /// ProtoGalaxy: Non Interactive Folding Scheme that implements main protocol defined in paper
 /// [protogalaxy](https://eprint.iacr.org/2023/1106)
@@ -217,7 +216,7 @@ mod compute_g {
         gamma: F,
         S: &PlonkStructure<F>,
         traces: &[(impl GetChallenges<F> + GetWitness<F>)],
-    ) -> Result<F, PowIError> {
+    ) -> Result<F, eval::Error> {
         let count_of_rows = 1 << S.k;
         let count_of_gates = S.gates.len();
         let n = count_of_rows * count_of_gates;
@@ -244,15 +243,17 @@ mod compute_g {
             (0..eval_domain.row_size())
                 .map(move |row_index| evaluator.evaluate(&eval_domain, row_index))
         });
-
         iter_eval_of_pow_i(
             NonZeroUsize::new(t).unwrap(),
             NonZeroUsize::new(n).unwrap(),
             beta,
-        )?
+        )
         .zip(evaluated)
-        .map(|(beta_i, f_i)| {});
-        Ok(F::ZERO)
+        .map(|(beta_i, f_i)| {
+            let f_i = f_i?;
+            Ok(beta_i * f_i)
+        })
+        .try_fold(F::ZERO, |sum, part| Ok(sum + part?))
     }
 
     fn compute_G_poly<F: PrimeField>(
@@ -263,7 +264,7 @@ mod compute_g {
         S: &PlonkStructure<F>,
         // first one is accumulator, the rest k traces are instances to be folded
         traces: &[(impl GetChallenges<F> + GetWitness<F>)],
-    ) -> Result<Vec<F>, PowIError> {
+    ) -> Result<Vec<F>, eval::Error> {
         let ctx = QueryIndexContext {
             num_fixed: S.fixed_columns.len(),
             num_advice: S.num_advice_columns,
@@ -280,7 +281,7 @@ mod compute_g {
         let mut a: Vec<F> = iter::successors(Some(F::ONE), move |val| Some(*val * generator))
             .take(num_pts)
             .map(|pt| evaluate_G_poly(beta, pt, S, traces))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, eval::Error>>()?;
         ifft(&mut a, log_n);
         Ok(a)
     }
