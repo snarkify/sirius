@@ -9,6 +9,9 @@ use ff::Field;
 pub struct UnivariatePoly<F: Field>(pub(crate) Box<[F]>);
 
 impl<F: Field> UnivariatePoly<F> {
+    pub fn new_zeroed(size: usize) -> Self {
+        Self::from_iter(iter::repeat(F::ZERO).take(size))
+    }
     pub fn iter(&self) -> impl Iterator<Item = &F> {
         self.0.iter()
     }

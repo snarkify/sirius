@@ -10,7 +10,7 @@ use ff::PrimeField;
 use halo2_proofs::{plonk::Expression as PE, poly::Rotation};
 use serde::Serialize;
 
-use crate::util::trim_leading_zeros;
+use crate::{plonk::PlonkStructure, util::trim_leading_zeros};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum ColumnIndex {
     Challenge { column_index: usize },
@@ -43,6 +43,17 @@ pub struct QueryIndexContext {
     pub num_advice: usize,
     pub num_challenges: usize,
     pub num_lookups: usize,
+}
+impl<F: PrimeField> From<&PlonkStructure<F>> for QueryIndexContext {
+    fn from(S: &PlonkStructure<F>) -> Self {
+        Self {
+            num_fixed: S.fixed_columns.len(),
+            num_advice: S.num_advice_columns,
+            num_selectors: S.selectors.len(),
+            num_challenges: S.num_challenges,
+            num_lookups: S.num_lookups(),
+        }
+    }
 }
 
 impl QueryIndexContext {
@@ -416,6 +427,24 @@ impl<F: PrimeField> Expression<F> {
                 (Scaled(Box::new(expr), *constant), degree).into()
             }
         }
+    }
+
+    pub fn degree(&self, ctx: &QueryIndexContext) -> usize {
+        self.evaluate(
+            &|_| 0,
+            &|poly| match poly.subtype(ctx) {
+                QueryType::Advice | QueryType::Lookup => 1,
+                _other => 0,
+            },
+            &|_| 1,
+            &|a| a,
+            &|a, b| match a.cmp(&b) {
+                Ordering::Equal | Ordering::Greater => a,
+                Ordering::Less => b,
+            },
+            &|a, b| a + b,
+            &|a, _| a,
+        )
     }
 }
 

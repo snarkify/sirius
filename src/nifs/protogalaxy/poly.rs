@@ -1,12 +1,11 @@
 use std::{
     iter,
     num::{NonZeroU32, NonZeroUsize},
-    sync::Arc,
 };
 
 use ff::{Field, PrimeField};
 use halo2curves::CurveAffine;
-use itertools::Itertools;
+use itertools::*;
 use tracing::*;
 
 use crate::{
@@ -31,12 +30,26 @@ pub enum Error {
 ///
 /// # Algorithm
 ///
-/// We use [`MultiProduct`] helper class & create `points_count` iterators for `pow_i`, where each
+/// We use [`Itertools::tree_reduce`] & create `points_count` iterators for `pow_i`, where each
 /// iterator uses a different challenge (`X`) from the cyclic group, and then iterate over all
 /// these iterators at once.
+///
 /// I.e. item `i` from this iterator is a collection of [pow_i(X0), pow_i(X1), ...]
 ///
-/// Then we do a zip with the witness and gets
+/// f₀  f₁ f₂  f₃  f₄  f₅  f₆  f₇
+/// │   │  │   │   │   │   │   │
+/// 1   β  1   β   1   β   1   β
+/// │   │  │   │   │   │   │   │
+/// └───f₀₁└───f₂₃ └───f₄₅ └───f₆₇
+///     │      │       │       │
+///     1      β²      1       β²
+///     │      │       │       │
+///     └──────f₀₁₂₃   └───────f₄₅₆₇
+///            │               │
+///            └───────────────f₀₁₂₃₄₅₆₇
+///
+/// Each β here is a vector of all `X`, and each node except leaves contains all counted
+/// Each `f` here is fₙₘ =  fₙ * 1 + fₘ * βⁱ
 #[instrument(skip_all)]
 pub(crate) fn compute_F<C: CurveAffine>(
     beta: C::ScalarExt,
@@ -48,6 +61,10 @@ pub(crate) fn compute_F<C: CurveAffine>(
     let count_of_gates = S.gates.len();
 
     let count_of_evaluation = count_of_rows * count_of_gates;
+
+    if count_of_evaluation == 0 {
+        return Ok(UnivariatePoly::new_zeroed(0));
+    }
 
     let points_count = count_of_evaluation
         .next_power_of_two()
@@ -65,60 +82,76 @@ pub(crate) fn compute_F<C: CurveAffine>(
         points_count: {points_count}"
     );
 
-    let challenges = lagrange::iter_cyclic_subgroup::<C::ScalarExt>(fft_domain_size.get())
+    // Use the elements of the cyclic group together with beta & delta as challenge and calculate them
+    // degrees
+    //
+    // Since we are using a tree-based algorithm, we need log2(n) squares of these
+    // challenge
+    //
+    // Even for large `count_of_evaluation` this will be a small number, so we can
+    // collect it
+    let challenges_powers = lagrange::iter_cyclic_subgroup::<C::ScalarExt>(fft_domain_size.get())
         .map(|X| {
             iter::successors(Some(beta + X * delta), |ch| Some(ch.double()))
                 .take(count_of_evaluation.next_power_of_two().ilog2() as usize)
                 .collect::<Box<_>>()
         })
         .take(points_count)
-        .collect::<Arc<[_]>>();
+        .collect::<Box<[_]>>();
 
+    /// Auxiliary wrapper for using the tree to evaluate polynomials
     enum Node<F: PrimeField> {
-        Original(F),
+        Leaf(F),
         Calculated {
+            /// Intermediate results for all calculated points
+            ///
+            /// Every point calculated for specific challenge
             points: Box<[F]>,
-            level: NonZeroUsize,
+            /// Node height relative to leaf height
+            height: NonZeroUsize,
         },
     }
 
     let evaluated = plonk::iter_evaluate_witness::<C>(S, trace)
-        .map(|result_with_evaluated_gate| result_with_evaluated_gate.map(Node::Original))
+        .map(|result_with_evaluated_gate| result_with_evaluated_gate.map(Node::Leaf))
+        // TODO #259 Migrate to a parallel algorithm
+        // TODO #259 Implement `try_tree_reduce` to stop on the first error
         .tree_reduce(|left_w, right_w| {
             let (left_w, right_w) = (left_w?, right_w?);
 
             match (left_w, right_w) {
-                (Node::Original(left), Node::Original(right)) => Ok(Node::Calculated {
-                    points: challenges
+                (Node::Leaf(left), Node::Leaf(right)) => Ok(Node::Calculated {
+                    points: challenges_powers
                         .iter()
                         .map(|challenge_powers| left + (right * challenge_powers[0]))
                         .collect(),
-                    level: NonZeroUsize::new(1).unwrap(),
+                    height: NonZeroUsize::new(1).unwrap(),
                 }),
                 (
                     Node::Calculated {
                         points: mut left,
-                        level: l_height,
+                        height: l_height,
                     },
                     Node::Calculated {
                         points: right,
-                        level: r_height,
+                        height: r_height,
                     },
                 ) => {
+                    // The tree must be binary, so we only calculate at the one node level
                     assert_eq!(l_height, r_height);
 
-                    itertools::multizip((challenges.iter(), left.iter_mut(), right.iter()))
+                    itertools::multizip((challenges_powers.iter(), left.iter_mut(), right.iter()))
                         .for_each(|(challenge_powers, left, right)| {
                             *left += *right * challenge_powers[l_height.get()]
                         });
 
                     Ok(Node::Calculated {
                         points: left,
-                        level: l_height.saturating_add(1),
+                        height: l_height.saturating_add(1),
                     })
                 }
-                (Node::Original(_), Node::Calculated { .. })
-                | (Node::Calculated { .. }, Node::Original(_)) => {
+                (Node::Leaf(_), Node::Calculated { .. })
+                | (Node::Calculated { .. }, Node::Leaf(_)) => {
                     unreachable!("tree must be binary")
                 }
             }
