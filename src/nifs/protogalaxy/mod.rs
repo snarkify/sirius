@@ -1,5 +1,6 @@
 use std::iter;
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 
 use ff::PrimeField;
 use halo2_proofs::arithmetic::CurveAffine;
@@ -8,11 +9,13 @@ use crate::{
     commitment::CommitmentKey,
     fft::{get_omega_or_inv, ifft},
     plonk::{
+        eval::{GetDataForEval, PlonkEvalDomain},
         GetChallenges, GetWitness, PlonkStructure, PlonkTrace, RelaxedPlonkInstance,
         RelaxedPlonkTrace,
     },
     polynomial::{
-        expression::QueryIndexContext, lagrange::iter_eval_lagrange_polynomials_for_cyclic_group,
+        expression::QueryIndexContext, graph_evaluator::GraphEvaluator,
+        lagrange::iter_eval_lagrange_polynomials_for_cyclic_group,
     },
 };
 
@@ -154,18 +157,18 @@ mod compute_g {
 
     /// given a vector of {w_i}, here w_i is a vector
     /// compute weighted sum: sum_i L_i(gamma)c_i
-    /// Here w_i can be vector of challenges or vector of witnesses
+    /// Here w_i is vector of challenges
     /// # Parameters
     ///
     /// - `gamma` - eval Lagrange polynomials at this point
     /// - `log_n` - `log2(n+1)`, where `n` - number of instances to be folded
-    /// - `ws` - `{w_0,..., w_n}`, vector of vector of F
+    /// - `ws` - `{w_0,..., w_n}`, w_i is vector of F
     ///
     /// # Result
     ///
     /// the vector of weighted sum
     /// `L_0(gamma)w_0 + L_1(gamma)w_1, ..., L_n(gamma)w_n`
-    fn fold_vectors<F: PrimeField>(gamma: F, log_n: usize, ws: &[Vec<F>]) -> Vec<F> {
+    fn fold_challenges<F: PrimeField>(gamma: F, log_n: usize, ws: &[&[F]]) -> Vec<F> {
         let ll: Vec<F> = iter_eval_lagrange_polynomials_for_cyclic_group(gamma, log_n).collect();
         (0..ws[0].len())
             .into_par_iter()
@@ -179,7 +182,18 @@ mod compute_g {
     }
 
     /// given a vector of {w_i}, here witness w_i is vector of vector
-    /// compute and return vector sum_i L_i(gamma)w_i
+    /// compute weighted sum: sum_i L_i(gamma)w_i
+    /// Here w_i is witness, vector of vector
+    /// # Parameters
+    ///
+    /// - `gamma` - eval Lagrange polynomials at this point
+    /// - `log_n` - `log2(n+1)`, where `n` - number of instances to be folded
+    /// - `ws` - `{w_0,..., w_n}`, w_i is vector of vector of F
+    ///
+    /// # Result
+    ///
+    /// the vector of weighted sum
+    /// `L_0(gamma)w_0 + L_1(gamma)w_1, ..., L_n(gamma)w_n`
     fn fold_witnesses<F: PrimeField>(gamma: F, log_n: usize, wss: &[&[Vec<F>]]) -> Vec<Vec<F>> {
         let ll: Vec<F> = iter_eval_lagrange_polynomials_for_cyclic_group(gamma, log_n).collect();
         (0..wss[0].len())
@@ -203,11 +217,42 @@ mod compute_g {
         gamma: F,
         S: &PlonkStructure<F>,
         traces: &[(impl GetChallenges<F> + GetWitness<F>)],
-    ) -> F {
+    ) -> Result<F, PowIError> {
+        let count_of_rows = 1 << S.k;
+        let count_of_gates = S.gates.len();
+        let n = count_of_rows * count_of_gates;
+        let t = n.next_power_of_two().ilog2() as usize;
+
         let num_instances = traces.len().next_power_of_two();
-        //let witnesses = traces.iter().map(|trace| trace.get_witness()).collect();
-        //let folded_w = fold_vectors(gamma, num_instances, witnesses);
-        F::ZERO
+        let witnesses: Vec<&[Vec<F>]> = traces.iter().map(|trace| trace.get_witness()).collect();
+        let folded_w = fold_witnesses(gamma, num_instances, &witnesses);
+        let challenges: Vec<&[F]> = traces.iter().map(|trace| trace.get_challenges()).collect();
+        let folded_c = fold_challenges(gamma, num_instances, &challenges);
+
+        let evaluated = S.gates.iter().flat_map(|gate| {
+            let eval_domain = PlonkEvalDomain {
+                num_advice: S.num_advice_columns,
+                num_lookup: S.num_lookups(),
+                selectors: &S.selectors,
+                fixed: &S.fixed_columns,
+                challenges: &folded_c,
+                W1s: &folded_w,
+                W2s: &[],
+            };
+
+            let evaluator = GraphEvaluator::new(gate);
+            (0..eval_domain.row_size())
+                .map(move |row_index| evaluator.evaluate(&eval_domain, row_index))
+        });
+
+        iter_eval_of_pow_i(
+            NonZeroUsize::new(t).unwrap(),
+            NonZeroUsize::new(n).unwrap(),
+            beta,
+        )?
+        .zip(evaluated)
+        .map(|(beta_i, f_i)| {});
+        Ok(F::ZERO)
     }
 
     fn compute_G_poly<F: PrimeField>(
@@ -218,7 +263,7 @@ mod compute_g {
         S: &PlonkStructure<F>,
         // first one is accumulator, the rest k traces are instances to be folded
         traces: &[(impl GetChallenges<F> + GetWitness<F>)],
-    ) -> Vec<F> {
+    ) -> Result<Vec<F>, PowIError> {
         let ctx = QueryIndexContext {
             num_fixed: S.fixed_columns.len(),
             num_advice: S.num_advice_columns,
@@ -235,8 +280,8 @@ mod compute_g {
         let mut a: Vec<F> = iter::successors(Some(F::ONE), move |val| Some(*val * generator))
             .take(num_pts)
             .map(|pt| evaluate_G_poly(beta, pt, S, traces))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         ifft(&mut a, log_n);
-        a
+        Ok(a)
     }
 }
