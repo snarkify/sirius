@@ -85,8 +85,8 @@ pub(crate) fn compute_F<C: CurveAffine>(
     // Use the elements of the cyclic group together with beta & delta as challenge and calculate them
     // degrees
     //
-    // Since we are using a tree-based algorithm, we need log2(n) squares of these
-    // challenge
+    // Since we are using a tree-based algorithm, we need `{X^1, X^2, ..., X^{log2(n)}}` of all
+    // challenges.
     //
     // Even for large `count_of_evaluation` this will be a small number, so we can
     // collect it
@@ -103,8 +103,7 @@ pub(crate) fn compute_F<C: CurveAffine>(
     enum Node<F: PrimeField> {
         Leaf(F),
         Calculated {
-            /// Intermediate results for all calculated points
-            ///
+            /// Intermediate results for all calculated challenges
             /// Every point calculated for specific challenge
             points: Box<[F]>,
             /// Node height relative to leaf height
