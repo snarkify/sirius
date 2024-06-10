@@ -5,7 +5,17 @@ use ff::Field;
 /// Represents a univariate polynomial
 ///
 /// Coefficients of the polynomial are presented from smaller to larger
+#[derive(Debug, PartialEq, Eq)]
 pub struct UnivariatePoly<F: Field>(pub(crate) Box<[F]>);
+
+impl<F: Field> UnivariatePoly<F> {
+    pub fn new_zeroed(size: usize) -> Self {
+        Self::from_iter(iter::repeat(F::ZERO).take(size))
+    }
+    pub fn iter(&self) -> impl Iterator<Item = &F> {
+        self.0.iter()
+    }
+}
 
 impl<F: Field> FromIterator<F> for UnivariatePoly<F> {
     fn from_iter<T: IntoIterator<Item = F>>(iter: T) -> Self {

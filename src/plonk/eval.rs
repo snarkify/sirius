@@ -1,7 +1,7 @@
 use crate::polynomial::ColumnIndex;
 use ff::PrimeField;
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum Error {
     #[error("challenge index out of boundary: {challenge_index}")]
     ChallengeIndexOutOfBoundary {

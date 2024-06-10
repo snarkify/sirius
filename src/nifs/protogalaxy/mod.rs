@@ -10,12 +10,10 @@ use crate::{
 
 use super::*;
 
-mod pow_i;
-pub use pow_i::{iter_eval_of_pow_i, Error as PowIError};
+pub(crate) mod poly;
 
 /// ProtoGalaxy: Non Interactive Folding Scheme that implements main protocol defined in paper
 /// [protogalaxy](https://eprint.iacr.org/2023/1106)
-///
 #[derive(Clone, Debug)]
 pub struct ProtoGalaxy<C: CurveAffine> {
     _marker: PhantomData<C>,

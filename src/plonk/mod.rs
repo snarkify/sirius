@@ -947,8 +947,8 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
 /// In other words iterator: `[gate1(row0), ..., gate1(rowN), gate2(0), ...]`
 pub(crate) fn iter_evaluate_witness<'link, C: CurveAffine>(
     S: &'link PlonkStructure<C::ScalarExt>,
-    trace: &'link (impl GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>),
-) -> impl 'link + Iterator<Item = Result<C::ScalarExt, eval::Error>> {
+    trace: &'link (impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>),
+) -> impl 'link + Send + Iterator<Item = Result<C::ScalarExt, eval::Error>> {
     S.gates.iter().flat_map(|gate| {
         let eval_domain = PlonkEvalDomain {
             num_advice: S.num_advice_columns,
@@ -968,24 +968,7 @@ pub(crate) fn iter_evaluate_witness<'link, C: CurveAffine>(
 }
 
 #[cfg(test)]
-mod test_eval_witness {
-
-    use ff::Field as _Field;
-    use halo2curves::{bn256, CurveAffine};
-
-    use crate::{
-        commitment::CommitmentKey,
-        plonk::PlonkTrace,
-        poseidon::{
-            random_oracle::{self, ROTrait},
-            PoseidonRO, Spec,
-        },
-        table::CircuitRunner,
-    };
-
-    type Curve = bn256::G1Affine;
-    type Field = <Curve as CurveAffine>::ScalarExt;
-
+pub(crate) mod test_eval_witness {
     pub mod poseidon_circuit {
         use std::{array, marker::PhantomData};
 
@@ -1045,7 +1028,7 @@ mod test_eval_witness {
                 layouter.assign_region(
                     || "poseidon hash",
                     move |region| {
-                        let z_i: [F; 10] = array::from_fn(|i| F::from(i as u64));
+                        let z_i: [F; 50] = array::from_fn(|i| F::from(i as u64));
                         let ctx = &mut RegionCtx::new(region, 0);
 
                         let mut pchip = PoseidonChip::new(config.pconfig.clone(), spec.clone());
@@ -1065,6 +1048,23 @@ mod test_eval_witness {
             }
         }
     }
+
+    use ff::Field as _Field;
+    use halo2curves::{bn256, CurveAffine};
+
+    use crate::{
+        commitment::CommitmentKey,
+        plonk::PlonkTrace,
+        poseidon::{
+            random_oracle::{self, ROTrait},
+            PoseidonRO, Spec,
+        },
+        table::CircuitRunner,
+    };
+
+    type Curve = bn256::G1Affine;
+    type Field = <Curve as CurveAffine>::ScalarExt;
+
     /// Spec for off-circuit poseidon
     const POSEIDON_PERMUTATION_WIDTH: usize = 3;
     const POSEIDON_RATE: usize = POSEIDON_PERMUTATION_WIDTH - 1;
@@ -1090,7 +1090,6 @@ mod test_eval_witness {
 
         let witness = runner.try_collect_witness().unwrap();
 
-        const K: usize = 12;
         let (u, w) = S
             .run_sps_protocol(
                 &CommitmentKey::<Curve>::setup(15, b"k"),
@@ -1101,10 +1100,11 @@ mod test_eval_witness {
             )
             .unwrap();
 
-        let trace = PlonkTrace { u, w };
-
-        super::iter_evaluate_witness::<Curve>(&S, &trace).for_each(|v| {
-            assert_eq!(v, Ok(Field::ZERO));
-        });
+        use rayon::prelude::*;
+        super::iter_evaluate_witness::<Curve>(&S, &PlonkTrace { u, w })
+            .par_bridge()
+            .for_each(|v| {
+                assert_eq!(v, Ok(Field::ZERO));
+            });
     }
 }
