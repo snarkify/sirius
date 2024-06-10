@@ -6,18 +6,22 @@ use std::{
 use ff::{Field, PrimeField};
 use halo2curves::CurveAffine;
 use itertools::*;
+use num_traits::Zero;
 use tracing::*;
 
 use crate::{
     fft,
-    plonk::{self, eval, GetChallenges, GetWitness, PlonkStructure},
-    polynomial::{lagrange, univariate::UnivariatePoly},
+    plonk::{self, eval, GetChallenges, GetWitness, PlonkStructure, PlonkWitness},
+    polynomial::{expression::QueryIndexContext, lagrange, univariate::UnivariatePoly},
+    util::TryMultiProduct,
 };
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum Error {
     #[error(transparent)]
     Eval(#[from] eval::Error),
+    #[error("You can't fold 0 traces")]
+    EmptyTracesNotAllowed,
 }
 
 /// This function calculates F(X), which mathematically looks like this:
@@ -100,6 +104,7 @@ pub(crate) fn compute_F<C: CurveAffine>(
         .collect::<Box<[_]>>();
 
     /// Auxiliary wrapper for using the tree to evaluate polynomials
+    #[derive(Debug)]
     enum Node<F: PrimeField> {
         Leaf(F),
         Calculated {
@@ -135,10 +140,8 @@ pub(crate) fn compute_F<C: CurveAffine>(
                         points: right,
                         height: r_height,
                     },
-                ) => {
                     // The tree must be binary, so we only calculate at the one node level
-                    assert_eq!(l_height, r_height);
-
+                ) if l_height.eq(&r_height) => {
                     itertools::multizip((challenges_powers.iter(), left.iter_mut(), right.iter()))
                         .for_each(|(challenge_powers, left, right)| {
                             *left += *right * challenge_powers[l_height.get()]
@@ -149,10 +152,7 @@ pub(crate) fn compute_F<C: CurveAffine>(
                         height: l_height.saturating_add(1),
                     })
                 }
-                (Node::Leaf(_), Node::Calculated { .. })
-                | (Node::Calculated { .. }, Node::Leaf(_)) => {
-                    unreachable!("tree must be binary")
-                }
+                other => unreachable!("this case must be unreachable: {other:?}"),
             }
         });
 
@@ -162,8 +162,172 @@ pub(crate) fn compute_F<C: CurveAffine>(
             Ok(UnivariatePoly(points))
         }
         Some(Err(err)) => Err(err.into()),
-        _ => unreachable!(),
+        other => unreachable!("this case must be unreachable: {other:?}"),
     }
+}
+
+
+struct FoldedTrace<F: PrimeField> {
+    witness: PlonkWitness<F>,
+    challenges: Vec<F>,
+}
+
+impl<F: PrimeField> FoldedTrace<F> {
+    fn new(
+        points_for_fft: &[F],
+        fft_domain_size: u32,
+        accumulator: impl Sync + GetChallenges<F> + GetWitness<F>,
+        traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
+    ) -> Box<[Self]> {
+        let folded_witnesses_collection =
+            fold_witnesses(points_for_fft, fft_domain_size, &accumulator, traces);
+        let folded_challenges_collection =
+            fold_plonk_challenges(points_for_fft, fft_domain_size, &accumulator, traces);
+
+        folded_witnesses_collection
+            .into_iter()
+            .zip(folded_challenges_collection)
+            .map(|(witness, challenges)| Self {
+                witness,
+                challenges,
+            })
+            .collect()
+    }
+}
+impl<F: PrimeField> GetChallenges<F> for FoldedTrace<F> {
+    fn get_challenges(&self) -> &[F] {
+        &self.challenges
+    }
+}
+impl<F: PrimeField> GetWitness<F> for FoldedTrace<F> {
+    fn get_witness(&self) -> &[Vec<F>] {
+        &self.witness.W
+    }
+}
+
+pub(crate) fn compute_G<C: CurveAffine>(
+    beta_stroke: C::ScalarExt,
+    S: &PlonkStructure<C::ScalarExt>,
+    accumulator: impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>,
+    traces: &[(impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>)],
+) -> Result<UnivariatePoly<C::ScalarExt>, Error> {
+    let ctx = QueryIndexContext::from(S);
+    let max_degree = S
+        .gates
+        .iter()
+        .map(|poly| poly.degree(&ctx))
+        .max()
+        .unwrap_or_default();
+
+    if traces.is_empty() {
+        return Err(Error::EmptyTracesNotAllowed);
+    }
+
+    // `1` from accumulator
+    let count_of_folding_traces = 1 + traces.len();
+
+    let count_of_rows = 2usize.pow(S.k as u32);
+    let count_of_gates = S.gates.len();
+
+    let count_of_evaluation = count_of_rows * count_of_gates;
+    if count_of_evaluation.is_zero() {
+        return Ok(UnivariatePoly::new_zeroed(0));
+    }
+
+    let points_count = (count_of_folding_traces * max_degree + 1).next_power_of_two();
+    let fft_domain_size = points_count.ilog2();
+
+    let powers_of_beta_stroke = iter::successors(Some(beta_stroke), |ch| Some(ch.double()))
+        .take(count_of_evaluation.next_power_of_two().ilog2() as usize)
+        .collect::<Box<[C::ScalarExt]>>();
+
+    let points_for_fft = lagrange::iter_cyclic_subgroup(fft_domain_size)
+        .take(points_count)
+        .collect::<Box<[_]>>();
+
+    /// Auxiliary wrapper for using the tree to evaluate polynomials
+    #[derive(Debug)]
+    enum Node<F: PrimeField> {
+        Leaf(Box<[F]>),
+        Calculated {
+            /// Intermediate results for all calculated points
+            ///
+            /// Every point calculated for specific challenge
+            points: Box<[F]>,
+            /// Node height relative to leaf height
+            height: NonZeroUsize,
+        },
+    }
+
+    let evaluated = FoldedTrace::new(&points_for_fft, fft_domain_size, accumulator, traces)
+        .iter()
+        .map(|folded_trace| plonk::iter_evaluate_witness::<C>(S, folded_trace))
+        .try_multi_product()
+        .map(|points| points.map(Node::Leaf))
+        .tree_reduce(|left, right| {
+            let (left, right) = (left?, right?);
+
+            match (left, right) {
+                (Node::Leaf(mut left), Node::Leaf(right)) => {
+                    left.iter_mut().zip(right.iter()).for_each(|(left, right)| {
+                        *left += *right * powers_of_beta_stroke[0];
+                    });
+
+                    Ok(Node::Calculated {
+                        points: left,
+                        height: NonZeroUsize::new(1).unwrap(),
+                    })
+                }
+                (
+                    Node::Calculated {
+                        points: mut left,
+                        height: l_height,
+                    },
+                    Node::Calculated {
+                        points: right,
+                        height: r_height,
+                    },
+                    // The tree must be binary, so we only calculate at the one node level
+                ) if l_height.eq(&r_height) => {
+                    left.iter_mut().zip(right.iter()).for_each(|(left, right)| {
+                        *left += *right * powers_of_beta_stroke[l_height.get()];
+                    });
+
+                    Ok(Node::Calculated {
+                        points: left,
+                        height: l_height.saturating_add(1),
+                    })
+                }
+                other => unreachable!("this case must be unreachable: {other:?}"),
+            }
+        });
+
+    match evaluated {
+        Some(Ok(Node::Calculated { mut points, .. })) => {
+            fft::ifft(&mut points, fft_domain_size);
+            Ok(UnivariatePoly(points))
+        }
+        Some(Err(err)) => Err(err.into()),
+        other => unreachable!("this case must be unreachable: {other:?}"),
+    }
+}
+
+fn fold_witnesses<F: PrimeField>(
+    _X_challanges: &[F],
+    _log_n: u32,
+    _accumulator: &(impl GetWitness<F> + Sync),
+    _witnesses: &[impl Sync + GetWitness<F>],
+) -> Vec<PlonkWitness<F>> {
+    todo!()
+}
+
+fn fold_plonk_challenges<F: PrimeField>(
+    _X_challanges: &[F],
+    _log_n: u32,
+    _accumulator: &(impl GetChallenges<F> + Sync),
+    _witnesses: &[impl Sync + GetChallenges<F>],
+) -> Vec<Vec<F>> {
+    todo!()
 }
 
 #[cfg(test)]
