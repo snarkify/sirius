@@ -213,6 +213,7 @@ pub(crate) fn compute_F<C: CurveAffine>(
 ///
 /// Unlike [`compute_F`] where `X` challenge affects the edges of the tree, here the set of values
 /// is in the nodes
+#[instrument(skip_all)]
 pub(crate) fn compute_G<C: CurveAffine>(
     beta_stroke: C::ScalarExt,
     S: &PlonkStructure<C::ScalarExt>,
@@ -255,63 +256,46 @@ pub(crate) fn compute_G<C: CurveAffine>(
 
     /// Auxiliary wrapper for using the tree to evaluate polynomials
     #[derive(Debug)]
-    enum Node<F: PrimeField> {
-        Leaf(Box<[F]>),
-        Calculated {
-            /// Intermediate results for all calculated points
-            ///
-            /// Every point calculated for specific challenge
-            points: Box<[F]>,
-            /// Node height relative to leaf height
-            height: NonZeroUsize,
-        },
+    struct Node<F: PrimeField> {
+        values: Box<[F]>,
+        height: usize,
     }
 
     let evaluated = FoldedTrace::new(&points_for_fft, accumulator, traces)
         .iter()
         .map(|folded_trace| plonk::iter_evaluate_witness::<C>(S, folded_trace))
         .try_multi_product()
-        .map(|points| points.map(Node::Leaf))
+        .map(|points| points.map(|points| Node { values: points, height: 0 }))
         .tree_reduce(|left, right| {
-            let (left, right) = (left?, right?);
+            let (
+                Node {
+                    values: mut left,
+                    height: l_height,
+                },
+                Node {
+                    values: right,
+                    height: r_height,
+                },
+            ) = (left?, right?);
 
-            match (left, right) {
-                (Node::Leaf(mut left), Node::Leaf(right)) => {
-                    left.iter_mut().zip(right.iter()).for_each(|(left, right)| {
-                        *left += *right * powers_of_beta_stroke[0];
-                    });
+            if l_height.eq(&r_height) {
+                left.iter_mut().zip(right.iter()).for_each(|(left, right)| {
+                    *left += *right * powers_of_beta_stroke[l_height];
+                });
 
-                    Ok(Node::Calculated {
-                        points: left,
-                        height: NonZeroUsize::new(1).unwrap(),
-                    })
-                }
-                (
-                    Node::Calculated {
-                        points: mut left,
-                        height: l_height,
-                    },
-                    Node::Calculated {
-                        points: right,
-                        height: r_height,
-                    },
-                    // The tree must be binary, so we only calculate at the one node level
-                ) if l_height.eq(&r_height) => {
-                    left.iter_mut().zip(right.iter()).for_each(|(left, right)| {
-                        *left += *right * powers_of_beta_stroke[l_height.get()];
-                    });
-
-                    Ok(Node::Calculated {
-                        points: left,
-                        height: l_height.saturating_add(1),
-                    })
-                }
-                other => unreachable!("this case must be unreachable: {other:?}"),
+                Ok(Node {
+                    values: left,
+                    height: l_height.saturating_add(1),
+                })
+            } else {
+                unreachable!("different heights should not be here because the tree is binary: {l_height} != {r_height}")
             }
         });
 
     match evaluated {
-        Some(Ok(Node::Calculated { mut points, .. })) => {
+        Some(Ok(Node {
+            values: mut points, ..
+        })) => {
             fft::ifft(&mut points, fft_domain_size);
             Ok(UnivariatePoly(points))
         }
