@@ -7,6 +7,7 @@ use ff::{Field, PrimeField};
 use halo2curves::CurveAffine;
 use itertools::*;
 use num_traits::Zero;
+use rayon::prelude::*;
 use tracing::*;
 
 use crate::{
@@ -166,7 +167,6 @@ pub(crate) fn compute_F<C: CurveAffine>(
     }
 }
 
-
 struct FoldedTrace<F: PrimeField> {
     witness: PlonkWitness<F>,
     challenges: Vec<F>,
@@ -179,8 +179,7 @@ impl<F: PrimeField> FoldedTrace<F> {
         accumulator: impl Sync + GetChallenges<F> + GetWitness<F>,
         traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
     ) -> Box<[Self]> {
-        let folded_witnesses_collection =
-            fold_witnesses(points_for_fft, fft_domain_size, &accumulator, traces);
+        let folded_witnesses_collection = fold_witnesses(points_for_fft, &accumulator, traces);
         let folded_challenges_collection =
             fold_plonk_challenges(points_for_fft, fft_domain_size, &accumulator, traces);
 
@@ -312,13 +311,80 @@ pub(crate) fn compute_G<C: CurveAffine>(
     }
 }
 
+/// For each `X` we must perform the operation of sum all all matrices [`PlonkWitness`] with
+/// coefficients taken from [`lagrange::iter_eval_lagrange_polynomials_for_cyclic_group`]
+///
+/// Since the number of rows is large, we do this in one pass, counting the points for each
+/// challenge at each iteration, and laying them out in separate [`PlonkWitness`] at the end.
 fn fold_witnesses<F: PrimeField>(
-    _X_challanges: &[F],
-    _log_n: u32,
-    _accumulator: &(impl GetWitness<F> + Sync),
-    _witnesses: &[impl Sync + GetWitness<F>],
+    X_challenges: &[F],
+    accumulator: &(impl GetWitness<F> + Sync),
+    witnesses: &[impl Sync + GetWitness<F>],
 ) -> Vec<PlonkWitness<F>> {
-    todo!()
+    let log_n = (witnesses.len() + 1).next_power_of_two().ilog2();
+
+    let lagrange_poly_by_challenge = X_challenges
+        .iter()
+        .map(|X| {
+            lagrange::iter_eval_lagrange_polynomials_for_cyclic_group(*X, log_n)
+                .collect::<Box<[_]>>()
+        })
+        .collect::<Box<[_]>>();
+
+    let columns_count = accumulator.get_witness().len();
+    let rows_count = accumulator.get_witness()[0].len();
+
+    let mut result_matrix_by_challenge = vec![
+        PlonkWitness {
+            W: vec![vec![F::ZERO; rows_count]; columns_count],
+        };
+        X_challenges.len()
+    ];
+
+    itertools::iproduct!(0..columns_count, 0..rows_count)
+        .map(|(col, row)| {
+            iter::once(accumulator.get_witness())
+                .chain(witnesses.iter().map(GetWitness::get_witness))
+                .zip(
+                    lagrange_poly_by_challenge
+                        .iter()
+                        .map(|m| m.iter().copied())
+                        .multi_product(),
+                )
+                .fold(
+                    vec![F::ZERO; X_challenges.len()].into_boxed_slice(),
+                    // every element of this collection - one cell for each multiplier
+                    |mut cells_by_challenge, (matrix, multiplier)| {
+                        cells_by_challenge
+                            .iter_mut()
+                            .zip(multiplier.iter())
+                            .for_each(|(res, cell)| {
+                                *res += *cell * matrix[col][row];
+                            });
+
+                        cells_by_challenge
+                    },
+                )
+        })
+        .zip(
+            // Here we take an iterator that on each iteration returns [column][row] elements for
+            // each witness for its challenge
+            //
+            // next -> vec![result[0][col][row], result[1][col][row], ... result[challenges_len][col][row]]
+            result_matrix_by_challenge
+                .iter_mut()
+                .map(|matrix| matrix.W.iter_mut().flat_map(|col| col.iter_mut()))
+                .multi_product(),
+        )
+        .par_bridge()
+        .for_each(|(elements, mut results)| {
+            results
+                .iter_mut()
+                .zip(elements.iter())
+                .for_each(|(result, cell)| **result = *cell);
+        });
+
+    result_matrix_by_challenge
 }
 
 fn fold_plonk_challenges<F: PrimeField>(
@@ -328,6 +394,32 @@ fn fold_plonk_challenges<F: PrimeField>(
     _witnesses: &[impl Sync + GetChallenges<F>],
 ) -> Vec<Vec<F>> {
     todo!()
+}
+
+struct MultiProduct<I: Iterator> {
+    iters: Box<[I]>,
+}
+impl<I: Iterator> Iterator for MultiProduct<I> {
+    type Item = Box<[I::Item]>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iters.iter_mut().map(|i| i.next()).collect()
+    }
+}
+trait MultiCartesianProduct: Iterator + Sized
+where
+    <Self as Iterator>::Item: Iterator + Sized,
+{
+    fn multi_product(self) -> MultiProduct<Self::Item> {
+        MultiProduct {
+            iters: self.collect(),
+        }
+    }
+}
+
+impl<I: Iterator + Sized> MultiCartesianProduct for I where
+    <Self as Iterator>::Item: Iterator + Sized
+{
 }
 
 #[cfg(test)]
