@@ -411,18 +411,18 @@ pub mod try_multi_product {
         /// # Example
         ///
         /// ```
-        /// use sirius::util::TryMultiProductTrait;
+        /// use crate::sirius::util::TryMultiProduct;
         ///
         /// let iterators = vec![
-        ///     vec![Ok(1), Ok(2), Ok(3)].into_iter(),
+        ///     vec![Result::<_, ()>::Ok(1), Ok(2), Ok(3)].into_iter(),
         ///     vec![Ok(4), Ok(5)].into_iter(),
         ///     vec![Ok(6), Ok(7)].into_iter(),
         /// ];
         ///
         /// let mut multi_prod = iterators.into_iter().try_multi_product();
         ///
-        /// assert_eq!(multi_prod.next(), Some(Ok(Box::new([1, 4, 6]))));
-        /// assert_eq!(multi_prod.next(), Some(Ok(Box::new([2, 5, 7]))));
+        /// assert_eq!(multi_prod.next(), Some(Ok(vec![1, 4, 6].into_boxed_slice())));
+        /// assert_eq!(multi_prod.next(), Some(Ok(vec![2, 5, 7].into_boxed_slice())));
         /// assert_eq!(multi_prod.next(), None);
         /// ```
         fn try_multi_product(self) -> MultiProductWithResults<T, I, E> {
@@ -471,5 +471,32 @@ pub mod try_multi_product {
             )
         }
     }
+
+    pub struct MultiProduct<I: Iterator> {
+        iters: Box<[I]>,
+    }
+    impl<I: Iterator> Iterator for MultiProduct<I> {
+        type Item = Box<[I::Item]>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.iters.iter_mut().map(|i| i.next()).collect()
+        }
+    }
+
+    pub trait MultiCartesianProduct: Iterator + Sized
+    where
+        <Self as Iterator>::Item: Iterator + Sized,
+    {
+        fn multi_product(self) -> MultiProduct<Self::Item> {
+            MultiProduct {
+                iters: self.collect(),
+            }
+        }
+    }
+
+    impl<I: Iterator + Sized> MultiCartesianProduct for I where
+        <Self as Iterator>::Item: Iterator + Sized
+    {
+    }
 }
-pub use try_multi_product::{MultiProductWithResults, TryMultiProduct};
+pub use try_multi_product::{MultiCartesianProduct, MultiProductWithResults, TryMultiProduct};
