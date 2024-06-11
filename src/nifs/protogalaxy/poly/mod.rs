@@ -53,6 +53,8 @@ pub enum Error {
 ///     │      │       │       │
 ///     └──────f₀₁₂₃   └───────f₄₅₆₇
 ///            │               │
+///            1               β⁴
+///            │               │
 ///            └───────────────f₀₁₂₃₄₅₆₇
 ///
 /// Each β here is a vector of all `X`, and each node except leaves contains all counted
@@ -199,6 +201,8 @@ pub(crate) fn compute_F<C: CurveAffine>(
 ///     1      β²      1       β²
 ///     │      │       │       │
 ///     └──────f₀₁₂₃   └───────f₄₅₆₇
+///            │               │
+///            1               β⁴
 ///            │               │
 ///            └───────────────f₀₁₂₃₄₅₆₇
 ///
