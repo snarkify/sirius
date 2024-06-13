@@ -164,9 +164,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             IVC::fold(
                 &pp,
-                sc1.clone(),
+                &sc1,
                 black_box(primary_z_0),
-                sc2.clone(),
+                &sc2,
                 black_box(secondary_z_0),
                 NonZeroUsize::new(1).unwrap(),
             )
@@ -182,9 +182,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             IVC::fold(
                 &pp,
-                sc1.clone(),
+                &sc1,
                 black_box(primary_z_0),
-                sc2.clone(),
+                &sc2,
                 black_box(secondary_z_0),
                 NonZeroUsize::new(2).unwrap(),
             )
