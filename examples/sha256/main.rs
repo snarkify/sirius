@@ -401,9 +401,9 @@ fn main() {
 
     IVC::fold_with_debug_mode(
         &pp,
-        sc1,
+        &sc1,
         array::from_fn(|i| C1Scalar::from_u128(i as u128)),
-        sc2,
+        &sc2,
         array::from_fn(|i| C2Scalar::from_u128(i as u128)),
         NonZeroUsize::new(1).unwrap(),
     )

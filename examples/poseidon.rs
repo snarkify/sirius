@@ -253,9 +253,9 @@ fn main() {
 
     IVC::fold(
         &pp,
-        primary,
+        &primary,
         primary_input,
-        secondary,
+        &secondary,
         secondary_input,
         fold_step_count,
     )

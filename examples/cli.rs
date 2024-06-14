@@ -137,9 +137,9 @@ fn fold(
     if args.debug_mode {
         IVC::fold_with_debug_mode(
             &pp,
-            primary,
+            &primary,
             primary_input,
-            secondary,
+            &secondary,
             secondary_input,
             args.fold_step_count,
         )
@@ -147,9 +147,9 @@ fn fold(
     } else {
         IVC::fold(
             &pp,
-            primary,
+            &primary,
             primary_input,
-            secondary,
+            &secondary,
             secondary_input,
             args.fold_step_count,
         )

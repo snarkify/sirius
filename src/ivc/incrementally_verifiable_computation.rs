@@ -1,4 +1,4 @@
-use std::{io, num::NonZeroUsize};
+use std::{io, marker::PhantomData, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
@@ -28,12 +28,11 @@ pub use super::step_circuit::{self, StepCircuit, SynthesisError};
 struct StepCircuitContext<const ARITY: usize, C, SC>
 where
     C: CurveAffine,
-    SC: StepCircuit<ARITY, C::Scalar>,
 {
-    step_circuit: SC,
     relaxed_trace: RelaxedPlonkTrace<C>,
     z_0: [C::Scalar; ARITY],
     z_i: [C::Scalar; ARITY],
+    _p: PhantomData<SC>,
 }
 
 // TODO #31 docs
@@ -130,9 +129,9 @@ where
 {
     pub fn fold_with_debug_mode<const T: usize, RP1, RP2>(
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
-        primary: SC1,
+        primary: &SC1,
         primary_z_0: [C1::Scalar; A1],
-        secondary: SC2,
+        secondary: &SC2,
         secondary_z_0: [C2::Scalar; A2],
         num_steps: NonZeroUsize,
     ) -> Result<(), Error>
@@ -145,7 +144,7 @@ where
 
         for step in 1..=num_steps.get() {
             trace!("Start fold {step} step");
-            ivc.fold_step(pp)?;
+            ivc.fold_step(pp, primary, secondary)?;
         }
 
         trace!("Finish folding, start verify");
@@ -156,9 +155,9 @@ where
     }
     pub fn fold<const T: usize, RP1, RP2>(
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
-        primary: SC1,
+        primary: &SC1,
         primary_z_0: [C1::Scalar; A1],
-        secondary: SC2,
+        secondary: &SC2,
         secondary_z_0: [C2::Scalar; A2],
         num_steps: NonZeroUsize,
     ) -> Result<(), Error>
@@ -171,7 +170,7 @@ where
 
         for step in 1..=num_steps.get() {
             trace!("Start fold {step} step");
-            ivc.fold_step(pp)?;
+            ivc.fold_step(pp, primary, secondary)?;
         }
 
         trace!("Finish folding, start verify");
@@ -182,11 +181,11 @@ where
     }
 
     #[instrument(name = "ivc_new", skip_all, fields(step = 0))]
-    fn new<const T: usize, RP1, RP2>(
+    pub fn new<const T: usize, RP1, RP2>(
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
-        primary: SC1,
+        primary: &SC1,
         primary_z_0: [C1::Scalar; A1],
-        secondary: SC2,
+        secondary: &SC2,
         secondary_z_0: [C2::Scalar; A2],
         debug_mode: bool,
     ) -> Result<Self, Error>
@@ -225,7 +224,7 @@ where
         };
 
         let primary_sfc = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
-            step_circuit: &primary,
+            step_circuit: primary,
             input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
                 step: C2::Base::ZERO,
                 step_pp: pp.primary.params(),
@@ -299,7 +298,7 @@ where
         };
 
         let secondary_sfc = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
-            step_circuit: &secondary,
+            step_circuit: secondary,
             input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
                 step: C1::Base::ZERO,
                 step_pp: pp.secondary.params(),
@@ -354,24 +353,26 @@ where
             primary_nifs_pp,
             secondary_trace: secondary_plonk_trace.clone(),
             primary: StepCircuitContext {
-                step_circuit: primary,
                 z_0: primary_z_0,
                 z_i: primary_z_output,
                 relaxed_trace: primary_relaxed_trace,
+                _p: PhantomData,
             },
             secondary: StepCircuitContext {
-                step_circuit: secondary,
                 z_0: secondary_z_0,
                 z_i: secondary_z_output,
                 relaxed_trace: secondary_relaxed_trace,
+                _p: PhantomData,
             },
         })
     }
 
     #[instrument(name = "ivc_fold_step", skip_all, fields(step = self.step))]
-    fn fold_step<const T: usize, RP1, RP2>(
+    pub fn fold_step<const T: usize, RP1, RP2>(
         &mut self,
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
+        primary: &SC1,
+        secondary: &SC2,
     ) -> Result<(), Error>
     where
         RP1: ROPair<C1::Scalar, Config = MainGateConfig<T>>,
@@ -391,10 +392,7 @@ where
         debug!("prepare primary td");
 
         // Prepare primary constraint system for folding
-        let primary_z_next = self
-            .primary
-            .step_circuit
-            .process_step(&self.primary.z_i, pp.primary.k_table_size())?;
+        let primary_z_next = primary.process_step(&self.primary.z_i, pp.primary.k_table_size())?;
 
         let primary_instance = {
             let _s = info_span!("generate_instance").entered();
@@ -415,7 +413,7 @@ where
         };
 
         let primary_sfc = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
-            step_circuit: &self.primary.step_circuit,
+            step_circuit: primary,
             input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
                 step: C2::Base::from_u128(self.step as u128),
                 step_pp: pp.primary.params(),
@@ -470,10 +468,8 @@ where
 
         debug!("start fold step with folding 'primary' by 'secondary'");
 
-        let next_secondary_z_i = self
-            .secondary
-            .step_circuit
-            .process_step(&self.secondary.z_i, pp.secondary.k_table_size())?;
+        let next_secondary_z_i =
+            secondary.process_step(&self.secondary.z_i, pp.secondary.k_table_size())?;
 
         let secondary_instance = {
             let _s = info_span!("generate_instance");
@@ -494,7 +490,7 @@ where
         };
 
         let secondary_sfc = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
-            step_circuit: &self.secondary.step_circuit,
+            step_circuit: secondary,
             input: StepInputs::<'_, A2, C1, RP2::OnCircuit> {
                 step: C1::Base::from_u128(self.step as u128),
                 step_pp: pp.secondary.params(),
@@ -542,7 +538,7 @@ where
     }
 
     #[instrument(name = "ivc_vefify", skip_all)]
-    fn verify<const T: usize, RP1, RP2>(
+    pub fn verify<const T: usize, RP1, RP2>(
         &mut self,
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
     ) -> Result<(), Error>
