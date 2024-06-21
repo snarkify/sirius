@@ -1,7 +1,7 @@
 use std::{array, io, num::NonZeroUsize, path::Path};
 
 use bn256::G1 as C1;
-use criterion::{criterion_group, Criterion};
+use criterion::{black_box, criterion_group, Criterion};
 use grumpkin::G1 as C2;
 use metadata::LevelFilter;
 use rand::Rng;
@@ -189,10 +189,11 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("ivc_of_merkle_tree");
     group.significance_level(0.1).sample_size(15);
     group.bench_function("fold_step_merkle_tree", |b| {
+        let input =
+            array::from_fn(|_| (rng.gen::<u32>() % INDEX_LIMIT, C1Scalar::random(&mut rng)));
+
         b.iter(|| {
-            sc1.update_leaves(&array::from_fn(|_| {
-                (rng.gen::<u32>() % INDEX_LIMIT, C1Scalar::random(&mut rng))
-            }));
+            sc1.update_leaves(&black_box(input));
             ivc.fold_step(&pp, &sc1, &sc2).unwrap();
         })
     });
