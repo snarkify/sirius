@@ -1,15 +1,15 @@
-use std::num::NonZeroUsize;
-use std::{iter, mem};
+use std::{iter, mem, num::NonZeroUsize};
 
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2curves::group::ff::{FromUniformBytes, PrimeField};
 use poseidon::{self, SparseMDSMatrix};
 use tracing::*;
 
-use crate::poseidon::{ROConstantsTrait, ROTrait};
-use crate::util::{bits_to_fe_le, fe_to_bits_le};
-
 use super::Spec;
+use crate::{
+    poseidon::{ROConstantsTrait, ROTrait},
+    util::{bits_to_fe_le, fe_to_bits_le},
+};
 
 // adapted from: https://github.com/privacy-scaling-explorations/snark-verifier
 
@@ -146,7 +146,7 @@ where
     }
 
     fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
-        self.output::<C>(num_bits)
+        self.output::<C::Scalar>(num_bits)
     }
 }
 
@@ -168,7 +168,17 @@ where
         self.buf.extend_from_slice(elements);
     }
 
-    fn output<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
+    pub fn digest<F1: PrimeField>(
+        spec: Spec<F, T, RATE>,
+        elements: &[F],
+        num_bits: NonZeroUsize,
+    ) -> F1 {
+        let mut s = Self::new(spec);
+        s.update(elements);
+        s.output(num_bits)
+    }
+
+    pub fn output<F1: PrimeField>(&mut self, num_bits: NonZeroUsize) -> F1 {
         let buf = mem::take(&mut self.buf);
         debug!("Off circuit input of hash: {buf:?}");
 
@@ -182,8 +192,11 @@ where
         }
 
         let output = self.state.inner[1];
-        let bits = fe_to_bits_le(&output)[..num_bits.get()].to_vec();
-        bits_to_fe_le(bits)
+        let mut bits = fe_to_bits_le(&output);
+        if bits.len() < num_bits.get() {
+            bits.resize(num_bits.get(), false);
+        }
+        bits_to_fe_le(bits[..num_bits.get()].to_vec())
     }
 
     fn permutation(&mut self, inputs: &[F]) {

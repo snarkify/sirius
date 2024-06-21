@@ -257,7 +257,7 @@ const MULTIPLICATION_COUNT: usize = 2;
 #[derive(Clone, Debug)]
 pub struct MainGateConfig<const T: usize> {
     pub(crate) state: [Column<Advice>; T],
-    pub(crate) input: Column<Advice>,
+    pub input: Column<Advice>,
     pub(crate) out: Column<Advice>,
     pub(crate) q_m: [Column<Fixed>; MULTIPLICATION_COUNT],
     // for linear term
