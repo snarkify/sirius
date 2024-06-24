@@ -200,8 +200,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let mut ivc = IVC::new(&pp, &sc1, [sc1_default_root], &sc2, [C2Scalar::ZERO], true).unwrap();
 
     let mut group = c.benchmark_group("ivc_of_merkle_tree");
-    group.significance_level(0.1).sample_size(30);
-    group.bench_function("fold_step_merkle_tree", |b| {
+    group.significance_level(0.1).sample_size(10);
+    group.bench_function("fold_batch_steps", |b| {
         b.iter(|| {
             for _ in 0..batch_size {
                 sc1.update_leaves(black_box(iter::repeat_with(|| {
@@ -212,7 +212,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         })
     });
 
-    group.bench_function("verify_merkle_tree", |b| {
+    group.bench_function("verify", |b| {
         b.iter(|| {
             ivc.verify(&pp).unwrap();
         })
