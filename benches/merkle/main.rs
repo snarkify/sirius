@@ -34,7 +34,6 @@ const COMMITMENT_KEY_SIZE: usize = 27;
 const INDEX_LIMIT: u32 = 1 << 31;
 const ARITY: usize = 1;
 
-const CIRCUIT_TABLE_SIZE1: usize = 18;
 const CIRCUIT_TABLE_SIZE2: usize = 17;
 
 use sirius::gadgets::merkle_tree::{
@@ -149,6 +148,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let step_batch_size: usize = std::env::var("STEP_BATCH_SIZE").unwrap().parse().unwrap();
     info!("with batch size = {batch_size}");
 
+    let circuit_table_size: u32 = std::env::var("CIRCUIT_TABLE_SIZE")
+        .unwrap()
+        .parse()
+        .unwrap();
+    info!("circuit table size = {circuit_table_size}");
+
     let _span = info_span!("merkle_bench").entered();
     let prepare_span = info_span!("prepare").entered();
 
@@ -182,7 +187,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         RandomOracle,
     >::new(
         CircuitPublicParamsInput::new(
-            CIRCUIT_TABLE_SIZE1 as u32,
+            circuit_table_size,
             &primary_commitment_key,
             primary_spec.clone(),
             &sc1,
