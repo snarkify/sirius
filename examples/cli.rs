@@ -9,6 +9,9 @@ use clap::{Parser, ValueEnum};
 #[allow(dead_code)]
 mod poseidon;
 
+#[allow(dead_code)]
+mod merkle;
+
 use ff::Field;
 use poseidon::poseidon_step_circuit::TestPoseidonCircuit;
 use sirius::{
@@ -29,6 +32,8 @@ struct Args {
     primary_commitment_key_size: usize,
     #[arg(long, default_value_t = 1)]
     primary_repeat_count: usize,
+    #[arg(long, default_value_t = 1)]
+    primary_batch_size: usize,
     #[arg(long, default_value_t = 10)]
     primary_r_f: usize,
     #[arg(long, default_value_t = 10)]
@@ -61,12 +66,12 @@ struct Args {
 enum Circuits {
     Poseidon,
     Trivial,
+    MerkleTree,
 }
-
-use halo2curves::{bn256, grumpkin};
 
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
+use halo2curves::{bn256, grumpkin};
 
 const MAIN_GATE_SIZE: usize = 5;
 const RATE: usize = 4;
@@ -80,10 +85,12 @@ type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
 type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
 type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
 
-fn fold(
+fn fold<SC1: StepCircuit<1, C1Scalar>, SC2: StepCircuit<1, C2Scalar>>(
     args: &Args,
-    primary: impl StepCircuit<1, C1Scalar>,
-    secondary: impl StepCircuit<1, C2Scalar>,
+    mut primary: SC1,
+    mut secondary: SC2,
+    primary_updater: impl Fn(&mut SC1),
+    secondary_updater: impl Fn(&mut SC2),
 ) {
     let primary_commitment_key = poseidon::get_or_create_commitment_key::<C1Affine>(
         args.primary_commitment_key_size,
@@ -134,27 +141,26 @@ fn fold(
     let primary_input = array::from_fn(|_| C1Scalar::random(&mut rnd));
     let secondary_input = array::from_fn(|_| C2Scalar::random(&mut rnd));
 
-    if args.debug_mode {
-        IVC::fold_with_debug_mode(
-            &pp,
-            &primary,
-            primary_input,
-            &secondary,
-            secondary_input,
-            args.fold_step_count,
-        )
-        .unwrap();
-    } else {
-        IVC::fold(
-            &pp,
-            &primary,
-            primary_input,
-            &secondary,
-            secondary_input,
-            args.fold_step_count,
-        )
-        .unwrap();
+    let mut ivc = IVC::new(
+        &pp,
+        &primary,
+        primary_input,
+        &secondary,
+        secondary_input,
+        args.debug_mode,
+    )
+    .unwrap();
+
+    for step in 0..args.fold_step_count.into() {
+        let _step_span = info_span!("step_span", step = step).entered();
+
+        primary_updater(&mut primary);
+        secondary_updater(&mut secondary);
+
+        ivc.fold_step(&pp, &primary, &secondary).unwrap();
     }
+
+    ivc.verify(&pp).unwrap()
 }
 
 fn main() {
@@ -189,26 +195,100 @@ fn main() {
 
     // Such a redundant call design due to the fact that they are different function types for the
     // compiler due to generics
+    let mut rng = rand::thread_rng();
     match (args.primary_circuit, args.secondary_circuit) {
         (Circuits::Poseidon, Circuits::Trivial) => fold(
             &args,
             TestPoseidonCircuit::new(args.primary_repeat_count),
             trivial::Circuit::default(),
+            |_| {},
+            |_| {},
         ),
         (Circuits::Poseidon, Circuits::Poseidon) => fold(
             &args,
             TestPoseidonCircuit::new(args.primary_repeat_count),
             TestPoseidonCircuit::new(args.secondary_repeat_count),
+            |_| {},
+            |_| {},
         ),
         (Circuits::Trivial, Circuits::Poseidon) => fold(
             &args,
             trivial::Circuit::default(),
             TestPoseidonCircuit::new(args.secondary_repeat_count),
+            |_| {},
+            |_| {},
         ),
         (Circuits::Trivial, Circuits::Trivial) => fold(
             &args,
             trivial::Circuit::default(),
             trivial::Circuit::default(),
+            |_| {},
+            |_| {},
+        ),
+        (Circuits::MerkleTree, Circuits::Trivial) => fold(
+            &args,
+            merkle::MerkleTreeUpdateCircuit::new_with_random_update(
+                args.primary_repeat_count,
+                &mut rng,
+            ),
+            trivial::Circuit::default(),
+            |primary| {
+                primary.random_update_leaves(&mut rand::thread_rng());
+            },
+            |_| {},
+        ),
+        (Circuits::MerkleTree, Circuits::Poseidon) => fold(
+            &args,
+            merkle::MerkleTreeUpdateCircuit::new_with_random_update(
+                args.primary_repeat_count,
+                &mut rng,
+            ),
+            TestPoseidonCircuit::new(args.secondary_repeat_count),
+            |primary| {
+                primary.random_update_leaves(&mut rand::thread_rng());
+            },
+            |_| {},
+        ),
+        (Circuits::Poseidon, Circuits::MerkleTree) => fold(
+            &args,
+            TestPoseidonCircuit::new(args.primary_repeat_count),
+            merkle::MerkleTreeUpdateCircuit::new_with_random_update(
+                args.secondary_repeat_count,
+                &mut rng,
+            ),
+            |_| {},
+            |secondary| {
+                secondary.random_update_leaves(&mut rand::thread_rng());
+            },
+        ),
+        (Circuits::Trivial, Circuits::MerkleTree) => fold(
+            &args,
+            trivial::Circuit::default(),
+            merkle::MerkleTreeUpdateCircuit::new_with_random_update(
+                args.secondary_repeat_count,
+                &mut rng,
+            ),
+            |_| {},
+            |secondary| {
+                secondary.random_update_leaves(&mut rand::thread_rng());
+            },
+        ),
+        (Circuits::MerkleTree, Circuits::MerkleTree) => fold(
+            &args,
+            merkle::MerkleTreeUpdateCircuit::new_with_random_update(
+                args.primary_repeat_count,
+                &mut rng,
+            ),
+            merkle::MerkleTreeUpdateCircuit::new_with_random_update(
+                args.secondary_repeat_count,
+                &mut rng,
+            ),
+            |primary| {
+                primary.random_update_leaves(&mut rand::thread_rng());
+            },
+            |secondary| {
+                secondary.random_update_leaves(&mut rand::thread_rng());
+            },
         ),
     }
 }
