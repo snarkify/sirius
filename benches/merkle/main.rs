@@ -207,9 +207,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     let mut ivc = IVC::new(&pp, &sc1, [sc1_default_root], &sc2, [C2Scalar::ZERO], true).unwrap();
 
-    let mut group = c.benchmark_group("ivc_of_merkle_tree");
+    let mut group = c.benchmark_group(format!("ivc_of_merkle_tree_{batch_size}/{step_batch_size}"));
     group.significance_level(0.1).sample_size(10);
-    group.bench_function("fold_batch_steps", |b| {
+    group.bench_function("fold_steps", |b| {
         b.iter(|| {
             for _ in 0..step_batch_size {
                 sc1.update_leaves(black_box(iter::repeat_with(|| {
