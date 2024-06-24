@@ -146,10 +146,13 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let batch_size: usize = std::env::var("BATCH_SIZE").unwrap().parse().unwrap();
     info!("with batch size = {batch_size}");
 
+    let step_batch_size: usize = std::env::var("STEP_BATCH_SIZE").unwrap().parse().unwrap();
+    info!("with batch size = {batch_size}");
+
     let _span = info_span!("merkle_bench").entered();
     let prepare_span = info_span!("prepare").entered();
 
-    let mut sc1 = MerkleTreeUpdateCircuit::new(1);
+    let mut sc1 = MerkleTreeUpdateCircuit::new(batch_size);
     let (sc1_default_root, _) = sc1.update_leaves(iter::repeat_with(|| {
         (rng.gen::<u32>() % INDEX_LIMIT, C1Scalar::random(&mut rng))
     }));
@@ -203,7 +206,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     group.significance_level(0.1).sample_size(10);
     group.bench_function("fold_batch_steps", |b| {
         b.iter(|| {
-            for _ in 0..batch_size {
+            for _ in 0..step_batch_size {
                 sc1.update_leaves(black_box(iter::repeat_with(|| {
                     (rng.gen::<u32>() % INDEX_LIMIT, C1Scalar::random(&mut rng))
                 })));
