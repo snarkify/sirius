@@ -132,6 +132,7 @@ where
                         region.constrain_equal(prev.cell(), old.cell())?;
                         prev = new;
                     }
+                    info!("offset = {}", region.offset);
 
                     Ok([prev])
                 },
