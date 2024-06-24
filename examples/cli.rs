@@ -151,9 +151,7 @@ fn fold<SC1: StepCircuit<1, C1Scalar>, SC2: StepCircuit<1, C2Scalar>>(
     )
     .unwrap();
 
-    for step in 0..args.fold_step_count.into() {
-        let _step_span = info_span!("step_span", step = step).entered();
-
+    for _step in 0..args.fold_step_count.into() {
         primary_updater(&mut primary);
         secondary_updater(&mut secondary);
 
