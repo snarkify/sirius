@@ -30,7 +30,7 @@ type RandomOracleConstant<F> = <RandomOracle as ROPair<F>>::Args;
 
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
 const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
-const COMMITMENT_KEY_SIZE: usize = 22;
+const COMMITMENT_KEY_SIZE: usize = 27;
 const INDEX_LIMIT: u32 = 1 << 31;
 const ARITY: usize = 1;
 
