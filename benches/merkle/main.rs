@@ -149,7 +149,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let _span = info_span!("merkle_bench").entered();
     let prepare_span = info_span!("prepare").entered();
 
-    let mut sc1 = MerkleTreeUpdateCircuit::new(batch_size);
+    let mut sc1 = MerkleTreeUpdateCircuit::new(1);
     let (sc1_default_root, _) = sc1.update_leaves(iter::repeat_with(|| {
         (rng.gen::<u32>() % INDEX_LIMIT, C1Scalar::random(&mut rng))
     }));
@@ -203,11 +203,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     group.significance_level(0.1).sample_size(30);
     group.bench_function("fold_step_merkle_tree", |b| {
         b.iter(|| {
-            let input =
-                iter::repeat_with(|| (rng.gen::<u32>() % INDEX_LIMIT, C1Scalar::random(&mut rng)));
-
-            sc1.update_leaves(black_box(input));
-            ivc.fold_step(&pp, &sc1, &sc2).unwrap();
+            for _ in 0..batch_size {
+                sc1.update_leaves(black_box(iter::repeat_with(|| {
+                    (rng.gen::<u32>() % INDEX_LIMIT, C1Scalar::random(&mut rng))
+                })));
+                ivc.fold_step(&pp, &sc1, &sc2).unwrap();
+            }
         })
     });
 
