@@ -2,7 +2,7 @@
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-use std::{array, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
 use clap::{Parser, ValueEnum};
 
@@ -12,9 +12,11 @@ mod poseidon;
 #[allow(dead_code)]
 mod merkle;
 
-use ff::Field;
+use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
+use merkle::MerkleTreeUpdateCircuit;
 use poseidon::poseidon_step_circuit::TestPoseidonCircuit;
 use sirius::{
+    gadgets::merkle_tree::off_circuit::Tree,
     ivc::{step_circuit::trivial, CircuitPublicParamsInput, PublicParams, StepCircuit, IVC},
     poseidon::ROPair,
 };
@@ -85,13 +87,46 @@ type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
 type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
 type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
 
-fn fold<SC1: StepCircuit<1, C1Scalar>, SC2: StepCircuit<1, C2Scalar>>(
+trait TestCircuitHelpers<F: PrimeField> {
+    const NAME: &'static str;
+
+    fn get_default_input() -> F {
+        F::ZERO
+    }
+
+    fn update_between_step(&mut self) {}
+}
+
+impl<F: PrimeField, const ARITY: usize> TestCircuitHelpers<F> for trivial::Circuit<ARITY, F> {
+    const NAME: &'static str = "Trivial";
+}
+impl<F: PrimeFieldBits> TestCircuitHelpers<F> for TestPoseidonCircuit<F> {
+    const NAME: &'static str = "Poseidon";
+}
+impl<F> TestCircuitHelpers<F> for MerkleTreeUpdateCircuit<F>
+where
+    F: PrimeFieldBits + serde::Serialize + FromUniformBytes<64>,
+{
+    const NAME: &'static str = "MerkleTree";
+
+    fn get_default_input() -> F {
+        *Tree::default().get_root()
+    }
+
+    fn update_between_step(&mut self) {
+        self.random_update_leaves(&mut rand::thread_rng());
+    }
+}
+
+fn fold<
+    SC1: StepCircuit<1, C1Scalar> + TestCircuitHelpers<C1Scalar>,
+    SC2: StepCircuit<1, C2Scalar> + TestCircuitHelpers<C2Scalar>,
+>(
     args: &Args,
     mut primary: SC1,
     mut secondary: SC2,
-    primary_updater: impl Fn(&mut SC1),
-    secondary_updater: impl Fn(&mut SC2),
 ) {
+    let _span = info_span!("cli", primary = SC1::NAME, secondary = SC2::NAME).entered();
     let primary_commitment_key = poseidon::get_or_create_commitment_key::<C1Affine>(
         args.primary_commitment_key_size,
         "bn256",
@@ -137,23 +172,22 @@ fn fold<SC1: StepCircuit<1, C1Scalar>, SC2: StepCircuit<1, C2Scalar>>(
     )
     .unwrap();
 
-    let mut rnd = rand::thread_rng();
-    let primary_input = array::from_fn(|_| C1Scalar::random(&mut rnd));
-    let secondary_input = array::from_fn(|_| C2Scalar::random(&mut rnd));
+    let primary_input = SC1::get_default_input();
+    let secondary_input = SC2::get_default_input();
 
     let mut ivc = IVC::new(
         &pp,
         &primary,
-        primary_input,
+        [primary_input],
         &secondary,
-        secondary_input,
+        [secondary_input],
         args.debug_mode,
     )
     .unwrap();
 
     for _step in 0..args.fold_step_count.into() {
-        primary_updater(&mut primary);
-        secondary_updater(&mut secondary);
+        primary.update_between_step();
+        secondary.update_between_step();
 
         ivc.fold_step(&pp, &primary, &secondary).unwrap();
     }
@@ -189,7 +223,6 @@ fn main() {
     }
 
     // To osterize the total execution time of the example
-    let _span = info_span!("cli").entered();
 
     // Such a redundant call design due to the fact that they are different function types for the
     // compiler due to generics
@@ -199,29 +232,21 @@ fn main() {
             &args,
             TestPoseidonCircuit::new(args.primary_repeat_count),
             trivial::Circuit::default(),
-            |_| {},
-            |_| {},
         ),
         (Circuits::Poseidon, Circuits::Poseidon) => fold(
             &args,
             TestPoseidonCircuit::new(args.primary_repeat_count),
             TestPoseidonCircuit::new(args.secondary_repeat_count),
-            |_| {},
-            |_| {},
         ),
         (Circuits::Trivial, Circuits::Poseidon) => fold(
             &args,
             trivial::Circuit::default(),
             TestPoseidonCircuit::new(args.secondary_repeat_count),
-            |_| {},
-            |_| {},
         ),
         (Circuits::Trivial, Circuits::Trivial) => fold(
             &args,
             trivial::Circuit::default(),
             trivial::Circuit::default(),
-            |_| {},
-            |_| {},
         ),
         (Circuits::MerkleTree, Circuits::Trivial) => fold(
             &args,
@@ -230,10 +255,6 @@ fn main() {
                 &mut rng,
             ),
             trivial::Circuit::default(),
-            |primary| {
-                primary.random_update_leaves(&mut rand::thread_rng());
-            },
-            |_| {},
         ),
         (Circuits::MerkleTree, Circuits::Poseidon) => fold(
             &args,
@@ -242,10 +263,6 @@ fn main() {
                 &mut rng,
             ),
             TestPoseidonCircuit::new(args.secondary_repeat_count),
-            |primary| {
-                primary.random_update_leaves(&mut rand::thread_rng());
-            },
-            |_| {},
         ),
         (Circuits::Poseidon, Circuits::MerkleTree) => fold(
             &args,
@@ -254,10 +271,6 @@ fn main() {
                 args.secondary_repeat_count,
                 &mut rng,
             ),
-            |_| {},
-            |secondary| {
-                secondary.random_update_leaves(&mut rand::thread_rng());
-            },
         ),
         (Circuits::Trivial, Circuits::MerkleTree) => fold(
             &args,
@@ -266,10 +279,6 @@ fn main() {
                 args.secondary_repeat_count,
                 &mut rng,
             ),
-            |_| {},
-            |secondary| {
-                secondary.random_update_leaves(&mut rand::thread_rng());
-            },
         ),
         (Circuits::MerkleTree, Circuits::MerkleTree) => fold(
             &args,
@@ -281,12 +290,6 @@ fn main() {
                 args.secondary_repeat_count,
                 &mut rng,
             ),
-            |primary| {
-                primary.random_update_leaves(&mut rand::thread_rng());
-            },
-            |secondary| {
-                secondary.random_update_leaves(&mut rand::thread_rng());
-            },
         ),
     }
 }
