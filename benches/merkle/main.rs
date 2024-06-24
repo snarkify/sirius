@@ -211,6 +211,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         })
     });
 
+    group.bench_function("verify_merkle_tree", |b| {
+        b.iter(|| {
+            ivc.verify(&pp).unwrap();
+        })
+    });
+
     group.finish();
 }
 
