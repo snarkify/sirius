@@ -189,7 +189,7 @@ fn main() {
     }
 
     // To osterize the total execution time of the example
-    let _span = info_span!("poseidon_example").entered();
+    let _span = info_span!("cli").entered();
 
     // Such a redundant call design due to the fact that they are different function types for the
     // compiler due to generics
