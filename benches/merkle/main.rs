@@ -1,4 +1,4 @@
-use std::{array, io, num::NonZeroUsize, path::Path};
+use std::{io, iter, num::NonZeroUsize, path::Path};
 
 use bn256::G1 as C1;
 use criterion::{black_box, criterion_group, Criterion};
@@ -30,11 +30,11 @@ type RandomOracleConstant<F> = <RandomOracle as ROPair<F>>::Args;
 
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
 const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
-const COMMITMENT_KEY_SIZE: usize = 21;
+const COMMITMENT_KEY_SIZE: usize = 22;
 const INDEX_LIMIT: u32 = 1 << 31;
 const ARITY: usize = 1;
 
-const CIRCUIT_TABLE_SIZE1: usize = 17;
+const CIRCUIT_TABLE_SIZE1: usize = 18;
 const CIRCUIT_TABLE_SIZE2: usize = 17;
 
 use sirius::gadgets::merkle_tree::{
@@ -51,7 +51,8 @@ where
     F: PrimeFieldBits + serde::Serialize + FromUniformBytes<64>,
 {
     tree: Tree<F>,
-    last_proof: Option<[Proof<F>; BATCH_SIZE]>,
+    last_proof: Option<Box<[Proof<F>]>>,
+    batch_size: usize,
 }
 
 impl<F> Default for MerkleTreeUpdateCircuit<F>
@@ -62,18 +63,27 @@ where
         Self {
             tree: Default::default(),
             last_proof: None,
+            batch_size: 2,
         }
     }
 }
-
-const BATCH_SIZE: usize = 10;
 
 impl<F> MerkleTreeUpdateCircuit<F>
 where
     F: PrimeFieldBits + serde::Serialize + FromUniformBytes<64>,
 {
-    fn update_leaves(&mut self, update: &[(u32, F); BATCH_SIZE]) -> (F, F) {
-        let proofs = update.map(|(index, data)| self.tree.update_leaf(index, data));
+    pub fn new(batch_size: usize) -> Self {
+        Self {
+            batch_size,
+            ..Default::default()
+        }
+    }
+    fn update_leaves(&mut self, update: impl Iterator<Item = (u32, F)>) -> (F, F) {
+        assert!(update.size_hint().0 >= self.batch_size);
+        let proofs = update
+            .map(|(index, data)| self.tree.update_leaf(index, data))
+            .take(self.batch_size)
+            .collect::<Box<[_]>>();
 
         let old = proofs.first().unwrap().root().old;
         let new = proofs.last().unwrap().root().new;
@@ -133,11 +143,14 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 pub fn criterion_benchmark(c: &mut Criterion) {
     let mut rng = rand::thread_rng();
 
+    let batch_size: usize = std::env::var("BATCH_SIZE").unwrap().parse().unwrap();
+    info!("with batch size = {batch_size}");
+
     let _span = info_span!("merkle_bench").entered();
     let prepare_span = info_span!("prepare").entered();
 
-    let mut sc1 = MerkleTreeUpdateCircuit::default();
-    let (sc1_default_root, _) = sc1.update_leaves(&array::from_fn(|_| {
+    let mut sc1 = MerkleTreeUpdateCircuit::new(batch_size);
+    let (sc1_default_root, _) = sc1.update_leaves(iter::repeat_with(|| {
         (rng.gen::<u32>() % INDEX_LIMIT, C1Scalar::random(&mut rng))
     }));
 
@@ -187,13 +200,13 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let mut ivc = IVC::new(&pp, &sc1, [sc1_default_root], &sc2, [C2Scalar::ZERO], true).unwrap();
 
     let mut group = c.benchmark_group("ivc_of_merkle_tree");
-    group.significance_level(0.1).sample_size(15);
+    group.significance_level(0.1).sample_size(30);
     group.bench_function("fold_step_merkle_tree", |b| {
-        let input =
-            array::from_fn(|_| (rng.gen::<u32>() % INDEX_LIMIT, C1Scalar::random(&mut rng)));
-
         b.iter(|| {
-            sc1.update_leaves(&black_box(input));
+            let input =
+                iter::repeat_with(|| (rng.gen::<u32>() % INDEX_LIMIT, C1Scalar::random(&mut rng)));
+
+            sc1.update_leaves(black_box(input));
             ivc.fold_step(&pp, &sc1, &sc2).unwrap();
         })
     });

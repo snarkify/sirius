@@ -1,4 +1,4 @@
-pub const T: usize = 4;
+pub const T: usize = 16;
 pub const RATE: usize = T - 1;
 pub use crate::{
     main_gate,
