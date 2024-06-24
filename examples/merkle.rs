@@ -112,6 +112,22 @@ where
         MainGate::configure(cs)
     }
 
+    fn process_step(
+        &self,
+        _z_i: &[F; ARITY],
+        _k_table_size: u32,
+    ) -> Result<[F; ARITY], SynthesisError> {
+        Ok([self
+            .last_proof
+            .as_ref()
+            .unwrap()
+            .last()
+            .as_ref()
+            .unwrap()
+            .root()
+            .new])
+    }
+
     fn synthesize_step(
         &self,
         config: Self::Config,
