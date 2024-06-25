@@ -188,7 +188,7 @@ fn fold<
     )
     .unwrap();
 
-    for _step in 0..args.fold_step_count.into() {
+    for _step in 1..args.fold_step_count.into() {
         primary.update_between_step();
         secondary.update_between_step();
 
