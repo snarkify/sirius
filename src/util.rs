@@ -333,11 +333,15 @@ macro_rules! create_and_verify_proof {
         use rand_core::OsRng;
 
         // setup
+
+        let keygen_span = info_span!("keygen").entered();
         let params: ParamsIPA<$curve_point> = ParamsIPA::<$curve_point>::new($k);
         let vk = keygen_vk(&params, &$circuit).expect("keygen_vk should not fail");
         let pk = keygen_pk(&params, vk, &$circuit).expect("keygen_pk should not fail");
+        keygen_span.exit();
 
         // prove
+        let prove_span = info_span!("create_proof").entered();
         let mut transcript = Blake2bWrite::<_, $curve_point, Challenge255<_>>::init(vec![]);
         create_proof::<IPACommitmentScheme<_>, ProverIPA<_>, _, _, _, _>(
             &params,
@@ -348,9 +352,12 @@ macro_rules! create_and_verify_proof {
             &mut transcript,
         )
         .expect("proof generation should not fail");
+        let proof = transcript.finalize();
+
+        prove_span.exit();
 
         // verify
-        let proof = transcript.finalize();
+        let prove_span = info_span!("verify").entered();
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
         let strategy = SingleStrategy::new(&params);
         verify_proof(
@@ -361,6 +368,7 @@ macro_rules! create_and_verify_proof {
             &mut transcript,
         )
         .unwrap();
+        prove_span.exit();
 
         proof
     }};

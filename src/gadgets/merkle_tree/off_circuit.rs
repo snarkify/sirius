@@ -197,6 +197,9 @@ impl<F: PrimeField> Proof<F> {
     pub fn root(&self) -> &NodeUpdate<F> {
         self.path.last().unwrap()
     }
+    pub fn start_root(&self) -> &NodeUpdate<F> {
+        self.path.first().unwrap()
+    }
 }
 
 impl<F: PrimeField> Proof<F>
