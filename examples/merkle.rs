@@ -15,7 +15,7 @@ use sirius::{
     main_gate::{MainGate, RegionCtx},
     poseidon::ROPair,
 };
-use tracing::*;
+use tracing::{info, info_span};
 
 type C1Affine = <C1 as sirius::halo2curves::group::prime::PrimeCurve>::Affine;
 type C2Affine = <C2 as sirius::halo2curves::group::prime::PrimeCurve>::Affine;
@@ -157,6 +157,52 @@ where
     }
 }
 
+impl<F> Circuit<F> for MerkleTreeUpdateCircuit<F>
+where
+    F: PrimeFieldBits + serde::Serialize + FromUniformBytes<64>,
+{
+    type Config = <Self as StepCircuit<1, F>>::Config;
+    type FloorPlanner = SimpleFloorPlanner;
+
+    fn without_witnesses(&self) -> Self {
+        todo!()
+    }
+
+    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+        <Self as StepCircuit<1, F>>::configure(meta)
+    }
+
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        mut layouter: impl Layouter<F>,
+    ) -> Result<(), Error> {
+        layouter.assign_region(
+            || "",
+            |region| {
+                let mut region = RegionCtx::new(region, 0);
+
+                region.next();
+
+                let mut prev = Option::<AssignedCell<F, F>>::None;
+                for proof in self.last_proof.as_ref().unwrap().iter() {
+                    let NodeUpdate { old, new, .. } = MerkleTreeUpdateChip::new(proof.clone())
+                        .prove_next_update(&mut region, config.clone())?;
+
+                    if let Some(prev) = prev {
+                        region.constrain_equal(prev.cell(), old.cell())?;
+                    }
+                    prev = Some(new);
+                }
+
+                Ok([prev])
+            },
+        )?;
+
+        Ok(())
+    }
+}
+
 fn get_or_create_commitment_key<C: CurveAffine>(
     k: usize,
     label: &'static str,
@@ -230,4 +276,36 @@ fn main() {
     }
 
     ivc.verify(&pp).unwrap();
+}
+
+#[test]
+fn halo2_circuit() {
+    use halo2_proofs::dev::MockProver;
+    use tracing::metadata::LevelFilter;
+    use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+
+    tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .json()
+        .init();
+
+    const K: u32 = 15;
+    let circuit =
+        MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_update(1, &mut rand::thread_rng());
+
+    let span = info_span!("mock").entered();
+    MockProver::run(K, &circuit, vec![])
+        .unwrap()
+        .verify()
+        .unwrap();
+    span.exit();
+
+    use halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk, verify_proof};
+
+    sirius::create_and_verify_proof!(IPA, K, circuit, &[], C1Affine);
 }
