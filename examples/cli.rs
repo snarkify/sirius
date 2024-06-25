@@ -113,6 +113,7 @@ where
         *Tree::default().get_root()
     }
 
+    #[instrument("update_leaves", skip_all)]
     fn update_between_step(&mut self) {
         self.random_update_leaves(&mut rand::thread_rng());
     }
