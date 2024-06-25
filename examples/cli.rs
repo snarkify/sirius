@@ -127,6 +127,7 @@ fn fold<
     mut secondary: SC2,
 ) {
     let _span = info_span!("cli", primary = SC1::NAME, secondary = SC2::NAME).entered();
+
     let primary_commitment_key = poseidon::get_or_create_commitment_key::<C1Affine>(
         args.primary_commitment_key_size,
         "bn256",
@@ -175,6 +176,8 @@ fn fold<
     let primary_input = SC1::get_default_input();
     let secondary_input = SC2::get_default_input();
 
+    let prove_span = info_span!("prove", steps = args.fold_step_count.get()).entered();
+
     let mut ivc = IVC::new(
         &pp,
         &primary,
@@ -191,6 +194,7 @@ fn fold<
 
         ivc.fold_step(&pp, &primary, &secondary).unwrap();
     }
+    prove_span.exit();
 
     ivc.verify(&pp).unwrap()
 }
