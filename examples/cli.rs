@@ -115,7 +115,7 @@ where
 
     #[instrument("update_leaves", skip_all)]
     fn update_between_step(&mut self) {
-        self.random_update_leaves(&mut rand::thread_rng());
+        assert!(self.pop_front_proof_batch())
     }
 }
 
@@ -255,45 +255,51 @@ fn main() {
         ),
         (Circuits::MerkleTree, Circuits::Trivial) => fold(
             &args,
-            merkle::MerkleTreeUpdateCircuit::new_with_random_update(
-                args.primary_repeat_count,
+            merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
                 &mut rng,
+                args.primary_repeat_count,
+                args.fold_step_count.get(),
             ),
             trivial::Circuit::default(),
         ),
         (Circuits::MerkleTree, Circuits::Poseidon) => fold(
             &args,
-            merkle::MerkleTreeUpdateCircuit::new_with_random_update(
-                args.primary_repeat_count,
+            merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
                 &mut rng,
+                args.primary_repeat_count,
+                args.fold_step_count.get(),
             ),
             TestPoseidonCircuit::new(args.secondary_repeat_count),
         ),
         (Circuits::Poseidon, Circuits::MerkleTree) => fold(
             &args,
             TestPoseidonCircuit::new(args.primary_repeat_count),
-            merkle::MerkleTreeUpdateCircuit::new_with_random_update(
-                args.secondary_repeat_count,
+            merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
                 &mut rng,
+                args.secondary_repeat_count,
+                args.fold_step_count.get(),
             ),
         ),
         (Circuits::Trivial, Circuits::MerkleTree) => fold(
             &args,
             trivial::Circuit::default(),
-            merkle::MerkleTreeUpdateCircuit::new_with_random_update(
-                args.secondary_repeat_count,
+            merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
                 &mut rng,
+                args.secondary_repeat_count,
+                args.fold_step_count.get(),
             ),
         ),
         (Circuits::MerkleTree, Circuits::MerkleTree) => fold(
             &args,
-            merkle::MerkleTreeUpdateCircuit::new_with_random_update(
+            merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
+                &mut rng,
                 args.primary_repeat_count,
-                &mut rng,
+                args.fold_step_count.get(),
             ),
-            merkle::MerkleTreeUpdateCircuit::new_with_random_update(
-                args.secondary_repeat_count,
+            merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
                 &mut rng,
+                args.secondary_repeat_count,
+                args.fold_step_count.get(),
             ),
         ),
     }

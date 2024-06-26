@@ -1,4 +1,4 @@
-use std::{io, iter, num::NonZeroUsize, path::Path};
+use std::{collections::VecDeque, io, iter, num::NonZeroUsize, path::Path};
 
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
@@ -41,12 +41,13 @@ use sirius::gadgets::merkle_tree::{
     *,
 };
 
+type ProofBatch<F> = Box<[Proof<F>]>;
 pub struct MerkleTreeUpdateCircuit<F>
 where
     F: PrimeFieldBits + serde::Serialize + FromUniformBytes<64>,
 {
     tree: Tree<F>,
-    last_proof: Option<Box<[Proof<F>]>>,
+    proofs_batches: VecDeque<ProofBatch<F>>,
     batch_size: usize,
 }
 
@@ -57,7 +58,7 @@ where
     fn default() -> Self {
         Self {
             tree: Default::default(),
-            last_proof: None,
+            proofs_batches: VecDeque::new(),
             batch_size: 2,
         }
     }
@@ -73,12 +74,26 @@ where
             ..Default::default()
         }
     }
-    pub fn new_with_random_update(batch_size: usize, rng: &mut impl Rng) -> Self {
+    pub fn new_with_random_updates(
+        rng: &mut impl Rng,
+        batch_size: usize,
+        batches_count: usize,
+    ) -> Self {
         let mut self_ = Self::new(batch_size);
 
-        self_.random_update_leaves(rng);
+        for _ in 0..batches_count {
+            self_.random_update_leaves(rng);
+        }
 
         self_
+    }
+
+    pub fn pop_front_proof_batch(&mut self) -> bool {
+        self.proofs_batches.pop_front().is_some()
+    }
+
+    pub fn front_proof_batch(&self) -> &ProofBatch<F> {
+        self.proofs_batches.front().as_ref().unwrap()
     }
 
     pub fn random_update_leaves(&mut self, mut rng: &mut impl Rng) {
@@ -97,7 +112,7 @@ where
         let old = proofs.first().unwrap().root().old;
         let new = proofs.last().unwrap().root().new;
 
-        self.last_proof = Some(proofs);
+        self.proofs_batches.push_back(proofs);
 
         (old, new)
     }
@@ -117,15 +132,7 @@ where
         _z_i: &[F; ARITY],
         _k_table_size: u32,
     ) -> Result<[F; ARITY], SynthesisError> {
-        Ok([self
-            .last_proof
-            .as_ref()
-            .unwrap()
-            .last()
-            .as_ref()
-            .unwrap()
-            .root()
-            .new])
+        Ok([self.front_proof_batch().last().as_ref().unwrap().root().new])
     }
 
     fn synthesize_step(
@@ -141,7 +148,7 @@ where
                     let mut region = RegionCtx::new(region, 0);
 
                     let mut prev = z_i[0].clone();
-                    for proof in self.last_proof.as_ref().unwrap().iter() {
+                    for proof in self.front_proof_batch().iter() {
                         let NodeUpdate { old, new, .. } = MerkleTreeUpdateChip::new(proof.clone())
                             .prove_next_update(&mut region, config.clone())?;
 
@@ -185,7 +192,7 @@ where
                 region.next();
 
                 let mut prev = Option::<AssignedCell<F, F>>::None;
-                for proof in self.last_proof.as_ref().unwrap().iter() {
+                for proof in self.front_proof_batch().iter() {
                     let NodeUpdate { old, new, .. } = MerkleTreeUpdateChip::new(proof.clone())
                         .prove_next_update(&mut region, config.clone())?;
 
