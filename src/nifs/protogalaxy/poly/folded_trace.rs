@@ -65,17 +65,28 @@ fn fold_witnesses<F: PrimeField>(
         })
         .collect::<Box<[_]>>();
 
-    let columns_count = accumulator.get_witness().len();
-    let rows_count = accumulator.get_witness()[0].len();
+    let empty_witness = accumulator
+        .get_witness()
+        .iter()
+        .map(|row| vec![F::ZERO; row.len()]) // TODO Use memory allocation with zeroes, for not iterate over `row.len()`
+        .collect::<Vec<_>>();
 
+    // TODO Create on the fly to avoid multiple rows iterations
     let mut result_matrix_by_challenge = vec![
         PlonkWitness {
-            W: vec![vec![F::ZERO; rows_count]; columns_count],
+            W: empty_witness.clone(),
         };
         X_challenges.len()
     ];
 
-    itertools::iproduct!(0..columns_count, 0..rows_count)
+    accumulator
+        .get_witness()
+        .iter()
+        .enumerate()
+        .flat_map(|(column, witness)| {
+            let rows_count = witness.len();
+            iter::repeat(column).zip(0..rows_count)
+        })
         .map(|(col, row)| {
             iter::once(accumulator.get_witness())
                 .chain(witnesses.iter().map(GetWitness::get_witness))
