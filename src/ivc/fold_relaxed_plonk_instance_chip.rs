@@ -1192,6 +1192,7 @@ mod tests {
                     &cross_term_commits,
                 )
                 .to_repr()
+                .as_ref()
                 .to_vec();
 
                 let mut reader = LittleEndianReader::new(&challenge);
