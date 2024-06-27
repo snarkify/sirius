@@ -323,6 +323,27 @@ pub(crate) fn compute_G<C: CurveAffine>(
     }
 }
 
+pub(crate) struct Challenges<F: PrimeField> {
+    alpha: F,
+    beta: F,
+    delta: F,
+}
+
+impl<F: PrimeField> Challenges<F> {
+    fn beta_stroke(&self) -> F {
+        self.beta + (self.alpha * self.delta)
+    }
+}
+
+pub(crate) fn compute_K<C: CurveAffine>(
+    _S: &PlonkStructure<C::ScalarExt>,
+    _challenges: Challenges<C::ScalarExt>,
+    _accumulator: impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>,
+    _traces: &[(impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>)],
+) -> UnivariatePoly<C::ScalarExt> {
+    todo!()
+}
+
 #[cfg(test)]
 mod test {
     use std::iter;
