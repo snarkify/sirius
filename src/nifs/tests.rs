@@ -1,19 +1,19 @@
 use std::marker::PhantomData;
 
-use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     plonk::{self, Advice, Circuit, Column, ConstraintSystem, Instance, Selector},
     poly::Rotation,
 };
-use halo2curves::{
-    bn256::{Fr, G1Affine},
-    group::ff::FromUniformBytes,
-};
 use some_to_err::*;
 
 use super::*;
 use crate::{
+    ff::{PrimeField, PrimeFieldBits},
+    halo2curves::{
+        bn256::{Fr, G1Affine},
+        group::ff::FromUniformBytes,
+    },
     nifs::{self, vanilla::VanillaFS},
     plonk::{
         PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness,

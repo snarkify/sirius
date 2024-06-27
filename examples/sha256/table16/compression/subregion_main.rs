@@ -1,10 +1,14 @@
-use super::super::{AssignedBits, RoundWord, RoundWordA, RoundWordE, StateWord, ROUND_CONSTANTS};
-use super::{compression_util::*, CompressionConfig, State};
 use halo2_proofs::{circuit::Region, plonk::Error};
+
+use super::{
+    super::{AssignedBits, RoundWord, RoundWordA, RoundWordE, StateWord, ROUND_CONSTANTS},
+    compression_util::*,
+    CompressionConfig, State,
+};
 
 impl CompressionConfig {
     #[allow(clippy::many_single_char_names)]
-    pub fn assign_round<F: ff::PrimeField>(
+    pub fn assign_round<F: sirius::ff::PrimeField>(
         &self,
         region: &mut Region<'_, F>,
         round_idx: MainRoundIdx,

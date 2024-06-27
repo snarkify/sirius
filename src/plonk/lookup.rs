@@ -42,6 +42,7 @@ use std::{
 };
 
 use ff::PrimeField;
+use halo2_proofs::halo2curves::ff;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
 use rayon::prelude::*;
 use serde::Serialize;

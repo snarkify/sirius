@@ -1,7 +1,7 @@
 use std::{iter, mem, num::NonZeroUsize};
 
 use halo2_proofs::arithmetic::CurveAffine;
-use halo2curves::group::ff::{FromUniformBytes, PrimeField};
+use halo2_proofs::halo2curves::group::ff::{self, FromUniformBytes, PrimeField};
 use poseidon::{self, SparseMDSMatrix};
 use tracing::*;
 
@@ -235,7 +235,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use halo2curves::pasta::{EpAffine, Fp, Fq};
+    use crate::halo2curves::pasta::{EpAffine, Fp, Fq};
     use tracing_test::traced_test;
 
     use super::*;

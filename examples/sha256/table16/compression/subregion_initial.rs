@@ -1,11 +1,11 @@
 use super::super::{RoundWord, StateWord, STATE};
 use super::{compression_util::*, CompressionConfig, State};
 
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Region, Value},
     plonk::Error,
 };
+use sirius::ff::PrimeField;
 
 impl CompressionConfig {
     #[allow(clippy::many_single_char_names)]

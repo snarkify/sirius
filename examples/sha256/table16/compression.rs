@@ -1,12 +1,11 @@
-use std::convert::TryInto;
-use std::ops::Range;
+use std::{convert::TryInto, ops::Range};
 
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Selector},
     poly::Rotation,
 };
+use sirius::ff::PrimeField;
 
 use super::{
     util::{i2lebsp, lebs2ip},
@@ -82,7 +81,7 @@ pub trait UpperSigmaVar<
 ///   We align the columns to make it efficient to copy-constrain these forms where they
 ///   are needed.
 #[derive(Clone, Debug)]
-pub struct AbcdVar<F: ff::PrimeField> {
+pub struct AbcdVar<F: sirius::ff::PrimeField> {
     a: SpreadVar<F, 2, 4>,
     b: SpreadVar<F, 11, 22>,
     c_lo: SpreadVar<F, 3, 6>,
@@ -951,9 +950,8 @@ impl CompressionConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{
-        super::BLOCK_SIZE, msg_schedule_test_input, BlockWord, Table16Chip, Table16Config, IV,
-    };
+    use std::marker::PhantomData;
+
     use ff::PrimeField;
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
@@ -962,7 +960,10 @@ mod tests {
     };
     use halo2curves::pasta::{pallas, Fp};
     use sirius::run_mock_prover_test;
-    use std::marker::PhantomData;
+
+    use super::super::{
+        super::BLOCK_SIZE, msg_schedule_test_input, BlockWord, Table16Chip, Table16Config, IV,
+    };
 
     #[traced_test]
     #[test]

@@ -1,5 +1,5 @@
 use ff::PrimeField;
-use halo2_proofs::plonk::ConstraintSystem;
+use halo2_proofs::{halo2curves::ff, plonk::ConstraintSystem};
 use tracing::*;
 
 use crate::{

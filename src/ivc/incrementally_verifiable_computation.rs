@@ -2,8 +2,10 @@ use std::{io, marker::PhantomData, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
-use halo2_proofs::dev::MockProver;
-use halo2curves::CurveAffine;
+use halo2_proofs::{
+    dev::MockProver,
+    halo2curves::{ff, group, CurveAffine},
+};
 use serde::Serialize;
 use tracing::*;
 

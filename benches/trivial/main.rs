@@ -2,17 +2,15 @@
 
 use std::{array, io, num::NonZeroUsize, path::Path};
 
-use criterion::{black_box, criterion_group, Criterion};
-use ff::Field;
-
-use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
-
 use bn256::G1 as C1;
+use criterion::{black_box, criterion_group, Criterion};
 use grumpkin::G1 as C2;
-
+use halo2_proofs::halo2curves;
+use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 use metadata::LevelFilter;
 use sirius::{
     commitment::CommitmentKey,
+    ff::Field,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, IVC},
     poseidon::{self, ROPair},
 };

@@ -1,16 +1,15 @@
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Region, Value},
     plonk::{Advice, Column, Error},
 };
-
-use crate::AssignedCell;
+use sirius::ff::PrimeField;
 
 use super::{
     super::{BlockWord, RoundWordDense},
-    {compression_util::*, CompressionConfig, State},
+    compression_util::*,
+    CompressionConfig, State,
 };
-use crate::DIGEST_SIZE;
+use crate::{AssignedCell, DIGEST_SIZE};
 
 impl CompressionConfig {
     #[allow(clippy::many_single_char_names)]

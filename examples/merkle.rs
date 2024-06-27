@@ -286,8 +286,7 @@ fn main() {
 }
 
 #[test]
-fn halo2_circuit() {
-    use halo2_proofs::dev::MockProver;
+fn ipa() {
     use tracing::metadata::LevelFilter;
     use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
@@ -303,16 +302,49 @@ fn halo2_circuit() {
 
     const K: u32 = 15;
     let circuit =
-        MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_update(1, &mut rand::thread_rng());
-
-    let span = info_span!("mock").entered();
-    MockProver::run(K, &circuit, vec![])
-        .unwrap()
-        .verify()
-        .unwrap();
-    span.exit();
-
-    use halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk, verify_proof};
+        MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(&mut rand::thread_rng(), 1, 1);
 
     sirius::create_and_verify_proof!(IPA, K, circuit, &[], C1Affine);
+}
+
+#[test]
+fn kzg() {
+    use halo2_proofs::{
+        halo2curves::bn256::Bn256,
+        plonk::{create_proof, keygen_pk, keygen_vk},
+        poly::kzg::{commitment::ParamsKZG, multiopen::ProverGWC},
+        transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},
+    };
+    use rand_core::OsRng;
+    use tracing::metadata::LevelFilter;
+    use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+
+    tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .json()
+        .init();
+
+    const K: u32 = 15;
+    let circuit =
+        MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(&mut rand::thread_rng(), 1, 1);
+
+    let params = ParamsKZG::<Bn256>::setup(K, OsRng);
+    let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
+    let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
+
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+    create_proof::<_, ProverGWC<_>, _, OsRng, Blake2bWrite<_, _, Challenge255<_>>, _>(
+        &params,
+        &pk,
+        &[circuit],
+        &[],
+        OsRng,
+        &mut transcript,
+    )
+    .expect("proof generation should not fail");
 }

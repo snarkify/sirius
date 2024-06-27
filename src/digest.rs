@@ -2,15 +2,13 @@ use std::{io, iter, num::NonZeroUsize};
 
 use bincode::Options;
 use bitter::{BitReader, LittleEndianReader};
+pub use digest::Digest;
 use digest::{typenum::U32, OutputSizeUser};
 use ff::{Field, PrimeField};
-use halo2curves::CurveAffine;
+use halo2_proofs::halo2curves::{ff, CurveAffine};
 use serde::Serialize;
-use tracing::*;
-
-pub use digest::Digest;
-
 pub use sha3::Sha3_256 as DefaultHasher;
+use tracing::*;
 
 use crate::constants::NUM_HASH_BITS;
 
@@ -86,8 +84,8 @@ pub fn into_curve_from_bits<C: CurveAffine>(input: &[u8], bits_count: NonZeroUsi
 mod tests {
     use std::num::NonZeroUsize;
 
-    use ff::PrimeField;
-    use halo2curves::bn256::{Fr, G1Affine};
+    use crate::ff::PrimeField;
+    use halo2_proofs::halo2curves::bn256::{Fr, G1Affine};
     use serde::*;
     use tracing_test::traced_test;
 

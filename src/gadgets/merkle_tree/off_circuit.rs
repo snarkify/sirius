@@ -1,6 +1,7 @@
 use std::{array, collections::HashMap, fmt, iter, num::NonZeroUsize};
 
 use itertools::Itertools;
+use serde::Serialize;
 use tracing::*;
 
 use super::{RATE, T};
@@ -17,7 +18,7 @@ const R_P: usize = 10;
 
 pub fn hash<F>(l: F, r: F) -> F
 where
-    F: serde::Serialize + PrimeField + FromUniformBytes<64> + PrimeFieldBits,
+    F: Serialize + PrimeField + FromUniformBytes<64> + PrimeFieldBits,
 {
     Hasher::digest::<F>(Spec::new(R_F, R_P), &[l, r], NUM_BITS)
 }
@@ -204,7 +205,7 @@ impl<F: PrimeField> Proof<F> {
 
 impl<F: PrimeField> Proof<F>
 where
-    F: serde::Serialize + PrimeField + FromUniformBytes<64> + PrimeFieldBits,
+    F: Serialize + PrimeField + FromUniformBytes<64> + PrimeFieldBits,
 {
     pub fn verify(&self) -> bool {
         for (level, next_level) in Level::iter_all().tuple_windows() {
@@ -253,7 +254,7 @@ where
 
 impl<F: PrimeField> Default for Tree<F>
 where
-    F: serde::Serialize + PrimeField + FromUniformBytes<64> + PrimeFieldBits,
+    F: Serialize + PrimeField + FromUniformBytes<64> + PrimeFieldBits,
 {
     fn default() -> Self {
         let mut default_values = [hash(F::ZERO, F::ZERO); DEPTH_SIZE];
@@ -272,7 +273,7 @@ where
 
 impl<F: PrimeField> Tree<F>
 where
-    F: serde::Serialize + PrimeField + FromUniformBytes<64> + PrimeFieldBits,
+    F: Serialize + PrimeField + FromUniformBytes<64> + PrimeFieldBits,
 {
     pub fn get_root(&self) -> &F {
         self.get_node(Index::root())

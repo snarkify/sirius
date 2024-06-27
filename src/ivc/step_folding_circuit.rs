@@ -2,11 +2,12 @@
 use std::{fmt, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
+use halo2_proofs::halo2curves::ff;
+use halo2_proofs::halo2curves::CurveAffine;
 use halo2_proofs::{
     circuit::{floor_planner, Layouter, Value},
     plonk::{Circuit, Column, ConstraintSystem, Instance},
 };
-use halo2curves::CurveAffine;
 use itertools::Itertools;
 use serde::Serialize;
 use tracing::*;

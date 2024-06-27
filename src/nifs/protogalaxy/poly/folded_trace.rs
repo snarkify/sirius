@@ -1,9 +1,9 @@
 use std::iter;
 
-use ff::PrimeField;
 use rayon::prelude::*;
 
 use crate::{
+    ff::PrimeField,
     plonk::{GetChallenges, GetWitness, PlonkWitness},
     polynomial::lagrange,
     util::MultiCartesianProduct,

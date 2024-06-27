@@ -6,6 +6,7 @@ use std::{
 };
 
 use ff::PrimeField;
+use halo2_proofs::halo2curves::ff;
 use itertools::*;
 use serde::Serialize;
 use tracing::*;
@@ -284,9 +285,9 @@ impl<F: PrimeField> Neg for GroupedPoly<F> {
 mod test {
     use std::array;
 
+    use crate::halo2curves::pasta::Fq;
     use ff::Field;
     use halo2_proofs::poly::Rotation;
-    use halo2curves::pasta::Fq;
     use maplit::hashmap as map;
 
     use super::*;

@@ -2,9 +2,10 @@
 use std::num::NonZeroUsize;
 
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
-use halo2curves::CurveAffine;
+use halo2_proofs::halo2curves::{ff, CurveAffine};
 use serde::Serialize;
 
+use super::fold_relaxed_plonk_instance_chip::AssignedRelaxedPlonkInstance;
 use crate::{
     constants::NUM_CHALLENGE_BITS,
     gadgets::{ecc::AssignedPoint, nonnative::bn::big_uint::BigUint},
@@ -13,8 +14,6 @@ use crate::{
     poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
     util,
 };
-
-use super::fold_relaxed_plonk_instance_chip::AssignedRelaxedPlonkInstance;
 
 pub(crate) struct AssignedRandomOracleComputationInstance<
     'l,
@@ -174,18 +173,19 @@ mod tests {
     use ff::Field;
     use halo2_proofs::{
         circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter},
+        halo2curves::{bn256, grumpkin},
         plonk::ConstraintSystem,
     };
-    use halo2curves::{bn256, grumpkin};
     use tracing_test::traced_test;
 
-    type C1 = <bn256::G1 as halo2curves::group::prime::PrimeCurve>::Affine;
-    type C2 = <grumpkin::G1 as halo2curves::group::prime::PrimeCurve>::Affine;
+    type C1 = <bn256::G1 as halo2_proofs::halo2curves::group::prime::PrimeCurve>::Affine;
+    type C2 = <grumpkin::G1 as halo2_proofs::halo2curves::group::prime::PrimeCurve>::Affine;
     type Base = <C1 as CurveAffine>::Base;
     type Scalar = <C1 as CurveAffine>::ScalarExt;
 
     const K_TABLE_SIZE: usize = 15;
 
+    use super::*;
     use crate::{
         commitment::CommitmentKey,
         ivc::fold_relaxed_plonk_instance_chip::{
@@ -195,8 +195,6 @@ mod tests {
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, Spec},
         table::WitnessCollector,
     };
-
-    use super::*;
 
     #[traced_test]
     #[test]

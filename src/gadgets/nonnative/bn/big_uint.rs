@@ -1,6 +1,7 @@
 use std::{io, iter, num::NonZeroUsize, ops::Not};
 
 use ff::PrimeField;
+use halo2_proofs::halo2curves::ff;
 use halo2_proofs::{
     circuit::{AssignedCell, Value},
     plonk::{Advice, Column},
@@ -302,7 +303,7 @@ mod tests {
     use std::mem;
 
     use ff::Field;
-    use halo2curves::pasta::Fp;
+    use halo2_proofs::halo2curves::pasta::Fp;
     use tracing_test::traced_test;
 
     use super::*;

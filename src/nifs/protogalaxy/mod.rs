@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 
 use ff::PrimeField;
 use halo2_proofs::arithmetic::CurveAffine;
+use halo2_proofs::halo2curves::ff;
 
 use super::*;
 use crate::{

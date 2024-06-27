@@ -2,20 +2,21 @@
 
 use std::{array, env, io, num::NonZeroUsize, path::Path};
 
-use ff::PrimeField;
-use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
-use metadata::LevelFilter;
-use tracing::*;
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
-
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
-
+use halo2_proofs::{
+    halo2curves,
+    halo2curves::{bn256, grumpkin, CurveAffine, CurveExt},
+};
+use metadata::LevelFilter;
 use sirius::{
     commitment::CommitmentKey,
+    ff::PrimeField,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, IVC},
     poseidon::{self, ROPair},
 };
+use tracing::*;
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 const ARITY: usize = BLOCK_SIZE / 2;
 const BLOCK_SIZE: usize = 16;

@@ -1,5 +1,6 @@
 use crate::main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx};
 use ff::PrimeFieldBits;
+use halo2_proofs::halo2curves::ff;
 use halo2_proofs::{
     arithmetic::CurveAffine,
     circuit::{Chip, Value},
@@ -380,11 +381,11 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use ff::Field;
+    use halo2_proofs::halo2curves::pasta::{pallas, EqAffine, Fp, Fq};
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         plonk::{Circuit, Column, ConstraintSystem, Instance},
     };
-    use halo2curves::pasta::{pallas, EqAffine, Fp, Fq};
     use rand_core::OsRng;
     use tracing_test::traced_test;
 

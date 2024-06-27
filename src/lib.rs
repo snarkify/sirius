@@ -20,5 +20,5 @@ pub mod util;
 
 pub mod error;
 
-pub use halo2_proofs;
-pub use halo2curves;
+pub use halo2_proofs::{self, halo2curves};
+pub use halo2curves::{ff, group};

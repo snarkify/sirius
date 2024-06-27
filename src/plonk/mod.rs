@@ -25,6 +25,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use ff::{Field, PrimeField};
 use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
+use halo2_proofs::halo2curves::ff;
 
 use crate::{
     commitment::CommitmentKey,
@@ -972,7 +973,7 @@ pub(crate) mod test_eval_witness {
     pub mod poseidon_circuit {
         use std::{array, marker::PhantomData};
 
-        use ff::{FromUniformBytes, PrimeFieldBits};
+        use crate::ff::{FromUniformBytes, PrimeFieldBits};
 
         use crate::{
             main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
@@ -1049,8 +1050,8 @@ pub(crate) mod test_eval_witness {
         }
     }
 
-    use ff::Field as _Field;
-    use halo2curves::{bn256, CurveAffine};
+    use crate::ff::Field as _Field;
+    use crate::halo2curves::{bn256, CurveAffine};
 
     use crate::{
         commitment::CommitmentKey,
@@ -1071,11 +1072,14 @@ pub(crate) mod test_eval_witness {
 
     const R_F1: usize = 4;
     const R_P1: usize = 3;
-    pub type PoseidonSpec =
-        Spec<<Curve as halo2curves::CurveAffine>::Base, POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE>;
+    pub type PoseidonSpec = Spec<
+        <Curve as crate::halo2curves::CurveAffine>::Base,
+        POSEIDON_PERMUTATION_WIDTH,
+        POSEIDON_RATE,
+    >;
 
     type RO = <PoseidonRO<POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE> as random_oracle::ROPair<
-        <Curve as halo2curves::CurveAffine>::Base,
+        <Curve as crate::halo2curves::CurveAffine>::Base,
     >>::OffCircuit;
 
     #[test]

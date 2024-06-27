@@ -3,12 +3,12 @@ use std::{
     num::{NonZeroU32, NonZeroUsize},
 };
 
-use ff::PrimeField;
 use itertools::*;
 use num_traits::Zero;
 use tracing::*;
 
 use crate::{
+    ff::PrimeField,
     fft,
     plonk::{self, eval, GetChallenges, GetWitness, PlonkStructure},
     polynomial::{expression::QueryIndexContext, lagrange, univariate::UnivariatePoly},
@@ -338,12 +338,12 @@ pub(crate) fn compute_K<F: PrimeField>(
 mod test {
     use std::iter;
 
-    use ff::Field as _Field;
-    use halo2curves::{bn256, CurveAffine};
     use tracing_test::traced_test;
 
     use crate::{
         commitment::CommitmentKey,
+        ff::Field as _Field,
+        halo2curves::{self, bn256, CurveAffine},
         nifs::protogalaxy::poly::PolyChallenges,
         plonk::{test_eval_witness::poseidon_circuit, PlonkStructure, PlonkTrace},
         polynomial::univariate::UnivariatePoly,
