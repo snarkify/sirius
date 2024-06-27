@@ -1,3 +1,7 @@
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 use std::{collections::VecDeque, io, iter, num::NonZeroUsize, path::Path};
 
 use bn256::G1 as C1;
@@ -290,6 +294,9 @@ fn ipa() {
     use tracing::metadata::LevelFilter;
     use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
         .with_env_filter(
@@ -324,6 +331,9 @@ fn kzg() {
     use rand_core::OsRng;
     use tracing::metadata::LevelFilter;
     use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
 
     tracing_subscriber::fmt()
         .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
