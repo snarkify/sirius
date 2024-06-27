@@ -3,17 +3,17 @@ use std::{convert::TryInto, num::NonZeroUsize};
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Value},
+    halo2curves::ff,
     plonk::Error,
 };
 use poseidon::{self};
 use tracing::*;
 
+use super::{ROCircuitTrait, Spec};
 use crate::{
     constants::MAX_BITS,
     main_gate::{AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
 };
-
-use super::{ROCircuitTrait, Spec};
 
 pub struct PoseidonChip<F: PrimeFieldBits, const T: usize, const RATE: usize> {
     main_gate: MainGate<F, T>,
@@ -417,21 +417,20 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
 
 #[cfg(test)]
 mod tests {
+    use crate::halo2curves::{
+        group::ff::FromUniformBytes,
+        pasta::{EqAffine, Fp},
+    };
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         plonk::{Circuit, Column, ConstraintSystem, Instance},
     };
-    use halo2curves::{
-        group::ff::FromUniformBytes,
-        pasta::{EqAffine, Fp},
-    };
     use tracing_test::traced_test;
 
+    use super::*;
     use crate::{
         create_and_verify_proof, main_gate::MainGateConfig, poseidon::Spec, run_mock_prover_test,
     };
-
-    use super::*;
 
     const T: usize = 3;
     const RATE: usize = 2;

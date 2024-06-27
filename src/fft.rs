@@ -1,7 +1,9 @@
-use crate::util;
 use ff::{Field, PrimeField};
 use group::{GroupOpsOwned, ScalarMulOwned};
-pub use halo2curves::{CurveAffine, CurveExt};
+use halo2_proofs::halo2curves::{ff, group};
+pub use halo2_proofs::halo2curves::{CurveAffine, CurveExt};
+
+use crate::util;
 
 /// Given FFT domain size k, return the omega in case of fft
 /// or return the omega_inv in case if ifft
@@ -174,10 +176,11 @@ pub fn ifft<F: PrimeField>(a: &mut [F], log_n: u32) {
 mod tests {
     use std::array;
 
-    use super::*;
-    use halo2curves::bn256::Fr;
+    use halo2_proofs::halo2curves::bn256::Fr;
     use itertools::Itertools;
     use rand_core::OsRng;
+
+    use super::*;
 
     #[test]
     fn fft_simple_input_test() {

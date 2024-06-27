@@ -1,6 +1,7 @@
 use std::ops;
 
 use ff::FromUniformBytes;
+use halo2_proofs::halo2curves::ff;
 use serde::Serialize;
 
 #[derive(Clone, Debug)]
@@ -133,7 +134,7 @@ impl<F: Serialize + ff::PrimeField, const T: usize, const RATE: usize> Serialize
 
 #[cfg(test)]
 mod tests {
-    use halo2curves::secp256r1::Fp;
+    use crate::halo2curves::bn256::Fq;
     use tracing_test::traced_test;
 
     use super::*;
@@ -141,7 +142,7 @@ mod tests {
     #[traced_test]
     #[test]
     fn just_serialize() {
-        let spec = Spec::<Fp, 10, 9>::new(10, 10);
+        let spec = Spec::<Fq, 10, 9>::new(10, 10);
         bincode::serialize(&spec).unwrap();
     }
 }

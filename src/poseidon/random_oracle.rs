@@ -1,7 +1,7 @@
 use std::{fmt, num::NonZeroUsize};
 
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
-use halo2_proofs::{arithmetic::CurveAffine, plonk::Error};
+use halo2_proofs::{arithmetic::CurveAffine, halo2curves::ff, plonk::Error};
 
 use crate::main_gate::{AssignedBit, RegionCtx, WrapValue};
 

@@ -3,12 +3,12 @@ use std::convert::TryInto;
 use crate::BlockWord;
 
 use super::{super::BLOCK_SIZE, AssignedBits, SpreadInputs, Table16Assignment, ROUNDS};
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::Layouter,
     plonk::{Advice, Column, ConstraintSystem, Error, Selector},
     poly::Rotation,
 };
+use sirius::ff::PrimeField;
 
 mod schedule_gates;
 mod schedule_util;

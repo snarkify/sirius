@@ -47,7 +47,8 @@ use std::{iter, num::NonZeroUsize, ops};
 
 use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::circuit::AssignedCell;
-use halo2curves::{Coordinates, CurveAffine};
+use halo2_proofs::halo2curves::ff;
+use halo2_proofs::halo2curves::{Coordinates, CurveAffine};
 use itertools::Itertools;
 use num_traits::Num;
 use tracing::*;
@@ -188,7 +189,8 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
 
     pub fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<C::Base>>
     where
-        <C as halo2curves::CurveAffine>::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+        <C as halo2_proofs::halo2curves::CurveAffine>::Base:
+            ff::PrimeFieldBits + ff::FromUniformBytes<64>,
     {
         let Self {
             folded_W,
@@ -1023,8 +1025,8 @@ mod tests {
     use bitter::{BitReader, LittleEndianReader};
     use ff::Field;
     use halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter, Value};
+    use halo2_proofs::halo2curves::{bn256::G1Affine as C1, CurveAffine};
     use halo2_proofs::plonk::ConstraintSystem;
-    use halo2curves::{bn256::G1Affine as C1, CurveAffine};
     use rand::{rngs::ThreadRng, Rng};
     use tracing_test::traced_test;
 

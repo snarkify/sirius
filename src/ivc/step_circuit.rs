@@ -1,4 +1,5 @@
 use ff::PrimeField;
+use halo2_proofs::halo2curves::ff;
 use halo2_proofs::{
     circuit::{floor_planner::single_pass::SingleChipLayouter, AssignedCell, Layouter, Value},
     plonk::ConstraintSystem,
@@ -133,6 +134,7 @@ pub mod trivial {
     use std::marker::PhantomData;
 
     use ff::PrimeField;
+    use halo2_proofs::halo2curves::ff;
     use halo2_proofs::{
         circuit::{AssignedCell, Layouter},
         plonk::ConstraintSystem,

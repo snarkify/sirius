@@ -4,7 +4,8 @@ use std::{
 };
 
 use ff::{Field, PrimeField};
-use halo2curves::CurveAffine;
+use halo2_proofs::halo2curves::ff;
+use halo2_proofs::halo2curves::CurveAffine;
 use itertools::*;
 use tracing::*;
 
@@ -175,8 +176,8 @@ mod test {
         polynomial::univariate::UnivariatePoly,
     };
 
-    use ff::Field as _Field;
-    use halo2curves::{bn256, CurveAffine};
+    use crate::ff::Field as _Field;
+    use crate::halo2curves::{bn256, CurveAffine};
     use tracing_test::traced_test;
 
     use crate::{
@@ -198,11 +199,14 @@ mod test {
 
     const R_F1: usize = 4;
     const R_P1: usize = 3;
-    pub type PoseidonSpec =
-        Spec<<Curve as halo2curves::CurveAffine>::Base, POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE>;
+    pub type PoseidonSpec = Spec<
+        <Curve as crate::halo2curves::CurveAffine>::Base,
+        POSEIDON_PERMUTATION_WIDTH,
+        POSEIDON_RATE,
+    >;
 
     type RO = <PoseidonRO<POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE> as random_oracle::ROPair<
-        <Curve as halo2curves::CurveAffine>::Base,
+        <Curve as crate::halo2curves::CurveAffine>::Base,
     >>::OffCircuit;
 
     fn poseidon_trace() -> (PlonkStructure<Field>, PlonkTrace<Curve>) {

@@ -1,13 +1,13 @@
 use std::marker::PhantomData;
 
-use ff::{PrimeField, PrimeFieldBits};
+use crate::ff::{PrimeField, PrimeFieldBits};
+use crate::halo2curves::bn256::{Fr, G1Affine};
+use crate::halo2curves::group::ff::FromUniformBytes;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     plonk::{self, Advice, Circuit, Column, ConstraintSystem, Instance, Selector},
     poly::Rotation,
 };
-use halo2curves::bn256::{Fr, G1Affine};
-use halo2curves::group::ff::FromUniformBytes;
 use some_to_err::*;
 
 use crate::nifs::{self, vanilla::VanillaFS};

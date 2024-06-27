@@ -1,4 +1,5 @@
 use ff::PrimeField;
+use halo2_proofs::halo2curves::ff;
 use halo2_proofs::{
     circuit::Value,
     plonk::{

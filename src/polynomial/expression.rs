@@ -7,6 +7,7 @@ use std::{
 };
 
 use ff::PrimeField;
+use halo2_proofs::halo2curves::ff;
 use halo2_proofs::{plonk::Expression as PE, poly::Rotation};
 use serde::Serialize;
 
@@ -519,8 +520,8 @@ mod tests {
 
     use ff::PrimeField;
     // use pasta_curves::{Fp, pallas};
+    use crate::halo2curves::pasta::{pallas, Fp};
     use halo2_proofs::poly::Rotation;
-    use halo2curves::pasta::{pallas, Fp};
     use tracing::*;
     use tracing_test::traced_test;
 

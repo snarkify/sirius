@@ -1,7 +1,9 @@
-use super::super::Gate;
-use ff::PrimeField;
-use halo2_proofs::plonk::Expression;
 use std::marker::PhantomData;
+
+use halo2_proofs::plonk::Expression;
+use sirius::ff::PrimeField;
+
+use super::super::Gate;
 
 pub struct ScheduleGate<F: PrimeField>(PhantomData<F>);
 

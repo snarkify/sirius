@@ -1,3 +1,4 @@
+use ff::PrimeField;
 /// This module provides an efficient and flexible way to evaluate expressions that represent
 /// can be represented as a graph of calculations.
 ///
@@ -40,7 +41,7 @@
 ///
 /// It is an adaptation for our needs of the [code from
 /// halo2](https://github.com/privacy-scaling-explorations/halo2/blob/main/halo2_backend/src/plonk/evaluation.rs#L200)
-use ff::PrimeField;
+use halo2_proofs::halo2curves::ff;
 use halo2_proofs::poly::Rotation;
 use tracing::*;
 
@@ -393,8 +394,8 @@ impl<F: PrimeField> GraphEvaluator<F> {
 mod tests {
     use std::array;
 
+    use crate::halo2curves::bn256;
     use ff::Field;
-    use halo2curves::bn256;
     use tracing_test::traced_test;
 
     use crate::{
@@ -443,7 +444,7 @@ mod tests {
         }
     }
 
-    type Scalar = <bn256::G1Affine as halo2curves::CurveAffine>::ScalarExt;
+    type Scalar = <bn256::G1Affine as crate::halo2curves::CurveAffine>::ScalarExt;
 
     #[traced_test]
     #[test]

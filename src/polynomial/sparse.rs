@@ -1,4 +1,5 @@
 use ff::PrimeField;
+use halo2_proofs::halo2curves::ff;
 
 // represent a sparse matrix M = {(i, j, v)}, i.e. M[i,j] = v
 // the size of matrix is N*N with N = num_io + num_advice_columns * num_rows

@@ -1,7 +1,9 @@
-use super::super::{util::*, Gate};
-use ff::PrimeField;
-use halo2_proofs::plonk::{Constraint, Constraints, Expression};
 use std::marker::PhantomData;
+
+use halo2_proofs::plonk::{Constraint, Constraints, Expression};
+use sirius::ff::PrimeField;
+
+use super::super::{util::*, Gate};
 
 pub struct CompressionGate<F: PrimeField>(PhantomData<F>);
 

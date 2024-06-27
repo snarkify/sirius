@@ -1,10 +1,15 @@
-use crate::plonk::permutation::Assembly;
-use crate::polynomial::sparse::SparseMatrix;
-use crate::polynomial::Expression;
-use ff::PrimeField;
-use halo2_proofs::plonk::{Any, Column};
-use halo2_proofs::plonk::{ConstraintSystem, Expression as PE};
 use std::collections::HashSet;
+
+use ff::PrimeField;
+use halo2_proofs::{
+    halo2curves::ff,
+    plonk::{Any, Column, ConstraintSystem, Expression as PE},
+};
+
+use crate::{
+    plonk::permutation::Assembly,
+    polynomial::{sparse::SparseMatrix, Expression},
+};
 
 // Helper function to convert cell indices (column, row) to index in Z vector
 pub(crate) fn cell_to_z_idx(column: usize, row: usize, num_rows: usize, num_io: usize) -> usize {

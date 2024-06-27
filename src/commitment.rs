@@ -7,8 +7,8 @@ use std::{
     slice,
 };
 
+use crate::group::Curve;
 use digest::{ExtendableOutput, Update};
-use group::Curve;
 use halo2_proofs::arithmetic::{best_multiexp, CurveAffine, CurveExt};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -170,7 +170,7 @@ impl<C: CurveAffine> CommitmentKey<C> {
 
 #[cfg(test)]
 mod file_tests {
-    use halo2curves::bn256::G1Affine;
+    use halo2_proofs::halo2curves::bn256::G1Affine;
     use tempfile::tempdir;
     use tracing_test::traced_test;
 

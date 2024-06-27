@@ -1,6 +1,7 @@
 use std::{fmt, iter, num::NonZeroUsize};
 
 use ff::{BatchInvert, Field, PrimeField};
+use halo2_proofs::halo2curves::ff;
 use halo2_proofs::plonk::Assigned;
 use num_bigint::BigUint;
 pub(crate) use rayon::current_num_threads;
@@ -195,7 +196,7 @@ pub(crate) fn concatenate_with_padding<F: PrimeField>(vs: &[Vec<F>], pad_size: u
 #[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
-    use halo2curves::pasta::Fp;
+    use crate::halo2curves::pasta::Fp;
     use tracing_test::traced_test;
 
     use super::*;

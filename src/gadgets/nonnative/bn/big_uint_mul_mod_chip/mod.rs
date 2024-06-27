@@ -8,6 +8,7 @@ use std::{
 use bitter::{BitReader, LittleEndianReader};
 use ff::PrimeField;
 use halo2_proofs::circuit::{AssignedCell, Chip, Value};
+use halo2_proofs::halo2curves::ff;
 use itertools::{EitherOrBoth, Itertools};
 use num_bigint::BigUint as BigUintRaw;
 use num_traits::{One, ToPrimitive, Zero};

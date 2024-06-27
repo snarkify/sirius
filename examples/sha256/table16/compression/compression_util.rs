@@ -1,14 +1,16 @@
+use std::convert::TryInto;
+
+use halo2_proofs::{
+    circuit::{Region, Value},
+    plonk::{Advice, Column, Error},
+};
+use sirius::ff::PrimeField;
+
 use super::{
     AbcdVar, CompressionConfig, EfghVar, RoundWord, RoundWordA, RoundWordDense, RoundWordE,
     RoundWordSpread, State, UpperSigmaVar,
 };
 use crate::table16::{util::*, AssignedBits, SpreadVar, SpreadWord, StateWord, Table16Assignment};
-use ff::PrimeField;
-use halo2_proofs::{
-    circuit::{Region, Value},
-    plonk::{Advice, Column, Error},
-};
-use std::convert::TryInto;
 
 // Test vector 'abc'
 #[cfg(test)]

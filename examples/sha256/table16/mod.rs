@@ -1,12 +1,12 @@
-use std::convert::TryInto;
-use std::marker::PhantomData;
+use std::{convert::TryInto, marker::PhantomData};
 
-use super::sha256::Sha256Instructions;
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Region, Value},
     plonk::{Advice, Any, Assigned, Column, ConstraintSystem, Error},
 };
+use sirius::ff::PrimeField;
+
+use super::sha256::Sha256Instructions;
 
 mod compression;
 mod gates;
@@ -469,13 +469,17 @@ trait Table16Assignment<F: PrimeField> {
 #[cfg(test)]
 #[cfg(feature = "test-dev-graph")]
 mod tests {
-    use super::super::{Sha256, BLOCK_SIZE};
-    use super::{message_schedule::msg_schedule_test_input, Table16Chip, Table16Config};
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         plonk::{Circuit, ConstraintSystem, Error},
     };
     use halo2curves::pasta::pallas;
+
+    use super::{
+        super::{Sha256, BLOCK_SIZE},
+        message_schedule::msg_schedule_test_input,
+        Table16Chip, Table16Config,
+    };
 
     #[traced_test]
     #[test]

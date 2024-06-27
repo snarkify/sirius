@@ -1,13 +1,13 @@
 use std::convert::TryInto;
 
 use super::{util::*, AssignedBits};
-use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::Field,
     circuit::{Chip, Layouter, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, TableColumn},
     poly::Rotation,
 };
+use sirius::ff::PrimeField;
 use std::marker::PhantomData;
 
 const BITS_7: usize = 1 << 7;

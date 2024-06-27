@@ -1,11 +1,11 @@
 use std::{marker::PhantomData, mem};
 
 use ff::Field;
+use halo2_proofs::halo2curves::pasta::Fp;
 use halo2_proofs::{
     circuit::SimpleFloorPlanner,
     plonk::{Advice, Circuit, Column, Instance},
 };
-use halo2curves::pasta::Fp;
 use num_traits::FromPrimitive;
 use tracing::*;
 
@@ -610,11 +610,11 @@ mod components_tests {
 }
 
 mod red_mod_tests {
+    use halo2_proofs::halo2curves::pasta::Fp;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
         plonk::{Advice, Circuit, Column, Instance},
     };
-    use halo2curves::pasta::Fp;
     use num_traits::FromPrimitive;
     use tracing_test::traced_test;
 

@@ -2,11 +2,15 @@ use std::{io, marker::PhantomData, num::NonZeroUsize};
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
-use halo2_proofs::dev::MockProver;
-use halo2curves::CurveAffine;
+use halo2_proofs::{
+    dev::MockProver,
+    halo2curves::{ff, group, CurveAffine},
+};
 use serde::Serialize;
 use tracing::*;
 
+use super::instance_computation::RandomOracleComputationInstance;
+pub use super::step_circuit::{self, StepCircuit, SynthesisError};
 use crate::{
     ivc::{
         public_params::PublicParams,
@@ -20,9 +24,6 @@ use crate::{
     table::CircuitRunner,
     util,
 };
-
-use super::instance_computation::RandomOracleComputationInstance;
-pub use super::step_circuit::{self, StepCircuit, SynthesisError};
 
 // TODO #31 docs
 struct StepCircuitContext<const ARITY: usize, C, SC>

@@ -1,11 +1,16 @@
-use super::super::{util::*, AssignedBits, BlockWord, SpreadVar, SpreadWord, Table16Assignment};
-use super::{schedule_util::*, MessageScheduleConfig};
-use ff::PrimeField;
+use std::convert::TryInto;
+
 use halo2_proofs::{
     circuit::{Region, Value},
     plonk::Error,
 };
-use std::convert::TryInto;
+use sirius::ff::PrimeField;
+
+use super::{
+    super::{util::*, AssignedBits, BlockWord, SpreadVar, SpreadWord, Table16Assignment},
+    schedule_util::*,
+    MessageScheduleConfig,
+};
 
 // A word in subregion 1
 // (3, 4, 11, 14)-bit chunks

@@ -1,12 +1,13 @@
 use std::{array, iter, marker::PhantomData, num::NonZeroUsize};
 
 use ff::{PrimeField, PrimeFieldBits};
+use halo2_proofs::halo2curves::ff;
+use halo2_proofs::halo2curves::{Coordinates, CurveAffine};
 use halo2_proofs::{
     circuit::{AssignedCell, Cell, Chip, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance},
     poly::Rotation,
 };
-use halo2curves::{Coordinates, CurveAffine};
 use itertools::Itertools;
 
 use crate::{
@@ -803,7 +804,7 @@ mod tests {
         plonk::CompressedGates,
         polynomial::{expression::QueryIndexContext, Expression},
     };
-    use halo2curves::pasta::Fp;
+    use halo2_proofs::halo2curves::pasta::Fp;
     use tracing_test::traced_test;
 
     #[traced_test]

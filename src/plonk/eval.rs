@@ -1,5 +1,6 @@
 use crate::polynomial::ColumnIndex;
 use ff::PrimeField;
+use halo2_proofs::halo2curves::ff;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum Error {

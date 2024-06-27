@@ -2,11 +2,14 @@ use std::{fmt, io, marker::PhantomData, num::NonZeroUsize, ops::Deref};
 
 use ff::{Field, FromUniformBytes, PrimeFieldBits};
 use group::prime::PrimeCurveAffine;
-use halo2_proofs::plonk;
-use halo2curves::CurveAffine;
+use halo2_proofs::{
+    halo2curves::{ff, group, CurveAffine},
+    plonk,
+};
 use serde::Serialize;
 use tracing::*;
 
+use super::{step_folding_circuit::StepParams, StepCircuit};
 use crate::{
     commitment::CommitmentKey,
     constants::NUM_HASH_BITS,
@@ -24,8 +27,6 @@ use crate::{
     table::CircuitRunner,
     util,
 };
-
-use super::{step_folding_circuit::StepParams, StepCircuit};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -418,19 +419,17 @@ where
 mod pp_test {
     use std::{fs, path::Path};
 
+    use bn256::G1 as C1;
     use group::Group;
-    use halo2curves::{bn256, grumpkin};
+    use grumpkin::G1 as C2;
+    use halo2_proofs::halo2curves::{bn256, grumpkin};
     use tracing_test::traced_test;
 
-    use bn256::G1 as C1;
-    use grumpkin::G1 as C2;
-
+    use super::*;
     use crate::ivc::step_circuit::{self, trivial};
 
-    use super::*;
-
-    type C1Affine = <C1 as halo2curves::group::prime::PrimeCurve>::Affine;
-    type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
+    type C1Affine = <C1 as halo2_proofs::halo2curves::group::prime::PrimeCurve>::Affine;
+    type C2Affine = <C2 as halo2_proofs::halo2curves::group::prime::PrimeCurve>::Affine;
 
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
     const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };

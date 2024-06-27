@@ -1,6 +1,7 @@
 use std::iter;
 
 use ff::PrimeField;
+use halo2_proofs::halo2curves::ff;
 
 use crate::fft;
 

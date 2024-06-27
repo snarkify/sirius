@@ -2,13 +2,12 @@
 pub mod poseidon_step_circuit {
     use std::marker::PhantomData;
 
-    use ff::{FromUniformBytes, PrimeFieldBits};
-
     use halo2_proofs::{
         circuit::{AssignedCell, Layouter},
         plonk::ConstraintSystem,
     };
     use sirius::{
+        ff::{FromUniformBytes, PrimeFieldBits},
         ivc::{StepCircuit, SynthesisError},
         main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
         poseidon::{poseidon_circuit::PoseidonChip, Spec},
@@ -121,17 +120,13 @@ pub mod poseidon_step_circuit {
 
 use std::{array, env, io, num::NonZeroUsize, path::Path};
 
-use ff::PrimeField;
-
-use halo2curves::{bn256, grumpkin, CurveAffine};
-
-use metadata::LevelFilter;
-
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
-
+use halo2_proofs::halo2curves::{bn256, grumpkin, CurveAffine};
+use metadata::LevelFilter;
 use sirius::{
     commitment::CommitmentKey,
+    ff::PrimeField,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, IVC},
     poseidon::{self, ROPair},
 };
@@ -160,11 +155,11 @@ const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
 /// Inside the IVC, big-uint math is used, these parameters define maximum count of limbs
 const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
-type C1Affine = <C1 as halo2curves::group::prime::PrimeCurve>::Affine;
-type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
+type C1Affine = <C1 as sirius::group::prime::PrimeCurve>::Affine;
+type C1Scalar = <C1 as sirius::group::Group>::Scalar;
 
-type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
-type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
+type C2Affine = <C2 as sirius::halo2curves::group::prime::PrimeCurve>::Affine;
+type C2Scalar = <C2 as sirius::halo2curves::group::Group>::Scalar;
 
 /// Either takes the key from [`CACHE_FOLDER`] or generates a new one and puts it in it
 #[instrument]

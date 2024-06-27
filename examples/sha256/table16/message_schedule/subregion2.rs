@@ -1,10 +1,10 @@
 use super::super::{util::*, AssignedBits, Bits, SpreadVar, SpreadWord, Table16Assignment};
 use super::{schedule_util::*, MessageScheduleConfig, MessageWord};
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Region, Value},
     plonk::Error,
 };
+use sirius::ff::PrimeField;
 use std::convert::TryInto;
 
 /// A word in subregion 2

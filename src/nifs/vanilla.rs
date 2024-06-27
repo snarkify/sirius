@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use ff::Field;
+use halo2_proofs::halo2curves::ff;
 use tracing::*;
 
 use super::*;

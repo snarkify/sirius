@@ -2,19 +2,17 @@
 
 use std::{array, io, iter, marker::PhantomData, num::NonZeroUsize, path::Path};
 
-use ff::PrimeField;
-use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, Value},
-    plonk::ConstraintSystem,
-};
-
-use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
-
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
-
+use halo2_proofs::{
+    circuit::{AssignedCell, Layouter, Value},
+    halo2curves,
+    plonk::ConstraintSystem,
+};
+use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
 use sirius::{
     commitment::CommitmentKey,
+    ff::PrimeField,
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
     poseidon::{self, ROPair},
 };
