@@ -329,12 +329,6 @@ pub(crate) struct Challenges<F: PrimeField> {
     delta: F,
 }
 
-impl<F: PrimeField> Challenges<F> {
-    fn beta_stroke(&self) -> F {
-        self.beta + (self.alpha * self.delta)
-    }
-}
-
 pub(crate) fn compute_K<C: CurveAffine>(
     _S: &PlonkStructure<C::ScalarExt>,
     _challenges: Challenges<C::ScalarExt>,
