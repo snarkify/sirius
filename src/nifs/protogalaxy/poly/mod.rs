@@ -194,20 +194,20 @@ pub(crate) fn compute_F<C: CurveAffine>(
 ///
 /// f₀  f₁ f₂  f₃  f₄  f₅  f₆  f₇
 /// │   │  │   │   │   │   │   │
-/// 1   β  1   β   1   β   1   β
+/// 1   β' 1   β'  1   β'  1   β'
 /// │   │  │   │   │   │   │   │
 /// └───f₀₁└───f₂₃ └───f₄₅ └───f₆₇
 ///     │      │       │       │
-///     1      β²      1       β²
+///     1      β'₂     1       β'₂
 ///     │      │       │       │
 ///     └──────f₀₁₂₃   └───────f₄₅₆₇
 ///            │               │
-///            1               β⁴
+///            1               β'₄
 ///            │               │
 ///            └───────────────f₀₁₂₃₄₅₆₇
 ///
-/// Each β here is a `beta_stroke` argument
-/// Each `f` here is vector (leafs too) of elements for each challenge with: fₙₘ =  fₙ * 1 + fₘ * βⁱ
+/// Where β'ᵢ= βⁱ + (α * δⁱ)
+/// Each `f` here is vector (leafs too) of elements for each challenge with: fₙₘ =  fₙ * 1 + fₘ * β'ᵢ
 ///
 /// # Note
 ///
@@ -215,7 +215,9 @@ pub(crate) fn compute_F<C: CurveAffine>(
 /// is in the nodes
 #[instrument(skip_all)]
 pub(crate) fn compute_G<C: CurveAffine>(
-    beta_stroke: C::ScalarExt,
+    alpha: C::ScalarExt,
+    beta: C::ScalarExt,
+    delta: C::ScalarExt,
     S: &PlonkStructure<C::ScalarExt>,
     accumulator: impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>,
     traces: &[(impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>)],
@@ -246,7 +248,24 @@ pub(crate) fn compute_G<C: CurveAffine>(
     let points_count = (count_of_folding_traces * max_degree + 1).next_power_of_two();
     let fft_domain_size = points_count.ilog2();
 
-    let powers_of_beta_stroke = iter::successors(Some(beta_stroke), |ch| Some(ch.double()))
+    struct BetaStrokeIter<F> {
+        alpha: F,
+        beta: F,
+        delta: F,
+    }
+    impl<F: PrimeField> Iterator for BetaStrokeIter<F> {
+        type Item = F;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let next = self.beta + (self.alpha * self.delta);
+
+            self.beta = self.beta.double();
+            self.delta = self.delta.double();
+
+            Some(next)
+        }
+    }
+    let powers_of_beta_stroke = BetaStrokeIter { alpha, beta, delta }
         .take(count_of_evaluation.next_power_of_two().ilog2() as usize)
         .collect::<Box<[C::ScalarExt]>>();
 
@@ -308,18 +327,14 @@ pub(crate) fn compute_G<C: CurveAffine>(
 mod test {
     use std::iter;
 
-    use crate::{
-        plonk::{test_eval_witness::poseidon_circuit, PlonkStructure},
-        polynomial::univariate::UnivariatePoly,
-    };
-
     use ff::Field as _Field;
     use halo2curves::{bn256, CurveAffine};
     use tracing_test::traced_test;
 
     use crate::{
         commitment::CommitmentKey,
-        plonk::PlonkTrace,
+        plonk::{test_eval_witness::poseidon_circuit, PlonkStructure, PlonkTrace},
+        polynomial::univariate::UnivariatePoly,
         poseidon::{
             random_oracle::{self, ROTrait},
             PoseidonRO, Spec,
@@ -408,12 +423,17 @@ mod test {
         let (S, trace) = poseidon_trace();
         let mut rnd = rand::thread_rng();
 
-        assert!(
-            super::compute_G::<Curve>(Field::random(&mut rnd), &S, trace.clone(), &[trace],)
-                .unwrap()
-                .iter()
-                .all(|f| f.is_zero().into())
-        );
+        assert!(super::compute_G::<Curve>(
+            Field::random(&mut rnd),
+            Field::random(&mut rnd),
+            Field::random(&mut rnd),
+            &S,
+            trace.clone(),
+            &[trace],
+        )
+        .unwrap()
+        .iter()
+        .all(|f| f.is_zero().into()));
     }
 
     #[traced_test]
@@ -428,7 +448,14 @@ mod test {
             .for_each(|row| row.iter_mut().for_each(|el| *el = Field::random(&mut rnd)));
 
         assert_ne!(
-            super::compute_G::<Curve>(Field::random(&mut rnd), &S, trace.clone(), &[trace]),
+            super::compute_G::<Curve>(
+                Field::random(&mut rnd),
+                Field::random(&mut rnd),
+                Field::random(&mut rnd),
+                &S,
+                trace.clone(),
+                &[trace]
+            ),
             Ok(UnivariatePoly::from_iter(
                 iter::repeat(Field::ZERO).take(16)
             ))

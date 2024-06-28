@@ -111,7 +111,12 @@ fn fold_witnesses<F: PrimeField>(
             // Here we take an iterator that on each iteration returns [column][row] elements for
             // each witness for its challenge
             //
-            // next -> vec![result[0][col][row], result[1][col][row], ... result[challenges_len][col][row]]
+            // next -> [
+            //     result[0][col][row],
+            //     result[1][col][row],
+            //     ...,
+            //     result[challenges_len][col][row]
+            // ]
             result_matrix_by_challenge
                 .iter_mut()
                 .map(|matrix| matrix.W.iter_mut().flat_map(|col| col.iter_mut()))
