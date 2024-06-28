@@ -7,6 +7,8 @@ use halo2curves::CurveAffine;
 use serde::Serialize;
 use tracing::*;
 
+use super::instance_computation::RandomOracleComputationInstance;
+pub use super::step_circuit::{self, StepCircuit, SynthesisError};
 use crate::{
     ivc::{
         public_params::PublicParams,
@@ -20,9 +22,6 @@ use crate::{
     table::CircuitRunner,
     util,
 };
-
-use super::instance_computation::RandomOracleComputationInstance;
-pub use super::step_circuit::{self, StepCircuit, SynthesisError};
 
 // TODO #31 docs
 struct StepCircuitContext<const ARITY: usize, C, SC>
@@ -111,7 +110,7 @@ where
     step: usize,
     secondary_nifs_pp: <nifs::vanilla::VanillaFS<C2> as FoldingScheme<C2>>::ProverParam,
     primary_nifs_pp: <nifs::vanilla::VanillaFS<C1> as FoldingScheme<C1>>::ProverParam,
-    secondary_trace: PlonkTrace<C2>,
+    secondary_trace: [PlonkTrace<C2>; 1],
 
     debug_mode: bool,
 }
@@ -351,7 +350,7 @@ where
             debug_mode: false,
             secondary_nifs_pp,
             primary_nifs_pp,
-            secondary_trace: secondary_plonk_trace.clone(),
+            secondary_trace: [secondary_plonk_trace.clone()],
             primary: StepCircuitContext {
                 z_0: primary_z_0,
                 z_i: primary_z_output,
@@ -397,7 +396,7 @@ where
         let primary_instance = {
             let _s = info_span!("generate_instance").entered();
             [
-                util::fe_to_fe(&self.secondary_trace.u.instance[1]).unwrap(),
+                util::fe_to_fe(&self.secondary_trace[0].u.instance[1]).unwrap(),
                 RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_2(),
@@ -421,7 +420,7 @@ where
                 z_0: self.primary.z_0,
                 z_i: self.primary.z_i,
                 U: self.secondary.relaxed_trace.U.clone(),
-                u: self.secondary_trace.u.clone(),
+                u: self.secondary_trace[0].u.clone(),
                 cross_term_commits: secondary_cross_term_commits,
             },
         };
@@ -447,13 +446,13 @@ where
         self.primary.z_i = primary_z_next;
         self.secondary.relaxed_trace = secondary_new_trace;
 
-        let primary_plonk_trace = VanillaFS::generate_plonk_trace(
+        let primary_plonk_trace = [VanillaFS::generate_plonk_trace(
             pp.primary.ck(),
             &primary_instance,
             &primary_witness,
             &self.primary_nifs_pp,
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-        )?;
+        )?];
 
         let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
             pp.primary.ck(),
@@ -474,7 +473,7 @@ where
         let secondary_instance = {
             let _s = info_span!("generate_instance");
             [
-                util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
+                util::fe_to_fe(&primary_plonk_trace[0].u.instance[1]).unwrap(),
                 RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
@@ -498,7 +497,7 @@ where
                 z_0: self.secondary.z_0,
                 z_i: self.secondary.z_i,
                 U: self.primary.relaxed_trace.U.clone(),
-                u: primary_plonk_trace.u.clone(),
+                u: primary_plonk_trace[0].u.clone(),
                 cross_term_commits: primary_cross_term_commits,
             },
         };
@@ -524,13 +523,13 @@ where
         self.secondary.z_i = next_secondary_z_i;
         self.primary.relaxed_trace = primary_new_trace;
 
-        self.secondary_trace = VanillaFS::generate_plonk_trace(
+        self.secondary_trace = [VanillaFS::generate_plonk_trace(
             pp.secondary.ck(),
             &secondary_instance,
             &secondary_witness,
             &self.secondary_nifs_pp,
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-        )?;
+        )?];
 
         self.step += 1;
 
@@ -561,7 +560,7 @@ where
         .generate_with_inspect::<C2::Scalar>(|buf| {
             debug!("primary X0 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&self.secondary_trace.u.instance[0])
+        .ne(&self.secondary_trace[0].u.instance[0])
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 0,
@@ -582,7 +581,7 @@ where
         .generate_with_inspect::<C1::Scalar>(|buf| {
             debug!("primary X1 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&util::fe_to_fe(&self.secondary_trace.u.instance[1]).unwrap())
+        .ne(&util::fe_to_fe(&self.secondary_trace[0].u.instance[1]).unwrap())
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 1,
@@ -617,8 +616,8 @@ where
         if let Err(err) = pp.secondary.S().is_sat(
             pp.secondary.ck(),
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-            &self.secondary_trace.u,
-            &self.secondary_trace.w,
+            &self.secondary_trace[0].u,
+            &self.secondary_trace[0].w,
         ) {
             errors.push(VerificationError::NotSat {
                 err,

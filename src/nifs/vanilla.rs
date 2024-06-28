@@ -188,8 +188,10 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         pp: &Self::ProverParam,
         ro_acc: &mut impl ROTrait<C::Base>,
         accumulator: &Self::Accumulator,
-        incoming: &PlonkTrace<C>,
+        incoming: &[PlonkTrace<C>; 1],
     ) -> Result<(Self::Accumulator, Self::Proof), Error> {
+        let incoming = &incoming[0];
+
         let U1 = &accumulator.U;
         let W1 = &accumulator.W;
         let U2 = &incoming.u;
@@ -228,9 +230,11 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         ro_nark: &mut impl ROTrait<C::Base>,
         ro_acc: &mut impl ROTrait<C::Base>,
         U1: &Self::AccumulatorInstance,
-        U2: &PlonkInstance<C>,
+        U2: &[PlonkInstance<C>; 1],
         cross_term_commits: &CrossTermCommits<C>,
     ) -> Result<Self::AccumulatorInstance, Error> {
+        let U2 = &U2[0];
+
         U2.sps_verify(ro_nark)?;
 
         let r = VanillaFS::generate_challenge(vp, ro_acc, U1, U2, cross_term_commits)?;

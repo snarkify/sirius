@@ -6,18 +6,21 @@ use halo2_proofs::{
     plonk::{self, Advice, Circuit, Column, ConstraintSystem, Instance, Selector},
     poly::Rotation,
 };
-use halo2curves::bn256::{Fr, G1Affine};
-use halo2curves::group::ff::FromUniformBytes;
+use halo2curves::{
+    bn256::{Fr, G1Affine},
+    group::ff::FromUniformBytes,
+};
 use some_to_err::*;
 
-use crate::nifs::{self, vanilla::VanillaFS};
-use crate::plonk::{
-    PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness,
-};
-use crate::table::CircuitRunner;
-use crate::util::create_ro;
-
 use super::*;
+use crate::{
+    nifs::{self, vanilla::VanillaFS},
+    plonk::{
+        PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness,
+    },
+    table::CircuitRunner,
+    util::create_ro,
+};
 
 #[derive(thiserror::Error, Debug)]
 enum Error<C: CurveAffine> {
@@ -140,8 +143,8 @@ where
 fn fold_instances<C, F1, F2>(
     ck: &CommitmentKey<C>,
     S: &PlonkStructure<F1>,
-    pair1: &PlonkTrace<C>,
-    pair2: &PlonkTrace<C>,
+    pair1: PlonkTrace<C>,
+    pair2: PlonkTrace<C>,
     pp_digest: C,
 ) -> Result<(), Error<C>>
 where
@@ -163,6 +166,7 @@ where
 
     let (pp, vp) = VanillaFS::setup_params(pp_digest, S.clone())?;
 
+    let pair1 = [pair1];
     let (RelaxedPlonkTrace { U: U_from_prove, W }, cross_term_commits) = VanillaFS::prove(
         ck,
         &pp,
@@ -171,7 +175,7 @@ where
             U: f_U.clone(),
             W: f_W.clone(),
         },
-        pair1,
+        &pair1,
     )?;
 
     let U_from_verify = VanillaFS::verify(
@@ -179,7 +183,7 @@ where
         &mut ro_nark_verifier,
         &mut ro_acc_verifier,
         &f_U,
-        &pair1.u,
+        &pair1.map(|p| p.u),
         &cross_term_commits,
     )?;
     Error::check_equality(&U_from_verify, &U_from_prove)?;
@@ -195,6 +199,7 @@ where
         errors.push(("is_sat_perm 1", err));
     }
 
+    let pair2 = [pair2];
     let (
         RelaxedPlonkTrace {
             U: U_from_prove,
@@ -209,7 +214,7 @@ where
             U: f_U.clone(),
             W: f_W,
         },
-        pair2,
+        &pair2,
     )?;
 
     let U_from_verify = VanillaFS::verify(
@@ -217,7 +222,7 @@ where
         &mut ro_nark_verifier,
         &mut ro_acc_verifier,
         &f_U,
-        &pair2.u,
+        &pair2.map(|p| p.u),
         &cross_term_commits,
     )?;
     assert_eq!(U_from_prove, U_from_verify);
@@ -250,9 +255,8 @@ fn smallest_power(n: usize, K: u32) -> usize {
 mod zero_round_test {
     use tracing_test::traced_test;
 
-    use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
-
     use super::*;
+    use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
 
     const T: usize = 3;
 
@@ -333,7 +337,7 @@ mod zero_round_test {
             public_inputs2,
             G1Affine::default(),
         )?;
-        fold_instances(&ck, &S, &pair1, &pair2, G1Affine::default())
+        fold_instances(&ck, &S, pair1, pair2, G1Affine::default())
     }
 }
 
@@ -524,7 +528,7 @@ mod one_round_test {
             public_inputs2,
             G1Affine::default(),
         )?;
-        fold_instances(&ck, &S, &pair1, &pair2, G1Affine::default())
+        fold_instances(&ck, &S, pair1, pair2, G1Affine::default())
     }
 }
 
@@ -828,6 +832,6 @@ mod three_rounds_test {
 
         let (ck, S, pair1, pair2) =
             prepare_trace(K, circuit1, circuit2, vec![], vec![], G1Affine::default())?;
-        fold_instances(&ck, &S, &pair1, &pair2, G1Affine::default())
+        fold_instances(&ck, &S, pair1, pair2, G1Affine::default())
     }
 }
