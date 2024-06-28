@@ -215,10 +215,8 @@ pub(crate) fn compute_F<C: CurveAffine>(
 /// is in the nodes
 #[instrument(skip_all)]
 pub(crate) fn compute_G<C: CurveAffine>(
-    alpha: C::ScalarExt,
-    beta: C::ScalarExt,
-    delta: C::ScalarExt,
     S: &PlonkStructure<C::ScalarExt>,
+    challenges: PolyChallenges<C::ScalarExt>,
     accumulator: impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>,
     traces: &[(impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>)],
 ) -> Result<UnivariatePoly<C::ScalarExt>, Error> {
@@ -248,24 +246,20 @@ pub(crate) fn compute_G<C: CurveAffine>(
     let points_count = (count_of_folding_traces * max_degree + 1).next_power_of_two();
     let fft_domain_size = points_count.ilog2();
 
-    struct BetaStrokeIter<F> {
-        alpha: F,
-        beta: F,
-        delta: F,
-    }
+    struct BetaStrokeIter<F: PrimeField>(PolyChallenges<F>);
     impl<F: PrimeField> Iterator for BetaStrokeIter<F> {
         type Item = F;
 
         fn next(&mut self) -> Option<Self::Item> {
-            let next = self.beta + (self.alpha * self.delta);
+            let next = self.0.beta + (self.0.alpha * self.0.delta);
 
-            self.beta = self.beta.double();
-            self.delta = self.delta.double();
+            self.0.beta = self.0.beta.double();
+            self.0.delta = self.0.delta.double();
 
             Some(next)
         }
     }
-    let powers_of_beta_stroke = BetaStrokeIter { alpha, beta, delta }
+    let powers_of_beta_stroke = BetaStrokeIter(challenges)
         .take(count_of_evaluation.next_power_of_two().ilog2() as usize)
         .collect::<Box<[C::ScalarExt]>>();
 
@@ -323,7 +317,7 @@ pub(crate) fn compute_G<C: CurveAffine>(
     }
 }
 
-pub(crate) struct Challenges<F: PrimeField> {
+pub(crate) struct PolyChallenges<F: PrimeField> {
     alpha: F,
     beta: F,
     delta: F,
@@ -331,7 +325,7 @@ pub(crate) struct Challenges<F: PrimeField> {
 
 pub(crate) fn compute_K<C: CurveAffine>(
     _S: &PlonkStructure<C::ScalarExt>,
-    _challenges: Challenges<C::ScalarExt>,
+    _challenges: PolyChallenges<C::ScalarExt>,
     _accumulator: impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>,
     _traces: &[(impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>)],
 ) -> UnivariatePoly<C::ScalarExt> {
@@ -348,6 +342,7 @@ mod test {
 
     use crate::{
         commitment::CommitmentKey,
+        nifs::protogalaxy::poly::PolyChallenges,
         plonk::{test_eval_witness::poseidon_circuit, PlonkStructure, PlonkTrace},
         polynomial::univariate::UnivariatePoly,
         poseidon::{
@@ -439,10 +434,12 @@ mod test {
         let mut rnd = rand::thread_rng();
 
         assert!(super::compute_G::<Curve>(
-            Field::random(&mut rnd),
-            Field::random(&mut rnd),
-            Field::random(&mut rnd),
             &S,
+            PolyChallenges {
+                alpha: Field::random(&mut rnd),
+                beta: Field::random(&mut rnd),
+                delta: Field::random(&mut rnd),
+            },
             trace.clone(),
             &[trace],
         )
@@ -464,10 +461,12 @@ mod test {
 
         assert_ne!(
             super::compute_G::<Curve>(
-                Field::random(&mut rnd),
-                Field::random(&mut rnd),
-                Field::random(&mut rnd),
                 &S,
+                PolyChallenges {
+                    alpha: Field::random(&mut rnd),
+                    beta: Field::random(&mut rnd),
+                    delta: Field::random(&mut rnd),
+                },
                 trace.clone(),
                 &[trace]
             ),
