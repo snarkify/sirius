@@ -397,3 +397,106 @@ impl<'l, F: PrimeField> fmt::Debug for CellsValuesView<'l, F> {
         write!(f, "]")
     }
 }
+
+pub mod try_multi_product {
+    /// This module provides utilities to create an iterator that yields the cartesian product of nested iterators.
+    ///
+    /// It is similar to [`itertools::Itertools::multi_cartesian_product`] but operates in a more
+    /// simplified manner without requiring `Clone` and [`Result`] inside
+    ///
+    /// A trait to extend iterators with the `try_multi_product` method.
+    pub trait TryMultiProduct<T, I: Iterator<Item = Result<T, E>>, E>:
+        Iterator<Item = I> + Sized
+    {
+        /// # Example
+        ///
+        /// ```
+        /// use crate::sirius::util::TryMultiProduct;
+        ///
+        /// let iterators = vec![
+        ///     vec![Result::<_, ()>::Ok(1), Ok(2), Ok(3)].into_iter(),
+        ///     vec![Ok(4), Ok(5)].into_iter(),
+        ///     vec![Ok(6), Ok(7)].into_iter(),
+        /// ];
+        ///
+        /// let mut multi_prod = iterators.into_iter().try_multi_product();
+        ///
+        /// assert_eq!(multi_prod.next(), Some(Ok(vec![1, 4, 6].into_boxed_slice())));
+        /// assert_eq!(multi_prod.next(), Some(Ok(vec![2, 5, 7].into_boxed_slice())));
+        /// assert_eq!(multi_prod.next(), None);
+        /// ```
+        fn try_multi_product(self) -> MultiProductWithResults<T, I, E> {
+            MultiProductWithResults::from_iter(self)
+        }
+    }
+    impl<MI, T, I, E> TryMultiProduct<T, I, E> for MI
+    where
+        I: Iterator<Item = Result<T, E>>,
+        MI: Iterator<Item = I> + Sized,
+    {
+    }
+
+    pub struct MultiProductWithResults<T, I: Iterator<Item = Result<T, E>>, E> {
+        iterators: Box<[I]>,
+    }
+
+    impl<T, I: Iterator<Item = Result<T, E>>, E> FromIterator<I> for MultiProductWithResults<T, I, E> {
+        fn from_iter<IN: IntoIterator<Item = I>>(iter: IN) -> Self {
+            Self {
+                iterators: iter.into_iter().collect(),
+            }
+        }
+    }
+    impl<T, E, I: Iterator<Item = Result<T, E>>> Iterator for MultiProductWithResults<T, I, E> {
+        type Item = Result<Box<[T]>, E>;
+
+        fn next(&mut self) -> Option<Result<Box<[T]>, E>> {
+            let len = self.iterators.len();
+
+            Some(
+                self.iterators
+                    .iter_mut()
+                    .map(|i| i.next())
+                    .try_fold(Ok(Vec::with_capacity(len)), |acc, next_value| {
+                        match (acc, next_value) {
+                            (Ok(mut acc), Some(Ok(next_value))) => {
+                                acc.push(next_value);
+                                Some(Ok(acc))
+                            }
+                            (Err(err), _) | (_, Some(Err(err))) => Some(Err(err)),
+                            (_, None) => None,
+                        }
+                    })?
+                    .map(|v| v.into_boxed_slice()),
+            )
+        }
+    }
+
+    pub struct MultiProduct<I: Iterator> {
+        iters: Box<[I]>,
+    }
+    impl<I: Iterator> Iterator for MultiProduct<I> {
+        type Item = Box<[I::Item]>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.iters.iter_mut().map(|i| i.next()).collect()
+        }
+    }
+
+    pub trait MultiCartesianProduct: Iterator + Sized
+    where
+        <Self as Iterator>::Item: Iterator + Sized,
+    {
+        fn multi_product(self) -> MultiProduct<Self::Item> {
+            MultiProduct {
+                iters: self.collect(),
+            }
+        }
+    }
+
+    impl<I: Iterator + Sized> MultiCartesianProduct for I where
+        <Self as Iterator>::Item: Iterator + Sized
+    {
+    }
+}
+pub use try_multi_product::{MultiCartesianProduct, MultiProductWithResults, TryMultiProduct};

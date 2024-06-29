@@ -104,7 +104,7 @@ mod tests {
 
         assert_eq!(
             into_curve_from_bits::<G1Affine>(
-                &input.to_repr(),
+                input.to_repr().as_ref(),
                 NonZeroUsize::new(Fr::NUM_BITS as usize).unwrap()
             ),
             -G1Affine::generator()
