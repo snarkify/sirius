@@ -1,6 +1,6 @@
-use crate::util;
+use crate::{polynomial::univariate::UnivariatePoly, util};
 use ff::{Field, PrimeField};
-use group::{GroupOpsOwned, ScalarMulOwned};
+use group::{ff::WithSmallOrderMulGroup, GroupOpsOwned, ScalarMulOwned};
 pub use halo2curves::{CurveAffine, CurveExt};
 
 /// Given FFT domain size k, return the omega in case of fft
@@ -166,6 +166,52 @@ pub fn ifft<F: PrimeField>(a: &mut [F], log_n: u32) {
     util::parallelize(a, |(a, _)| {
         for a in a {
             *a *= &divisor;
+        }
+    });
+}
+
+/// coset IFFT
+/// `a` corresponds to values of a polynoimal on coset domain zeta*{1,omega,omega^2,...}
+pub fn coset_ifft<F: WithSmallOrderMulGroup<3>>(a: &mut [F], log_n: u32) -> UnivariatePoly<F> {
+    assert_eq!(a.len(), 1 << log_n as usize);
+    // We use zeta here because we know it generates a coset, and it's available
+    // already.
+    // The coset evaluation domain is:
+    // zeta {1, extended_omega, extended_omega^2, ..., extended_omega^{(2^extended_k) - 1}}
+    let g_coset = F::ZETA;
+    let g_coset_inv = g_coset.square();
+
+    ifft(a, log_n);
+    distribute_powers_zeta(a, g_coset, g_coset_inv, false);
+    UnivariatePoly(a.to_vec().into_boxed_slice())
+}
+
+/// Given a slice of group elements `[a_0, a_1, a_2, ...]`, this returns
+/// `[a_0, [zeta]a_1, [zeta^2]a_2, a_3, [zeta]a_4, [zeta^2]a_5, a_6, ...]`,
+/// where zeta is a cube root of unity in the multiplicative subgroup with
+/// order (p - 1), i.e. zeta^3 = 1.
+///
+/// `into_coset` should be set to `true` when moving into the coset,
+/// and `false` when moving out. This toggles the choice of `zeta`.
+fn distribute_powers_zeta<F: PrimeField>(
+    a: &mut [F],
+    g_coset: F,
+    g_coset_inv: F,
+    into_coset: bool,
+) {
+    let coset_powers: [F; 2] = if into_coset {
+        [g_coset, g_coset_inv]
+    } else {
+        [g_coset_inv, g_coset]
+    };
+    util::parallelize(a, |(a, mut index)| {
+        for a in a {
+            // Distribute powers to move into/from coset
+            let i: usize = index % (coset_powers.len() + 1);
+            if i != 0 {
+                *a *= &coset_powers[i - 1];
+            }
+            index += 1;
         }
     });
 }
