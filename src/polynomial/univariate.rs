@@ -15,6 +15,9 @@ impl<F: Field> UnivariatePoly<F> {
     pub fn iter(&self) -> impl Iterator<Item = &F> {
         self.0.iter()
     }
+    pub fn get_vector_mut(&mut self) -> &mut Box<[F]> {
+        &mut self.0
+    }
 }
 
 impl<F: Field> FromIterator<F> for UnivariatePoly<F> {

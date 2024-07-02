@@ -75,6 +75,40 @@ pub fn iter_eval_lagrange_polynomials_for_cyclic_group<F: PrimeField>(
         .take(n)
 }
 
+/// # Parameters
+/// - `degree` - degree of the Lagrange poly
+/// - `poly_idx` - `i` - the i-th Lagrange poly  
+/// - `point` - eval Lagrange polynomials at this point
+/// # Result - L_i(gamma)
+pub fn eval_lagrange_polynomial<F: PrimeField>(degree: usize, poly_idx: usize, point: F) -> F {
+    let n = degree + 1;
+    let log_n = n.ilog2();
+
+    let inverted_n = F::from_u128(n as u128)
+        .invert()
+        .expect("safe because it's `2^log_n`");
+    let X_pow_n_sub_1 = point.pow([n as u64]) - F::ONE;
+
+    let generator: F = fft::get_omega_or_inv(log_n, false);
+    let omega_i = generator.pow([poly_idx as u64]);
+
+    let challenge_sub_value_inverted = point.sub(omega_i).invert();
+
+    if X_pow_n_sub_1.is_zero_vartime() && challenge_sub_value_inverted.is_none().into() {
+        F::ONE
+    } else {
+        omega_i * inverted_n * (X_pow_n_sub_1 * challenge_sub_value_inverted.unwrap())
+    }
+}
+
+/// # Parameters
+/// - `degree` - `n`  
+/// - `point` - `x` - eval Lagrange polynomials at this point
+/// # Result - x^n - 1
+pub fn eval_vanish_polynomial<F: PrimeField>(degree: usize, point: F) -> F {
+    point.pow([degree as u64]) - F::ONE
+}
+
 #[cfg(test)]
 mod tests {
     use ff::Field;

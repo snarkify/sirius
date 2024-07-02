@@ -170,14 +170,20 @@ pub fn ifft<F: PrimeField>(a: &mut [F], log_n: u32) {
     });
 }
 
+/// coset FFT
+/// input `a` corresponds to coefficients of a polynoimal
+pub fn coset_fft<F: WithSmallOrderMulGroup<3>>(a: &mut [F], log_n: u32) {
+    assert_eq!(a.len(), 1 << log_n as usize);
+    let g_coset = F::ZETA;
+    let g_coset_inv = g_coset.square();
+    distribute_powers_zeta(a, g_coset, g_coset_inv, true);
+    fft(a, log_n);
+}
+
 /// coset IFFT
-/// `a` corresponds to values of a polynoimal on coset domain zeta*{1,omega,omega^2,...}
+/// input `a` corresponds to values of a polynoimal on coset domain zeta*{1,omega,omega^2,...}
 pub fn coset_ifft<F: WithSmallOrderMulGroup<3>>(a: &mut [F], log_n: u32) -> UnivariatePoly<F> {
     assert_eq!(a.len(), 1 << log_n as usize);
-    // We use zeta here because we know it generates a coset, and it's available
-    // already.
-    // The coset evaluation domain is:
-    // zeta {1, extended_omega, extended_omega^2, ..., extended_omega^{(2^extended_k) - 1}}
     let g_coset = F::ZETA;
     let g_coset_inv = g_coset.square();
 

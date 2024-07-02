@@ -4,12 +4,13 @@ use std::{
 };
 
 use ff::PrimeField;
+use group::ff::WithSmallOrderMulGroup;
 use itertools::*;
 use num_traits::Zero;
 use tracing::*;
 
 use crate::{
-    fft,
+    fft::{self, coset_fft, coset_ifft},
     plonk::{self, eval, GetChallenges, GetWitness, PlonkStructure},
     polynomial::{expression::QueryIndexContext, lagrange, univariate::UnivariatePoly},
     util::TryMultiProduct,
@@ -231,9 +232,6 @@ pub(crate) fn compute_G<F: PrimeField>(
         return Err(Error::EmptyTracesNotAllowed);
     }
 
-    // `1` from accumulator
-    let count_of_folding_traces = 1 + traces.len();
-
     let count_of_rows = 2usize.pow(S.k as u32);
     let count_of_gates = S.gates.len();
 
@@ -242,7 +240,7 @@ pub(crate) fn compute_G<F: PrimeField>(
         return Ok(UnivariatePoly::new_zeroed(0));
     }
 
-    let points_count = (count_of_folding_traces * max_degree + 1).next_power_of_two();
+    let points_count = (traces.len() * max_degree + 1).next_power_of_two();
     let fft_domain_size = points_count.ilog2();
 
     struct BetaStrokeIter<F: PrimeField>(PolyChallenges<F>);
@@ -322,16 +320,49 @@ pub(crate) struct PolyChallenges<F: PrimeField> {
     delta: F,
 }
 
-pub(crate) fn compute_K<F: PrimeField>(
+pub(crate) fn compute_K<F: WithSmallOrderMulGroup<3>>(
     S: &PlonkStructure<F>,
+    f_alpha: F,
     challenges: PolyChallenges<F>,
     accumulator: impl Sync + GetChallenges<F> + GetWitness<F>,
     traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
 ) -> Result<UnivariatePoly<F>, Error> {
-    let _poly_G = compute_G(S, challenges, accumulator, traces)?;
+    let mut g_poly = compute_G(S, challenges, accumulator, traces)?;
+    // is coeffs here, will transform to evals by fft later
+    let g_evals = g_poly.get_vector_mut();
+    let ctx = QueryIndexContext::from(S);
+    let max_degree = S
+        .gates
+        .iter()
+        .map(|poly| poly.degree(&ctx))
+        .max()
+        .unwrap_or_default();
+    let points_count = max_degree * traces.len() + 1;
+    let log_n = points_count.next_power_of_two().ilog2();
+    coset_fft(g_evals, log_n);
 
-    let points = Box::new([]);
-    Ok(UnivariatePoly(points))
+    // eval (F(alpha)*L_0(X), Z(X)) on zeta*{1, omega,...,}
+    let l_and_z_evals = lagrange::iter_cyclic_subgroup::<F>(log_n)
+        .take(points_count)
+        .map(|pt| F::ZETA * pt)
+        .map(|pt| {
+            (
+                f_alpha * lagrange::eval_lagrange_polynomial((1 << log_n) - 1, 0, pt),
+                lagrange::eval_vanish_polynomial(1 << log_n, pt),
+            )
+        })
+        .collect::<Box<[_]>>();
+
+    let mut k_evals = g_evals
+        .iter()
+        .zip(l_and_z_evals.iter())
+        // when z_y is on coset domain, invert is save
+        .map(|(g_y, (l_y, z_y))| (*g_y - *l_y) * z_y.invert().unwrap())
+        .collect::<Vec<_>>();
+
+    coset_ifft(&mut k_evals, log_n);
+
+    Ok(UnivariatePoly(k_evals.into_boxed_slice()))
 }
 
 #[cfg(test)]
