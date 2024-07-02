@@ -945,10 +945,10 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
 /// fails.
 ///
 /// In other words iterator: `[gate1(row0), ..., gate1(rowN), gate2(0), ...]`
-pub(crate) fn iter_evaluate_witness<'link, C: CurveAffine>(
-    S: &'link PlonkStructure<C::ScalarExt>,
-    trace: &'link (impl Sync + GetChallenges<C::ScalarExt> + GetWitness<C::ScalarExt>),
-) -> impl 'link + Send + Iterator<Item = Result<C::ScalarExt, eval::Error>> {
+pub(crate) fn iter_evaluate_witness<'link, F: PrimeField>(
+    S: &'link PlonkStructure<F>,
+    trace: &'link (impl Sync + GetChallenges<F> + GetWitness<F>),
+) -> impl 'link + Send + Iterator<Item = Result<F, eval::Error>> {
     S.gates.iter().flat_map(|gate| {
         let eval_domain = PlonkEvalDomain {
             num_advice: S.num_advice_columns,
@@ -1101,7 +1101,7 @@ pub(crate) mod test_eval_witness {
             .unwrap();
 
         use rayon::prelude::*;
-        super::iter_evaluate_witness::<Curve>(&S, &PlonkTrace { u, w })
+        super::iter_evaluate_witness::<Field>(&S, &PlonkTrace { u, w })
             .par_bridge()
             .for_each(|v| {
                 assert_eq!(v, Ok(Field::ZERO));
