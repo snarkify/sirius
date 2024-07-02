@@ -52,9 +52,9 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
         pp: &Self::ProverParam,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
-        let (u, w) =
-            pp.S.run_sps_protocol(ck, instance, witness, ro_nark, pp.S.num_challenges)?;
-        Ok(PlonkTrace { u, w })
+        Ok(pp
+            .S
+            .run_sps_protocol(ck, instance, witness, ro_nark, pp.S.num_challenges)?)
     }
 
     fn prove(

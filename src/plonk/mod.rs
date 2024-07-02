@@ -17,14 +17,13 @@
 use std::{iter, num::NonZeroUsize, time::Instant};
 
 use count_to_non_zero::*;
+use ff::{Field, PrimeField};
+use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
 use itertools::Itertools;
 use rayon::prelude::*;
 use serde::Serialize;
 use some_to_err::*;
 use tracing::{debug, error, info, instrument, warn};
-
-use ff::{Field, PrimeField};
-use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
 
 use crate::{
     commitment::CommitmentKey,
@@ -571,7 +570,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         advice: &[Vec<F>],
         ro_nark: &mut RO,
         num_challenges: usize,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+    ) -> Result<PlonkTrace<C>, SpsError> {
         debug!("run sps protocol with {num_challenges} challenges");
         match num_challenges {
             0 => self.run_sps_protocol_0(instance, advice, ck),
@@ -589,7 +588,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         instance: &[F],
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+    ) -> Result<PlonkTrace<C>, SpsError> {
         let W1 = concatenate_with_padding(advice, 1 << self.k);
         let C1 = ck
             .commit(&W1)
@@ -598,14 +597,14 @@ impl<F: PrimeField> PlonkStructure<F> {
                 err,
             })?;
 
-        Ok((
-            PlonkInstance {
+        Ok(PlonkTrace {
+            u: PlonkInstance {
                 W_commitments: vec![C1],
                 instance: instance.to_vec(),
                 challenges: vec![],
             },
-            PlonkWitness { W: vec![W1] },
-        ))
+            w: PlonkWitness { W: vec![W1] },
+        })
     }
 
     /// run 1-round special soundness protocol to generate witnesses and challenges
@@ -619,8 +618,11 @@ impl<F: PrimeField> PlonkStructure<F> {
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
-        let (mut plonk_instance, plonk_witness) = self.run_sps_protocol_0(instance, advice, ck)?;
+    ) -> Result<PlonkTrace<C>, SpsError> {
+        let PlonkTrace {
+            u: mut plonk_instance,
+            w: plonk_witness,
+        } = self.run_sps_protocol_0(instance, advice, ck)?;
 
         ro_nark
             .absorb_field_iter(instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
@@ -630,7 +632,10 @@ impl<F: PrimeField> PlonkStructure<F> {
             .challenges
             .push(ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS));
 
-        Ok((plonk_instance, plonk_witness))
+        Ok(PlonkTrace {
+            u: plonk_instance,
+            w: plonk_witness,
+        })
     }
 
     /// run 2-round special soundness protocol to generate witnesses and challenges
@@ -644,7 +649,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+    ) -> Result<PlonkTrace<C>, SpsError> {
         let k_power_of_2 = 1 << self.k;
 
         // round 1
@@ -692,14 +697,14 @@ impl<F: PrimeField> PlonkStructure<F> {
             })?;
         let r2 = ro_nark.absorb_point(&C2).squeeze::<C>(NUM_CHALLENGE_BITS);
 
-        Ok((
-            PlonkInstance {
+        Ok(PlonkTrace {
+            u: PlonkInstance {
                 W_commitments: vec![C1, C2],
                 instance: instance.to_vec(),
                 challenges: vec![r1, r2],
             },
-            PlonkWitness { W: vec![W1, W2] },
-        ))
+            w: PlonkWitness { W: vec![W1, W2] },
+        })
     }
 
     /// run 3-round special soundness protocol to generate witnesses and challenges
@@ -712,7 +717,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+    ) -> Result<PlonkTrace<C>, SpsError> {
         ro_nark.absorb_field_iter(instance.iter().map(|inst| fe_to_fe(inst).unwrap()));
 
         let k_power_of_2 = 1 << self.k;
@@ -763,16 +768,16 @@ impl<F: PrimeField> PlonkStructure<F> {
             })?;
         let r3 = ro_nark.absorb_point(&C3).squeeze::<C>(NUM_CHALLENGE_BITS);
 
-        Ok((
-            PlonkInstance {
+        Ok(PlonkTrace {
+            u: PlonkInstance {
                 W_commitments: vec![C1, C2, C3],
                 instance: instance.to_vec(),
                 challenges: vec![r1, r2, r3],
             },
-            PlonkWitness {
+            w: PlonkWitness {
                 W: vec![W1, W2, W3],
             },
-        ))
+        })
     }
 }
 
@@ -973,14 +978,14 @@ pub(crate) mod test_eval_witness {
         use std::{array, marker::PhantomData};
 
         use ff::{FromUniformBytes, PrimeFieldBits};
+        use halo2_proofs::{
+            circuit::{Layouter, SimpleFloorPlanner, Value},
+            plonk::{Circuit, ConstraintSystem},
+        };
 
         use crate::{
             main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
             poseidon::{poseidon_circuit::PoseidonChip, Spec},
-        };
-        use halo2_proofs::{
-            circuit::{Layouter, SimpleFloorPlanner, Value},
-            plonk::{Circuit, ConstraintSystem},
         };
 
         /// Input and output size for `StepCircuit` within each step
@@ -1054,7 +1059,6 @@ pub(crate) mod test_eval_witness {
 
     use crate::{
         commitment::CommitmentKey,
-        plonk::PlonkTrace,
         poseidon::{
             random_oracle::{self, ROTrait},
             PoseidonRO, Spec,
@@ -1090,7 +1094,7 @@ pub(crate) mod test_eval_witness {
 
         let witness = runner.try_collect_witness().unwrap();
 
-        let (u, w) = S
+        let trace = S
             .run_sps_protocol(
                 &CommitmentKey::<Curve>::setup(15, b"k"),
                 &[],
@@ -1101,7 +1105,7 @@ pub(crate) mod test_eval_witness {
             .unwrap();
 
         use rayon::prelude::*;
-        super::iter_evaluate_witness::<Field>(&S, &PlonkTrace { u, w })
+        super::iter_evaluate_witness::<Curve>(&S, &trace)
             .par_bridge()
             .for_each(|v| {
                 assert_eq!(v, Ok(Field::ZERO));

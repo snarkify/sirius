@@ -1,21 +1,23 @@
 use std::marker::PhantomData;
 
 use ff::Field;
+use halo2_proofs::arithmetic::CurveAffine;
 use tracing::*;
 
 use super::*;
-use crate::commitment::CommitmentKey;
-use crate::concat_vec;
-use crate::constants::NUM_CHALLENGE_BITS;
-use crate::plonk::eval::{GetDataForEval, PlonkEvalDomain};
-use crate::plonk::{
-    PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
+use crate::{
+    commitment::CommitmentKey,
+    concat_vec,
+    constants::NUM_CHALLENGE_BITS,
+    plonk::{
+        eval::{GetDataForEval, PlonkEvalDomain},
+        PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness, RelaxedPlonkInstance,
+        RelaxedPlonkTrace, RelaxedPlonkWitness,
+    },
+    polynomial::graph_evaluator::GraphEvaluator,
+    poseidon::ROTrait,
+    sps::SpecialSoundnessVerifier,
 };
-use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
-use crate::polynomial::graph_evaluator::GraphEvaluator;
-use crate::poseidon::ROTrait;
-use crate::sps::SpecialSoundnessVerifier;
-use halo2_proofs::arithmetic::CurveAffine;
 
 /// Represent intermediate polynomial terms that arise when folding
 /// two polynomial relations into one.
@@ -162,9 +164,9 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         pp: &VanillaFSProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
-        let (u, w) =
-            pp.S.run_sps_protocol(ck, instance, witness, ro_nark, pp.S.num_challenges)?;
-        Ok(PlonkTrace { u, w })
+        Ok(pp
+            .S
+            .run_sps_protocol(ck, instance, witness, ro_nark, pp.S.num_challenges)?)
     }
 
     /// Generates a proof of correct folding using the NIFS protocol.
