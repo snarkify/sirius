@@ -345,15 +345,14 @@ fn kzg() {
         .json()
         .init();
 
-    
     {
         let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
             &mut rand::thread_rng(),
-            60,
+            2,
             1,
         );
-        const K: u32 = 21;
-        let _s_60_1_21 = info_span!("60_1_21").entered();
+        const K: u32 = 16;
+        let _s_2_1_16 = info_span!("2_1_16").entered();
 
         let keygen = info_span!("keygen").entered();
         let params = ParamsKZG::<Bn256>::setup(K, OsRng);
@@ -378,120 +377,21 @@ fn kzg() {
         .expect("proof generation should not fail");
         prove.exit();
 
-        //let proof = transcript.finalize();
+        let proof = transcript.finalize();
 
-        //let verify = info_span!("verify").entered();
-        //let strategy = SingleStrategy::new(&params);
-        //let mut transcript =
-        //    Blake2bRead::<&[u8], C1Affine, Challenge255<C1Affine>>::init(&proof[..]);
+        let verify = info_span!("verify").entered();
+        let strategy = SingleStrategy::new(&params);
+        let mut transcript =
+            Blake2bRead::<&[u8], C1Affine, Challenge255<C1Affine>>::init(&proof[..]);
 
-        //assert!(verify_proof::<
-        //    KZGCommitmentScheme<Bn256>,
-        //    VerifierGWC<'_, Bn256>,
-        //    Challenge255<C1Affine>,
-        //    Blake2bRead<&[u8], C1Affine, Challenge255<C1Affine>>,
-        //    SingleStrategy<'_, Bn256>,
-        //>(&params, pk.get_vk(), strategy, &[], &mut transcript)
-        //.is_ok());
-        //verify.exit();
-    }
-    {
-        let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
-            &mut rand::thread_rng(),
-            80,
-            1,
-        );
-        const K: u32 = 21;
-        let _s_80_1_21 = info_span!("80_1_21").entered();
-
-        let keygen = info_span!("keygen").entered();
-        let params = ParamsKZG::<Bn256>::setup(K, OsRng);
-        let pk = keygen_pk(
-            &params,
-            keygen_vk(&params, &circuit).expect("keygen_vk should not fail"),
-            &circuit,
-        )
-        .expect("keygen_pk should not fail");
-        keygen.exit();
-
-        let prove = info_span!("prove").entered();
-        let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-        create_proof::<
+        assert!(verify_proof::<
             KZGCommitmentScheme<Bn256>,
-            ProverGWC<'_, Bn256>,
+            VerifierGWC<'_, Bn256>,
             Challenge255<C1Affine>,
-            OsRng,
-            Blake2bWrite<Vec<u8>, C1Affine, Challenge255<_>>,
-            _,
-        >(&params, &pk, &[circuit], &[], OsRng, &mut transcript)
-        .expect("proof generation should not fail");
-        prove.exit();
-
-        //let proof = transcript.finalize();
-
-        //let verify = info_span!("verify").entered();
-        //let strategy = SingleStrategy::new(&params);
-        //let mut transcript =
-        //    Blake2bRead::<&[u8], C1Affine, Challenge255<C1Affine>>::init(&proof[..]);
-
-        //assert!(verify_proof::<
-        //    KZGCommitmentScheme<Bn256>,
-        //    VerifierGWC<'_, Bn256>,
-        //    Challenge255<C1Affine>,
-        //    Blake2bRead<&[u8], C1Affine, Challenge255<C1Affine>>,
-        //    SingleStrategy<'_, Bn256>,
-        //>(&params, pk.get_vk(), strategy, &[], &mut transcript)
-        //.is_ok());
-        //verify.exit();
-    }
-
-    {
-        let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
-            &mut rand::thread_rng(),
-            100,
-            1,
-        );
-        const K: u32 = 21;
-        let _s_100_1_21 = info_span!("100_1_21").entered();
-
-        let keygen = info_span!("keygen").entered();
-        let params = ParamsKZG::<Bn256>::setup(K, OsRng);
-        let pk = keygen_pk(
-            &params,
-            keygen_vk(&params, &circuit).expect("keygen_vk should not fail"),
-            &circuit,
-        )
-        .expect("keygen_pk should not fail");
-        keygen.exit();
-
-        let prove = info_span!("prove").entered();
-        let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-        create_proof::<
-            KZGCommitmentScheme<Bn256>,
-            ProverGWC<'_, Bn256>,
-            Challenge255<C1Affine>,
-            OsRng,
-            Blake2bWrite<Vec<u8>, C1Affine, Challenge255<_>>,
-            _,
-        >(&params, &pk, &[circuit], &[], OsRng, &mut transcript)
-        .expect("proof generation should not fail");
-        prove.exit();
-
-        //let proof = transcript.finalize();
-
-        //let verify = info_span!("verify").entered();
-        //let strategy = SingleStrategy::new(&params);
-        //let mut transcript =
-        //    Blake2bRead::<&[u8], C1Affine, Challenge255<C1Affine>>::init(&proof[..]);
-
-        //assert!(verify_proof::<
-        //    KZGCommitmentScheme<Bn256>,
-        //    VerifierGWC<'_, Bn256>,
-        //    Challenge255<C1Affine>,
-        //    Blake2bRead<&[u8], C1Affine, Challenge255<C1Affine>>,
-        //    SingleStrategy<'_, Bn256>,
-        //>(&params, pk.get_vk(), strategy, &[], &mut transcript)
-        //.is_ok());
-        //verify.exit();
+            Blake2bRead<&[u8], C1Affine, Challenge255<C1Affine>>,
+            SingleStrategy<'_, Bn256>,
+        >(&params, pk.get_vk(), strategy, &[], &mut transcript)
+        .is_ok());
+        verify.exit();
     }
 }
