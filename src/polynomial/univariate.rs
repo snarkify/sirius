@@ -15,8 +15,11 @@ impl<F: Field> UnivariatePoly<F> {
     pub fn iter(&self) -> impl Iterator<Item = &F> {
         self.0.iter()
     }
-    pub fn get_vector_mut(&mut self) -> &mut Box<[F]> {
-        &mut self.0
+}
+
+impl<F: Field> AsMut<[F]> for UnivariatePoly<F> {
+    fn as_mut(&mut self) -> &mut [F] {
+        self.0.as_mut()
     }
 }
 
@@ -41,8 +44,9 @@ impl<F: Field> UnivariatePoly<F> {
 mod tests {
     use std::iter;
 
-    use super::UnivariatePoly;
     use halo2curves::bn256::Fr;
+
+    use super::UnivariatePoly;
 
     // Helper to create an `Fr` iterator from a `u64` iterator
     trait ToF<I: Into<Fr>>: Sized + IntoIterator<Item = I> {
