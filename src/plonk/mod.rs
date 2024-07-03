@@ -220,6 +220,7 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
     /// contains challenges
     pub(crate) challenges: Vec<C::ScalarExt>,
     /// homogenous variable u
+    // TODO Do we need it for protogalaxy?
     pub(crate) u: C::ScalarExt,
 }
 
@@ -234,6 +235,24 @@ pub struct RelaxedPlonkWitness<F: PrimeField> {
 pub struct RelaxedPlonkTrace<C: CurveAffine> {
     pub U: RelaxedPlonkInstance<C>,
     pub W: RelaxedPlonkWitness<C::Scalar>,
+}
+
+impl<C: CurveAffine> RelaxedPlonkTrace<C> {
+    pub fn new(args: RelaxedPlonkTraceArgs) -> Self {
+        Self {
+            U: RelaxedPlonkInstance::new(args.num_io, args.num_challenges, args.num_witness),
+            W: RelaxedPlonkWitness::new(args.k_table_size, &args.round_sizes),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct RelaxedPlonkTraceArgs {
+    num_io: usize,
+    num_challenges: usize,
+    num_witness: usize,
+    k_table_size: usize,
+    round_sizes: Box<[usize]>,
 }
 
 // TODO #31 docs
@@ -1105,7 +1124,7 @@ pub(crate) mod test_eval_witness {
             .unwrap();
 
         use rayon::prelude::*;
-        super::iter_evaluate_witness::<Curve>(&S, &trace)
+        super::iter_evaluate_witness::<Field>(&S, &trace)
             .par_bridge()
             .for_each(|v| {
                 assert_eq!(v, Ok(Field::ZERO));

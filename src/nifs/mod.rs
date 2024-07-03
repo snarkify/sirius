@@ -19,6 +19,8 @@ use crate::plonk::{PlonkInstance, PlonkStructure, PlonkTrace};
 use crate::poseidon::ROTrait;
 use crate::sps::Error as SpsError;
 
+use self::protogalaxy::poly;
+
 pub mod protogalaxy;
 pub mod vanilla;
 
@@ -84,6 +86,8 @@ pub enum Error {
     Plonk(#[from] Halo2Error),
     #[error(transparent)]
     Commitment(#[from] commitment::Error),
+    #[error(transparent)]
+    Poly(#[from] poly::Error),
 }
 
 #[cfg(test)]

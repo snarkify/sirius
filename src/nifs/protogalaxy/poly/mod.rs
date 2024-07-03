@@ -1,7 +1,4 @@
-use std::{
-    iter,
-    num::{NonZeroU32, NonZeroUsize},
-};
+use std::num::{NonZeroU32, NonZeroUsize};
 
 use ff::PrimeField;
 use group::ff::WithSmallOrderMulGroup;
@@ -67,7 +64,7 @@ pub enum Error {
 /// except leaves.
 #[instrument(skip_all)]
 pub(crate) fn compute_F<F: PrimeField>(
-    beta: F,
+    betas: impl Iterator<Item = F>,
     delta: F,
     S: &PlonkStructure<F>,
     trace: &(impl Sync + GetChallenges<F> + GetWitness<F>),
@@ -105,10 +102,15 @@ pub(crate) fn compute_F<F: PrimeField>(
     //
     // Even for large `count_of_evaluation` this will be a small number, so we can
     // collect it
+    let betas = betas
+        .take(count_of_evaluation.next_power_of_two().ilog2() as usize)
+        .collect::<Box<[_]>>();
+
     let challenges_powers = lagrange::iter_cyclic_subgroup::<F>(fft_domain_size.get())
         .map(|X| {
-            iter::successors(Some(beta + X * delta), |ch| Some(ch.double()))
-                .take(count_of_evaluation.next_power_of_two().ilog2() as usize)
+            betas
+                .iter()
+                .map(|beta| *beta + X * delta)
                 .collect::<Box<_>>()
         })
         .take(points_count)
@@ -216,8 +218,8 @@ pub(crate) fn compute_F<F: PrimeField>(
 #[instrument(skip_all)]
 pub(crate) fn compute_G<F: PrimeField>(
     S: &PlonkStructure<F>,
-    challenges: PolyChallenges<F>,
-    accumulator: impl Sync + GetChallenges<F> + GetWitness<F>,
+    betas_stroke: impl Iterator<Item = F>,
+    accumulator: &(impl Sync + GetChallenges<F> + GetWitness<F>),
     traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
 ) -> Result<UnivariatePoly<F>, Error> {
     let ctx = QueryIndexContext::from(S);
@@ -243,20 +245,7 @@ pub(crate) fn compute_G<F: PrimeField>(
     let points_count = (traces.len() * max_degree + 1).next_power_of_two();
     let fft_domain_size = points_count.ilog2();
 
-    struct BetaStrokeIter<F: PrimeField>(PolyChallenges<F>);
-    impl<F: PrimeField> Iterator for BetaStrokeIter<F> {
-        type Item = F;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            let next = self.0.beta + (self.0.alpha * self.0.delta);
-
-            self.0.beta = self.0.beta.double();
-            self.0.delta = self.0.delta.double();
-
-            Some(next)
-        }
-    }
-    let powers_of_beta_stroke = BetaStrokeIter(challenges)
+    let powers_of_beta_stroke = betas_stroke
         .take(count_of_evaluation.next_power_of_two().ilog2() as usize)
         .collect::<Box<[_]>>();
 
@@ -314,20 +303,49 @@ pub(crate) fn compute_G<F: PrimeField>(
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct PolyChallenges<F: PrimeField> {
-    alpha: F,
-    beta: F,
-    delta: F,
+    pub(crate) betas: Box<[F]>,
+    pub(crate) alpha: F,
+    pub(crate) delta: F,
+}
+
+struct BetaStrokeIter<F: PrimeField> {
+    cha: PolyChallenges<F>,
+    beta_index: usize,
+}
+
+impl<F: PrimeField> PolyChallenges<F> {
+    fn iter_beta_stroke(self) -> BetaStrokeIter<F> {
+        BetaStrokeIter {
+            cha: self,
+            beta_index: 0,
+        }
+    }
+}
+
+impl<F: PrimeField> Iterator for BetaStrokeIter<F> {
+    type Item = F;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next =
+            self.cha.betas.get(self.beta_index).copied()? + (self.cha.alpha * self.cha.delta);
+
+        self.beta_index += 1;
+        self.cha.delta = self.cha.delta.double();
+
+        Some(next)
+    }
 }
 
 pub(crate) fn compute_K<F: WithSmallOrderMulGroup<3>>(
     S: &PlonkStructure<F>,
     f_alpha: F,
     challenges: PolyChallenges<F>,
-    accumulator: impl Sync + GetChallenges<F> + GetWitness<F>,
+    accumulator: &(impl Sync + GetChallenges<F> + GetWitness<F>),
     traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
 ) -> Result<UnivariatePoly<F>, Error> {
-    let mut g_poly = compute_G(S, challenges, accumulator, traces)?;
+    let mut g_poly = compute_G(S, challenges.iter_beta_stroke(), accumulator, traces)?;
     // is coeffs here, will transform to evals by fft later
     let ctx = QueryIndexContext::from(S);
 
@@ -373,7 +391,6 @@ mod test {
 
     use crate::{
         commitment::CommitmentKey,
-        nifs::protogalaxy::poly::PolyChallenges,
         plonk::{test_eval_witness::poseidon_circuit, PlonkStructure, PlonkTrace},
         polynomial::univariate::UnivariatePoly,
         poseidon::{
@@ -428,12 +445,16 @@ mod test {
         let (S, trace) = poseidon_trace();
         let mut rnd = rand::thread_rng();
 
-        assert!(
-            super::compute_F(Field::random(&mut rnd), Field::random(&mut rnd), &S, &trace,)
-                .unwrap()
-                .iter()
-                .all(|f| f.is_zero().into())
-        );
+        let delta = Field::random(&mut rnd);
+        assert!(super::compute_F(
+            iter::repeat_with(|| Field::random(&mut rnd)),
+            delta,
+            &S,
+            &trace,
+        )
+        .unwrap()
+        .iter()
+        .all(|f| f.is_zero().into()));
     }
 
     #[traced_test]
@@ -447,8 +468,14 @@ mod test {
             .iter_mut()
             .for_each(|row| row.iter_mut().for_each(|el| *el = Field::random(&mut rnd)));
 
+        let delta = Field::random(&mut rnd);
         assert_ne!(
-            super::compute_F(Field::random(&mut rnd), Field::random(&mut rnd), &S, &trace,),
+            super::compute_F(
+                iter::repeat_with(|| Field::random(&mut rnd)),
+                delta,
+                &S,
+                &trace,
+            ),
             Ok(UnivariatePoly::from_iter(
                 iter::repeat(Field::ZERO).take(16)
             ))
@@ -463,12 +490,8 @@ mod test {
 
         assert!(super::compute_G(
             &S,
-            PolyChallenges {
-                alpha: Field::random(&mut rnd),
-                beta: Field::random(&mut rnd),
-                delta: Field::random(&mut rnd),
-            },
-            trace.clone(),
+            iter::repeat_with(|| Field::random(&mut rnd)),
+            &trace.clone(),
             &[trace],
         )
         .unwrap()
@@ -490,12 +513,8 @@ mod test {
         assert_ne!(
             super::compute_G(
                 &S,
-                PolyChallenges {
-                    alpha: Field::random(&mut rnd),
-                    beta: Field::random(&mut rnd),
-                    delta: Field::random(&mut rnd),
-                },
-                trace.clone(),
+                iter::repeat_with(|| Field::random(&mut rnd)),
+                &trace.clone(),
                 &[trace]
             ),
             Ok(UnivariatePoly::from_iter(
