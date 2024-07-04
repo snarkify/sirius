@@ -310,13 +310,13 @@ pub(crate) struct PolyChallenges<F: PrimeField> {
     pub(crate) delta: F,
 }
 
-struct BetaStrokeIter<F: PrimeField> {
+pub(crate) struct BetaStrokeIter<F: PrimeField> {
     cha: PolyChallenges<F>,
     beta_index: usize,
 }
 
 impl<F: PrimeField> PolyChallenges<F> {
-    fn iter_beta_stroke(self) -> BetaStrokeIter<F> {
+    pub(crate) fn iter_beta_stroke(self) -> BetaStrokeIter<F> {
         BetaStrokeIter {
             cha: self,
             beta_index: 0,
@@ -341,11 +341,11 @@ impl<F: PrimeField> Iterator for BetaStrokeIter<F> {
 pub(crate) fn compute_K<F: WithSmallOrderMulGroup<3>>(
     S: &PlonkStructure<F>,
     f_alpha: F,
-    challenges: PolyChallenges<F>,
+    betas_stroke: impl Iterator<Item = F>,
     accumulator: &(impl Sync + GetChallenges<F> + GetWitness<F>),
     traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
 ) -> Result<UnivariatePoly<F>, Error> {
-    let mut g_poly = compute_G(S, challenges.iter_beta_stroke(), accumulator, traces)?;
+    let mut g_poly = compute_G(S, betas_stroke, accumulator, traces)?;
     // is coeffs here, will transform to evals by fft later
     let ctx = QueryIndexContext::from(S);
 

@@ -1,4 +1,4 @@
-use std::{iter, marker::PhantomData};
+use std::{iter, marker::PhantomData, ops::Mul};
 
 use ff::{Field, PrimeField};
 use halo2_proofs::arithmetic::CurveAffine;
@@ -11,7 +11,7 @@ use crate::{
     plonk::{
         PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkTraceArgs,
     },
-    polynomial::univariate::UnivariatePoly,
+    polynomial::{lagrange, univariate::UnivariatePoly},
     util,
 };
 
@@ -98,23 +98,7 @@ impl<C: CurveAffine> Accumulator<C> {
             trace: RelaxedPlonkTrace::new(args),
         }
     }
-
-    fn fold(&self, _gamma: C::ScalarExt) -> Self {
-        todo!()
-    }
 }
-
-//impl<C: CurveAffine> Accumulator<C> {
-//    fn new(num_io: usize, num_challenges: usize, num_witness: usize) -> Self {
-//        Self {
-//            beta: C::ScalarExt::ZERO,
-//            trace: RelaxedPlonkTrace {
-//                U: RelaxedPlonkInstance::new(num_io, num_challenges, num_witness),
-//                W: RelaxedPlonkWitness::new(k_table_size, round_sized),
-//            },
-//        }
-//    }
-//}
 
 impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<L, C> {
     type ProverParam = ProtoGalaxyProverParam<C>;
@@ -150,6 +134,10 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<L, C> {
         accumulator: &Self::Accumulator,
         incoming: &[PlonkTrace<C>; L],
     ) -> Result<(Self::Accumulator, Self::Proof), Error> {
+        let log_n = Self::get_count_of_valuation(&pp.S)
+            .next_power_of_two()
+            .ilog2();
+
         let delta = Self::generate_challenge(
             &pp.pp_digest,
             ro_acc,
@@ -172,15 +160,18 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<L, C> {
             )
             .squeeze::<C>(NUM_CHALLENGE_BITS);
 
-        let challenges = poly::PolyChallenges {
+        let betas_stroke = poly::PolyChallenges {
             betas: accumulator.betas.clone(),
             delta,
             alpha,
-        };
+        }
+        .iter_beta_stroke()
+        .collect::<Box<[_]>>();
+
         let poly_K = poly::compute_K::<C::ScalarExt>(
             &pp.S,
             alpha,
-            challenges,
+            betas_stroke.iter().copied(),
             &accumulator.trace,
             incoming,
         )?;
@@ -188,6 +179,20 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<L, C> {
         let gamma = ro_acc
             .absorb_field_iter(poly_K.iter().map(|v| util::fe_to_fe(v).unwrap()))
             .squeeze::<C>(NUM_CHALLENGE_BITS);
+
+        let poly_F_alpha = poly_F.eval(alpha);
+        let lagrange_zero_for_gamma =
+            lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
+                .next()
+                .unwrap();
+        let poly_Z_for_gamme = lagrange::eval_vanish_polynomial(log_n, gamma);
+        let poly_K_gamma = poly_K.eval(gamma);
+
+        let new_accumulator = Accumulator {
+            betas: betas_stroke,
+            e: (poly_F_alpha * lagrange_zero_for_gamma) + (poly_Z_for_gamme * poly_K_gamma),
+            trace: todo!(),
+        };
 
         Ok((accumulator.fold(gamma), ProtoGalaxyProof { poly_F, poly_K }))
     }
