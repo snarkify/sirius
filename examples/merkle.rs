@@ -316,9 +316,11 @@ fn ipa() {
 
 #[test]
 fn kzg() {
+    use std::{env, fs, io::Write};
+
     use halo2_proofs::{
         halo2curves::bn256::Bn256,
-        plonk::{create_proof, keygen_pk, keygen_vk},
+        plonk,
         poly::kzg::{
             commitment::{KZGCommitmentScheme, ParamsKZG},
             multiopen::{ProverGWC, VerifierGWC},
@@ -327,6 +329,7 @@ fn kzg() {
         transcript::{
             Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
         },
+        SerdeFormat,
     };
     use rand_core::OsRng;
     use tracing::metadata::LevelFilter;
@@ -345,53 +348,110 @@ fn kzg() {
         .json()
         .init();
 
-    {
-        let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
-            &mut rand::thread_rng(),
-            2,
-            1,
-        );
-        const K: u32 = 16;
-        let _s_2_1_16 = info_span!("2_1_16").entered();
+    let repeat_count = env::var("REPEAT_COUNT")
+        .expect("env `REPEAT_COUNT`=?")
+        .parse()
+        .expect("env `REPEAT_COUNT` not int");
 
+    let refresh_keygen: bool = env::var("REFRESH_KEYGEN")
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(false);
+
+    info!("start with {repeat_count} repeat count & {refresh_keygen} refresh keygen");
+
+    let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
+        &mut rand::thread_rng(),
+        repeat_count,
+        1,
+    );
+
+    let k_table_size = (20_838 * repeat_count).next_power_of_two().ilog2();
+
+    let _span = info_span!("{}_1_{}", repeat_count, k_table_size).entered();
+
+    const FOLDER: &str = ".cache/examples";
+    let cache = Path::new(FOLDER).join("kzg");
+    let path_pk = cache.join(format!("{}.pk", repeat_count));
+    let path_params = cache.join(format!("{}.params", repeat_count));
+
+    let params = if path_params.exists() && !refresh_keygen {
+        info!("load params from file");
+        let mut file = fs::File::open(&path_params).expect("failed to open the params file");
+        ParamsKZG::<Bn256>::read_custom(&mut file, SerdeFormat::Processed)
+            .expect("failed to deserialize the params")
+    } else {
+        info!("generate params");
+        let params = ParamsKZG::<Bn256>::setup(k_table_size, OsRng);
+        // Save the `params` bytes to a file
+        let mut params_bytes = vec![];
+        params
+            .write_custom(&mut params_bytes, SerdeFormat::Processed)
+            .expect("failed to serialize the params");
+        fs::create_dir_all(path_params.parent().unwrap()).expect("failed to create directories");
+        let mut file = fs::File::create(&path_params).expect("failed to create the params file");
+        file.write_all(&params_bytes)
+            .expect("failed to write to the params file");
+        params
+    };
+
+    let pk = if path_pk.exists() && !refresh_keygen {
+        info!("load pk from file");
+        // Read the file and parse `pk` from it
+        let mut file = fs::File::open(&path_pk).expect("failed to open the pk file");
+        plonk::ProvingKey::read::<_, MerkleTreeUpdateCircuit<C1Scalar>>(
+            &mut file,
+            SerdeFormat::Processed,
+        )
+        .expect("failed to deserialize the proving key")
+    } else {
+        info!("generate pk");
         let keygen = info_span!("keygen").entered();
-        let params = ParamsKZG::<Bn256>::setup(K, OsRng);
-        let pk = keygen_pk(
+
+        let pk = plonk::keygen_pk(
             &params,
-            keygen_vk(&params, &circuit).expect("keygen_vk should not fail"),
+            plonk::keygen_vk(&params, &circuit).expect("keygen_vk should not fail"),
             &circuit,
         )
         .expect("keygen_pk should not fail");
+
+        // Save the `pk` bytes to a file
+        let pk_bytes = pk.to_bytes(SerdeFormat::Processed);
+        fs::create_dir_all(path_pk.parent().unwrap()).expect("failed to create directories");
+        let mut file = fs::File::create(&path_pk).expect("failed to create the pk file");
+        file.write_all(&pk_bytes)
+            .expect("failed to write to the pk file");
+
         keygen.exit();
 
-        let prove = info_span!("prove").entered();
-        let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-        create_proof::<
-            KZGCommitmentScheme<Bn256>,
-            ProverGWC<'_, Bn256>,
-            Challenge255<C1Affine>,
-            OsRng,
-            Blake2bWrite<Vec<u8>, C1Affine, Challenge255<_>>,
-            _,
-        >(&params, &pk, &[circuit], &[], OsRng, &mut transcript)
-        .expect("proof generation should not fail");
-        prove.exit();
+        pk
+    };
 
-        let proof = transcript.finalize();
+    let prove = info_span!("prove").entered();
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+    plonk::create_proof::<
+        KZGCommitmentScheme<Bn256>,
+        ProverGWC<'_, Bn256>,
+        Challenge255<C1Affine>,
+        OsRng,
+        Blake2bWrite<Vec<u8>, C1Affine, Challenge255<_>>,
+        _,
+    >(&params, &pk, &[circuit], &[], OsRng, &mut transcript)
+    .expect("proof generation should not fail");
+    prove.exit();
 
-        let verify = info_span!("verify").entered();
-        let strategy = SingleStrategy::new(&params);
-        let mut transcript =
-            Blake2bRead::<&[u8], C1Affine, Challenge255<C1Affine>>::init(&proof[..]);
+    let proof = transcript.finalize();
 
-        assert!(verify_proof::<
-            KZGCommitmentScheme<Bn256>,
-            VerifierGWC<'_, Bn256>,
-            Challenge255<C1Affine>,
-            Blake2bRead<&[u8], C1Affine, Challenge255<C1Affine>>,
-            SingleStrategy<'_, Bn256>,
-        >(&params, pk.get_vk(), strategy, &[], &mut transcript)
-        .is_ok());
-        verify.exit();
-    }
+    let verify = info_span!("verify").entered();
+    let strategy = SingleStrategy::new(&params);
+    let mut transcript = Blake2bRead::<&[u8], C1Affine, Challenge255<C1Affine>>::init(&proof[..]);
+
+    assert!(plonk::verify_proof::<
+        KZGCommitmentScheme<Bn256>,
+        VerifierGWC<'_, Bn256>,
+        Challenge255<C1Affine>,
+        Blake2bRead<&[u8], C1Affine, Challenge255<C1Affine>>,
+        SingleStrategy<'_, Bn256>,
+    >(&params, pk.get_vk(), strategy, &[], &mut transcript)
+    .is_ok());
+    verify.exit();
 }
