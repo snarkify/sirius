@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{iter, marker::PhantomData};
 
 use ff::{Field, PrimeField};
 use halo2_proofs::arithmetic::CurveAffine;
@@ -20,23 +20,53 @@ pub(crate) mod poly;
 /// ProtoGalaxy: Non Interactive Folding Scheme that implements main protocol defined in paper
 /// [protogalaxy](https://eprint.iacr.org/2023/1106)
 #[derive(Clone, Debug)]
-pub struct ProtoGalaxy<C: CurveAffine> {
+pub struct ProtoGalaxy<const L: usize, C: CurveAffine> {
     _marker: PhantomData<C>,
 }
 
-impl<C: CurveAffine> ProtoGalaxy<C> {
+impl<const L: usize, C: CurveAffine> ProtoGalaxy<L, C> {
     #[instrument(skip_all)]
     pub(crate) fn generate_challenge<'i>(
         pp_digest: &C,
         ro_acc: &mut impl ROTrait<C::Base>,
         accumulator: &RelaxedPlonkInstance<C>,
         instances: impl Iterator<Item = &'i PlonkInstance<C>>,
-    ) -> Result<<C as CurveAffine>::ScalarExt, Error> {
-        Ok(ro_acc
+    ) -> <C as CurveAffine>::ScalarExt {
+        ro_acc
             .absorb_point(pp_digest)
             .absorb(accumulator)
             .absorb_iter(instances)
-            .squeeze::<C>(NUM_CHALLENGE_BITS))
+            .squeeze::<C>(NUM_CHALLENGE_BITS)
+    }
+
+    fn get_count_of_valuation(S: &PlonkStructure<C::ScalarExt>) -> usize {
+        let count_of_rows = 2usize.pow(S.k as u32);
+        let count_of_gates = S.gates.len();
+
+        count_of_rows * count_of_gates
+    }
+
+    pub(crate) fn new_accumulator(
+        args: AccumulatorArgs,
+        params: &ProtoGalaxyProverParam<C>,
+        ro_acc: &mut impl ROTrait<C::Base>,
+    ) -> Accumulator<C> {
+        let mut accumulator = Accumulator::new(args, Self::get_count_of_valuation(&params.S));
+
+        let beta = Self::generate_challenge(
+            &params.pp_digest,
+            ro_acc,
+            &accumulator.trace.U,
+            iter::empty(),
+        );
+
+        accumulator
+            .betas
+            .iter_mut()
+            .zip(iter::successors(Some(beta), |acc| Some(acc.double())))
+            .for_each(|(b, beta_pow)| *b = beta_pow);
+
+        accumulator
     }
 }
 
@@ -61,9 +91,9 @@ pub struct Accumulator<C: CurveAffine> {
 }
 
 impl<C: CurveAffine> Accumulator<C> {
-    pub fn new(args: AccumulatorArgs, t: usize) -> Self {
+    fn new(args: AccumulatorArgs, count_of_evaluation: usize) -> Self {
         Self {
-            betas: vec![C::ScalarExt::ZERO; t].into_boxed_slice(),
+            betas: vec![C::ScalarExt::ZERO; count_of_evaluation].into_boxed_slice(),
             e: C::ScalarExt::ZERO,
             trace: RelaxedPlonkTrace::new(args),
         }
@@ -86,7 +116,7 @@ impl<C: CurveAffine> Accumulator<C> {
 //    }
 //}
 
-impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
+impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<L, C> {
     type ProverParam = ProtoGalaxyProverParam<C>;
     type VerifierParam = C;
     type Accumulator = Accumulator<C>;
@@ -125,7 +155,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
             ro_acc,
             &accumulator.trace.U,
             incoming.iter().map(|t| &t.u),
-        )?;
+        );
 
         let poly_F = poly::compute_F::<C::ScalarExt>(
             accumulator.betas.iter().copied(),
@@ -156,11 +186,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
         )?;
 
         let gamma = ro_acc
-            .absorb_field_iter(
-                poly_K
-                    .iter()
-                    .map(|v| util::fe_to_fe(v).unwrap()),
-            )
+            .absorb_field_iter(poly_K.iter().map(|v| util::fe_to_fe(v).unwrap()))
             .squeeze::<C>(NUM_CHALLENGE_BITS);
 
         Ok((accumulator.fold(gamma), ProtoGalaxyProof { poly_F, poly_K }))
