@@ -348,31 +348,31 @@ fn kzg() {
         .json()
         .init();
 
-    let repeat_count = env::var("REPEAT_COUNT")
-        .expect("env `REPEAT_COUNT`=?")
+    let batch_update_size = env::var("BATCH_UPDATE_SIZE")
+        .expect("env `BATCH_UPDATE_SIZE`=?")
         .parse()
-        .expect("env `REPEAT_COUNT` not int");
+        .expect("env `BATCH_UPDATE_SIZE` not int");
 
     let refresh_keygen: bool = env::var("REFRESH_KEYGEN")
         .map(|s| s.parse().unwrap())
         .unwrap_or(false);
 
-    info!("start with {repeat_count} repeat count & {refresh_keygen} refresh keygen");
+    info!("start with {batch_update_size} repeat count & {refresh_keygen} refresh keygen");
 
     let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
         &mut rand::thread_rng(),
-        repeat_count,
+        batch_update_size,
         1,
     );
 
-    let k_table_size = (20_838 * repeat_count).next_power_of_two().ilog2();
+    let k_table_size = (20_838 * batch_update_size).next_power_of_two().ilog2();
 
-    let _span = info_span!("{}_1_{}", repeat_count, k_table_size).entered();
+    let _span = info_span!("{}_1_{}", batch_update_size, k_table_size).entered();
 
     const FOLDER: &str = ".cache/examples";
     let cache = Path::new(FOLDER).join("kzg");
-    let path_pk = cache.join(format!("{}.pk", repeat_count));
-    let path_params = cache.join(format!("{}.params", repeat_count));
+    let path_pk = cache.join(format!("{}.pk", batch_update_size));
+    let path_params = cache.join(format!("{}.params", batch_update_size));
 
     let params = if path_params.exists() && !refresh_keygen {
         info!("load params from file");
