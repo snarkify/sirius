@@ -82,6 +82,11 @@ struct ChallengeContext<F: PrimeField> {
     X_pow_n_sub_1: F,
 }
 
+/// evaluate Lagrange polynomials over cyclic subgroup
+/// # Parameters
+/// - `challenges`: iterator of (X_i, X_i^n - 1)
+/// # Result
+/// - {(X_i, L_i(X_i))}
 fn eval_lagrange_iter<F: PrimeField>(
     challenges: impl Iterator<Item = ChallengeContext<F>>,
     log_n: u32,
@@ -141,7 +146,7 @@ pub fn eval_lagrange_polynomial<F: PrimeField>(degree: usize, poly_idx: usize, p
 }
 
 /// # Parameters
-/// - `degree` - `n`  
+/// - `log_n` - logarithm of polynomial degree
 /// - `point` - `x` - eval Lagrange polynomials at this point
 /// # Result - x^n - 1
 pub fn eval_vanish_polynomial<F: PrimeField>(log_n: u32, point: F) -> F {
