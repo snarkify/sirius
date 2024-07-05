@@ -1,7 +1,8 @@
-use crate::{polynomial::univariate::UnivariatePoly, util};
 use ff::{Field, PrimeField};
 use group::{ff::WithSmallOrderMulGroup, GroupOpsOwned, ScalarMulOwned};
 pub use halo2curves::{CurveAffine, CurveExt};
+
+use crate::{polynomial::univariate::UnivariatePoly, util};
 
 /// Given FFT domain size k, return the omega in case of fft
 /// or return the omega_inv in case if ifft
@@ -172,23 +173,23 @@ pub fn ifft<F: PrimeField>(a: &mut [F], log_n: u32) {
 
 /// coset FFT
 /// input `a` corresponds to coefficients of a polynoimal
-pub fn coset_fft<F: WithSmallOrderMulGroup<3>>(a: &mut [F], log_n: u32) {
-    assert_eq!(a.len(), 1 << log_n as usize);
-    let g_coset = F::ZETA;
-    let g_coset_inv = g_coset.square();
-    distribute_powers_zeta(a, g_coset, g_coset_inv, true);
+pub fn coset_fft<F: WithSmallOrderMulGroup<3>>(a: &mut [F]) {
+    assert!(a.len().is_power_of_two());
+    let log_n = a.len().ilog2();
+
+    distribute_powers_zeta(a, F::ZETA, F::ZETA.square(), true);
+
     fft(a, log_n);
 }
 
 /// coset IFFT
 /// input `a` corresponds to values of a polynoimal on coset domain zeta*{1,omega,omega^2,...}
-pub fn coset_ifft<F: WithSmallOrderMulGroup<3>>(a: &mut [F], log_n: u32) -> UnivariatePoly<F> {
-    assert_eq!(a.len(), 1 << log_n as usize);
-    let g_coset = F::ZETA;
-    let g_coset_inv = g_coset.square();
+pub fn coset_ifft<F: WithSmallOrderMulGroup<3>>(a: &mut [F]) -> UnivariatePoly<F> {
+    assert!(a.len().is_power_of_two());
+    let log_n = a.len().ilog2();
 
     ifft(a, log_n);
-    distribute_powers_zeta(a, g_coset, g_coset_inv, false);
+    distribute_powers_zeta(a, F::ZETA, F::ZETA.square(), false);
     UnivariatePoly(a.to_vec().into_boxed_slice())
 }
 
@@ -200,7 +201,7 @@ pub fn coset_ifft<F: WithSmallOrderMulGroup<3>>(a: &mut [F], log_n: u32) -> Univ
 /// `into_coset` should be set to `true` when moving into the coset,
 /// and `false` when moving out. This toggles the choice of `zeta`.
 fn distribute_powers_zeta<F: PrimeField>(
-    a: &mut [F],
+    input: &mut [F],
     g_coset: F,
     g_coset_inv: F,
     into_coset: bool,
@@ -210,12 +211,12 @@ fn distribute_powers_zeta<F: PrimeField>(
     } else {
         [g_coset_inv, g_coset]
     };
-    util::parallelize(a, |(a, mut index)| {
-        for a in a {
+    util::parallelize(input, |(input, mut index)| {
+        for element in input {
             // Distribute powers to move into/from coset
             let i: usize = index % (coset_powers.len() + 1);
             if i != 0 {
-                *a *= &coset_powers[i - 1];
+                *element *= &coset_powers[i - 1];
             }
             index += 1;
         }
@@ -226,10 +227,11 @@ fn distribute_powers_zeta<F: PrimeField>(
 mod tests {
     use std::array;
 
-    use super::*;
     use halo2curves::bn256::Fr;
     use itertools::Itertools;
     use rand_core::OsRng;
+
+    use super::*;
 
     #[test]
     fn fft_simple_input_test() {

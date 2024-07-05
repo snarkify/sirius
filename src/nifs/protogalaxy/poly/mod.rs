@@ -329,40 +329,38 @@ pub(crate) fn compute_K<F: WithSmallOrderMulGroup<3>>(
 ) -> Result<UnivariatePoly<F>, Error> {
     let mut g_poly = compute_G(S, challenges, accumulator, traces)?;
     // is coeffs here, will transform to evals by fft later
-    let g_evals = g_poly.get_vector_mut();
     let ctx = QueryIndexContext::from(S);
+
     let max_degree = S
         .gates
         .iter()
         .map(|poly| poly.degree(&ctx))
         .max()
         .unwrap_or_default();
-    let points_count = max_degree * traces.len() + 1;
-    let log_n = points_count.next_power_of_two().ilog2();
-    coset_fft(g_evals, log_n);
 
-    // eval (F(alpha)*L_0(X), Z(X)) on zeta*{1, omega,...,}
-    let l_and_z_evals = lagrange::iter_cyclic_subgroup::<F>(log_n)
-        .take(points_count)
-        .map(|pt| F::ZETA * pt)
-        .map(|pt| {
-            (
-                f_alpha * lagrange::eval_lagrange_polynomial((1 << log_n) - 1, 0, pt),
-                lagrange::eval_vanish_polynomial(1 << log_n, pt),
-            )
-        })
-        .collect::<Box<[_]>>();
+    let points_count = (traces.len() * max_degree + 1).next_power_of_two();
+    let log_n = points_count.ilog2();
 
-    let mut k_evals = g_evals
-        .iter()
-        .zip(l_and_z_evals.iter())
+    coset_fft(g_poly.as_mut());
+
+    let mut k_evals = lagrange::iter_eval_lagrange_poly_for_cyclic_group_for_challenges(
+        lagrange::iter_cyclic_subgroup::<F>(log_n).map(|pt| F::ZETA * pt),
+        log_n,
+    )
+    .zip(g_poly.iter())
+    .map(|((challenge, evaluated_lagrange), g_y)| {
+        let l_y = f_alpha * evaluated_lagrange;
+        let z_y = lagrange::eval_vanish_polynomial(log_n, challenge);
+
         // when z_y is on coset domain, invert is save
-        .map(|(g_y, (l_y, z_y))| (*g_y - *l_y) * z_y.invert().unwrap())
-        .collect::<Vec<_>>();
+        (*g_y - l_y) * z_y.invert().unwrap()
+    })
+    .take(points_count)
+    .collect::<Box<[_]>>();
 
-    coset_ifft(&mut k_evals, log_n);
+    coset_ifft(k_evals.as_mut());
 
-    Ok(UnivariatePoly(k_evals.into_boxed_slice()))
+    Ok(UnivariatePoly(k_evals))
 }
 
 #[cfg(test)]
