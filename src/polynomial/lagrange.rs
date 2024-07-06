@@ -145,6 +145,7 @@ pub fn eval_lagrange_polynomial<F: PrimeField>(degree: usize, poly_idx: usize, p
     }
 }
 
+/// This fn calculates vanishing polynomial $Z(X)$ from the formula $G(X)=F(\alpha)L_0(X)+K(X)Z(X)$
 /// # Parameters
 /// - `log_n` - logarithm of polynomial degree
 /// - `point` - `x` - eval Lagrange polynomials at this point
