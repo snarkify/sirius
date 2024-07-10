@@ -343,20 +343,22 @@ pub(crate) fn compute_K<F: WithSmallOrderMulGroup<3>>(
 
     coset_fft(g_poly.as_mut());
 
-    let mut k_evals = lagrange::iter_eval_lagrange_poly_for_cyclic_group_for_challenges(
-        lagrange::iter_cyclic_subgroup::<F>(log_n).map(|pt| F::ZETA * pt),
-        log_n,
-    )
-    .zip(g_poly.iter())
-    .map(|((challenge, evaluated_lagrange), g_y)| {
-        let l_y = f_alpha * evaluated_lagrange;
-        let z_y = lagrange::eval_vanish_polynomial(log_n, challenge);
+    let mut k_evals = lagrange::iter_cyclic_subgroup::<F>(log_n)
+        .map(|pt| F::ZETA * pt)
+        .zip(g_poly.iter())
+        .map(|(pt, g_y)| {
+            let l_y = f_alpha
+                * lagrange::iter_eval_lagrange_poly_for_cyclic_group(pt, log_n)
+                    .next()
+                    .unwrap();
 
-        // when z_y is on coset domain, invert is save
-        (*g_y - l_y) * z_y.invert().unwrap()
-    })
-    .take(points_count)
-    .collect::<Box<[_]>>();
+            let z_y = lagrange::eval_vanish_polynomial(log_n, pt);
+
+            // when z_y is on coset domain, invert is save
+            (*g_y - l_y) * z_y.invert().unwrap()
+        })
+        .take(points_count)
+        .collect::<Box<[_]>>();
 
     coset_ifft(k_evals.as_mut());
 

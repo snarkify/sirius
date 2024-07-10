@@ -50,47 +50,9 @@ pub fn iter_cyclic_subgroup<F: PrimeField>(log_n: u32) -> impl Iterator<Item = F
 /// where {1, \omega, \omega^2, ..., \omega^n} - cyclic group, check [`iter_cyclic_subgroup`] for
 /// more details
 pub fn iter_eval_lagrange_poly_for_cyclic_group<F: PrimeField>(
-    challenge: F,
+    X: F,
     log_n: u32,
 ) -> impl Iterator<Item = F> {
-    eval_lagrange_iter(
-        iter::repeat(ChallengeContext {
-            X: challenge,
-            X_pow_n_sub_1: eval_vanish_polynomial(log_n, challenge),
-        }),
-        log_n,
-    )
-    .map(|(_ch, l)| l)
-}
-
-pub fn iter_eval_lagrange_poly_for_cyclic_group_for_challenges<F: PrimeField>(
-    challenges: impl Iterator<Item = F>,
-    log_n: u32,
-) -> impl Iterator<Item = (F, F)> {
-    eval_lagrange_iter(
-        challenges.map(move |challenge| ChallengeContext {
-            X: challenge,
-            X_pow_n_sub_1: eval_vanish_polynomial(log_n, challenge),
-        }),
-        log_n,
-    )
-}
-
-#[derive(Clone)]
-struct ChallengeContext<F: PrimeField> {
-    X: F,
-    X_pow_n_sub_1: F,
-}
-
-/// evaluate Lagrange polynomials over cyclic subgroup
-/// # Parameters
-/// - `challenges`: iterator of (X_i, X_i^n - 1)
-/// # Result
-/// - {(X_i, L_i(X_i))}
-fn eval_lagrange_iter<F: PrimeField>(
-    challenges: impl Iterator<Item = ChallengeContext<F>>,
-    log_n: u32,
-) -> impl Iterator<Item = (F, F)> {
     let n = 2usize.pow(log_n);
 
     let inverted_n = F::from_u128(n as u128)
@@ -98,51 +60,19 @@ fn eval_lagrange_iter<F: PrimeField>(
         .expect("safe because it's `2^log_n`");
 
     iter_cyclic_subgroup::<F>(log_n)
-        .zip(challenges)
-        .map(move |(value, ctx)| {
-            let challenge_sub_value_inverted = ctx.X.sub(value).invert();
+        .map(move |value| {
+            let challenge_sub_value_inverted = X.sub(value).invert();
+            let X_pow_n_sub_1 = eval_vanish_polynomial(log_n, X);
 
             // During the calculation, this part of the expression should be reduced to 1, but we
             // get 0/0 here, so we insert an explicit `if`.
-            if ctx.X_pow_n_sub_1.is_zero_vartime() && challenge_sub_value_inverted.is_none().into()
-            {
-                (ctx.X, F::ONE)
+            if X_pow_n_sub_1.is_zero_vartime() && challenge_sub_value_inverted.is_none().into() {
+                F::ONE
             } else {
-                (
-                    ctx.X,
-                    value
-                        * inverted_n
-                        * (ctx.X_pow_n_sub_1 * challenge_sub_value_inverted.unwrap()),
-                )
+                value * inverted_n * (X_pow_n_sub_1 * challenge_sub_value_inverted.unwrap())
             }
         })
         .take(n)
-}
-
-/// # Parameters
-/// - `degree` - degree of the Lagrange poly
-/// - `poly_idx` - `i` - the i-th Lagrange poly  
-/// - `point` - eval Lagrange polynomials at this point
-/// # Result - L_i(gamma)
-pub fn eval_lagrange_polynomial<F: PrimeField>(degree: usize, poly_idx: usize, point: F) -> F {
-    let n = degree + 1;
-    let log_n = n.ilog2();
-
-    let inverted_n = F::from_u128(n as u128)
-        .invert()
-        .expect("safe because it's `2^log_n`");
-    let X_pow_n_sub_1 = eval_vanish_polynomial(log_n, point);
-
-    let generator: F = fft::get_omega_or_inv(log_n, false);
-    let omega_i = generator.pow([poly_idx as u64]);
-
-    let challenge_sub_value_inverted = point.sub(omega_i).invert();
-
-    if X_pow_n_sub_1.is_zero_vartime() && challenge_sub_value_inverted.is_none().into() {
-        F::ONE
-    } else {
-        omega_i * inverted_n * (X_pow_n_sub_1 * challenge_sub_value_inverted.unwrap())
-    }
 }
 
 /// This fn calculates vanishing polynomial $Z(X)$ from the formula $G(X)=F(\alpha)L_0(X)+K(X)Z(X)$
