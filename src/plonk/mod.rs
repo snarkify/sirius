@@ -17,14 +17,13 @@
 use std::{iter, num::NonZeroUsize, time::Instant};
 
 use count_to_non_zero::*;
+use ff::{Field, PrimeField};
+use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
 use itertools::Itertools;
 use rayon::prelude::*;
 use serde::Serialize;
 use some_to_err::*;
-use tracing::{debug, error, info, instrument, warn};
-
-use ff::{Field, PrimeField};
-use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
+use tracing::{debug, error, info, info_span, instrument, warn};
 
 use crate::{
     commitment::CommitmentKey,
@@ -564,6 +563,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     /// run special soundness protocol to generate witnesses and challenges
     /// depending on whether we have multiple gates, lookup arguments and whether
     /// we have vector lookup, we will call different sub-sps protocol
+    #[instrument(name = "sps", skip_all)]
     pub fn run_sps_protocol<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
         ck: &CommitmentKey<C>,
@@ -584,12 +584,15 @@ impl<F: PrimeField> PlonkStructure<F> {
 
     /// run 0-round special soundness protocol
     /// w.r.t single custom gate + no lookup
+    #[instrument(name = "0", skip_all)]
     fn run_sps_protocol_0<C: CurveAffine<ScalarExt = F>>(
         &self,
         instance: &[F],
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
     ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+        let _span = info_span!("witness_commit").entered();
+
         let W1 = concatenate_with_padding(advice, 1 << self.k);
         let C1 = ck
             .commit(&W1)
@@ -613,6 +616,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     /// sequence of generating challenges:
     /// [pi.instance] -> [C] -> ]r1[
     /// w.r.t multiple gates + no lookup
+    #[instrument(name = "1", skip_all)]
     fn run_sps_protocol_1<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
         instance: &[F],
@@ -622,6 +626,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
         let (mut plonk_instance, plonk_witness) = self.run_sps_protocol_0(instance, advice, ck)?;
 
+        let _span = info_span!("instance_commit").entered();
         ro_nark
             .absorb_field_iter(instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
             .absorb_point_iter(plonk_instance.W_commitments.iter());
@@ -638,6 +643,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     /// sequence of generating challenges:
     /// [pi.instance] -> [C1] -> ]r1[ -> [C2] -> ]r2[
     /// w.r.t has lookup but no vector lookup
+    #[instrument(name = "2", skip_all)]
     fn run_sps_protocol_2<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
         instance: &[F],
@@ -706,6 +712,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     /// notations: "[C]" absorb C; "]r[" squeeze r;
     /// sequence of generating challenges:
     /// [pi.instance] -> [C1] -> ]r1[ -> [C2] -> ]r2[ -> [C3] -> ]r3[
+    #[instrument(name = "3", skip_all)]
     fn run_sps_protocol_3<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
         instance: &[F],
@@ -973,14 +980,14 @@ pub(crate) mod test_eval_witness {
         use std::{array, marker::PhantomData};
 
         use ff::{FromUniformBytes, PrimeFieldBits};
+        use halo2_proofs::{
+            circuit::{Layouter, SimpleFloorPlanner, Value},
+            plonk::{Circuit, ConstraintSystem},
+        };
 
         use crate::{
             main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
             poseidon::{poseidon_circuit::PoseidonChip, Spec},
-        };
-        use halo2_proofs::{
-            circuit::{Layouter, SimpleFloorPlanner, Value},
-            plonk::{Circuit, ConstraintSystem},
         };
 
         /// Input and output size for `StepCircuit` within each step

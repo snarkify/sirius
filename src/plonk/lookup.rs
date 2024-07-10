@@ -83,6 +83,7 @@ pub struct Arguments<F: PrimeField> {
 
 impl<F: PrimeField> Arguments<F> {
     /// Compresses a potentially vector Lookup Argument from a constraint system into non-vector expression.
+    #[instrument(name = "lookup", skip_all)]
     pub fn compress_from(cs: &ConstraintSystem<F>) -> Option<Self> {
         let max_lookup_len = cs
             .lookups()
@@ -313,6 +314,7 @@ impl<F: PrimeField> Arguments<F> {
         (h, g)
     }
 
+    #[instrument(name = "lookup_1", skip_all)]
     pub(crate) fn evaluate_coefficient_1(
         &self,
         circuit_data: &PlonkStructure<F>,
@@ -346,6 +348,7 @@ impl<F: PrimeField> ArgumentCoefficient1<F> {
     /// calculate the inverse in log derivative formula
     /// h_i := \frac{1}{l_i+r}
     /// g_i := \frac{m_i}{t_i+r}
+    #[instrument(name = "lookup_2", skip_all)]
     pub(crate) fn evaluate_coefficient_2(&self, r: F) -> ArgumentCoefficient2<F> {
         let (hs, gs): (Vec<_>, Vec<_>) =
             itertools::multizip((self.ls.iter(), self.ts.iter(), self.ms.iter()))

@@ -1,10 +1,13 @@
-use crate::plonk::permutation::Assembly;
-use crate::polynomial::sparse::SparseMatrix;
-use crate::polynomial::Expression;
-use ff::PrimeField;
-use halo2_proofs::plonk::{Any, Column};
-use halo2_proofs::plonk::{ConstraintSystem, Expression as PE};
 use std::collections::HashSet;
+
+use ff::PrimeField;
+use halo2_proofs::plonk::{Any, Column, ConstraintSystem, Expression as PE};
+use tracing::*;
+
+use crate::{
+    plonk::permutation::Assembly,
+    polynomial::{sparse::SparseMatrix, Expression},
+};
 
 // Helper function to convert cell indices (column, row) to index in Z vector
 pub(crate) fn cell_to_z_idx(column: usize, row: usize, num_rows: usize, num_io: usize) -> usize {
@@ -121,6 +124,7 @@ pub(crate) fn compress_expression<F: PrimeField>(
 /// advice columns. define vector Z = (i_1,...,i_{io}, x_1,...,x_{n*r}) This function is to find
 /// the permutation matrix P such that the copy constraints are equivalent to P * Z - Z = 0. This
 /// is invariant relation under our folding scheme
+#[instrument(name = "permutation", skip_all)]
 pub(crate) fn construct_permutation_matrix<F: PrimeField>(
     k_table_size: usize,
     num_io: usize,
