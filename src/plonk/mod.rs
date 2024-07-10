@@ -670,12 +670,13 @@ impl<F: PrimeField> PlonkStructure<F> {
         ]
         .concat();
 
-        let C1 = ck
-            .commit(&W1)
-            .map_err(|err| SpsError::WrongCommitmentSize {
+        let C1 = {
+            let _s = info_span!("lookup+witness_commit").entered();
+            ck.commit(&W1).map_err(|err| SpsError::WrongCommitmentSize {
                 annotation: "W1",
                 err,
-            })?;
+            })
+        }?;
 
         let r1 = ro_nark
             .absorb_field_iter(instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
@@ -690,12 +691,13 @@ impl<F: PrimeField> PlonkStructure<F> {
             k_power_of_2,
         );
 
-        let C2 = ck
-            .commit(&W2)
-            .map_err(|err| SpsError::WrongCommitmentSize {
+        let C2 = {
+            let _s = info_span!("lookup_commit").entered();
+            ck.commit(&W2).map_err(|err| SpsError::WrongCommitmentSize {
                 annotation: "W2",
                 err,
-            })?;
+            })
+        }?;
         let r2 = ro_nark.absorb_point(&C2).squeeze::<C>(NUM_CHALLENGE_BITS);
 
         Ok((
@@ -726,12 +728,13 @@ impl<F: PrimeField> PlonkStructure<F> {
 
         // round 1
         let W1 = concatenate_with_padding(advice, k_power_of_2);
-        let C1 = ck
-            .commit(&W1)
-            .map_err(|err| SpsError::WrongCommitmentSize {
+        let C1 = {
+            let _s = info_span!("witness_commit").entered();
+            ck.commit(&W1).map_err(|err| SpsError::WrongCommitmentSize {
                 annotation: "W1",
                 err,
-            })?;
+            })
+        }?;
         let r1 = ro_nark.absorb_point(&C1).squeeze::<C>(NUM_CHALLENGE_BITS);
 
         // round 2
@@ -746,12 +749,13 @@ impl<F: PrimeField> PlonkStructure<F> {
             &concat_vec!(&lookup_coeff.ls, &lookup_coeff.ts, &lookup_coeff.ms),
             k_power_of_2,
         );
-        let C2 = ck
-            .commit(&W2)
-            .map_err(|err| SpsError::WrongCommitmentSize {
+        let C2 = {
+            let _s = info_span!("lookup_commit").entered();
+            ck.commit(&W2).map_err(|err| SpsError::WrongCommitmentSize {
                 annotation: "W2",
                 err,
-            })?;
+            })
+        }?;
         let r2 = ro_nark.absorb_point(&C2).squeeze::<C>(NUM_CHALLENGE_BITS);
 
         // round 3
@@ -762,12 +766,13 @@ impl<F: PrimeField> PlonkStructure<F> {
             k_power_of_2,
         );
 
-        let C3 = ck
-            .commit(&W3)
-            .map_err(|err| SpsError::WrongCommitmentSize {
+        let C3 = {
+            let _s = info_span!("lookup_commit").entered();
+            ck.commit(&W3).map_err(|err| SpsError::WrongCommitmentSize {
                 annotation: "W3",
                 err,
-            })?;
+            })
+        }?;
         let r3 = ro_nark.absorb_point(&C3).squeeze::<C>(NUM_CHALLENGE_BITS);
 
         Ok((

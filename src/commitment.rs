@@ -76,7 +76,6 @@ impl<C: CurveAffine> CommitmentKey<C> {
         CommitmentKey { ck }
     }
 
-    #[instrument(skip_all)]
     pub fn commit(&self, v: &[C::Scalar]) -> Result<C, Error> {
         if self.ck.len() >= v.len() {
             Ok(best_multiexp(v, &self.ck[..v.len()]).to_affine())
