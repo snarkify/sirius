@@ -3,6 +3,7 @@ use std::{fmt, iter, num::NonZeroUsize};
 use ff::{BatchInvert, Field, PrimeField};
 use halo2_proofs::halo2curves::ff;
 use halo2_proofs::plonk::Assigned;
+use itertools::Itertools;
 use num_bigint::BigUint;
 pub(crate) use rayon::current_num_threads;
 use rayon::prelude::*;
@@ -185,11 +186,7 @@ pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>, bit_len: NonZeroUsi
 /// with padding to ensure uniform segment sizes.
 pub(crate) fn concatenate_with_padding<F: PrimeField>(vs: &[Vec<F>], pad_size: usize) -> Vec<F> {
     vs.par_iter()
-        .flat_map_iter(|v| {
-            v.iter()
-                .copied()
-                .chain(iter::repeat(F::ZERO).take(pad_size.saturating_sub(v.len())))
-        })
+        .flat_map_iter(|v| v.iter().copied().pad_using(pad_size, |_| F::ZERO))
         .collect()
 }
 

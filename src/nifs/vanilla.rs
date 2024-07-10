@@ -1,22 +1,23 @@
 use std::marker::PhantomData;
 
 use ff::Field;
-use halo2_proofs::halo2curves::ff;
+use halo2_proofs::{arithmetic::CurveAffine, halo2curves::ff};
 use tracing::*;
 
 use super::*;
-use crate::commitment::CommitmentKey;
-use crate::concat_vec;
-use crate::constants::NUM_CHALLENGE_BITS;
-use crate::plonk::eval::{GetDataForEval, PlonkEvalDomain};
-use crate::plonk::{
-    PlonkInstance, PlonkStructure, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkWitness,
+use crate::{
+    commitment::CommitmentKey,
+    concat_vec,
+    constants::NUM_CHALLENGE_BITS,
+    plonk::{
+        eval::{GetDataForEval, PlonkEvalDomain},
+        PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness, RelaxedPlonkInstance,
+        RelaxedPlonkTrace, RelaxedPlonkWitness,
+    },
+    polynomial::graph_evaluator::GraphEvaluator,
+    poseidon::ROTrait,
+    sps::SpecialSoundnessVerifier,
 };
-use crate::plonk::{PlonkTrace, RelaxedPlonkTrace};
-use crate::polynomial::graph_evaluator::GraphEvaluator;
-use crate::poseidon::ROTrait;
-use crate::sps::SpecialSoundnessVerifier;
-use halo2_proofs::arithmetic::CurveAffine;
 
 /// Represent intermediate polynomial terms that arise when folding
 /// two polynomial relations into one.
@@ -94,6 +95,7 @@ impl<C: CurveAffine> VanillaFS<C> {
 
         let row_size = data.row_size();
 
+        let evaluation_span = info_span!("evaluation").entered();
         let cross_terms = S
             .custom_gates_lookup_compressed
             .grouped()
@@ -114,11 +116,14 @@ impl<C: CurveAffine> VanillaFS<C> {
                 None => Ok(vec![C::ScalarExt::ZERO; row_size].into_boxed_slice()),
             })
             .collect::<Result<CrossTerms<C>, _>>()?;
+        evaluation_span.exit();
 
+        let commit_span = info_span!("commit").entered();
         let cross_term_commits: Vec<C> = cross_terms
             .iter()
             .map(|v| ck.commit(v))
             .collect::<Result<Vec<_>, _>>()?;
+        commit_span.exit();
 
         Ok((cross_terms, cross_term_commits))
     }
