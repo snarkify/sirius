@@ -39,8 +39,8 @@ where
 // TODO #31 docs
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error(transparent)]
-    Halo2(#[from] halo2_proofs::plonk::Error),
+    #[error("halo2: {0:?}")]
+    Halo2(halo2_proofs::plonk::ErrorFront),
     #[error(transparent)]
     Plonk(#[from] crate::plonk::Error),
     #[error(transparent)]
@@ -57,6 +57,12 @@ pub enum Error {
     NIFS(#[from] nifs::Error),
     #[error("TODO")]
     VerifyFailed(Vec<VerificationError>),
+}
+
+impl From<halo2_proofs::plonk::ErrorFront> for Error {
+    fn from(value: halo2_proofs::plonk::ErrorFront) -> Self {
+        Error::Halo2(value)
+    }
 }
 
 impl Error {

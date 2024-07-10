@@ -18,10 +18,7 @@ use std::{iter, num::NonZeroUsize, time::Instant};
 
 use count_to_non_zero::*;
 use ff::{Field, PrimeField};
-use halo2_proofs::{
-    arithmetic::{best_multiexp, CurveAffine},
-    halo2curves::ff,
-};
+use halo2_proofs::{arithmetic::CurveAffine, halo2curves::ff};
 use itertools::Itertools;
 use rayon::prelude::*;
 use serde::Serialize;
@@ -32,6 +29,7 @@ use crate::{
     commitment::CommitmentKey,
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
+    halo2curves::msm::best_multiexp,
     plonk::{
         self,
         eval::{Error as EvalError, GetDataForEval, PlonkEvalDomain},
@@ -1037,7 +1035,7 @@ pub(crate) mod test_eval_witness {
                 &self,
                 config: Self::Config,
                 mut layouter: impl Layouter<F>,
-            ) -> Result<(), halo2_proofs::plonk::Error> {
+            ) -> Result<(), halo2_proofs::plonk::ErrorFront> {
                 let spec = CircuitPoseidonSpec::<F>::new(R_F1, R_P1);
 
                 layouter.assign_region(

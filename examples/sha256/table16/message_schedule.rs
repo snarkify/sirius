@@ -5,7 +5,7 @@ use crate::BlockWord;
 use super::{super::BLOCK_SIZE, AssignedBits, SpreadInputs, Table16Assignment, ROUNDS};
 use halo2_proofs::{
     circuit::Layouter,
-    plonk::{Advice, Column, ConstraintSystem, Error, Selector},
+    plonk::{Advice, Column, ConstraintSystem, ErrorFront as Error, Selector},
     poly::Rotation,
 };
 use sirius::ff::PrimeField;

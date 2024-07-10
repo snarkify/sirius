@@ -1,15 +1,16 @@
 use ff::PrimeField;
-use halo2_proofs::halo2curves::ff;
-use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error, FloorPlanner};
+use halo2_proofs::{
+    halo2curves::ff,
+    plonk::{Circuit, ConstraintSystem, ErrorFront as Error, FloorPlanner},
+};
 use tracing::*;
 
+use super::{circuit_data::CircuitData, ConstraintSystemMetainfo, WitnessCollector};
 use crate::{
     plonk::{self, PlonkStructure},
     polynomial::sparse::SparseMatrix,
     util::batch_invert_assigned,
 };
-
-use super::{circuit_data::CircuitData, ConstraintSystemMetainfo, WitnessCollector};
 
 pub type Witness<F> = Vec<Vec<F>>;
 

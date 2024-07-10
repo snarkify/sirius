@@ -1,13 +1,15 @@
-use crate::main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx};
+use std::cmp;
+
 use ff::PrimeFieldBits;
-use halo2_proofs::halo2curves::ff;
 use halo2_proofs::{
     arithmetic::CurveAffine,
     circuit::{Chip, Value},
-    plonk::Error,
+    halo2curves::ff,
+    plonk::ErrorFront as Error,
 };
-use std::cmp;
 use tracing::*;
+
+use crate::main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx};
 
 // assume point is not infinity
 #[derive(Clone, Debug)]
@@ -22,8 +24,8 @@ impl<C: CurveAffine> AssignedPoint<C> {
     }
 
     pub fn coordinates_values(&self) -> Option<(C::Base, C::Base)> {
-        let x = *self.x.value().copied().unwrap();
-        let y = *self.y.value().copied().unwrap();
+        let x = self.x.value().copied().unwrap();
+        let y = self.y.value().copied().unwrap();
 
         Some((x?, y?))
     }
@@ -381,17 +383,16 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use ff::Field;
-    use halo2_proofs::halo2curves::pasta::{pallas, EqAffine, Fp, Fq};
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
+        halo2curves::pasta::{pallas, EqAffine, Fp, Fq},
         plonk::{Circuit, Column, ConstraintSystem, Instance},
     };
     use rand_core::OsRng;
     use tracing_test::traced_test;
 
-    use crate::{create_and_verify_proof, run_mock_prover_test, util::fe_to_fe_safe};
-
     use super::*;
+    use crate::{create_and_verify_proof, run_mock_prover_test, util::fe_to_fe_safe};
 
     #[derive(Clone, Debug)]
     struct Point<C: CurveAffine> {
@@ -611,10 +612,10 @@ mod tests {
         let lambda = Fq::random(&mut OsRng);
         let r = p.scalar_mul(&lambda);
         let circuit = TestCircuit::new(p, q, lambda, 1);
-        let public_inputs: &[&[Fp]] = &[&[r.x, r.y]];
+        let public_inputs = vec![vec![r.x, r.y]];
 
         let K: u32 = 14;
-        create_and_verify_proof!(IPA, K, circuit, public_inputs, EqAffine);
+        create_and_verify_proof!(IPA, K, circuit, public_inputs.clone(), EqAffine);
         println!("-----ECC circuit works fine-----");
     }
 

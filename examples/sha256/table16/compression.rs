@@ -2,7 +2,7 @@ use std::{convert::TryInto, ops::Range};
 
 use halo2_proofs::{
     circuit::{Layouter, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error, Selector},
+    plonk::{Advice, Column, ConstraintSystem, ErrorFront as Error, Selector},
     poly::Rotation,
 };
 use sirius::ff::PrimeField;

@@ -4,7 +4,7 @@ use super::{util::*, AssignedBits};
 use halo2_proofs::{
     arithmetic::Field,
     circuit::{Chip, Layouter, Region, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error, TableColumn},
+    plonk::{Advice, Column, ConstraintSystem, ErrorFront as Error, TableColumn},
     poly::Rotation,
 };
 use sirius::ff::PrimeField;

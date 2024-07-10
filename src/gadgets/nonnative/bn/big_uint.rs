@@ -134,7 +134,7 @@ impl<F: ff::PrimeField> BigUint<F> {
 
         let limbs = input
             .iter()
-            .map(|cell| *cell.value().map(|v| *v).unwrap())
+            .map(|cell| cell.value().map(|v| *v).unwrap())
             .map(|fv| {
                 if let Some(fv) = fv {
                     let repr_len = fv.to_repr().as_ref().len();

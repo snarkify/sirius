@@ -2,7 +2,7 @@ use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Chip, Value},
     halo2curves::ff,
-    plonk::Error,
+    plonk::ErrorFront as Error,
 };
 
 use crate::main_gate::{AssignedValue, MainGate, RegionCtx};

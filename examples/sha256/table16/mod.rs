@@ -2,7 +2,7 @@ use std::{convert::TryInto, marker::PhantomData};
 
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Region, Value},
-    plonk::{Advice, Any, Assigned, Column, ConstraintSystem, Error},
+    plonk::{Advice, Any, Assigned, Column, ConstraintSystem, ErrorFront as Error},
 };
 use sirius::ff::PrimeField;
 
@@ -141,7 +141,7 @@ impl<F: PrimeField, const LEN: usize> AssignedBits<F, LEN> {
 
         let column: Column<Any> = column.into();
         match column.column_type() {
-            Any::Advice(_) => {
+            Any::Advice => {
                 region.assign_advice(annotation, column.try_into().unwrap(), offset, || {
                     value.clone()
                 })
@@ -176,7 +176,7 @@ impl<F: PrimeField> AssignedBits<F, 16> {
         let column: Column<Any> = column.into();
         let value: Value<Bits<16>> = value.map(|v| v.into());
         match column.column_type() {
-            Any::Advice(_) => {
+            Any::Advice => {
                 region.assign_advice(annotation, column.try_into().unwrap(), offset, || {
                     value.clone()
                 })
@@ -211,7 +211,7 @@ impl<F: PrimeField> AssignedBits<F, 32> {
         let column: Column<Any> = column.into();
         let value: Value<Bits<32>> = value.map(|v| v.into());
         match column.column_type() {
-            Any::Advice(_) => {
+            Any::Advice => {
                 region.assign_advice(annotation, column.try_into().unwrap(), offset, || {
                     value.clone()
                 })

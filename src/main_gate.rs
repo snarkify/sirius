@@ -1,11 +1,10 @@
 use std::{array, iter, marker::PhantomData, num::NonZeroUsize};
 
 use ff::{PrimeField, PrimeFieldBits};
-use halo2_proofs::halo2curves::ff;
-use halo2_proofs::halo2curves::{Coordinates, CurveAffine};
 use halo2_proofs::{
     circuit::{AssignedCell, Cell, Chip, Region, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance},
+    halo2curves::{ff, Coordinates, CurveAffine},
+    plonk::{Advice, Column, ConstraintSystem, ErrorFront as Error, Expression, Fixed, Instance},
     poly::Rotation,
 };
 use itertools::Itertools;
@@ -401,14 +400,14 @@ macro_rules! create_column_cycle {
                 region: &mut RegionCtx<'_, F>,
                 annotation: impl Fn() -> AR,
                 value: F,
-            ) -> Result<AssignedCell<F, F>, halo2_proofs::plonk::Error>;
+            ) -> Result<AssignedCell<F, F>, halo2_proofs::plonk::ErrorFront>;
 
             fn $assign_next_collection_fn_name<AR: Into<String>>(
                 &mut self,
                 region: &mut RegionCtx<'_, F>,
                 annotation: impl Clone + Fn() -> AR,
                 values: impl Iterator<Item = F>,
-            ) -> Result<Vec<AssignedCell<F, F>>, halo2_proofs::plonk::Error>;
+            ) -> Result<Vec<AssignedCell<F, F>>, halo2_proofs::plonk::ErrorFront>;
         }
 
         impl<'a, I, F> $trait_name<F> for $struct_name<'a, I>
@@ -421,7 +420,7 @@ macro_rules! create_column_cycle {
                 region: &mut RegionCtx<'_, F>,
                 annotation: impl Fn() -> AR,
                 value: F,
-            ) -> Result<AssignedCell<F, F>, halo2_proofs::plonk::Error> {
+            ) -> Result<AssignedCell<F, F>, halo2_proofs::plonk::ErrorFront> {
                 let (index, column) = self.iter.by_ref().next().expect("Safe because cycle");
 
                 if !self.first_pass && index == 0 {
@@ -439,7 +438,7 @@ macro_rules! create_column_cycle {
                 region: &mut RegionCtx<'_, F>,
                 annotation: impl Clone + Fn() -> AR,
                 values: impl Iterator<Item = F>,
-            ) -> Result<Vec<AssignedCell<F, F>>, halo2_proofs::plonk::Error> {
+            ) -> Result<Vec<AssignedCell<F, F>>, halo2_proofs::plonk::ErrorFront> {
                 values
                     .map(|val| self.$assign_next_fn_name(region, annotation.clone(), val))
                     .collect()
@@ -799,13 +798,14 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
 
 #[cfg(test)]
 mod tests {
+    use halo2_proofs::halo2curves::pasta::Fp;
+    use tracing_test::traced_test;
+
     use super::*;
     use crate::{
         plonk::CompressedGates,
         polynomial::{expression::QueryIndexContext, Expression},
     };
-    use halo2_proofs::halo2curves::pasta::Fp;
-    use tracing_test::traced_test;
 
     #[traced_test]
     #[test]

@@ -7,16 +7,15 @@ use std::{
     slice,
 };
 
-use crate::group::Curve;
 use digest::{ExtendableOutput, Update};
-use halo2_proofs::arithmetic::{best_multiexp, CurveAffine, CurveExt};
+use halo2_proofs::arithmetic::{CurveAffine, CurveExt};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha3::Shake256;
 use some_to_err::*;
 use tracing::*;
 
-use crate::util::parallelize;
+use crate::{group::Curve, halo2curves::msm::best_multiexp, util::parallelize};
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {

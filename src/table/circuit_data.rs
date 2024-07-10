@@ -3,7 +3,8 @@ use halo2_proofs::{
     circuit::Value,
     halo2curves::ff,
     plonk::{
-        Advice, Any, Assigned, Assignment, Challenge, Column, Error, Fixed, Instance, Selector,
+        Advice, Any, Assigned, Assignment, Challenge, Column, ErrorFront as Error, Fixed, Instance,
+        Selector,
     },
 };
 use tracing::*;

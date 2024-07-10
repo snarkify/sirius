@@ -30,14 +30,19 @@ use crate::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error(transparent)]
-    Plonk(#[from] plonk::Error),
+    #[error("halo2: {0:?}")]
+    Plonk(plonk::ErrorFront),
     #[error("Error while calculate digest of pp")]
     WhileDigest(#[from] io::Error),
     #[error("While calculate intiail plonk relaxed trace of secondary circuit: {0:?}")]
     WhileGeneratePlonkTrace(#[from] nifs::Error),
     #[error("While calculate intiail plonk relaxed trace of secondary circuit, error was occured in `process_step`: {0:?}")]
     WhileProcessStep(#[from] ivc::step_circuit::SynthesisError),
+}
+impl From<plonk::ErrorFront> for Error {
+    fn from(value: plonk::ErrorFront) -> Self {
+        Error::Plonk(value)
+    }
 }
 
 #[derive(Serialize)]

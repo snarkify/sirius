@@ -340,7 +340,7 @@ pub enum Error {
     BigUintChip(#[from] big_uint_mul_mod_chip::Error),
 
     #[error("Halo2 proof system error: {0:?}")]
-    Halo2(#[from] halo2_proofs::plonk::Error),
+    Halo2(halo2_proofs::plonk::ErrorFront),
 
     #[error("Error constructing elliptic curve coordinates for {variable_name}: {variable_str}")]
     CantBuildCoordinates {
@@ -354,10 +354,16 @@ pub enum Error {
         variable_str: String,
     },
 }
-impl From<Error> for halo2_proofs::plonk::Error {
-    fn from(err: Error) -> halo2_proofs::plonk::Error {
+impl From<Error> for halo2_proofs::plonk::ErrorFront {
+    fn from(err: Error) -> halo2_proofs::plonk::ErrorFront {
         error!("downcast error: {err:?} to `Synthesis`");
-        halo2_proofs::plonk::Error::Synthesis
+        halo2_proofs::plonk::ErrorFront::Synthesis
+    }
+}
+
+impl From<halo2_proofs::plonk::ErrorFront> for Error {
+    fn from(err: halo2_proofs::plonk::ErrorFront) -> Error {
+        Error::Halo2(err)
     }
 }
 
@@ -1078,7 +1084,7 @@ mod tests {
         ecc: &EccChip<C, C::Base, T>,
         points: &[C],
         var_prefix: &str,
-    ) -> Result<Vec<AssignedPoint<C>>, halo2_proofs::plonk::Error>
+    ) -> Result<Vec<AssignedPoint<C>>, halo2_proofs::plonk::ErrorFront>
     where
         C: CurveAffine,
         C::Base: PrimeFieldBits + FromUniformBytes<64>,

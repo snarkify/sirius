@@ -2,7 +2,7 @@ use super::super::{util::*, AssignedBits, Bits, SpreadVar, SpreadWord, Table16As
 use super::{schedule_util::*, MessageScheduleConfig, MessageWord};
 use halo2_proofs::{
     circuit::{Region, Value},
-    plonk::Error,
+    plonk::ErrorFront as Error,
 };
 use sirius::ff::PrimeField;
 use std::convert::TryInto;

@@ -4,7 +4,7 @@ use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Value},
     halo2curves::ff,
-    plonk::Error,
+    plonk::ErrorFront as Error,
 };
 use poseidon::{self};
 use tracing::*;
@@ -48,7 +48,7 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
         if let Some(buf) = self
             .buf
             .iter()
-            .map(|b| *b.value().unwrap())
+            .map(|b| b.value().unwrap())
             .collect::<Option<Vec<_>>>()
         {
             scan(&buf)
@@ -381,7 +381,7 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
         let buf = self.buf.clone();
         if let Some(buf) = buf
             .iter()
-            .map(|val| *val.value().unwrap())
+            .map(|val| val.value().unwrap())
             .collect::<Option<Vec<F>>>()
         {
             debug!("On circuit input of hash: {buf:?}",);
@@ -513,9 +513,9 @@ mod tests {
         let circuit = TestCircuit::new(inputs, num_bits);
 
         let out_hash = Fp::from_str_vartime("277726250230731218669330566268314254439").unwrap();
-        let public_inputs: &[&[Fp]] = &[&[out_hash]];
+        let public_inputs = vec![vec![out_hash]];
 
-        create_and_verify_proof!(IPA, K, circuit, public_inputs, EqAffine);
+        create_and_verify_proof!(IPA, K, circuit, public_inputs.clone(), EqAffine);
         println!("-----poseidon circuit works fine-----");
     }
 

@@ -26,8 +26,8 @@ use crate::{
 enum Error<C: CurveAffine> {
     #[error(transparent)]
     Nifs(#[from] nifs::Error),
-    #[error(transparent)]
-    Plonk(#[from] plonk::Error),
+    #[error("halo2: {0:?}")]
+    Plonk(plonk::ErrorFront),
     #[error("while verify: {errors:?}")]
     Verify {
         errors: Vec<(&'static str, crate::plonk::Error)>,
@@ -38,6 +38,12 @@ enum Error<C: CurveAffine> {
         from_prove: Box<RelaxedPlonkInstance<C>>,
     },
 }
+impl<C: CurveAffine> From<plonk::ErrorFront> for Error<C> {
+    fn from(err: plonk::ErrorFront) -> Self {
+        Error::Plonk(err)
+    }
+}
+
 impl<C: CurveAffine> Error<C> {
     fn check_equality(
         from_verify: &RelaxedPlonkInstance<C>,
@@ -301,7 +307,7 @@ mod zero_round_test {
             &self,
             config: Self::Config,
             mut layouter: impl Layouter<F>,
-        ) -> Result<(), plonk::Error> {
+        ) -> Result<(), plonk::ErrorFront> {
             let pchip = MainGate::new(config.pconfig);
             let output = layouter.assign_region(
                 || "test",
@@ -410,7 +416,7 @@ mod one_round_test {
             a: F,
             b: F,
             nrows: usize,
-        ) -> Result<(Number<F>, Number<F>), plonk::Error> {
+        ) -> Result<(Number<F>, Number<F>), plonk::ErrorFront> {
             layouter.assign_region(
                 || "entire block",
                 |mut region| {
@@ -447,7 +453,7 @@ mod one_round_test {
             mut layouter: impl Layouter<F>,
             num: Number<F>,
             row: usize,
-        ) -> Result<(), plonk::Error> {
+        ) -> Result<(), plonk::ErrorFront> {
             layouter.constrain_instance(num.0.cell(), self.config.instance, row)
         }
     }
@@ -478,7 +484,7 @@ mod one_round_test {
             &self,
             config: Self::Config,
             mut layouter: impl Layouter<F>,
-        ) -> Result<(), plonk::Error> {
+        ) -> Result<(), plonk::ErrorFront> {
             let chip = FiboChip::construct(config);
             let nrows = (self.num + 1) / 2;
             let (_, b) = chip.load(layouter.namespace(|| "block"), self.a, self.b, nrows)?;
@@ -638,7 +644,7 @@ mod three_rounds_test {
             a: F,
             b: F,
             c: F,
-        ) -> Result<(Number<F>, Number<F>, Number<F>), plonk::Error> {
+        ) -> Result<(Number<F>, Number<F>, Number<F>), plonk::ErrorFront> {
             let config = self.config();
 
             layouter.assign_region(
@@ -666,7 +672,7 @@ mod three_rounds_test {
             mut layouter: impl Layouter<F>,
             a: &Number<F>,
             b: &Number<F>,
-        ) -> Result<Number<F>, plonk::Error> {
+        ) -> Result<Number<F>, plonk::ErrorFront> {
             let config = self.config();
             layouter.assign_region(
                 || "add",
@@ -690,7 +696,7 @@ mod three_rounds_test {
             mut layouter: impl Layouter<F>,
             a: &Number<F>,
             b: &Number<F>,
-        ) -> Result<Number<F>, plonk::Error> {
+        ) -> Result<Number<F>, plonk::ErrorFront> {
             let config = self.config();
             layouter.assign_region(
                 || "xor",
@@ -715,7 +721,7 @@ mod three_rounds_test {
             )
         }
 
-        fn load_table(&self, mut layouter: impl Layouter<F>) -> Result<(), plonk::Error> {
+        fn load_table(&self, mut layouter: impl Layouter<F>) -> Result<(), plonk::ErrorFront> {
             layouter.assign_table(
                 || "xor",
                 |mut table| {
@@ -779,7 +785,7 @@ mod three_rounds_test {
             &self,
             config: Self::Config,
             mut layouter: impl Layouter<F>,
-        ) -> Result<(), plonk::Error> {
+        ) -> Result<(), plonk::ErrorFront> {
             let chip = FiboChip::construct(config);
             let (mut a, mut b, mut c) =
                 chip.load_private(layouter.namespace(|| "first row"), self.a, self.b, self.c)?;

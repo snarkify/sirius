@@ -1,4 +1,4 @@
-use halo2_proofs::{circuit::Region, plonk::Error};
+use halo2_proofs::{circuit::Region, plonk::ErrorFront as Error};
 
 use super::{
     super::{AssignedBits, RoundWord, RoundWordA, RoundWordE, StateWord, ROUND_CONSTANTS},

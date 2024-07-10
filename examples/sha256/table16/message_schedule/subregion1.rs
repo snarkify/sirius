@@ -2,7 +2,7 @@ use std::convert::TryInto;
 
 use halo2_proofs::{
     circuit::{Region, Value},
-    plonk::Error,
+    plonk::ErrorFront as Error,
 };
 use sirius::ff::PrimeField;
 

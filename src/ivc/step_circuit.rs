@@ -12,8 +12,8 @@ use super::fold_relaxed_plonk_instance_chip;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SynthesisError {
-    #[error(transparent)]
-    Halo2(halo2_proofs::plonk::Error),
+    #[error("{0:?}")]
+    Halo2(halo2_proofs::plonk::ErrorFront),
     #[error(transparent)]
     FoldError(#[from] fold_relaxed_plonk_instance_chip::Error),
 }

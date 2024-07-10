@@ -8,16 +8,15 @@
 //! For more details look at:
 //! - Paragraph '3. Folding scheme' at [Nova whitepaper](https://eprint.iacr.org/2021/370)
 //! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
+use halo2_proofs::{arithmetic::CurveAffine, plonk::Error as Halo2Error};
 use rayon::prelude::*;
 
-use halo2_proofs::arithmetic::CurveAffine;
-use halo2_proofs::plonk::Error as Halo2Error;
-
-use crate::commitment::{self, CommitmentKey};
-use crate::plonk::eval::Error as EvalError;
-use crate::plonk::{PlonkInstance, PlonkStructure, PlonkTrace};
-use crate::poseidon::ROTrait;
-use crate::sps::Error as SpsError;
+use crate::{
+    commitment::{self, CommitmentKey},
+    plonk::{eval::Error as EvalError, PlonkInstance, PlonkStructure, PlonkTrace},
+    poseidon::ROTrait,
+    sps::Error as SpsError,
+};
 
 pub mod protogalaxy;
 pub mod vanilla;
@@ -80,10 +79,16 @@ pub enum Error {
     Eval(#[from] EvalError),
     #[error(transparent)]
     Sps(#[from] SpsError),
-    #[error(transparent)]
-    Plonk(#[from] Halo2Error),
+    #[error("halo2: {0:?}")]
+    Plonk(Halo2Error),
     #[error(transparent)]
     Commitment(#[from] commitment::Error),
+}
+
+impl From<Halo2Error> for Error {
+    fn from(value: Halo2Error) -> Self {
+        Error::Plonk(value)
+    }
 }
 
 #[cfg(test)]

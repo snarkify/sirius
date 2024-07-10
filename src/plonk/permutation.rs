@@ -1,6 +1,6 @@
 //! Adapted from halo2/halo2_proofs/src/plonk/permutation/keygen.rs
-use halo2_proofs::plonk::permutation::Argument;
-use halo2_proofs::plonk::{Any, Column, Error};
+use halo2_frontend::plonk::permutation::Argument;
+use halo2_proofs::plonk::{Any, Column, ErrorFront as Error};
 use tracing::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

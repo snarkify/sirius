@@ -256,7 +256,7 @@ where
         &self,
         config: StepConfig<ARITY, C::Base, SC, T>,
         mut layouter: impl Layouter<C::Base>,
-    ) -> Result<(), halo2_proofs::plonk::Error> {
+    ) -> Result<(), halo2_proofs::plonk::ErrorFront> {
         let (assigned_z_0, assigned_z_i): ([_; ARITY], [_; ARITY]) = layouter
             .assign_region(
                 || "assign z_0 & z_i",
@@ -278,7 +278,7 @@ where
             )
             .map_err(|err| {
                 error!("while assign z_0 & z_i: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                halo2_proofs::plonk::ErrorFront::Synthesis
             })?;
 
         let chip = FoldRelaxedPlonkInstanceChip::new(
@@ -306,7 +306,7 @@ where
             )
             .map_err(|err| {
                 error!("while assigned witness: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                halo2_proofs::plonk::ErrorFront::Synthesis
             })?;
 
         debug!("witness & challenge assigned");
@@ -341,7 +341,7 @@ where
             )
             .map_err(|err| {
                 error!("while assign step & next step: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                halo2_proofs::plonk::ErrorFront::Synthesis
             })?;
 
         // Check X0 == input_params_hash
@@ -388,7 +388,7 @@ where
             )
             .map_err(|err| {
                 error!("while generate input hash: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                halo2_proofs::plonk::ErrorFront::Synthesis
             })?;
 
         // Synthesize the circuit for the non-base case and get the new running
@@ -403,7 +403,7 @@ where
             )
             .map_err(|err| {
                 error!("while synthesize_step_non_base_case: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                halo2_proofs::plonk::ErrorFront::Synthesis
             })?;
 
         let (assigned_new_U, assigned_input) = layouter
@@ -447,7 +447,7 @@ where
             )
             .map_err(|err| {
                 error!("while folding: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                halo2_proofs::plonk::ErrorFront::Synthesis
             })?;
 
         let z_output = self
@@ -455,7 +455,7 @@ where
             .synthesize_step(config.step_config, &mut layouter, &assigned_input)
             .map_err(|err| {
                 error!("while synthesize_step: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                halo2_proofs::plonk::ErrorFront::Synthesis
             })?;
 
         let output_hash = layouter
@@ -479,7 +479,7 @@ where
             )
             .map_err(|err| {
                 error!("while generate output hash: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                halo2_proofs::plonk::ErrorFront::Synthesis
             })?;
 
         debug!("output instance 0: {:?}", output_hash);
@@ -493,7 +493,7 @@ where
             )
             .map_err(|err| {
                 error!("while check that old_X1 == new_X0: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                halo2_proofs::plonk::ErrorFront::Synthesis
             })?;
 
         // Check that new_X1 == output_hash
@@ -501,7 +501,7 @@ where
             .constrain_instance(output_hash.cell(), config.instance, 1)
             .map_err(|err| {
                 error!("while check that new_X1 == output_hash: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                halo2_proofs::plonk::ErrorFront::Synthesis
             })?;
 
         Ok(())
