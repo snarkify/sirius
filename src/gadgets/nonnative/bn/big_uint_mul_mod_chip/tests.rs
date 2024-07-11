@@ -1,17 +1,18 @@
 use std::{marker::PhantomData, mem};
 
-use ff::Field;
 use halo2_proofs::{
     circuit::SimpleFloorPlanner,
     plonk::{Advice, Circuit, Column, Instance},
 };
-use halo2curves::pasta::Fp;
 use num_traits::FromPrimitive;
 use tracing::*;
 
-use crate::run_mock_prover_test;
-
 use super::*;
+use crate::{
+    ff::{PrimeField, PrimeFieldBits},
+    halo2curves::pasta::Fp,
+    run_mock_prover_test,
+};
 
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(Fp::S as usize) };
 const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
@@ -35,11 +36,11 @@ mod mult_mod_tests {
     }
 
     #[derive(Debug)]
-    struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits> {
+    struct TestCircuit<F: PrimeField + PrimeFieldBits> {
         modulus: BigUint<F>,
     }
 
-    impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
+    impl<F: PrimeField + PrimeFieldBits> Circuit<F> for TestCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -246,14 +247,14 @@ mod components_tests {
     }
 
     #[derive(Debug, Default)]
-    struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits> {
+    struct TestCircuit<F: PrimeField + PrimeFieldBits> {
         _p: PhantomData<F>,
     }
 
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(Fp::S as usize) };
     const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
-    impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
+    impl<F: PrimeField + PrimeFieldBits> Circuit<F> for TestCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -614,13 +615,11 @@ mod red_mod_tests {
         circuit::SimpleFloorPlanner,
         plonk::{Advice, Circuit, Column, Instance},
     };
-    use halo2curves::pasta::Fp;
     use num_traits::FromPrimitive;
     use tracing_test::traced_test;
 
-    use crate::run_mock_prover_test;
-
     use super::*;
+    use crate::{halo2curves::pasta::Fp, run_mock_prover_test};
 
     #[derive(Clone)]
     struct Config {
@@ -637,11 +636,11 @@ mod red_mod_tests {
     const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
     #[derive(Debug)]
-    struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits> {
+    struct TestCircuit<F: PrimeField + PrimeFieldBits> {
         modulus: BigUint<F>,
     }
 
-    impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
+    impl<F: PrimeField + PrimeFieldBits> Circuit<F> for TestCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -803,7 +802,7 @@ mod red_mod_tests {
 }
 
 mod decompose_tests {
-    use halo2_proofs::circuit::Value;
+    use halo2_proofs::{arithmetic::Field, circuit::Value};
     use tracing_test::traced_test;
 
     use super::*;
@@ -821,9 +820,9 @@ mod decompose_tests {
     const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(5) };
 
     #[derive(Debug, Default)]
-    struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits>(PhantomData<F>);
+    struct TestCircuit<F: PrimeField + PrimeFieldBits>(PhantomData<F>);
 
-    impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
+    impl<F: PrimeField + PrimeFieldBits> Circuit<F> for TestCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -944,6 +943,7 @@ mod decompose_tests {
 }
 
 mod to_le_bits {
+    use halo2_proofs::arithmetic::Field;
     use rand::Rng;
     use tracing_test::traced_test;
 
@@ -957,11 +957,11 @@ mod to_le_bits {
     }
 
     #[derive(Debug, Default)]
-    struct TestCircuit<F: ff::PrimeField + ff::PrimeFieldBits> {
+    struct TestCircuit<F: PrimeField + PrimeFieldBits> {
         _m: PhantomData<F>,
     }
 
-    impl<F: ff::PrimeField + ff::PrimeFieldBits> Circuit<F> for TestCircuit<F> {
+    impl<F: PrimeField + PrimeFieldBits> Circuit<F> for TestCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
 

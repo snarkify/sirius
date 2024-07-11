@@ -1,8 +1,6 @@
 use std::iter;
 
-use ff::PrimeField;
-
-use crate::fft;
+use crate::{ff::PrimeField, fft};
 
 /// Returns an iterator over elements of a cyclic subgroup of a specified order in a given prime
 /// field:
@@ -86,11 +84,11 @@ pub fn eval_vanish_polynomial<F: PrimeField>(log_n: u32, point: F) -> F {
 
 #[cfg(test)]
 mod tests {
-    use ff::Field;
     use halo2_proofs::halo2curves::bn256::Fr;
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::ff::Field;
 
     #[traced_test]
     #[test]

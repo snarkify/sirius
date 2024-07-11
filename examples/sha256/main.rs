@@ -2,19 +2,17 @@
 
 use std::{array, io, iter, marker::PhantomData, num::NonZeroUsize, path::Path};
 
-use ff::PrimeField;
+use bn256::G1 as C1;
+use grumpkin::G1 as C2;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::ConstraintSystem,
 };
-
-use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
-
-use bn256::G1 as C1;
-use grumpkin::G1 as C2;
-
 use sirius::{
     commitment::CommitmentKey,
+    ff::PrimeField,
+    group::{prime::PrimeCurve, Group},
+    halo2curves::{bn256, grumpkin, CurveAffine, CurveExt},
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
     poseidon::{self, ROPair},
 };
@@ -333,11 +331,11 @@ type RandomOracleConstant<F> = <RandomOracle as ROPair<F>>::Args;
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
 const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
-type C1Affine = <C1 as halo2curves::group::prime::PrimeCurve>::Affine;
-type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
+type C1Affine = <C1 as PrimeCurve>::Affine;
+type C2Affine = <C2 as PrimeCurve>::Affine;
 
-type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
-type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
+type C1Scalar = <C1 as Group>::Scalar;
+type C2Scalar = <C2 as Group>::Scalar;
 
 const FOLDER: &str = ".cache/examples";
 

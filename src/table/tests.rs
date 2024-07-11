@@ -1,18 +1,17 @@
-use ff::{Field, PrimeField};
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner},
     plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
 };
-use halo2curves::group::ff::FromUniformBytes;
 use prettytable::{row, Cell, Row, Table};
 use tracing_test::traced_test;
 
+use super::*;
 use crate::{
+    ff::{Field, PrimeField},
+    halo2curves::group::ff::FromUniformBytes,
     main_gate::{MainGate, MainGateConfig, RegionCtx},
     util::trim_leading_zeros,
 };
-
-use super::*;
 
 const T: usize = 3;
 
@@ -72,7 +71,7 @@ impl<F: PrimeField + FromUniformBytes<64>> Circuit<F> for TestCircuit<F> {
 #[traced_test]
 #[test]
 fn test_assembly() -> Result<(), Error> {
-    use halo2curves::pasta::Fp;
+    use crate::halo2curves::pasta::Fp;
 
     const K: u32 = 4;
     let mut inputs = Vec::new();

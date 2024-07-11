@@ -1,14 +1,13 @@
-use ff::PrimeField;
 use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error, FloorPlanner};
 use tracing::*;
 
+use super::{circuit_data::CircuitData, ConstraintSystemMetainfo, WitnessCollector};
 use crate::{
+    ff::PrimeField,
     plonk::{self, PlonkStructure},
     polynomial::sparse::SparseMatrix,
     util::batch_invert_assigned,
 };
-
-use super::{circuit_data::CircuitData, ConstraintSystemMetainfo, WitnessCollector};
 
 pub type Witness<F> = Vec<Vec<F>>;
 
@@ -88,7 +87,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
             k: self.k,
             num_io: self.instance.len(),
             fixed: vec![vec![F::ZERO.into(); nrow]; self.cs.num_fixed_columns()],
-            selector: vec![vec![false; nrow]; self.cs.num_selectors()],
+            selector: vec![vec![false; nrow]; self.cs.num_selectors],
             permutation: plonk::permutation::Assembly::new(nrow, &self.cs.permutation),
         };
 

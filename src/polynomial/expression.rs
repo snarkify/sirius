@@ -6,11 +6,10 @@ use std::{
     ops::{self, Add, Mul, Neg, Sub},
 };
 
-use ff::PrimeField;
 use halo2_proofs::{plonk::Expression as PE, poly::Rotation};
 use serde::Serialize;
 
-use crate::{plonk::PlonkStructure, util::trim_leading_zeros};
+use crate::{ff::PrimeField, plonk::PlonkStructure, util::trim_leading_zeros};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum ColumnIndex {
     Challenge { column_index: usize },
@@ -517,14 +516,16 @@ pub fn challenge_in_degree<F: PrimeField>(
 mod tests {
     use std::array;
 
-    use ff::PrimeField;
     // use pasta_curves::{Fp, pallas};
     use halo2_proofs::poly::Rotation;
-    use halo2curves::pasta::{pallas, Fp};
     use tracing::*;
     use tracing_test::traced_test;
 
     use super::super::expression::*;
+    use crate::{
+        ff::PrimeField,
+        halo2curves::pasta::{pallas, Fp},
+    };
 
     #[traced_test]
     #[test]

@@ -1,13 +1,16 @@
 use std::{fmt, iter, num::NonZeroUsize};
 
-use ff::{BatchInvert, Field, PrimeField};
-use halo2_proofs::plonk::Assigned;
+use halo2_proofs::{
+    halo2curves::ff::{FromUniformBytes, PrimeFieldBits},
+    plonk::Assigned,
+};
 use itertools::Itertools;
 use num_bigint::BigUint;
 pub(crate) use rayon::current_num_threads;
 use rayon::prelude::*;
 
 use crate::{
+    ff::{BatchInvert, Field, PrimeField},
     main_gate::AssignedValue,
     poseidon::{PoseidonHash, ROTrait, Spec},
 };
@@ -192,10 +195,10 @@ pub(crate) fn concatenate_with_padding<F: PrimeField>(vs: &[Vec<F>], pad_size: u
 #[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
-    use halo2curves::pasta::Fp;
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::halo2curves::pasta::Fp;
 
     // Helper to easily create an Fp element
     fn fp(num: u64) -> Fp {
@@ -265,7 +268,7 @@ mod tests {
 pub(crate) fn create_ro<F, const T: usize, const RATE: usize, const R_F: usize, const R_P: usize>(
 ) -> PoseidonHash<F, T, RATE>
 where
-    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: PrimeFieldBits + FromUniformBytes<64>,
 {
     let spec = Spec::<F, T, RATE>::new(R_F, R_P);
     PoseidonHash::<F, T, RATE>::new(spec)
@@ -363,7 +366,7 @@ macro_rules! create_and_verify_proof {
     }};
 }
 
-pub(crate) fn get_power_of_two_iter<F: ff::PrimeField>() -> impl Iterator<Item = F> {
+pub(crate) fn get_power_of_two_iter<F: PrimeField>() -> impl Iterator<Item = F> {
     iter::successors(Some(F::ONE), |l| Some(l.double()))
 }
 

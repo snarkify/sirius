@@ -2,11 +2,11 @@ use std::convert::TryInto;
 use std::marker::PhantomData;
 
 use super::sha256::Sha256Instructions;
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Region, Value},
     plonk::{Advice, Any, Assigned, Column, ConstraintSystem, Error},
 };
+use sirius::ff::PrimeField;
 
 mod compression;
 mod gates;

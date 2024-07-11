@@ -4,6 +4,7 @@ use halo2_proofs::{
     circuit::{Region, Value},
     plonk::Error,
 };
+use sirius::ff::PrimeField;
 
 #[cfg(test)]
 use super::super::{super::BLOCK_SIZE, BlockWord, ROUNDS};
@@ -147,7 +148,7 @@ pub const MSG_SCHEDULE_TEST_OUTPUT: [u32; ROUNDS] = [
 impl MessageScheduleConfig {
     // Assign a word and its hi and lo halves
     #[allow(clippy::type_complexity)]
-    pub fn assign_word_and_halves<F: ff::PrimeField>(
+    pub fn assign_word_and_halves<F: PrimeField>(
         &self,
         region: &mut Region<'_, F>,
         word: Value<u32>,

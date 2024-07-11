@@ -1,6 +1,5 @@
 use std::{io, iter, num::NonZeroUsize, ops::Not};
 
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Value},
     plonk::{Advice, Column},
@@ -9,7 +8,7 @@ use num_bigint::BigUint as BigUintRaw;
 use num_traits::{identities::One, Zero};
 use tracing::*;
 
-use crate::{error::Halo2PlonkError, main_gate::RegionCtx};
+use crate::{error::Halo2PlonkError, ff::PrimeField, main_gate::RegionCtx};
 
 // A big natural number with limbs in field `F`
 //
@@ -70,7 +69,7 @@ pub enum Error {
     LimbNotFound { limb_index: usize },
 }
 
-impl<F: ff::PrimeField> BigUint<F> {
+impl<F: PrimeField> BigUint<F> {
     pub fn from_limbs(
         mut limbs_input: impl Iterator<Item = F>,
         limb_width: NonZeroUsize,
@@ -133,7 +132,7 @@ impl<F: ff::PrimeField> BigUint<F> {
 
         let limbs = input
             .iter()
-            .map(|cell| *cell.value().map(|v| *v).unwrap())
+            .map(|cell| cell.value().map(|v| *v).unwrap())
             .map(|fv| {
                 if let Some(fv) = fv {
                     let repr_len = fv.to_repr().as_ref().len();
@@ -267,7 +266,7 @@ impl<F: ff::PrimeField> BigUint<F> {
     }
 }
 
-pub fn nat_to_f<Scalar: ff::PrimeField>(n: &num_bigint::BigUint) -> Option<Scalar> {
+pub fn nat_to_f<Scalar: PrimeField>(n: &num_bigint::BigUint) -> Option<Scalar> {
     Scalar::from_str_vartime(&format!("{n}"))
 }
 
@@ -301,11 +300,10 @@ fn get_max_word_mask_bits(limb_width: usize) -> usize {
 mod tests {
     use std::mem;
 
-    use ff::Field;
-    use halo2curves::pasta::Fp;
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::{ff::Field, halo2curves::pasta::Fp};
 
     #[traced_test]
     #[test]

@@ -9,9 +9,10 @@ use clap::{Parser, ValueEnum};
 #[allow(dead_code)]
 mod poseidon;
 
-use ff::Field;
+use halo2_proofs::arithmetic::Field;
 use poseidon::poseidon_step_circuit::TestPoseidonCircuit;
 use sirius::{
+    group::{prime::PrimeCurve, Group},
     ivc::{step_circuit::trivial, CircuitPublicParamsInput, PublicParams, StepCircuit, IVC},
     poseidon::ROPair,
 };
@@ -63,10 +64,9 @@ enum Circuits {
     Trivial,
 }
 
-use halo2curves::{bn256, grumpkin};
-
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
+use sirius::halo2curves::{bn256, grumpkin};
 
 const MAIN_GATE_SIZE: usize = 5;
 const RATE: usize = 4;
@@ -74,11 +74,11 @@ const RATE: usize = 4;
 type RandomOracle = sirius::poseidon::PoseidonRO<MAIN_GATE_SIZE, RATE>;
 type RandomOracleConstant<F> = <RandomOracle as ROPair<F>>::Args;
 
-type C1Affine = <C1 as halo2curves::group::prime::PrimeCurve>::Affine;
-type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
+type C1Affine = <C1 as PrimeCurve>::Affine;
+type C1Scalar = <C1 as Group>::Scalar;
 
-type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
-type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
+type C2Affine = <C2 as PrimeCurve>::Affine;
+type C2Scalar = <C2 as Group>::Scalar;
 
 fn fold(
     args: &Args,

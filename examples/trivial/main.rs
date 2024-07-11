@@ -2,20 +2,18 @@
 
 use std::{array, env, io, num::NonZeroUsize, path::Path};
 
-use ff::PrimeField;
-use halo2curves::{bn256, grumpkin, CurveAffine, CurveExt};
-use metadata::LevelFilter;
-use tracing::*;
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
-
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
-
+use metadata::LevelFilter;
 use sirius::{
     commitment::CommitmentKey,
+    group::{prime::PrimeCurve, Group},
+    halo2curves::{bn256, grumpkin, CurveAffine, CurveExt},
     ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, IVC},
     poseidon::{self, ROPair},
 };
+use tracing::*;
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 const ARITY: usize = BLOCK_SIZE / 2;
 const BLOCK_SIZE: usize = 16;
@@ -33,11 +31,11 @@ type RandomOracleConstant<F> = <RandomOracle as ROPair<F>>::Args;
 const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
 const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
-type C1Affine = <C1 as halo2curves::group::prime::PrimeCurve>::Affine;
-type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
+type C1Affine = <C1 as PrimeCurve>::Affine;
+type C2Affine = <C2 as PrimeCurve>::Affine;
 
-type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
-type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
+type C1Scalar = <C1 as Group>::Scalar;
+type C2Scalar = <C2 as Group>::Scalar;
 
 const FOLDER: &str = ".cache/examples";
 
@@ -117,9 +115,9 @@ fn main() {
     IVC::fold_with_debug_mode(
         &pp,
         &sc1,
-        array::from_fn(|i| C1Scalar::from_u128(i as u128)),
+        array::from_fn(|i| C1Scalar::from(i as u64)),
         &sc2,
-        array::from_fn(|i| C2Scalar::from_u128(i as u128)),
+        array::from_fn(|i| C2Scalar::from(i as u64)),
         NonZeroUsize::new(5).unwrap(),
     )
     .unwrap();

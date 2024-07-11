@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
-use ff::PrimeField;
 use halo2_proofs::arithmetic::CurveAffine;
 
 use super::*;
 use crate::{
     commitment::CommitmentKey,
+    ff::PrimeField,
     plonk::{PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace},
 };
 

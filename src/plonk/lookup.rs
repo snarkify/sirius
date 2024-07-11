@@ -41,13 +41,13 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
-use ff::PrimeField;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
 use rayon::prelude::*;
 use serde::Serialize;
 use tracing::*;
 
 use crate::{
+    ff::PrimeField,
     plonk::{
         eval::{Error, LookupEvalDomain},
         util::compress_halo2_expression,
@@ -100,15 +100,20 @@ impl<F: PrimeField> Arguments<F> {
             .map(|arg| {
                 (
                     compress_halo2_expression(
-                        arg.input_expressions(),
-                        cs.num_selectors(),
+                        arg.input_expressions()
+                            .iter()
+                            .flatten()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .as_slice(),
+                        cs.num_selectors,
                         cs.num_fixed_columns(),
                         // compress vector table items with r1 (challenge_index = 0)
                         0,
                     ),
                     compress_halo2_expression(
                         arg.table_expressions(),
-                        cs.num_selectors(),
+                        cs.num_selectors,
                         cs.num_fixed_columns(),
                         // compress vector lookups with r1 (challenge_index = 0)
                         0,
@@ -134,7 +139,7 @@ impl<F: PrimeField> Arguments<F> {
     /// L_i(x1,...,xa) - l_i which evaluates to zero on every row
     /// T_i(y1,...,yb) - t_i which evaluates to zero on every row
     pub fn vanishing_lookup_polys(&self, cs: &ConstraintSystem<F>) -> Vec<Expression<F>> {
-        let lookup_offset = cs.num_selectors() + cs.num_fixed_columns() + cs.num_advice_columns();
+        let lookup_offset = cs.num_selectors + cs.num_fixed_columns() + cs.num_advice_columns();
         let expression_of_l = |lookup_index: usize| -> Expression<F> {
             Expression::Polynomial(Query {
                 index: lookup_offset + lookup_index * 5,
@@ -177,7 +182,7 @@ impl<F: PrimeField> Arguments<F> {
     ) -> (Expression<F>, Expression<F>) {
         let r = Expression::Challenge(challenge_index);
         // starting index of lookup variables (l_i, t_i, m_i, h_i, g_i)
-        let lookup_offset = cs.num_selectors() + cs.num_fixed_columns() + cs.num_advice_columns();
+        let lookup_offset = cs.num_selectors + cs.num_fixed_columns() + cs.num_advice_columns();
         // Please see (#34)[https://github.com/snarkify/sirius/issues/34] for details on notations.
         let [l, t, m, h, g] = array::from_fn(|idx| {
             Expression::Polynomial(Query {

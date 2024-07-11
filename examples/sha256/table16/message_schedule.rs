@@ -1,14 +1,14 @@
 use std::convert::TryInto;
 
-use crate::BlockWord;
-
-use super::{super::BLOCK_SIZE, AssignedBits, SpreadInputs, Table16Assignment, ROUNDS};
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::Layouter,
     plonk::{Advice, Column, ConstraintSystem, Error, Selector},
     poly::Rotation,
 };
+use sirius::ff::PrimeField;
+
+use super::{super::BLOCK_SIZE, AssignedBits, SpreadInputs, Table16Assignment, ROUNDS};
+use crate::BlockWord;
 
 mod schedule_gates;
 mod schedule_util;
@@ -17,10 +17,9 @@ mod subregion2;
 mod subregion3;
 
 use schedule_gates::ScheduleGate;
-use schedule_util::*;
-
 #[cfg(test)]
 pub use schedule_util::msg_schedule_test_input;
+use schedule_util::*;
 
 #[derive(Clone, Debug)]
 pub(super) struct MessageWord<F: PrimeField>(pub AssignedBits<F, 32>);
@@ -395,10 +394,8 @@ impl MessageScheduleConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{
-        super::BLOCK_SIZE, util::lebs2ip, BlockWord, SpreadTableChip, Table16Chip, Table16Config,
-    };
-    use super::schedule_util::*;
+    use std::marker::PhantomData;
+
     use ff::PrimeField;
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
@@ -407,7 +404,14 @@ mod tests {
     };
     use halo2curves::pasta::pallas;
     use sirius::run_mock_prover_test;
-    use std::marker::PhantomData;
+
+    use super::{
+        super::{
+            super::BLOCK_SIZE, util::lebs2ip, BlockWord, SpreadTableChip, Table16Chip,
+            Table16Config,
+        },
+        schedule_util::*,
+    };
 
     #[traced_test]
     #[test]

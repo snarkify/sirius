@@ -17,7 +17,6 @@
 use std::{iter, num::NonZeroUsize, time::Instant};
 
 use count_to_non_zero::*;
-use ff::{Field, PrimeField};
 use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
 use itertools::Itertools;
 use rayon::prelude::*;
@@ -29,6 +28,7 @@ use crate::{
     commitment::CommitmentKey,
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
+    ff::{Field, PrimeField},
     plonk::{
         self,
         eval::{Error as EvalError, GetDataForEval, PlonkEvalDomain},
@@ -984,13 +984,13 @@ pub(crate) mod test_eval_witness {
     pub mod poseidon_circuit {
         use std::{array, marker::PhantomData};
 
-        use ff::{FromUniformBytes, PrimeFieldBits};
         use halo2_proofs::{
             circuit::{Layouter, SimpleFloorPlanner, Value},
             plonk::{Circuit, ConstraintSystem},
         };
 
         use crate::{
+            ff::{FromUniformBytes, PrimeFieldBits},
             main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
             poseidon::{poseidon_circuit::PoseidonChip, Spec},
         };
@@ -1061,11 +1061,10 @@ pub(crate) mod test_eval_witness {
         }
     }
 
-    use ff::Field as _Field;
-    use halo2curves::{bn256, CurveAffine};
-
     use crate::{
         commitment::CommitmentKey,
+        ff::Field as _Field,
+        halo2curves::{bn256, CurveAffine},
         plonk::PlonkTrace,
         poseidon::{
             random_oracle::{self, ROTrait},
@@ -1084,10 +1083,10 @@ pub(crate) mod test_eval_witness {
     const R_F1: usize = 4;
     const R_P1: usize = 3;
     pub type PoseidonSpec =
-        Spec<<Curve as halo2curves::CurveAffine>::Base, POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE>;
+        Spec<<Curve as CurveAffine>::Base, POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE>;
 
     type RO = <PoseidonRO<POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE> as random_oracle::ROPair<
-        <Curve as halo2curves::CurveAffine>::Base,
+        <Curve as CurveAffine>::Base,
     >>::OffCircuit;
 
     #[test]

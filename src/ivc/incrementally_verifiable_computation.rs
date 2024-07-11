@@ -1,15 +1,15 @@
 use std::{io, marker::PhantomData, num::NonZeroUsize};
 
-use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
-use group::prime::PrimeCurveAffine;
 use halo2_proofs::dev::MockProver;
-use halo2curves::CurveAffine;
 use serde::Serialize;
 use tracing::*;
 
 use super::instance_computation::RandomOracleComputationInstance;
 pub use super::step_circuit::{self, StepCircuit, SynthesisError};
 use crate::{
+    ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
+    group::prime::PrimeCurveAffine,
+    halo2curves::CurveAffine,
     ivc::{
         public_params::PublicParams,
         step_folding_circuit::{StepFoldingCircuit, StepInputs},

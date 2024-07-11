@@ -1,13 +1,11 @@
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::{floor_planner::single_pass::SingleChipLayouter, AssignedCell, Layouter, Value},
     plonk::ConstraintSystem,
 };
 use tracing::*;
 
-use crate::{main_gate::RegionCtx, table::WitnessCollector};
-
 use super::fold_relaxed_plonk_instance_chip;
+use crate::{ff::PrimeField, main_gate::RegionCtx, table::WitnessCollector};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SynthesisError {
@@ -132,13 +130,13 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
 pub mod trivial {
     use std::marker::PhantomData;
 
-    use ff::PrimeField;
     use halo2_proofs::{
         circuit::{AssignedCell, Layouter},
         plonk::ConstraintSystem,
     };
 
     use super::{StepCircuit, SynthesisError};
+    use crate::ff::PrimeField;
 
     /// A trivial step circuit that simply returns the input
     #[derive(Clone, Debug, Default, PartialEq, Eq)]

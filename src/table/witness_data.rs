@@ -1,4 +1,3 @@
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::Value,
     plonk::{
@@ -6,6 +5,8 @@ use halo2_proofs::{
     },
 };
 use tracing::*;
+
+use crate::ff::PrimeField;
 
 pub struct WitnessCollector<F: PrimeField> {
     pub(crate) instance: Vec<F>,
@@ -126,5 +127,13 @@ impl<F: PrimeField> Assignment<F> for WitnessCollector<F> {
 
     fn pop_namespace(&mut self, _: Option<String>) {
         // Do nothing; we don't care about namespaces in this context.
+    }
+
+    fn query_advice(&self, _column: Column<Advice>, _row: usize) -> Result<F, Error> {
+        todo!()
+    }
+
+    fn query_fixed(&self, _column: Column<Fixed>, _row: usize) -> Result<F, Error> {
+        todo!()
     }
 }

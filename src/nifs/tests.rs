@@ -1,19 +1,19 @@
 use std::marker::PhantomData;
 
-use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     plonk::{self, Advice, Circuit, Column, ConstraintSystem, Instance, Selector},
     poly::Rotation,
 };
-use halo2curves::{
-    bn256::{Fr, G1Affine},
-    group::ff::FromUniformBytes,
-};
 use some_to_err::*;
 
 use super::*;
 use crate::{
+    ff::{PrimeField, PrimeFieldBits},
+    halo2curves::{
+        bn256::{Fr, G1Affine},
+        group::ff::FromUniformBytes,
+    },
     nifs::{self, vanilla::VanillaFS},
     plonk::{
         PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness,
@@ -83,7 +83,7 @@ where
     let td1 = CircuitRunner::new(K, circuit1, public_inputs1.clone());
     let num_lookup = td1.cs.lookups().len();
     let p1 = smallest_power(td1.cs.num_advice_columns() + 5 * num_lookup, K);
-    let p2 = smallest_power(td1.cs.num_selectors() + td1.cs.num_fixed_columns(), K);
+    let p2 = smallest_power(td1.cs.num_selectors + td1.cs.num_fixed_columns(), K);
     let ck = CommitmentKey::<C>::setup(p1.max(p2), b"prepare_trace");
 
     let S = td1.try_collect_plonk_structure()?;

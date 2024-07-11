@@ -3,16 +3,17 @@ pub mod poseidon_hash;
 pub mod random_oracle;
 mod spec;
 
+use halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 pub use poseidon_hash::PoseidonHash;
 pub use random_oracle::*;
 pub use spec::Spec;
 
 pub struct PoseidonRO<const T: usize, const RATE: usize>;
 
-impl<const T: usize, const RATE: usize, F: serde::Serialize + ff::PrimeField> ROPair<F>
+impl<const T: usize, const RATE: usize, F: serde::Serialize + PrimeField> ROPair<F>
     for PoseidonRO<T, RATE>
 where
-    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: PrimeFieldBits + FromUniformBytes<64>,
 {
     type Args = Spec<F, T, RATE>;
     type Config = crate::main_gate::MainGateConfig<T>;

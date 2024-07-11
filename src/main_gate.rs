@@ -1,16 +1,16 @@
 use std::{array, iter, marker::PhantomData, num::NonZeroUsize};
 
-use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Cell, Chip, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance},
     poly::Rotation,
 };
-use halo2curves::{Coordinates, CurveAffine};
 use itertools::Itertools;
 
 use crate::{
+    ff::{PrimeField, PrimeFieldBits},
     gadgets::ecc::AssignedPoint,
+    halo2curves::{Coordinates, CurveAffine},
     util::{self, normalize_trailing_zeros},
 };
 
@@ -798,13 +798,14 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
 
 #[cfg(test)]
 mod tests {
+    use tracing_test::traced_test;
+
     use super::*;
     use crate::{
+        halo2curves::pasta::Fp,
         plonk::CompressedGates,
         polynomial::{expression::QueryIndexContext, Expression},
     };
-    use halo2curves::pasta::Fp;
-    use tracing_test::traced_test;
 
     #[traced_test]
     #[test]
@@ -823,7 +824,7 @@ mod tests {
         const RATE: usize = 2;
         let mut cs = ConstraintSystem::<Fp>::default();
         let _: MainGateConfig<T> = MainGate::configure(&mut cs);
-        let num_selector = cs.num_selectors(); // is zero for current main_gate design
+        let num_selector = cs.num_selectors; // is zero for current main_gate design
         let num_fixed = cs.num_fixed_columns();
         let num_instance = cs.num_instance_columns();
         let num_advice = cs.num_advice_columns();
@@ -843,7 +844,7 @@ mod tests {
             QueryIndexContext {
                 num_fixed,
                 num_advice,
-                num_selectors: cs.num_selectors(),
+                num_selectors: cs.num_selectors,
                 num_challenges: cs.num_challenges(),
                 num_lookups: 0,
             },

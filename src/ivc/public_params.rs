@@ -1,16 +1,17 @@
 use std::{fmt, io, marker::PhantomData, num::NonZeroUsize, ops::Deref};
 
-use ff::{Field, FromUniformBytes, PrimeFieldBits};
-use group::prime::PrimeCurveAffine;
 use halo2_proofs::plonk;
-use halo2curves::CurveAffine;
 use serde::Serialize;
 use tracing::*;
 
+use super::{step_folding_circuit::StepParams, StepCircuit};
 use crate::{
     commitment::CommitmentKey,
     constants::NUM_HASH_BITS,
     digest::{self, into_curve_from_bits, DigestToBits, DigestToCurve},
+    ff::{Field, FromUniformBytes, PrimeFieldBits},
+    group::prime::PrimeCurveAffine,
+    halo2curves::CurveAffine,
     ivc::{
         self,
         instance_computation::RandomOracleComputationInstance,
@@ -24,8 +25,6 @@ use crate::{
     table::CircuitRunner,
     util,
 };
-
-use super::{step_folding_circuit::StepParams, StepCircuit};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -418,19 +417,19 @@ where
 mod pp_test {
     use std::{fs, path::Path};
 
-    use group::Group;
-    use halo2curves::{bn256, grumpkin};
-    use tracing_test::traced_test;
-
     use bn256::G1 as C1;
     use grumpkin::G1 as C2;
-
-    use crate::ivc::step_circuit::{self, trivial};
+    use tracing_test::traced_test;
 
     use super::*;
+    use crate::{
+        group::{prime::PrimeCurve, Group},
+        halo2curves::{bn256, grumpkin},
+        ivc::step_circuit::{self, trivial},
+    };
 
-    type C1Affine = <C1 as halo2curves::group::prime::PrimeCurve>::Affine;
-    type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
+    type C1Affine = <C1 as PrimeCurve>::Affine;
+    type C2Affine = <C2 as PrimeCurve>::Affine;
 
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
     const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };

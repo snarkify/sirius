@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
-use ff::PrimeField;
 use halo2_proofs::plonk::{Any, Column, ConstraintSystem, Expression as PE};
 use tracing::*;
 
 use crate::{
+    ff::PrimeField,
     plonk::permutation::Assembly,
     polynomial::{sparse::SparseMatrix, Expression},
 };

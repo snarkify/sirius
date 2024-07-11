@@ -1,14 +1,14 @@
-use std::convert::TryInto;
+use std::{convert::TryInto, marker::PhantomData};
 
-use super::{util::*, AssignedBits};
-use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::Field,
     circuit::{Chip, Layouter, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, TableColumn},
     poly::Rotation,
 };
-use std::marker::PhantomData;
+use sirius::ff::PrimeField;
+
+use super::{util::*, AssignedBits};
 
 const BITS_7: usize = 1 << 7;
 const BITS_10: usize = 1 << 10;
@@ -287,18 +287,19 @@ impl SpreadTableConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{get_tag, SpreadTableChip, SpreadTableConfig};
-    use ff::PrimeField;
-    use rand::Rng;
     use std::marker::PhantomData;
 
+    use ff::PrimeField;
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         plonk::{Advice, Circuit, Column, ConstraintSystem, Error},
     };
     use halo2curves::pasta::Fp;
+    use rand::Rng;
     use sirius::run_mock_prover_test;
+
+    use super::{get_tag, SpreadTableChip, SpreadTableConfig};
 
     #[traced_test]
     #[test]

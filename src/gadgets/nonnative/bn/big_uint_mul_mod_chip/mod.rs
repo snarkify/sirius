@@ -1,24 +1,22 @@
 use std::{
     cmp, fmt, iter,
     num::NonZeroUsize,
-    ops::{Add, Div, Mul, Sub},
-    ops::{Deref, Not},
+    ops::{Add, Deref, Div, Mul, Not, Sub},
 };
 
 use bitter::{BitReader, LittleEndianReader};
-use ff::PrimeField;
 use halo2_proofs::circuit::{AssignedCell, Chip, Value};
 use itertools::{EitherOrBoth, Itertools};
 use num_bigint::BigUint as BigUintRaw;
 use num_traits::{One, ToPrimitive, Zero};
 use tracing::*;
 
+use super::big_uint::{self, BigUint};
 use crate::{
+    ff::{PrimeField, PrimeFieldBits},
     main_gate::{AssignAdviceFrom, MainGate, MainGateConfig, RegionCtx},
     util,
 };
-
-use super::big_uint::{self, BigUint};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -47,13 +45,13 @@ pub const MAIN_GATE_T: usize = 4;
 
 /// Multiplication of two large natural numbers by mod
 #[derive(Debug)]
-pub struct BigUintMulModChip<F: ff::PrimeField> {
+pub struct BigUintMulModChip<F: PrimeField> {
     main_gate: MainGate<F, MAIN_GATE_T>,
     limb_width: NonZeroUsize,
     limbs_count: NonZeroUsize,
 }
 
-impl<F: ff::PrimeField> BigUintMulModChip<F> {
+impl<F: PrimeField> BigUintMulModChip<F> {
     pub fn new(
         config: <Self as Chip<F>>::Config,
         limb_width: NonZeroUsize,
@@ -330,7 +328,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
             "Production cells: {:?}",
             production_cells
                 .iter()
-                .filter_map(|c| *c.value().unwrap())
+                .filter_map(|c| c.value().unwrap())
                 .collect::<Box<[_]>>()
         );
 
@@ -947,12 +945,12 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
 }
 
 #[derive(Debug, Clone)]
-pub struct OverflowingBigUint<F: ff::PrimeField> {
+pub struct OverflowingBigUint<F: PrimeField> {
     pub cells: Vec<AssignedCell<F, F>>,
     pub max_word: F,
 }
 
-impl<F: ff::PrimeField> OverflowingBigUint<F> {
+impl<F: PrimeField> OverflowingBigUint<F> {
     pub fn new(cells: Vec<AssignedCell<F, F>>, limb_width: NonZeroUsize) -> Self {
         let max_word_without_overflow: F =
             big_uint::nat_to_f(&big_uint::get_big_int_with_n_ones(limb_width.get()))
@@ -965,7 +963,7 @@ impl<F: ff::PrimeField> OverflowingBigUint<F> {
     }
 }
 
-impl<F: ff::PrimeField> Deref for OverflowingBigUint<F> {
+impl<F: PrimeField> Deref for OverflowingBigUint<F> {
     type Target = [AssignedCell<F, F>];
     fn deref(&self) -> &Self::Target {
         self.cells.as_slice()
@@ -973,12 +971,12 @@ impl<F: ff::PrimeField> Deref for OverflowingBigUint<F> {
 }
 
 #[derive(Debug, Clone)]
-struct GroupedBigUint<F: ff::PrimeField> {
+struct GroupedBigUint<F: PrimeField> {
     cells: Vec<AssignedCell<F, F>>,
     max_word: F,
     limb_width: NonZeroUsize,
 }
-impl<F: ff::PrimeField> Deref for GroupedBigUint<F> {
+impl<F: PrimeField> Deref for GroupedBigUint<F> {
     type Target = [AssignedCell<F, F>];
     fn deref(&self) -> &Self::Target {
         self.cells.as_slice()
@@ -1010,13 +1008,15 @@ pub struct SumContext<F: PrimeField> {
     pub res: OverflowingBigUint<F>,
 }
 
-impl<F: ff::PrimeField> BigUintMulModChip<F> {
+impl<F: PrimeField> BigUintMulModChip<F> {
     /// Converts a single assigned cell to a list of limbs, according to the limb width and count limit.
     ///
     /// This function assigns to the region context, evaluated `AssignedCells` representing the limbs of the
     /// original `AssignedCell` in the `BigUint` representation.
     ///
     /// # Arguments
+    /// * `ctx`: Mutable reference to the `RegionCtx` provides the constraint system and metadata.
+    /// * `input`: A reference to the `AssignedCell` representing the input value.
     /// * `ctx`: Mutable reference to the `RegionCtx` provides the constraint system and metadata.
     /// * `input`: A reference to the `AssignedCell` representing the input value.
     ///
@@ -1117,7 +1117,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
 
                 debug!(
                     "Previos partial sum: {:?}",
-                    prev_partial_sum.as_ref().and_then(|c| *c.value().unwrap())
+                    prev_partial_sum.as_ref().and_then(|c| c.value().unwrap())
                 );
                 debug!("Previos shifted partial sum: {:?}", shifted_prev.unwrap());
 
@@ -1369,7 +1369,7 @@ impl<F: ff::PrimeField> BigUintMulModChip<F> {
     }
 }
 
-impl<F: ff::PrimeFieldBits> BigUintMulModChip<F> {
+impl<F: PrimeFieldBits> BigUintMulModChip<F> {
     /// Converts a big uint number in assigned limbs form to bits, where each limb occupies transmitted bits.
     ///
     /// Use [`MainGate::le_num_to_bits`] per each limb and concat all results
@@ -1391,7 +1391,7 @@ impl<F: ff::PrimeFieldBits> BigUintMulModChip<F> {
     }
 }
 
-impl<F: ff::PrimeField> Chip<F> for BigUintMulModChip<F> {
+impl<F: PrimeField> Chip<F> for BigUintMulModChip<F> {
     type Config = MainGateConfig<MAIN_GATE_T>;
     type Loaded = ();
 

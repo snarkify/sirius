@@ -1,6 +1,5 @@
 use std::{convert::TryInto, num::NonZeroUsize};
 
-use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Value},
     plonk::Error,
@@ -8,12 +7,12 @@ use halo2_proofs::{
 use poseidon::{self};
 use tracing::*;
 
+use super::{ROCircuitTrait, Spec};
 use crate::{
     constants::MAX_BITS,
+    ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
     main_gate::{AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
 };
-
-use super::{ROCircuitTrait, Spec};
 
 pub struct PoseidonChip<F: PrimeFieldBits, const T: usize, const RATE: usize> {
     main_gate: MainGate<F, T>,
@@ -44,11 +43,14 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
         self.update(&point)
     }
 
-    fn inspect(&mut self, scan: impl FnOnce(&[F])) -> &mut Self {
+    fn inspect(&mut self, scan: impl FnOnce(&[F])) -> &mut Self
+    where
+        F: Sized,
+    {
         if let Some(buf) = self
             .buf
             .iter()
-            .map(|b| *b.value().unwrap())
+            .map(|b| b.value().unwrap())
             .collect::<Option<Vec<_>>>()
         {
             scan(&buf)
@@ -381,7 +383,7 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
         let buf = self.buf.clone();
         if let Some(buf) = buf
             .iter()
-            .map(|val| *val.value().unwrap())
+            .map(|val| val.value().unwrap())
             .collect::<Option<Vec<F>>>()
         {
             debug!("On circuit input of hash: {buf:?}",);
@@ -421,17 +423,19 @@ mod tests {
         circuit::{Layouter, SimpleFloorPlanner},
         plonk::{Circuit, Column, ConstraintSystem, Instance},
     };
-    use halo2curves::{
-        group::ff::FromUniformBytes,
-        pasta::{EqAffine, Fp},
-    };
     use tracing_test::traced_test;
 
-    use crate::{
-        create_and_verify_proof, main_gate::MainGateConfig, poseidon::Spec, run_mock_prover_test,
-    };
-
     use super::*;
+    use crate::{
+        create_and_verify_proof,
+        halo2curves::{
+            group::ff::FromUniformBytes,
+            pasta::{EqAffine, Fp},
+        },
+        main_gate::MainGateConfig,
+        poseidon::Spec,
+        run_mock_prover_test,
+    };
 
     const T: usize = 3;
     const RATE: usize = 2;

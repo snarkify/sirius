@@ -1,17 +1,18 @@
 /// Module name acronym `StepFoldingCircuit` -> `sfc`
 use std::{fmt, num::NonZeroUsize};
 
-use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{floor_planner, Layouter, Value},
     plonk::{Circuit, Column, ConstraintSystem, Instance},
 };
-use halo2curves::CurveAffine;
 use itertools::Itertools;
 use serde::Serialize;
 use tracing::*;
 
+use super::instance_computation::AssignedRandomOracleComputationInstance;
 use crate::{
+    ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
+    halo2curves::CurveAffine,
     ivc::{
         fold_relaxed_plonk_instance_chip::{
             AssignedRelaxedPlonkInstance, FoldRelaxedPlonkInstanceChip, FoldResult,
@@ -23,8 +24,6 @@ use crate::{
     poseidon::ROCircuitTrait,
     table::ConstraintSystemMetainfo,
 };
-
-use super::instance_computation::AssignedRandomOracleComputationInstance;
 
 #[derive(Serialize)]
 #[serde(bound(serialize = "RO::Args: Serialize"))]
@@ -79,7 +78,7 @@ where
 #[derive(Clone)]
 pub(crate) struct StepInputs<'link, const ARITY: usize, C, RO>
 where
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
     C: CurveAffine,
     RO: ROCircuitTrait<C::Base>,
 {
@@ -103,7 +102,7 @@ where
 
 impl<'link, const ARITY: usize, C, RO> StepInputs<'link, ARITY, C, RO>
 where
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
     C: CurveAffine,
     RO: ROCircuitTrait<C::Base>,
 {
@@ -187,8 +186,8 @@ where
 pub(crate) struct StepFoldingCircuit<'link, const ARITY: usize, C, SC, RO, const T: usize>
 where
     C: CurveAffine,
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
-    C::Scalar: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C::Scalar: PrimeFieldBits + FromUniformBytes<64>,
     SC: StepCircuit<ARITY, C::Base> + Sized,
     RO: ROCircuitTrait<C::Base>,
 {
@@ -200,8 +199,8 @@ impl<'link, const ARITY: usize, C, SC, RO, const T: usize> Circuit<C::Base>
     for StepFoldingCircuit<'link, ARITY, C, SC, RO, T>
 where
     C: CurveAffine,
-    C::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
-    C::Scalar: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C::Scalar: PrimeFieldBits + FromUniformBytes<64>,
     SC: StepCircuit<ARITY, C::Base> + Sized,
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
 {

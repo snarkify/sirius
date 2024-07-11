@@ -5,14 +5,15 @@ use std::{
     time::Instant,
 };
 
-use ff::PrimeField;
 use itertools::*;
 use serde::Serialize;
 use tracing::*;
 
-use crate::polynomial::{Query, QueryType};
-
 use super::{expression::QueryIndexContext, Expression};
+use crate::{
+    ff::PrimeField,
+    polynomial::{Query, QueryType},
+};
 
 /// Polynome grouped by degrees
 ///
@@ -284,12 +285,11 @@ impl<F: PrimeField> Neg for GroupedPoly<F> {
 mod test {
     use std::array;
 
-    use ff::Field;
     use halo2_proofs::poly::Rotation;
-    use halo2curves::pasta::Fq;
     use maplit::hashmap as map;
 
     use super::*;
+    use crate::{ff::Field, halo2curves::pasta::Fq};
 
     #[test]
     fn simple_add() {

@@ -19,3 +19,8 @@ pub mod table;
 pub mod util;
 
 pub mod error;
+
+pub use halo2_proofs::{
+    self, halo2curves,
+    halo2curves::{ff, group},
+};

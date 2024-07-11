@@ -45,15 +45,14 @@
 
 use std::{iter, num::NonZeroUsize, ops};
 
-use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::circuit::AssignedCell;
-use halo2curves::{Coordinates, CurveAffine};
 use itertools::Itertools;
 use num_traits::Num;
 use tracing::*;
 
 use crate::{
     constants::NUM_CHALLENGE_BITS,
+    ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
     gadgets::{
         ecc::{AssignedPoint, EccChip},
         nonnative::bn::{
@@ -61,6 +60,7 @@ use crate::{
             big_uint_mul_mod_chip::{self, BigUintMulModChip, OverflowingBigUint},
         },
     },
+    halo2curves::{Coordinates, CurveAffine},
     main_gate::{
         AdviceCyclicAssignor, AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx,
         WrapValue,
@@ -188,7 +188,7 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
 
     pub fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<C::Base>>
     where
-        <C as halo2curves::CurveAffine>::Base: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+        <C as CurveAffine>::Base: PrimeFieldBits + FromUniformBytes<64>,
     {
         let Self {
             folded_W,
@@ -945,11 +945,11 @@ where
 }
 
 #[derive(Debug, Clone)]
-struct BigUintView<F: ff::Field> {
+struct BigUintView<F: Field> {
     as_bn_limbs: Vec<AssignedValue<F>>,
     as_bits: Vec<AssignedValue<F>>,
 }
-impl<F: ff::Field> ops::Deref for BigUintView<F> {
+impl<F: Field> ops::Deref for BigUintView<F> {
     type Target = [AssignedValue<F>];
 
     fn deref(&self) -> &Self::Target {
@@ -1021,22 +1021,23 @@ pub struct FoldResult<C: CurveAffine> {
 #[cfg(test)]
 mod tests {
     use bitter::{BitReader, LittleEndianReader};
-    use ff::Field;
-    use halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter, Value};
-    use halo2_proofs::plonk::ConstraintSystem;
-    use halo2curves::{bn256::G1Affine as C1, CurveAffine};
+    use halo2_proofs::{
+        circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter, Value},
+        plonk::ConstraintSystem,
+    };
     use rand::{rngs::ThreadRng, Rng};
     use tracing_test::traced_test;
 
+    use super::*;
     use crate::{
         commitment::CommitmentKey,
         constants::MAX_BITS,
+        ff::Field,
+        halo2curves::{bn256::G1Affine as C1, CurveAffine},
         nifs::vanilla::VanillaFS,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
         table::WitnessCollector,
     };
-
-    use super::*;
 
     type Base = <C1 as CurveAffine>::Base;
     type ScalarExt = <C1 as CurveAffine>::ScalarExt;

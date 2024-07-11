@@ -1,6 +1,6 @@
 use std::iter;
 
-use ff::Field;
+use crate::ff::Field;
 
 /// Represents a univariate polynomial
 ///
@@ -44,9 +44,8 @@ impl<F: Field> UnivariatePoly<F> {
 mod tests {
     use std::iter;
 
-    use halo2curves::bn256::Fr;
-
     use super::UnivariatePoly;
+    use crate::halo2curves::bn256::Fr;
 
     // Helper to create an `Fr` iterator from a `u64` iterator
     trait ToF<I: Into<Fr>>: Sized + IntoIterator<Item = I> {

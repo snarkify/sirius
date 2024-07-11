@@ -1,3 +1,7 @@
+use halo2_proofs::poly::Rotation;
+use tracing::*;
+
+use super::Expression;
 /// This module provides an efficient and flexible way to evaluate expressions that represent
 /// can be represented as a graph of calculations.
 ///
@@ -40,13 +44,8 @@
 ///
 /// It is an adaptation for our needs of the [code from
 /// halo2](https://github.com/privacy-scaling-explorations/halo2/blob/main/halo2_backend/src/plonk/evaluation.rs#L200)
-use ff::PrimeField;
-use halo2_proofs::poly::Rotation;
-use tracing::*;
-
+use crate::ff::PrimeField;
 use crate::plonk::eval::{Error as EvalError, GetDataForEval};
-
-use super::Expression;
 
 /// Return the index in the polynomial of size `isize` after rotation `rot`.
 fn get_rotation_idx(idx: usize, rot: i32, num_row: usize) -> usize {
@@ -393,16 +392,16 @@ impl<F: PrimeField> GraphEvaluator<F> {
 mod tests {
     use std::array;
 
-    use ff::Field;
-    use halo2curves::bn256;
+    use halo2_proofs::halo2curves::CurveAffine;
     use tracing_test::traced_test;
 
+    use super::*;
     use crate::{
+        ff::Field,
+        halo2curves::bn256,
         plonk::eval::{Error as EvalError, GetDataForEval},
         polynomial::Query,
     };
-
-    use super::*;
 
     #[derive(Default)]
     struct Mock<F: PrimeField> {
@@ -443,7 +442,7 @@ mod tests {
         }
     }
 
-    type Scalar = <bn256::G1Affine as halo2curves::CurveAffine>::ScalarExt;
+    type Scalar = <bn256::G1Affine as CurveAffine>::ScalarExt;
 
     #[traced_test]
     #[test]
