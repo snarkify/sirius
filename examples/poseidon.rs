@@ -251,7 +251,7 @@ fn main() {
         primary_input,
         &secondary,
         secondary_input,
-        NonZeroUsize::new(1).unwrap(),
+        NonZeroUsize::new(10).unwrap(),
     )
     .unwrap();
 }

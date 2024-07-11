@@ -1,9 +1,7 @@
 use std::{convert::TryInto, num::NonZeroUsize};
 
-use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Value},
-    halo2curves::ff,
     plonk::Error,
 };
 use poseidon::{self};
@@ -12,6 +10,7 @@ use tracing::*;
 use super::{ROCircuitTrait, Spec};
 use crate::{
     constants::MAX_BITS,
+    ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
     main_gate::{AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
 };
 
@@ -44,7 +43,10 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
         self.update(&point)
     }
 
-    fn inspect(&mut self, scan: impl FnOnce(&[F])) -> &mut Self {
+    fn inspect(&mut self, scan: impl FnOnce(&[F])) -> &mut Self
+    where
+        F: Sized,
+    {
         if let Some(buf) = self
             .buf
             .iter()

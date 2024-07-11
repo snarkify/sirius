@@ -1,12 +1,12 @@
 use std::{iter, mem, num::NonZeroUsize};
 
-use halo2_proofs::arithmetic::CurveAffine;
-use halo2_proofs::halo2curves::group::ff::{self, FromUniformBytes, PrimeField};
+use halo2_proofs::{arithmetic::CurveAffine, halo2curves::ff::PrimeFieldBits};
 use poseidon::{self, SparseMDSMatrix};
 use tracing::*;
 
 use super::Spec;
 use crate::{
+    halo2curves::group::ff::{FromUniformBytes, PrimeField},
     poseidon::{ROConstantsTrait, ROTrait},
     util::{bits_to_fe_le, fe_to_bits_le},
 };
@@ -107,7 +107,7 @@ where
 
 impl<F: PrimeField, const T: usize, const RATE: usize> ROTrait<F> for PoseidonHash<F, T, RATE>
 where
-    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: PrimeFieldBits + FromUniformBytes<64>,
 {
     type Constants = Spec<F, T, RATE>;
 
@@ -154,7 +154,7 @@ where
 #[derive(Clone, Debug)]
 pub struct PoseidonHash<F: PrimeField, const T: usize, const RATE: usize>
 where
-    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: PrimeFieldBits + FromUniformBytes<64>,
 {
     spec: Spec<F, T, RATE>,
     state: State<F, T, RATE>,
@@ -163,7 +163,7 @@ where
 
 impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonHash<F, T, RATE>
 where
-    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
+    F: PrimeFieldBits + FromUniformBytes<64>,
 {
     fn update(&mut self, elements: &[F]) {
         self.buf.extend_from_slice(elements);
@@ -236,10 +236,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::halo2curves::pasta::{EpAffine, Fp, Fq};
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::halo2curves::pasta::{EpAffine, Fp, Fq};
 
     #[traced_test]
     #[test]
