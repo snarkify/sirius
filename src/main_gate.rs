@@ -1,16 +1,16 @@
 use std::{array, iter, marker::PhantomData, num::NonZeroUsize};
 
-use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Cell, Chip, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance},
     poly::Rotation,
 };
-use halo2curves::{Coordinates, CurveAffine};
 use itertools::Itertools;
 
 use crate::{
+    ff::{PrimeField, PrimeFieldBits},
     gadgets::ecc::AssignedPoint,
+    halo2curves::{Coordinates, CurveAffine},
     util::{self, normalize_trailing_zeros},
 };
 
@@ -798,13 +798,14 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
 
 #[cfg(test)]
 mod tests {
+    use tracing_test::traced_test;
+
     use super::*;
     use crate::{
+        halo2curves::pasta::Fp,
         plonk::CompressedGates,
         polynomial::{expression::QueryIndexContext, Expression},
     };
-    use halo2curves::pasta::Fp;
-    use tracing_test::traced_test;
 
     #[traced_test]
     #[test]

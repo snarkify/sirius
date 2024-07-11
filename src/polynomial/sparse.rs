@@ -1,4 +1,4 @@
-use ff::PrimeField;
+use crate::ff::PrimeField;
 
 // represent a sparse matrix M = {(i, j, v)}, i.e. M[i,j] = v
 // the size of matrix is N*N with N = num_io + num_advice_columns * num_rows

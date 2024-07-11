@@ -1,5 +1,4 @@
-use crate::polynomial::ColumnIndex;
-use ff::PrimeField;
+use crate::{ff::PrimeField, polynomial::ColumnIndex};
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum Error {

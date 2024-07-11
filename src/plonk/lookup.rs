@@ -41,7 +41,7 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
-use ff::PrimeField;
+use crate::ff::PrimeField;
 use halo2_proofs::{plonk::ConstraintSystem, poly::Rotation};
 use rayon::prelude::*;
 use serde::Serialize;

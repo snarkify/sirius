@@ -1,12 +1,16 @@
-use crate::main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx};
-use ff::PrimeFieldBits;
+use std::cmp;
+
 use halo2_proofs::{
     arithmetic::CurveAffine,
     circuit::{Chip, Value},
     plonk::Error,
 };
-use std::cmp;
 use tracing::*;
+
+use crate::{
+    ff::PrimeFieldBits,
+    main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx},
+};
 
 // assume point is not infinity
 #[derive(Clone, Debug)]
@@ -379,18 +383,21 @@ impl<C: CurveAffine<Base = F>, F: PrimeFieldBits, const T: usize> EccChip<C, F, 
 mod tests {
     use std::num::NonZeroUsize;
 
-    use ff::Field;
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         plonk::{Circuit, Column, ConstraintSystem, Instance},
     };
-    use halo2curves::pasta::{pallas, EqAffine, Fp, Fq};
     use rand_core::OsRng;
     use tracing_test::traced_test;
 
-    use crate::{create_and_verify_proof, run_mock_prover_test, util::fe_to_fe_safe};
-
     use super::*;
+    use crate::{
+        create_and_verify_proof,
+        ff::Field,
+        halo2curves::pasta::{pallas, EqAffine, Fp, Fq},
+        run_mock_prover_test,
+        util::fe_to_fe_safe,
+    };
 
     #[derive(Clone, Debug)]
     struct Point<C: CurveAffine> {

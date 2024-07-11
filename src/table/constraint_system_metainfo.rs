@@ -1,8 +1,8 @@
-use ff::PrimeField;
 use halo2_proofs::plonk::ConstraintSystem;
 use tracing::*;
 
 use crate::{
+    ff::PrimeField,
     plonk::{lookup, CompressedGates},
     polynomial::{expression::QueryIndexContext, Expression},
 };

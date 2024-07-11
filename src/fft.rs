@@ -1,8 +1,10 @@
-use ff::{Field, PrimeField};
-use group::{ff::WithSmallOrderMulGroup, GroupOpsOwned, ScalarMulOwned};
-pub use halo2curves::{CurveAffine, CurveExt};
-
-use crate::{polynomial::univariate::UnivariatePoly, util};
+pub use crate::halo2curves::{CurveAffine, CurveExt};
+use crate::{
+    ff::{Field, PrimeField},
+    group::{ff::WithSmallOrderMulGroup, GroupOpsOwned, ScalarMulOwned},
+    polynomial::univariate::UnivariatePoly,
+    util,
+};
 
 /// Given FFT domain size k, return the omega in case of fft
 /// or return the omega_inv in case if ifft
@@ -227,11 +229,11 @@ fn distribute_powers_zeta<F: PrimeField>(
 mod tests {
     use std::array;
 
-    use halo2curves::bn256::Fr;
     use itertools::Itertools;
     use rand_core::OsRng;
 
     use super::*;
+    use crate::halo2curves::bn256::Fr;
 
     #[test]
     fn fft_simple_input_test() {

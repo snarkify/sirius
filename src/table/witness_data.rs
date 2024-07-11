@@ -1,4 +1,4 @@
-use ff::PrimeField;
+use crate::ff::PrimeField;
 use halo2_proofs::{
     circuit::Value,
     plonk::{

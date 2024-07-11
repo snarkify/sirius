@@ -1,8 +1,11 @@
-use crate::main_gate::{AssignedValue, MainGate, RegionCtx};
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Chip, Value},
     plonk::Error,
+};
+
+use crate::{
+    ff::PrimeField,
+    main_gate::{AssignedValue, MainGate, RegionCtx},
 };
 
 impl<F: PrimeField, const T: usize> MainGate<F, T> {

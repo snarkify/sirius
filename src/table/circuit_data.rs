@@ -1,4 +1,3 @@
-use ff::PrimeField;
 use halo2_proofs::{
     circuit::Value,
     plonk::{
@@ -7,7 +6,7 @@ use halo2_proofs::{
 };
 use tracing::*;
 
-use crate::plonk;
+use crate::{ff::PrimeField, plonk};
 
 pub struct CircuitData<F: PrimeField> {
     pub(crate) k: u32,

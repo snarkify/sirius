@@ -8,7 +8,6 @@ use std::{
 };
 
 use digest::{ExtendableOutput, Update};
-use group::Curve;
 use halo2_proofs::arithmetic::{best_multiexp, CurveAffine, CurveExt};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -16,7 +15,7 @@ use sha3::Shake256;
 use some_to_err::*;
 use tracing::*;
 
-use crate::util::parallelize;
+use crate::{group::Curve, util::parallelize};
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
@@ -170,11 +169,11 @@ impl<C: CurveAffine> CommitmentKey<C> {
 
 #[cfg(test)]
 mod file_tests {
-    use halo2curves::bn256::G1Affine;
     use tempfile::tempdir;
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::halo2curves::bn256::G1Affine;
 
     #[traced_test]
     #[test]

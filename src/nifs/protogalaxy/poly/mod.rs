@@ -3,14 +3,14 @@ use std::{
     num::{NonZeroU32, NonZeroUsize},
 };
 
-use ff::PrimeField;
-use group::ff::WithSmallOrderMulGroup;
 use itertools::*;
 use num_traits::Zero;
 use tracing::*;
 
 use crate::{
+    ff::PrimeField,
     fft::{self, coset_fft, coset_ifft},
+    group::ff::WithSmallOrderMulGroup,
     plonk::{self, eval, GetChallenges, GetWitness, PlonkStructure},
     polynomial::{expression::QueryIndexContext, lagrange, univariate::UnivariatePoly},
     util::TryMultiProduct,
@@ -369,12 +369,12 @@ pub(crate) fn compute_K<F: WithSmallOrderMulGroup<3>>(
 mod test {
     use std::iter;
 
-    use ff::Field as _Field;
-    use halo2curves::{bn256, CurveAffine};
     use tracing_test::traced_test;
 
     use crate::{
         commitment::CommitmentKey,
+        ff::Field as _Field,
+        halo2curves::{bn256, CurveAffine},
         nifs::protogalaxy::poly::PolyChallenges,
         plonk::{test_eval_witness::poseidon_circuit, PlonkStructure, PlonkTrace},
         polynomial::univariate::UnivariatePoly,
@@ -395,10 +395,10 @@ mod test {
     const R_F1: usize = 4;
     const R_P1: usize = 3;
     pub type PoseidonSpec =
-        Spec<<Curve as halo2curves::CurveAffine>::Base, POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE>;
+        Spec<<Curve as CurveAffine>::Base, POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE>;
 
     type RO = <PoseidonRO<POSEIDON_PERMUTATION_WIDTH, POSEIDON_RATE> as random_oracle::ROPair<
-        <Curve as halo2curves::CurveAffine>::Base,
+        <Curve as CurveAffine>::Base,
     >>::OffCircuit;
 
     fn poseidon_trace() -> (PlonkStructure<Field>, PlonkTrace<Curve>) {

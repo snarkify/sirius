@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 
-use ff::Field;
 use halo2_proofs::arithmetic::CurveAffine;
 use tracing::*;
 
@@ -9,6 +8,7 @@ use crate::{
     commitment::CommitmentKey,
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
+    ff::Field,
     plonk::{
         eval::{GetDataForEval, PlonkEvalDomain},
         PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness, RelaxedPlonkInstance,
