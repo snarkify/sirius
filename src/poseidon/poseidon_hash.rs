@@ -145,6 +145,7 @@ where
         self
     }
 
+    #[instrument(skip_all)]
     fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
         self.output::<C>(num_bits)
     }
