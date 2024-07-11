@@ -1,12 +1,12 @@
 use std::{iter, mem, num::NonZeroUsize};
 
-use halo2_proofs::{arithmetic::CurveAffine, halo2curves::ff::PrimeFieldBits};
+use halo2_proofs::arithmetic::CurveAffine;
+use halo2_proofs::halo2curves::group::ff::{self, FromUniformBytes, PrimeField};
 use poseidon::{self, SparseMDSMatrix};
 use tracing::*;
 
 use super::Spec;
 use crate::{
-    halo2curves::group::ff::{FromUniformBytes, PrimeField},
     poseidon::{ROConstantsTrait, ROTrait},
     util::{bits_to_fe_le, fe_to_bits_le},
 };
@@ -107,7 +107,7 @@ where
 
 impl<F: PrimeField, const T: usize, const RATE: usize> ROTrait<F> for PoseidonHash<F, T, RATE>
 where
-    F: PrimeFieldBits + FromUniformBytes<64>,
+    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
     type Constants = Spec<F, T, RATE>;
 
@@ -147,14 +147,14 @@ where
 
     #[instrument(skip_all)]
     fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
-        self.output::<C>(num_bits)
+        self.output::<C::Scalar>(num_bits)
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct PoseidonHash<F: PrimeField, const T: usize, const RATE: usize>
 where
-    F: PrimeFieldBits + FromUniformBytes<64>,
+    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
     spec: Spec<F, T, RATE>,
     state: State<F, T, RATE>,
@@ -163,13 +163,23 @@ where
 
 impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonHash<F, T, RATE>
 where
-    F: PrimeFieldBits + FromUniformBytes<64>,
+    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
     fn update(&mut self, elements: &[F]) {
         self.buf.extend_from_slice(elements);
     }
 
-    fn output<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
+    pub fn digest<F1: PrimeField>(
+        spec: Spec<F, T, RATE>,
+        elements: &[F],
+        num_bits: NonZeroUsize,
+    ) -> F1 {
+        let mut s = Self::new(spec);
+        s.update(elements);
+        s.output(num_bits)
+    }
+
+    pub fn output<F1: PrimeField>(&mut self, num_bits: NonZeroUsize) -> F1 {
         let buf = mem::take(&mut self.buf);
         debug!("Off circuit input of hash: {buf:?}");
 
@@ -183,8 +193,11 @@ where
         }
 
         let output = self.state.inner[1];
-        let bits = fe_to_bits_le(&output)[..num_bits.get()].to_vec();
-        bits_to_fe_le(bits)
+        let mut bits = fe_to_bits_le(&output);
+        if bits.len() < num_bits.get() {
+            bits.resize(num_bits.get(), false);
+        }
+        bits_to_fe_le(bits[..num_bits.get()].to_vec())
     }
 
     fn permutation(&mut self, inputs: &[F]) {
@@ -223,10 +236,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::halo2curves::pasta::{EpAffine, Fp, Fq};
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::halo2curves::pasta::{EpAffine, Fp, Fq};
 
     #[traced_test]
     #[test]

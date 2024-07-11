@@ -244,15 +244,14 @@ fn main() {
 
     let primary_input = array::from_fn(|i| C1Scalar::from(i as u64));
     let secondary_input = array::from_fn(|i| C2Scalar::from(i as u64));
-    let fold_step_count = NonZeroUsize::new(10).unwrap();
 
-    IVC::fold(
+    IVC::fold_with_debug_mode(
         &pp,
         &primary,
         primary_input,
         &secondary,
         secondary_input,
-        fold_step_count,
+        NonZeroUsize::new(1).unwrap(),
     )
     .unwrap();
 }

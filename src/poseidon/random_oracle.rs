@@ -1,11 +1,9 @@
 use std::{fmt, num::NonZeroUsize};
 
-use halo2_proofs::{arithmetic::CurveAffine, plonk::Error};
+use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
+use halo2_proofs::{arithmetic::CurveAffine, halo2curves::ff, plonk::Error};
 
-use crate::{
-    ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
-    main_gate::{AssignedBit, RegionCtx, WrapValue},
-};
+use crate::main_gate::{AssignedBit, RegionCtx, WrapValue};
 
 /// A helper trait to obsorb different objects into RO
 pub trait AbsorbInRO<F: PrimeField, RO: ROTrait<F>> {
@@ -112,7 +110,7 @@ pub trait ROCircuitTrait<F: PrimeFieldBits + FromUniformBytes<64>> {
 /// allowing the use of a single generic.
 pub trait ROPair<F: PrimeField>
 where
-    F: PrimeFieldBits + FromUniformBytes<64>,
+    F: ff::PrimeFieldBits + ff::FromUniformBytes<64>,
 {
     /// Argument for creating on-circuit & off-circuit versions of oracles
     type Args: fmt::Debug + serde::Serialize + Clone;

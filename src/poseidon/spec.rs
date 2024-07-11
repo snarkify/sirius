@@ -1,13 +1,15 @@
 use std::ops;
 
+use ff::FromUniformBytes;
+use halo2_proofs::halo2curves::ff;
 use serde::Serialize;
 
-use crate::ff::{FromUniformBytes, PrimeField};
-
 #[derive(Clone, Debug)]
-pub struct Spec<F: PrimeField, const T: usize, const RATE: usize>(pub poseidon::Spec<F, T, RATE>);
+pub struct Spec<F: ff::PrimeField, const T: usize, const RATE: usize>(
+    pub poseidon::Spec<F, T, RATE>,
+);
 
-impl<F: PrimeField, const T: usize, const RATE: usize> Spec<F, T, RATE>
+impl<F: ff::PrimeField, const T: usize, const RATE: usize> Spec<F, T, RATE>
 where
     F: FromUniformBytes<64>,
 {
@@ -16,14 +18,16 @@ where
     }
 }
 
-impl<F: PrimeField, const T: usize, const RATE: usize> ops::Deref for Spec<F, T, RATE> {
+impl<F: ff::PrimeField, const T: usize, const RATE: usize> ops::Deref for Spec<F, T, RATE> {
     type Target = poseidon::Spec<F, T, RATE>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<F: Serialize + PrimeField, const T: usize, const RATE: usize> Serialize for Spec<F, T, RATE> {
+impl<F: Serialize + ff::PrimeField, const T: usize, const RATE: usize> Serialize
+    for Spec<F, T, RATE>
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::ser::Serializer,
@@ -130,15 +134,15 @@ impl<F: Serialize + PrimeField, const T: usize, const RATE: usize> Serialize for
 
 #[cfg(test)]
 mod tests {
+    use crate::halo2curves::bn256::Fq;
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::halo2curves::bn256::Fr;
 
     #[traced_test]
     #[test]
     fn just_serialize() {
-        let spec = Spec::<Fr, 10, 9>::new(10, 10);
+        let spec = Spec::<Fq, 10, 9>::new(10, 10);
         bincode::serialize(&spec).unwrap();
     }
 }

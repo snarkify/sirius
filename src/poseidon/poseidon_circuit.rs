@@ -1,7 +1,9 @@
 use std::{convert::TryInto, num::NonZeroUsize};
 
+use ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Value},
+    halo2curves::ff,
     plonk::Error,
 };
 use poseidon::{self};
@@ -10,7 +12,6 @@ use tracing::*;
 use super::{ROCircuitTrait, Spec};
 use crate::{
     constants::MAX_BITS,
-    ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
     main_gate::{AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
 };
 
@@ -43,10 +44,7 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
         self.update(&point)
     }
 
-    fn inspect(&mut self, scan: impl FnOnce(&[F])) -> &mut Self
-    where
-        F: Sized,
-    {
+    fn inspect(&mut self, scan: impl FnOnce(&[F])) -> &mut Self {
         if let Some(buf) = self
             .buf
             .iter()
@@ -518,9 +516,8 @@ mod tests {
         let circuit = TestCircuit::new(inputs, num_bits);
 
         let out_hash = Fp::from_str_vartime("277726250230731218669330566268314254439").unwrap();
-        let public_inputs: &[&[Fp]] = &[&[out_hash]];
 
-        create_and_verify_proof!(IPA, K, circuit, public_inputs, EqAffine);
+        create_and_verify_proof!(IPA, K, circuit, &[&[out_hash]], EqAffine);
         println!("-----poseidon circuit works fine-----");
     }
 
