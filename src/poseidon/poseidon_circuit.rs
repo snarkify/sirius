@@ -43,11 +43,14 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
         self.update(&point)
     }
 
-    fn inspect(&mut self, scan: impl FnOnce(&[F])) -> &mut Self {
+    fn inspect(&mut self, scan: impl FnOnce(&[F])) -> &mut Self
+    where
+        F: Sized,
+    {
         if let Some(buf) = self
             .buf
             .iter()
-            .map(|b| *b.value().unwrap())
+            .map(|b| b.value().unwrap())
             .collect::<Option<Vec<_>>>()
         {
             scan(&buf)
@@ -380,7 +383,7 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
         let buf = self.buf.clone();
         if let Some(buf) = buf
             .iter()
-            .map(|val| *val.value().unwrap())
+            .map(|val| val.value().unwrap())
             .collect::<Option<Vec<F>>>()
         {
             debug!("On circuit input of hash: {buf:?}",);
