@@ -2,22 +2,28 @@
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-use std::{array, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
 use clap::{Parser, ValueEnum};
+use halo2_proofs::halo2curves;
 
-#[allow(dead_code)]
-mod poseidon;
+use merkle::MerkleTreeUpdateCircuit;
 
-use halo2_proofs::arithmetic::Field;
 use poseidon::poseidon_step_circuit::TestPoseidonCircuit;
 use sirius::{
-    group::{prime::PrimeCurve, Group},
+    ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
+    gadgets::merkle_tree::off_circuit::Tree,
     ivc::{step_circuit::trivial, CircuitPublicParamsInput, PublicParams, StepCircuit, IVC},
     poseidon::ROPair,
 };
 use tracing::*;
 use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
+
+#[allow(dead_code)]
+mod poseidon;
+
+#[allow(dead_code)]
+mod merkle;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -62,11 +68,12 @@ struct Args {
 enum Circuits {
     Poseidon,
     Trivial,
+    MerkleTree,
 }
 
 use bn256::G1 as C1;
 use grumpkin::G1 as C2;
-use sirius::halo2curves::{bn256, grumpkin};
+use halo2curves::{bn256, grumpkin};
 
 const MAIN_GATE_SIZE: usize = 5;
 const RATE: usize = 4;
@@ -74,17 +81,54 @@ const RATE: usize = 4;
 type RandomOracle = sirius::poseidon::PoseidonRO<MAIN_GATE_SIZE, RATE>;
 type RandomOracleConstant<F> = <RandomOracle as ROPair<F>>::Args;
 
-type C1Affine = <C1 as PrimeCurve>::Affine;
-type C1Scalar = <C1 as Group>::Scalar;
+type C1Affine = <C1 as halo2curves::group::prime::PrimeCurve>::Affine;
+type C1Scalar = <C1 as halo2curves::group::Group>::Scalar;
 
-type C2Affine = <C2 as PrimeCurve>::Affine;
-type C2Scalar = <C2 as Group>::Scalar;
+type C2Affine = <C2 as halo2curves::group::prime::PrimeCurve>::Affine;
+type C2Scalar = <C2 as halo2curves::group::Group>::Scalar;
 
-fn fold(
+trait TestCircuitHelpers<F: PrimeField> {
+    const NAME: &'static str;
+
+    fn get_default_input() -> F {
+        F::ZERO
+    }
+
+    fn update_between_step(&mut self) {}
+}
+
+impl<F: PrimeField, const ARITY: usize> TestCircuitHelpers<F> for trivial::Circuit<ARITY, F> {
+    const NAME: &'static str = "Trivial";
+}
+impl<F: PrimeFieldBits> TestCircuitHelpers<F> for TestPoseidonCircuit<F> {
+    const NAME: &'static str = "Poseidon";
+}
+impl<F> TestCircuitHelpers<F> for MerkleTreeUpdateCircuit<F>
+where
+    F: PrimeFieldBits + serde::Serialize + FromUniformBytes<64>,
+{
+    const NAME: &'static str = "MerkleTree";
+
+    fn get_default_input() -> F {
+        *Tree::default().get_root()
+    }
+
+    #[instrument("update_leaves", skip_all)]
+    fn update_between_step(&mut self) {
+        assert!(self.pop_front_proof_batch())
+    }
+}
+
+fn fold<
+    SC1: StepCircuit<1, C1Scalar> + TestCircuitHelpers<C1Scalar>,
+    SC2: StepCircuit<1, C2Scalar> + TestCircuitHelpers<C2Scalar>,
+>(
     args: &Args,
-    primary: impl StepCircuit<1, C1Scalar>,
-    secondary: impl StepCircuit<1, C2Scalar>,
+    mut primary: SC1,
+    mut secondary: SC2,
 ) {
+    let _span = info_span!("cli", primary = SC1::NAME, secondary = SC2::NAME).entered();
+
     let primary_commitment_key = poseidon::get_or_create_commitment_key::<C1Affine>(
         args.primary_commitment_key_size,
         "bn256",
@@ -130,31 +174,30 @@ fn fold(
     )
     .unwrap();
 
-    let mut rnd = rand::thread_rng();
-    let primary_input = array::from_fn(|_| C1Scalar::random(&mut rnd));
-    let secondary_input = array::from_fn(|_| C2Scalar::random(&mut rnd));
+    let primary_input = SC1::get_default_input();
+    let secondary_input = SC2::get_default_input();
 
-    if args.debug_mode {
-        IVC::fold_with_debug_mode(
-            &pp,
-            &primary,
-            primary_input,
-            &secondary,
-            secondary_input,
-            args.fold_step_count,
-        )
-        .unwrap();
-    } else {
-        IVC::fold(
-            &pp,
-            &primary,
-            primary_input,
-            &secondary,
-            secondary_input,
-            args.fold_step_count,
-        )
-        .unwrap();
+    let prove_span = info_span!("prove", steps = args.fold_step_count.get()).entered();
+
+    let mut ivc = IVC::new(
+        &pp,
+        &primary,
+        [primary_input],
+        &secondary,
+        [secondary_input],
+        args.debug_mode,
+    )
+    .unwrap();
+
+    for _step in 1..args.fold_step_count.into() {
+        primary.update_between_step();
+        secondary.update_between_step();
+
+        ivc.fold_step(&pp, &primary, &secondary).unwrap();
     }
+    prove_span.exit();
+
+    ivc.verify(&pp).unwrap()
 }
 
 fn main() {
@@ -185,10 +228,10 @@ fn main() {
     }
 
     // To osterize the total execution time of the example
-    let _span = info_span!("poseidon_example").entered();
 
     // Such a redundant call design due to the fact that they are different function types for the
     // compiler due to generics
+    let mut rng = rand::thread_rng();
     match (args.primary_circuit, args.secondary_circuit) {
         (Circuits::Poseidon, Circuits::Trivial) => fold(
             &args,
@@ -209,6 +252,55 @@ fn main() {
             &args,
             trivial::Circuit::default(),
             trivial::Circuit::default(),
+        ),
+        (Circuits::MerkleTree, Circuits::Trivial) => fold(
+            &args,
+            merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
+                &mut rng,
+                args.primary_repeat_count,
+                args.fold_step_count.get(),
+            ),
+            trivial::Circuit::default(),
+        ),
+        (Circuits::MerkleTree, Circuits::Poseidon) => fold(
+            &args,
+            merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
+                &mut rng,
+                args.primary_repeat_count,
+                args.fold_step_count.get(),
+            ),
+            TestPoseidonCircuit::new(args.secondary_repeat_count),
+        ),
+        (Circuits::Poseidon, Circuits::MerkleTree) => fold(
+            &args,
+            TestPoseidonCircuit::new(args.primary_repeat_count),
+            merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
+                &mut rng,
+                args.secondary_repeat_count,
+                args.fold_step_count.get(),
+            ),
+        ),
+        (Circuits::Trivial, Circuits::MerkleTree) => fold(
+            &args,
+            trivial::Circuit::default(),
+            merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
+                &mut rng,
+                args.secondary_repeat_count,
+                args.fold_step_count.get(),
+            ),
+        ),
+        (Circuits::MerkleTree, Circuits::MerkleTree) => fold(
+            &args,
+            merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
+                &mut rng,
+                args.primary_repeat_count,
+                args.fold_step_count.get(),
+            ),
+            merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
+                &mut rng,
+                args.secondary_repeat_count,
+                args.fold_step_count.get(),
+            ),
         ),
     }
 }
