@@ -46,6 +46,10 @@ class SpanNode:
             "time_busy": self.time_busy,
         }
 
+    def format_fields(self) -> str:
+        formatted = " ".join(f"{k}={v}" for k, v in self.fields.items() if k != "name")
+        return formatted
+
     def to_human_readable(
         self, min_runtime: timedelta, indent: int = 0, max_length: int = 80
     ) -> List[str]:
@@ -57,8 +61,10 @@ class SpanNode:
         if self.time_busy and self.time_busy < min_runtime:
             return []
 
-        start_line = "··" * indent + f"Start:  {self.name}"
-        end_line = "··" * indent + f"End:    {self.name}"
+        span_properties = self.format_fields()
+
+        start_line = "··" * indent + f"Start: {self.name} {span_properties}".strip()
+        end_line = "··" * indent + f"End: {self.name} {span_properties}".strip()
 
         # Time busy formatting
         if self.time_busy:
@@ -146,7 +152,7 @@ class LogProcessor:
                 name=node_name,
                 level=level,
                 start=parse_timestamp(start),
-                fields={**span_info, **{"target": target}},
+                fields=span_info,
             )
 
             # Fix for determining root node
