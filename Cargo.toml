@@ -69,6 +69,10 @@ harness = false
 name = "poseidon"
 harness = false
 
+[[example]]
+name = "cli"
+path = "examples/cli.rs"
+
 [features]
 # Allows cli-example to check memory usage with dhat
 dhat-heap = []
