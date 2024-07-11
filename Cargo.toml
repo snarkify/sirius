@@ -73,6 +73,11 @@ harness = false
 name = "cli"
 path = "examples/cli.rs"
 
+[[example]]
+name = "cli"
+path = "examples/cli.rs"
+required-features = ["merkle-tree-gadget"]
+
 [features]
 # Allows cli-example to check memory usage with dhat
 dhat-heap = []

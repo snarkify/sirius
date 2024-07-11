@@ -2,7 +2,7 @@
 poseidon-example = ["run", "--example", "poseidon", "--release", "--", "--json"]
 trivial-example = ["run", "--example", "trivial", "--release", "--", "--json"]
 
-cli-dhat = ["run", "--example", "cli", "--release", "--features", "dhat-heap", "--"]
 cli-example = ["run", "--example", "cli", "--release", "--"]
+cli-dhat = ["run", "--example", "cli", "--release", "--features", "dhat-heap", "--"]
 
 merkle-example = ["run", "--example", "merkle", "--release", "--", "--json"]
