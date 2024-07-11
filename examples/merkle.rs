@@ -20,7 +20,7 @@ use tracing::{info, info_span};
 type C1Affine = <C1 as sirius::halo2curves::group::prime::PrimeCurve>::Affine;
 type C2Affine = <C2 as sirius::halo2curves::group::prime::PrimeCurve>::Affine;
 
-type C1Scalar = <C1 as sirius::halo2curves::group::Group>::Scalar;
+pub type C1Scalar = <C1 as sirius::halo2curves::group::Group>::Scalar;
 type C2Scalar = <C2 as sirius::halo2curves::group::Group>::Scalar;
 
 type RandomOracle = sirius::poseidon::PoseidonRO<T, RATE>;
@@ -84,7 +84,7 @@ where
     ) -> Self {
         let mut self_ = Self::new(batch_size);
 
-        for _ in 0..batches_count {
+        for _ in 0..=batches_count {
             self_.random_update_leaves(rng);
         }
 
@@ -249,10 +249,8 @@ fn main() {
     let _span = info_span!("merkle_example").entered();
     let prepare_span = info_span!("prepare").entered();
 
-    let mut sc1 = MerkleTreeUpdateCircuit::new(1);
-    let (sc1_default_root, _) = sc1.update_leaves(iter::repeat_with(|| {
-        (rng.gen::<u32>() % INDEX_LIMIT, C1Scalar::random(&mut rng))
-    }));
+    let step_count = NonZeroUsize::new(2).unwrap();
+    let mut sc1 = MerkleTreeUpdateCircuit::new_with_random_updates(&mut rng, 1, step_count.get());
 
     let sc2 = step_circuit::trivial::Circuit::<ARITY, _>::default();
 
@@ -297,12 +295,18 @@ fn main() {
 
     prepare_span.exit();
 
-    let mut ivc = IVC::new(&pp, &sc1, [sc1_default_root], &sc2, [C2Scalar::ZERO], false).unwrap();
+    let mut ivc = IVC::new(
+        &pp,
+        &sc1,
+        [*Tree::default().get_root()],
+        &sc2,
+        [C2Scalar::ZERO],
+        false,
+    )
+    .unwrap();
 
-    for _ in 0..5 {
-        sc1.update_leaves(iter::repeat_with(|| {
-            (rng.gen::<u32>() % INDEX_LIMIT, C1Scalar::random(&mut rng))
-        }));
+    for _ in 0..step_count.get() {
+        sc1.pop_front_proof_batch();
         ivc.fold_step(&pp, &sc1, &sc2).unwrap();
     }
 
