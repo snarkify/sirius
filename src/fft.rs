@@ -1,7 +1,8 @@
-use crate::util;
 use ff::{Field, PrimeField};
-use group::{GroupOpsOwned, ScalarMulOwned};
+use group::{ff::WithSmallOrderMulGroup, GroupOpsOwned, ScalarMulOwned};
 pub use halo2curves::{CurveAffine, CurveExt};
+
+use crate::{polynomial::univariate::UnivariatePoly, util};
 
 /// Given FFT domain size k, return the omega in case of fft
 /// or return the omega_inv in case if ifft
@@ -170,14 +171,67 @@ pub fn ifft<F: PrimeField>(a: &mut [F], log_n: u32) {
     });
 }
 
+/// coset FFT
+/// input `a` corresponds to coefficients of a polynoimal
+pub fn coset_fft<F: WithSmallOrderMulGroup<3>>(a: &mut [F]) {
+    assert!(a.len().is_power_of_two());
+    let log_n = a.len().ilog2();
+
+    distribute_powers_zeta(a, F::ZETA, F::ZETA.square(), true);
+
+    fft(a, log_n);
+}
+
+/// coset IFFT
+/// input `a` corresponds to values of a polynoimal on coset domain zeta*{1,omega,omega^2,...}
+pub fn coset_ifft<F: WithSmallOrderMulGroup<3>>(a: &mut [F]) -> UnivariatePoly<F> {
+    assert!(a.len().is_power_of_two());
+    let log_n = a.len().ilog2();
+
+    ifft(a, log_n);
+    distribute_powers_zeta(a, F::ZETA, F::ZETA.square(), false);
+    UnivariatePoly(a.to_vec().into_boxed_slice())
+}
+
+/// Given a slice of group elements `[a_0, a_1, a_2, ...]`, this returns
+/// `[a_0, [zeta]a_1, [zeta^2]a_2, a_3, [zeta]a_4, [zeta^2]a_5, a_6, ...]`,
+/// where zeta is a cube root of unity in the multiplicative subgroup with
+/// order (p - 1), i.e. zeta^3 = 1.
+///
+/// `into_coset` should be set to `true` when moving into the coset,
+/// and `false` when moving out. This toggles the choice of `zeta`.
+fn distribute_powers_zeta<F: PrimeField>(
+    input: &mut [F],
+    g_coset: F,
+    g_coset_inv: F,
+    into_coset: bool,
+) {
+    let coset_powers: [F; 2] = if into_coset {
+        [g_coset, g_coset_inv]
+    } else {
+        [g_coset_inv, g_coset]
+    };
+    util::parallelize(input, |(input, mut index)| {
+        for element in input {
+            // Distribute powers to move into/from coset
+            let i: usize = index % (coset_powers.len() + 1);
+            if i != 0 {
+                *element *= &coset_powers[i - 1];
+            }
+            index += 1;
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use std::array;
 
-    use super::*;
     use halo2curves::bn256::Fr;
     use itertools::Itertools;
     use rand_core::OsRng;
+
+    use super::*;
 
     #[test]
     fn fft_simple_input_test() {

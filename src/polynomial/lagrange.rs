@@ -49,8 +49,8 @@ pub fn iter_cyclic_subgroup<F: PrimeField>(log_n: u32) -> impl Iterator<Item = F
 /// ```
 /// where {1, \omega, \omega^2, ..., \omega^n} - cyclic group, check [`iter_cyclic_subgroup`] for
 /// more details
-pub fn iter_eval_lagrange_polynomials_for_cyclic_group<F: PrimeField>(
-    challenge: F,
+pub fn iter_eval_lagrange_poly_for_cyclic_group<F: PrimeField>(
+    X: F,
     log_n: u32,
 ) -> impl Iterator<Item = F> {
     let n = 2usize.pow(log_n);
@@ -58,11 +58,11 @@ pub fn iter_eval_lagrange_polynomials_for_cyclic_group<F: PrimeField>(
     let inverted_n = F::from_u128(n as u128)
         .invert()
         .expect("safe because it's `2^log_n`");
-    let X_pow_n_sub_1 = challenge.pow([n as u64]) - F::ONE;
 
-    iter_cyclic_subgroup(log_n)
-        .map(move |value: F| {
-            let challenge_sub_value_inverted = challenge.sub(value).invert();
+    iter_cyclic_subgroup::<F>(log_n)
+        .map(move |value| {
+            let challenge_sub_value_inverted = X.sub(value).invert();
+            let X_pow_n_sub_1 = eval_vanish_polynomial(log_n, X);
 
             // During the calculation, this part of the expression should be reduced to 1, but we
             // get 0/0 here, so we insert an explicit `if`.
@@ -73,6 +73,15 @@ pub fn iter_eval_lagrange_polynomials_for_cyclic_group<F: PrimeField>(
             }
         })
         .take(n)
+}
+
+/// This fn calculates vanishing polynomial $Z(X)$ from the formula $G(X)=F(\alpha)L_0(X)+K(X)Z(X)$
+/// # Parameters
+/// - `log_n` - logarithm of polynomial degree
+/// - `point` - `x` - eval Lagrange polynomials at this point
+/// # Result - x^n - 1
+pub fn eval_vanish_polynomial<F: PrimeField>(log_n: u32, point: F) -> F {
+    point.pow([1 << log_n as u64]) - F::ONE
 }
 
 #[cfg(test)]
@@ -96,7 +105,7 @@ mod tests {
             .enumerate()
             .take(n)
             .for_each(|(j, w_j)| {
-                iter_eval_lagrange_polynomials_for_cyclic_group(w_j, LOG_N)
+                iter_eval_lagrange_poly_for_cyclic_group(w_j, LOG_N)
                     .enumerate()
                     .for_each(|(i, L_i)| {
                         assert_eq!(L_i, if i == j { Fr::ONE } else { Fr::ZERO });
@@ -107,7 +116,7 @@ mod tests {
     #[test]
     fn basic_lagrange_test() {
         assert_eq!(
-            iter_eval_lagrange_polynomials_for_cyclic_group(Fr::from(2u64), 2).collect::<Vec<_>>(),
+            iter_eval_lagrange_poly_for_cyclic_group(Fr::from(2u64), 2).collect::<Vec<_>>(),
             [
                 "5472060717959818805561601436314318772137091100104008585924551046643952123908",
                 "5472060717959818798949719980869953008325120142272090480018905346516323946831",
