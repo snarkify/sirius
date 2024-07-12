@@ -17,7 +17,7 @@
 use std::{iter, num::NonZeroUsize, time::Instant};
 
 use count_to_non_zero::*;
-use halo2_proofs::{arithmetic::{CurveAffine}, halo2curves::msm::best_multiexp};
+use halo2_proofs::{arithmetic::CurveAffine, halo2curves::msm::best_multiexp};
 use itertools::Itertools;
 use rayon::prelude::*;
 use serde::Serialize;

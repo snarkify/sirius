@@ -460,6 +460,9 @@ where
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?];
 
+        primary_span.exit();
+        let _secondary_span = info_span!("secondary").entered();
+
         let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
             pp.primary.ck(),
             &self.primary_nifs_pp,
@@ -467,9 +470,6 @@ where
             &self.primary.relaxed_trace,
             &primary_plonk_trace,
         )?;
-
-        primary_span.exit();
-        let _secondary_span = info_span!("secondary").entered();
 
         debug!("start fold step with folding 'primary' by 'secondary'");
 

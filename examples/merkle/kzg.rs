@@ -1,13 +1,12 @@
 use std::{fs, io::Write, path::Path};
 
-use bn256::G1 as C1;
 use clap::Parser;
 use halo2_proofs::{
-    halo2curves::bn256::{self, Bn256},
+    halo2curves::bn256::{self, Bn256, G1Affine},
     plonk,
     poly::kzg::{
         commitment::{KZGCommitmentScheme, ParamsKZG},
-        multiopen::{ProverGWC, VerifierGWC},
+        multiopen::{ProverSHPLONK, VerifierSHPLONK},
         strategy::SingleStrategy,
     },
     transcript::{
@@ -16,13 +15,12 @@ use halo2_proofs::{
     SerdeFormat,
 };
 use rand_core::OsRng;
-use sirius::group::{prime::PrimeCurve, Group};
 use tracing::*;
 
 use crate::circuit::MerkleTreeUpdateCircuit;
 
-type C1Scalar = <C1 as Group>::Scalar;
-type C1Affine = <C1 as PrimeCurve>::Affine;
+type C1Scalar = bn256::Fr;
+type C1Affine = bn256::G1Affine;
 
 /// Approximately manually calculated number of lines needed for merkle-tree-circuit
 /// Used to find the minimum required `k_table_size`
@@ -107,28 +105,28 @@ fn get_or_create_pk(
 }
 
 pub fn run(repeat_count: usize, clean_cache: bool) {
-    info!("start merkle-circuit prove&verify with halo2-kzg");
-
-    let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
-        &mut rand::thread_rng(),
-        repeat_count,
-        1,
-    );
-
-    info!("circuit created");
+    info!("start merkle-circuit({repeat_count}) prove&verify with halo2-kzg");
 
     let k_table_size = (ROWS * repeat_count).next_power_of_two().ilog2();
     info!("k table size is {k_table_size}");
 
-    let _span = info_span!("{repeat_count}_1_{k_table_size}",).entered();
+    let circuit =
+        MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(&mut rand::thread_rng(), 1, 1);
 
-    let cache = Path::new(FOLDER).join("kzg");
+    info!("circuit created");
 
+    let _span = info_span!("kzg", repeat_count, k_table_size).entered();
+
+    let cache = Path::new(FOLDER).join("merkle").join("kzg");
+
+    // Setup
+    let mut rng = rand::thread_rng();
     let params = get_or_create_params(
         k_table_size,
         &cache.join(format!("{}.params", repeat_count)),
         clean_cache,
     );
+
     let pk = get_or_create_pk(
         k_table_size,
         &cache.join(format!("{}.pk", repeat_count)),
@@ -138,34 +136,39 @@ pub fn run(repeat_count: usize, clean_cache: bool) {
     );
 
     let prove = info_span!("prove").entered();
+    let instances = vec![vec![]];
 
-    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-    plonk::create_proof::<
-        KZGCommitmentScheme<Bn256>,
-        ProverGWC<'_, Bn256>,
-        Challenge255<C1Affine>,
-        OsRng,
-        Blake2bWrite<Vec<u8>, C1Affine, Challenge255<_>>,
-        _,
-    >(&params, &pk, &[circuit], &[], OsRng, &mut transcript)
+    let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
+    plonk::create_proof::<KZGCommitmentScheme<Bn256>, ProverSHPLONK<'_, Bn256>, _, _, _, _>(
+        &params,
+        &pk,
+        &[circuit],
+        instances.as_slice(),
+        &mut rng,
+        &mut transcript,
+    )
     .expect("proof generation should not fail");
     let proof = transcript.finalize();
-
     prove.exit();
 
     let verify = info_span!("verify").entered();
-    let params = params.verifier_params();
-    let strategy = SingleStrategy::new(&params);
-    let mut transcript = Blake2bRead::<&[u8], C1Affine, Challenge255<C1Affine>>::init(&proof[..]);
 
-    assert!(plonk::verify_proof::<
-        KZGCommitmentScheme<Bn256>,
-        VerifierGWC<_>,
-        Challenge255<C1Affine>,
-        Blake2bRead<&[u8], C1Affine, Challenge255<C1Affine>>,
-        SingleStrategy<Bn256>,
-    >(&params, pk.get_vk(), strategy, &[], &mut transcript)
-    .is_ok());
+    // Verify
+    let mut verifier_transcript =
+        Blake2bRead::<_, G1Affine, Challenge255<_>>::init(proof.as_slice());
+    let verifier_params = params.verifier_params();
+    let strategy = SingleStrategy::new(&verifier_params);
+
+    plonk::verify_proof::<KZGCommitmentScheme<Bn256>, VerifierSHPLONK<Bn256>, _, _, _>(
+        &verifier_params,
+        pk.get_vk(),
+        strategy,
+        instances.as_slice(),
+        &mut verifier_transcript,
+    )
+    .expect("verify failed");
 
     verify.exit();
+
+    info!("success");
 }

@@ -32,7 +32,7 @@ type C1Scalar = <C1 as Group>::Scalar;
 const ROWS: usize = 20838;
 
 pub fn run(repeat_count: usize) {
-    info!("start merkle-circuit prove&verify with halo2-ipa");
+    info!("start merkle-circuit({repeat_count}) prove&verify with halo2-ipa");
     let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
         &mut rand::thread_rng(),
         repeat_count,
@@ -43,6 +43,8 @@ pub fn run(repeat_count: usize) {
 
     let k_table_size = (ROWS * repeat_count).next_power_of_two().ilog2();
     info!("k table size is {k_table_size}");
+
+    let _span = info_span!("ipa", repeat_count, k_table_size).entered();
 
     let keygen = info_span!("keygen").entered();
 
@@ -59,12 +61,14 @@ pub fn run(repeat_count: usize) {
         &params,
         &pk,
         &[circuit],
-        &[],
+        &[vec![]],
         OsRng,
         &mut transcript,
     )
     .expect("proof generation should not fail");
+    info!("proof created");
     let proof = transcript.finalize();
+    info!("proof finalized");
 
     prove.exit();
 
@@ -72,7 +76,7 @@ pub fn run(repeat_count: usize) {
 
     let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
     let strategy = SingleStrategy::new(&params);
-    plonk::verify_proof(&params, pk.get_vk(), strategy, &[], &mut transcript).unwrap();
+    plonk::verify_proof(&params, pk.get_vk(), strategy, &[vec![]], &mut transcript).unwrap();
 
     verify.exit();
 }

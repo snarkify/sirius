@@ -49,7 +49,9 @@ impl<F: PrimeField> ConstraintSystemMetainfo<F> {
             .gates()
             .iter()
             .flat_map(|gate| gate.polynomials().iter())
-            .map(|expr| Expression::from_halo2_expr(expr, cs.num_selectors(), cs.num_fixed_columns()))
+            .map(|expr| {
+                Expression::from_halo2_expr(expr, cs.num_selectors(), cs.num_fixed_columns())
+            })
             .chain(lookup_exprs)
             .collect::<Vec<_>>();
 
