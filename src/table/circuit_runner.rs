@@ -87,7 +87,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
             k: self.k,
             num_io: self.instance.len(),
             fixed: vec![vec![F::ZERO.into(); nrow]; self.cs.num_fixed_columns()],
-            selector: vec![vec![false; nrow]; self.cs.num_selectors],
+            selector: vec![vec![false; nrow]; self.cs.num_selectors()],
             permutation: plonk::permutation::Assembly::new(nrow, &self.cs.permutation),
         };
 

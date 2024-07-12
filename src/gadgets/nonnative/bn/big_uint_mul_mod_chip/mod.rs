@@ -328,7 +328,7 @@ impl<F: PrimeField> BigUintMulModChip<F> {
             "Production cells: {:?}",
             production_cells
                 .iter()
-                .filter_map(|c| c.value().unwrap())
+                .filter_map(|c| *c.value().unwrap())
                 .collect::<Box<[_]>>()
         );
 
@@ -1117,7 +1117,7 @@ impl<F: PrimeField> BigUintMulModChip<F> {
 
                 debug!(
                     "Previos partial sum: {:?}",
-                    prev_partial_sum.as_ref().and_then(|c| c.value().unwrap())
+                    prev_partial_sum.as_ref().and_then(|c| *c.value().unwrap())
                 );
                 debug!("Previos shifted partial sum: {:?}", shifted_prev.unwrap());
 

@@ -25,8 +25,8 @@ impl<C: CurveAffine> AssignedPoint<C> {
     }
 
     pub fn coordinates_values(&self) -> Option<(C::Base, C::Base)> {
-        let x = self.x.value().copied().unwrap();
-        let y = self.y.value().copied().unwrap();
+        let x = *self.x.value().copied().unwrap();
+        let y = *self.y.value().copied().unwrap();
 
         Some((x?, y?))
     }
