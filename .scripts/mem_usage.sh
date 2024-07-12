@@ -16,7 +16,7 @@ echo "2"
 
 ## Sirius 2
 cargo re-cli-dhat merkle-tree trivial \
-    --primary-commitment-key-size 27 \
+    --primary-commitment-key-size 21 \
     --primary-repeat-count 2 \
     --fold-step-count 1 \
     --primary-circuit-k-table-size 17 \
@@ -46,7 +46,7 @@ echo "10"
 
 # Sirius 10 (2,5)
 cargo re-cli-dhat merkle-tree trivial \
-    --primary-commitment-key-size 27 \
+    --primary-commitment-key-size 21 \
     --primary-repeat-count 2 \
     --fold-step-count 5 \
     --primary-circuit-k-table-size 17 \
@@ -74,7 +74,7 @@ echo "20"
 
 # Sirius 20 (20,1)
 cargo re-cli-dhat merkle-tree trivial \
-    --primary-commitment-key-size 27 \
+    --primary-commitment-key-size 22 \
     --primary-repeat-count 20 \
     --fold-step-count 1 \
     --primary-circuit-k-table-size 19 \
