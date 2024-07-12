@@ -22,8 +22,8 @@ use crate::{
 pub enum Error {
     #[error(transparent)]
     BigUint(#[from] big_uint::Error),
-    #[error(transparent)]
-    Halo2(#[from] halo2_proofs::plonk::Error),
+    #[error("halo2: {0:?}")]
+    Halo2(halo2_proofs::plonk::ErrorFront),
     #[error(
         "During the calculation of carry bits the number is converted to f64 and an error occurred"
     )]
@@ -39,6 +39,12 @@ pub enum Error {
         lhs_limb_width: NonZeroUsize,
         rhs_limb_width: NonZeroUsize,
     },
+}
+
+impl From<halo2_proofs::plonk::ErrorFront> for Error {
+    fn from(value: halo2_proofs::plonk::ErrorFront) -> Self {
+        Error::Halo2(value)
+    }
 }
 
 pub const MAIN_GATE_T: usize = 4;
@@ -328,7 +334,7 @@ impl<F: PrimeField> BigUintMulModChip<F> {
             "Production cells: {:?}",
             production_cells
                 .iter()
-                .filter_map(|c| *c.value().unwrap())
+                .filter_map(|c| c.value().unwrap())
                 .collect::<Box<[_]>>()
         );
 
@@ -1117,7 +1123,7 @@ impl<F: PrimeField> BigUintMulModChip<F> {
 
                 debug!(
                     "Previos partial sum: {:?}",
-                    prev_partial_sum.as_ref().and_then(|c| *c.value().unwrap())
+                    prev_partial_sum.as_ref().and_then(|c| c.value().unwrap())
                 );
                 debug!("Previos shifted partial sum: {:?}", shifted_prev.unwrap());
 

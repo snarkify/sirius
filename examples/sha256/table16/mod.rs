@@ -1,12 +1,12 @@
-use std::convert::TryInto;
-use std::marker::PhantomData;
+use std::{convert::TryInto, marker::PhantomData};
 
-use super::sha256::Sha256Instructions;
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Region, Value},
-    plonk::{Advice, Any, Assigned, Column, ConstraintSystem, Error},
+    plonk::{Advice, Any, Assigned, Column, ConstraintSystem, ErrorFront as Error},
 };
 use sirius::ff::PrimeField;
+
+use super::sha256::Sha256Instructions;
 
 mod compression;
 mod gates;
@@ -141,7 +141,7 @@ impl<F: PrimeField, const LEN: usize> AssignedBits<F, LEN> {
 
         let column: Column<Any> = column.into();
         match column.column_type() {
-            Any::Advice(_) => {
+            Any::Advice => {
                 region.assign_advice(annotation, column.try_into().unwrap(), offset, || {
                     value.clone()
                 })
@@ -176,7 +176,7 @@ impl<F: PrimeField> AssignedBits<F, 16> {
         let column: Column<Any> = column.into();
         let value: Value<Bits<16>> = value.map(|v| v.into());
         match column.column_type() {
-            Any::Advice(_) => {
+            Any::Advice => {
                 region.assign_advice(annotation, column.try_into().unwrap(), offset, || {
                     value.clone()
                 })
@@ -211,7 +211,7 @@ impl<F: PrimeField> AssignedBits<F, 32> {
         let column: Column<Any> = column.into();
         let value: Value<Bits<32>> = value.map(|v| v.into());
         match column.column_type() {
-            Any::Advice(_) => {
+            Any::Advice => {
                 region.assign_advice(annotation, column.try_into().unwrap(), offset, || {
                     value.clone()
                 })
@@ -469,13 +469,17 @@ trait Table16Assignment<F: PrimeField> {
 #[cfg(test)]
 #[cfg(feature = "test-dev-graph")]
 mod tests {
-    use super::super::{Sha256, BLOCK_SIZE};
-    use super::{message_schedule::msg_schedule_test_input, Table16Chip, Table16Config};
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         plonk::{Circuit, ConstraintSystem, Error},
     };
     use halo2curves::pasta::pallas;
+
+    use super::{
+        super::{Sha256, BLOCK_SIZE},
+        message_schedule::msg_schedule_test_input,
+        Table16Chip, Table16Config,
+    };
 
     #[traced_test]
     #[test]

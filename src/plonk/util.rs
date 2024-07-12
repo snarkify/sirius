@@ -29,7 +29,7 @@ pub fn column_index(idx: usize, columns: &[Column<Any>]) -> usize {
     let column = columns[idx];
     let offset = match column.column_type() {
         Any::Instance => 0,
-        Any::Advice(_) => 1,
+        Any::Advice => 1,
         Any::Fixed => panic!(
             "fixed column is not allowed in the copy constraint, it will break during folding"
         ),
@@ -138,8 +138,8 @@ pub(crate) fn construct_permutation_matrix<F: PrimeField>(
     let get_column_index = |column: &Column<Any>| -> usize {
         column.index()
             + match column.column_type() {
-                Any::Advice(_) if instance_column_idx.is_some() => 1,
-                Any::Advice(_) | Any::Instance => 0,
+                Any::Advice if instance_column_idx.is_some() => 1,
+                Any::Advice | Any::Instance => 0,
                 Any::Fixed => panic!(
                 "fixed column is not allowed in the copy constraint, it will break during folding"
             ),

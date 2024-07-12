@@ -2,7 +2,7 @@ use std::{convert::TryInto, num::NonZeroUsize};
 
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Value},
-    plonk::Error,
+    plonk::ErrorFront as Error,
 };
 use poseidon::{self};
 use tracing::*;
@@ -50,7 +50,7 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
         if let Some(buf) = self
             .buf
             .iter()
-            .map(|b| *b.value().unwrap())
+            .map(|b| b.value().unwrap())
             .collect::<Option<Vec<_>>>()
         {
             scan(&buf)
@@ -383,7 +383,7 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
         let buf = self.buf.clone();
         if let Some(buf) = buf
             .iter()
-            .map(|val| *val.value().unwrap())
+            .map(|val| val.value().unwrap())
             .collect::<Option<Vec<F>>>()
         {
             debug!("On circuit input of hash: {buf:?}",);
@@ -519,7 +519,7 @@ mod tests {
 
         let out_hash = Fp::from_str_vartime("277726250230731218669330566268314254439").unwrap();
 
-        create_and_verify_proof!(IPA, K, circuit, &[&[out_hash]], EqAffine);
+        create_and_verify_proof!(IPA, K, circuit, vec![vec![out_hash]], EqAffine);
         println!("-----poseidon circuit works fine-----");
     }
 

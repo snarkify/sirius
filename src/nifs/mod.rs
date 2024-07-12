@@ -11,7 +11,7 @@
 use rayon::prelude::*;
 
 use halo2_proofs::arithmetic::CurveAffine;
-use halo2_proofs::plonk::Error as Halo2Error;
+use halo2_proofs::plonk::ErrorFront as Halo2Error;
 
 use crate::commitment::{self, CommitmentKey};
 use crate::plonk::eval::Error as EvalError;
@@ -80,10 +80,16 @@ pub enum Error {
     Eval(#[from] EvalError),
     #[error(transparent)]
     Sps(#[from] SpsError),
-    #[error(transparent)]
-    Plonk(#[from] Halo2Error),
+    #[error("halo2: {0:?}")]
+    Plonk(Halo2Error),
     #[error(transparent)]
     Commitment(#[from] commitment::Error),
+}
+
+impl From<Halo2Error> for Error {
+    fn from(value: Halo2Error) -> Self {
+        Self::Plonk(value)
+    }
 }
 
 #[cfg(test)]

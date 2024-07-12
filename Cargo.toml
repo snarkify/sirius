@@ -43,7 +43,13 @@ rev = "807f8f555313f726ca03bdf941f798098f488ba4"
 
 [dependencies.halo2_proofs]
 git = "https://github.com/snarkify/halo2"
-branch = "snarkify/dev.alpha.3"
+branch = "snarkify/dev.alpha.4"
+features = ["derive_serde"]
+
+[dependencies.halo2_frontend]
+git = "https://github.com/snarkify/halo2"
+branch = "snarkify/dev.alpha.4"
+features = ["derive_serde"]
 
 [dev-dependencies]
 bincode = "1.3"

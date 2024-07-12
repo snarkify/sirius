@@ -1,4 +1,4 @@
-use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error, FloorPlanner};
+use halo2_proofs::plonk::{Circuit, ConstraintSystem, ErrorFront as Error, FloorPlanner};
 use tracing::*;
 
 use super::{circuit_data::CircuitData, ConstraintSystemMetainfo, WitnessCollector};

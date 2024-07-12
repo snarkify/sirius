@@ -17,7 +17,7 @@
 use std::{iter, num::NonZeroUsize, time::Instant};
 
 use count_to_non_zero::*;
-use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
+use halo2_proofs::{arithmetic::{CurveAffine}, halo2curves::msm::best_multiexp};
 use itertools::Itertools;
 use rayon::prelude::*;
 use serde::Serialize;
@@ -1034,7 +1034,7 @@ pub(crate) mod test_eval_witness {
                 &self,
                 config: Self::Config,
                 mut layouter: impl Layouter<F>,
-            ) -> Result<(), halo2_proofs::plonk::Error> {
+            ) -> Result<(), halo2_proofs::plonk::ErrorFront> {
                 let spec = CircuitPoseidonSpec::<F>::new(R_F1, R_P1);
 
                 layouter.assign_region(

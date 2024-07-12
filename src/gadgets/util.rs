@@ -1,6 +1,6 @@
 use halo2_proofs::{
     circuit::{Chip, Value},
-    plonk::Error,
+    plonk::ErrorFront as Error,
 };
 
 use crate::{

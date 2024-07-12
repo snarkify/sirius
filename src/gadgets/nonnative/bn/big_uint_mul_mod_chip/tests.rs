@@ -86,7 +86,7 @@ mod mult_mod_tests {
             &self,
             config: Self::Config,
             mut layouter: impl halo2_proofs::circuit::Layouter<F>,
-        ) -> Result<(), halo2_proofs::plonk::Error> {
+        ) -> Result<(), halo2_proofs::plonk::ErrorFront> {
             trace!("Start synthesize");
 
             let chip =
@@ -300,7 +300,7 @@ mod components_tests {
             &self,
             config: Self::Config,
             mut layouter: impl halo2_proofs::circuit::Layouter<F>,
-        ) -> Result<(), halo2_proofs::plonk::Error> {
+        ) -> Result<(), halo2_proofs::plonk::ErrorFront> {
             trace!("Start synthesize");
 
             let chip =
@@ -678,7 +678,7 @@ mod red_mod_tests {
             &self,
             config: Self::Config,
             mut layouter: impl halo2_proofs::circuit::Layouter<F>,
-        ) -> Result<(), halo2_proofs::plonk::Error> {
+        ) -> Result<(), halo2_proofs::plonk::ErrorFront> {
             trace!("Start synthesize");
 
             let chip =
@@ -852,7 +852,7 @@ mod decompose_tests {
             &self,
             config: Self::Config,
             mut layouter: impl halo2_proofs::circuit::Layouter<F>,
-        ) -> Result<(), halo2_proofs::plonk::Error> {
+        ) -> Result<(), halo2_proofs::plonk::ErrorFront> {
             trace!("Start synthesize");
 
             let config_clone = config.clone();
@@ -986,7 +986,7 @@ mod to_le_bits {
             &self,
             config: Self::Config,
             mut layouter: impl halo2_proofs::circuit::Layouter<F>,
-        ) -> Result<(), halo2_proofs::plonk::Error> {
+        ) -> Result<(), halo2_proofs::plonk::ErrorFront> {
             trace!("Start synthesize");
 
             let config_clone = config.clone();

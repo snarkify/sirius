@@ -2,7 +2,7 @@ use super::super::AssignedBits;
 use super::MessageScheduleConfig;
 use halo2_proofs::{
     circuit::{Region, Value},
-    plonk::Error,
+    plonk::ErrorFront as Error,
 };
 use sirius::ff::PrimeField;
 

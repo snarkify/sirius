@@ -1,6 +1,6 @@
 use std::{fmt, num::NonZeroUsize};
 
-use halo2_proofs::{arithmetic::CurveAffine, plonk::Error};
+use halo2_proofs::{arithmetic::CurveAffine, plonk::ErrorFront as Error};
 
 use crate::{
     ff::{FromUniformBytes, PrimeField, PrimeFieldBits},

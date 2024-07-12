@@ -3,7 +3,7 @@ use std::cmp;
 use halo2_proofs::{
     arithmetic::CurveAffine,
     circuit::{Chip, Value},
-    plonk::Error,
+    plonk::ErrorFront as Error,
 };
 use tracing::*;
 
@@ -25,8 +25,8 @@ impl<C: CurveAffine> AssignedPoint<C> {
     }
 
     pub fn coordinates_values(&self) -> Option<(C::Base, C::Base)> {
-        let x = *self.x.value().copied().unwrap();
-        let y = *self.y.value().copied().unwrap();
+        let x = self.x.value().copied().unwrap();
+        let y = self.y.value().copied().unwrap();
 
         Some((x?, y?))
     }
@@ -617,10 +617,10 @@ mod tests {
         let lambda = Fq::random(&mut OsRng);
         let r = p.scalar_mul(&lambda);
         let circuit = TestCircuit::new(p, q, lambda, 1);
-        let public_inputs: &[&[Fp]] = &[&[r.x, r.y]];
+        let public_inputs = vec![vec![r.x, r.y]];
 
         let K: u32 = 14;
-        create_and_verify_proof!(IPA, K, circuit, public_inputs, EqAffine);
+        create_and_verify_proof!(IPA, K, circuit, public_inputs.clone(), EqAffine);
         println!("-----ECC circuit works fine-----");
     }
 

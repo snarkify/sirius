@@ -1,7 +1,7 @@
 use halo2_proofs::{
     circuit::Value,
     plonk::{
-        Advice, Any, Assigned, Assignment, Challenge, Column, Error, Fixed, Instance, Selector,
+        Advice, Any, Assigned, Assignment, Challenge, Column, ErrorFront as Error, Fixed, Instance, Selector,
     },
 };
 use tracing::*;

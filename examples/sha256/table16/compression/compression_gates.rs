@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
-use halo2_proofs::plonk::{Constraint, Constraints, Expression};
+use halo2_frontend::plonk::Constraint;
+use halo2_proofs::plonk::{Constraints, Expression};
 use sirius::ff::PrimeField;
 
 use super::super::{util::*, Gate};

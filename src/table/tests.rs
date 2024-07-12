@@ -1,6 +1,6 @@
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner},
-    plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
+    plonk::{Circuit, Column, ConstraintSystem, ErrorFront as Error, Instance},
 };
 use prettytable::{row, Cell, Row, Table};
 use tracing_test::traced_test;

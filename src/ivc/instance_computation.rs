@@ -44,7 +44,7 @@ where
         ctx: &mut RegionCtx<'_, C::Base>,
         config: MainGateConfig<T>,
         inspect: impl FnOnce(&[C::Base]),
-    ) -> Result<AssignedValue<C::Base>, halo2_proofs::plonk::Error> {
+    ) -> Result<AssignedValue<C::Base>, halo2_proofs::plonk::ErrorFront> {
         let bits = RO::new(config.clone(), self.random_oracle_constant)
             .absorb_point(WrapValue::from_assigned_point(self.public_params_hash))
             .absorb_base(WrapValue::Assigned(self.step.clone()))
@@ -60,7 +60,7 @@ where
         self,
         ctx: &mut RegionCtx<'_, C::Base>,
         config: MainGateConfig<T>,
-    ) -> Result<AssignedValue<C::Base>, halo2_proofs::plonk::Error> {
+    ) -> Result<AssignedValue<C::Base>, halo2_proofs::plonk::ErrorFront> {
         self.generate_with_inspect(ctx, config, |_| {})
     }
 }

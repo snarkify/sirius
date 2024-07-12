@@ -8,7 +8,10 @@ use std::{
 };
 
 use digest::{ExtendableOutput, Update};
-use halo2_proofs::arithmetic::{best_multiexp, CurveAffine, CurveExt};
+use halo2_proofs::{
+    arithmetic::{CurveAffine, CurveExt},
+    halo2curves::msm::best_multiexp,
+};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha3::Shake256;

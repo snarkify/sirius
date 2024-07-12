@@ -33,7 +33,7 @@ pub mod sha256 {
     use halo2_proofs::{
         arithmetic::Field,
         circuit::{AssignedCell, Chip, Layouter},
-        plonk::Error,
+        plonk::ErrorFront as Error,
     };
 
     pub use super::table16::{BlockWord, Table16Chip, Table16Config};
