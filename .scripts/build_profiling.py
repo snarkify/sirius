@@ -40,10 +40,10 @@ class SpanNode:
         return {
             "name": self.name,
             "level": self.level,
-            "start": self.start,
+            "start": self.start.isoformat(),  # Convert datetime to ISO format string
             "fields": self.fields,
             "children": [child.to_dict() for child in self.children],
-            "time_busy": self.time_busy,
+            "time_busy": self.time_busy.total_seconds() if self.time_busy else None,  # Convert timedelta to total seconds
         }
 
     def format_fields(self) -> str:
@@ -91,6 +91,14 @@ class SpanTree:
     def __init__(self):
         self.roots: List[SpanNode] = []
         self.span_mapping: Dict[str, SpanNode] = {}
+
+    def to_dict(self) -> Dict:
+        """
+        Convert the SpanTree to a dictionary.
+        """
+        return {
+            "roots": [root.to_dict() for root in self.roots]
+        }
 
     def to_human_readable(self, min_runtime: timedelta, max_length: int = 80) -> str:
         """
@@ -303,6 +311,12 @@ def main():
         default="1s",
         help="Minimum runtime time to display (default: 1s)",
     )
+    parser.add_argument(
+        '--json-output',
+        action='store_true',
+        help='Output the SpanTree as JSON',
+        default=False,
+    )
     args = parser.parse_args()
 
     min_runtime = parse_timedelta(args.min_runtime)
@@ -313,8 +327,11 @@ def main():
     for line in sys.stdin:
         log_processor.process_log_line(line.strip())
 
-    print(log_processor.span_tree.to_human_readable(min_runtime=min_runtime))
 
+    if args.json_output:
+        print(json.dumps(log_processor.span_tree.to_dict(), indent=2))
+    else:
+        print(log_processor.span_tree.to_human_readable(min_runtime=min_runtime))
 
 if __name__ == "__main__":
     main()
