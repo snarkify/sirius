@@ -1,3 +1,7 @@
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 use bn256::G1 as C1;
 use clap::Parser;
 use sirius::{self, group::prime::PrimeCurve, halo2curves::bn256};
