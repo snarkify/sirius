@@ -66,6 +66,7 @@ fn get_or_create_params(
 }
 
 fn get_or_create_pk(
+    k_table_size: u32,
     path_pk: &Path,
     clean_cache: bool,
     params: &ParamsKZG<Bn256>,
@@ -75,9 +76,12 @@ fn get_or_create_pk(
         info!("load pk from file");
         // Read the file and parse `pk` from it
         let mut file = fs::File::open(path_pk).expect("failed to open the pk file");
-        plonk::ProvingKey::read::<_, MerkleTreeUpdateCircuit<C1Scalar>>(
+        plonk::pk_read::<_, _, MerkleTreeUpdateCircuit<C1Scalar>>(
             &mut file,
             SerdeFormat::Processed,
+            k_table_size,
+            circuit,
+            true,
         )
         .expect("failed to deserialize the proving key")
     } else {
@@ -92,11 +96,9 @@ fn get_or_create_pk(
         .expect("keygen_pk should not fail");
 
         // Save the `pk` bytes to a file
-        let pk_bytes = pk.to_bytes(SerdeFormat::Processed);
         fs::create_dir_all(path_pk.parent().unwrap()).expect("failed to create directories");
         let mut file = fs::File::create(path_pk).expect("failed to create the pk file");
-        file.write_all(&pk_bytes)
-            .expect("failed to write to the pk file");
+        pk.write(&mut file, SerdeFormat::Processed).unwrap();
 
         keygen.exit();
 
@@ -128,6 +130,7 @@ pub fn run(repeat_count: usize, clean_cache: bool) {
         clean_cache,
     );
     let pk = get_or_create_pk(
+        k_table_size,
         &cache.join(format!("{}.pk", repeat_count)),
         clean_cache,
         &params,
@@ -151,15 +154,16 @@ pub fn run(repeat_count: usize, clean_cache: bool) {
     prove.exit();
 
     let verify = info_span!("verify").entered();
+    let params = params.verifier_params();
     let strategy = SingleStrategy::new(&params);
     let mut transcript = Blake2bRead::<&[u8], C1Affine, Challenge255<C1Affine>>::init(&proof[..]);
 
     assert!(plonk::verify_proof::<
         KZGCommitmentScheme<Bn256>,
-        VerifierGWC<'_, Bn256>,
+        VerifierGWC<_>,
         Challenge255<C1Affine>,
         Blake2bRead<&[u8], C1Affine, Challenge255<C1Affine>>,
-        SingleStrategy<'_, Bn256>,
+        SingleStrategy<Bn256>,
     >(&params, pk.get_vk(), strategy, &[], &mut transcript)
     .is_ok());
 

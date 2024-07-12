@@ -59,7 +59,7 @@ pub fn run(repeat_count: usize) {
         &params,
         &pk,
         &[circuit],
-        &[(&[])],
+        &[],
         OsRng,
         &mut transcript,
     )
@@ -72,7 +72,7 @@ pub fn run(repeat_count: usize) {
 
     let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
     let strategy = SingleStrategy::new(&params);
-    plonk::verify_proof(&params, pk.get_vk(), strategy, &[(&[])], &mut transcript).unwrap();
+    plonk::verify_proof(&params, pk.get_vk(), strategy, &[], &mut transcript).unwrap();
 
     verify.exit();
 }

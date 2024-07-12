@@ -8,7 +8,7 @@ use sirius::{
     halo2_proofs::{
         circuit::AssignedCell,
         halo2curves::ff::{FromUniformBytes, PrimeFieldBits},
-        plonk::Error as Halo2Error,
+        plonk::ErrorFront as Halo2Error,
     },
     main_gate::{AdviceCyclicAssignor, RegionCtx, WrapValue},
 };
