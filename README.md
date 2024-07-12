@@ -146,14 +146,16 @@ This code will run `fold_step_count` of folding steps, and also check the proof 
 For runnable examples, please check [examples](examples) folder.
 
 ```bash
+# 're' is short for 'run example'
+
 # Alias to run IVC with parameterization via cli arguments
-cargo cli-example --help
+cargo re-cli --help
 
 # Alias for run the IVC for trivial `StepCircuit` (just returns its input unchanged)
-cargo trivial-example
+cargo re-trivial
 
 # Alias for run the IVC for the poseidon-circuit
-cargo poseidon-example
+cargo re-poseidon
 ```
 
 # Time-Profiling 
@@ -162,14 +164,16 @@ Span lifetime tracking implemented, which allows you to understand in detail
 how long a particular step takes to complete.
 
 ```bash
+# 're' is short for 'run example'
+
 # By default, it will output all spans with a lifetime greater than 1s
-cargo poseidon-example | python3 .scripts/build_profiling.py
+cargo re-poseidon | python3 .scripts/build_profiling.py
 
 # It is possible to specify the bottom border of the output span
-cargo poseidon-example | python3 .scripts/build_profiling.py --min-runtime 0.1s
+cargo re-poseidon | python3 .scripts/build_profiling.py --min-runtime 0.1s
 
 # You can also store logs and process them at a later date
-cargo poseidon-example > log; cat log | python3 .scripts/build_profiling.py 
+cargo re-poseidon > log; cat log | python3 .scripts/build_profiling.py 
 ```
 
 # Memory-Profiling 

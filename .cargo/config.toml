@@ -1,8 +1,12 @@
+# 're' is short for 'run example'
+
 [alias]
-poseidon-example = ["run", "--example", "poseidon", "--release", "--", "--json"]
-trivial-example = ["run", "--example", "trivial", "--release", "--", "--json"]
+re-poseidon = [ "run", "--example", "poseidon", "--release", "--", "--json"]
+re-trivial =  [ "run", "--example", "trivial", "--release", "--", "--json"]
+re-merkle =   [ "run", "--example", "merkle", "--release", "--", "--json"]
 
-cli-example = ["run", "--example", "cli", "--release", "--"]
-cli-dhat = ["run", "--example", "cli", "--release", "--features", "dhat-heap", "--"]
+re-cli =      [ "run", "--example", "cli", "--release", "--"]
+re-cli-dhat = [ "run", "--example", "cli", "--release", "--features", "dhat-heap", "--"]
 
-merkle-example = ["run", "--example", "merkle", "--release", "--", "--json"]
+re-kzg-merkle = [ "run", "--example", "merkle-ipa", "--release", "--"]
+re-ipa-merkle = [ "run", "--example", "merkle-kzg", "--release", "--"]
