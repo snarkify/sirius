@@ -8,8 +8,8 @@ re-merkle = ["run", "--example", "merkle", "--features", "merkle-tree-gadget", "
 re-cli = ["run", "--example", "cli", "--release", "--features", "merkle-tree-gadget", "--"]
 re-cli-dhat = ["run", "--example", "cli", "--release", "--features", "merkle-tree-gadget,dhat-heap", "--"]
 
-re-kzg-merkle = ["run", "--example", "merkle-ipa", "--features", "merkle-tree-gadget", "--release", "--"]
-re-ipa-merkle = ["run", "--example", "merkle-kzg", "--features", "merkle-tree-gadget", "--release", "--"]
+re-kzg-merkle = ["run", "--example", "merkle-kzg", "--features", "merkle-tree-gadget", "--release", "--"]
+re-ipa-merkle = ["run", "--example", "merkle-ipa", "--features", "merkle-tree-gadget", "--release", "--"]
 
-re-kzg-merkle-dhat = ["run", "--example", "merkle-ipa", "--features", "merkle-tree-gadget,dhat-heap", "--release", "--"]
-re-ipa-merkle-dhat = ["run", "--example", "merkle-kzg", "--features", "merkle-tree-gadget,dhat-heap", "--release", "--"]
+re-kzg-merkle-dhat = ["run", "--example", "merkle-kzg", "--features", "merkle-tree-gadget,dhat-heap", "--release", "--"]
+re-ipa-merkle-dhat = ["run", "--example", "merkle-ipa", "--features", "merkle-tree-gadget,dhat-heap", "--release", "--"]

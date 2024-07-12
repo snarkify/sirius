@@ -138,9 +138,12 @@ fn main() {
         1,
     );
 
-    let k_table_size = (ROWS * repeat_count).next_power_of_two().ilog2();
+    info!("circuit created");
 
-    let _span = info_span!("{}_1_{}", repeat_count, k_table_size).entered();
+    let k_table_size = (ROWS * repeat_count).next_power_of_two().ilog2();
+    info!("k table size is {k_table_size}");
+
+    let _span = info_span!("{repeat_count}_1_{k_table_size}",).entered();
 
     let cache = Path::new(FOLDER).join("kzg");
 
@@ -157,6 +160,7 @@ fn main() {
     );
 
     let prove = info_span!("prove").entered();
+
     let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
     plonk::create_proof::<
         KZGCommitmentScheme<Bn256>,
@@ -167,9 +171,9 @@ fn main() {
         _,
     >(&params, &pk, &[circuit], &[], OsRng, &mut transcript)
     .expect("proof generation should not fail");
-    prove.exit();
-
     let proof = transcript.finalize();
+
+    prove.exit();
 
     let verify = info_span!("verify").entered();
     let strategy = SingleStrategy::new(&params);
