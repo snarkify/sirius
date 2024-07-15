@@ -3,10 +3,10 @@
 [alias]
 re-poseidon = [ "run", "--example", "poseidon", "--release", "--", "--json"]
 re-trivial =  [ "run", "--example", "trivial", "--release", "--", "--json"]
-re-merkle =   [ "run", "--example", "merkle", "--release", "--", "--json"]
+re-merkle =   [ "run", "--example", "merkle", "--release", "--", "--json-logs"]
 
 re-cli =      [ "run", "--example", "cli", "--release", "--"]
 re-cli-dhat = [ "run", "--example", "cli", "--release", "--features", "dhat-heap", "--"]
 
-re-kzg-merkle = [ "run", "--example", "merkle-ipa", "--release", "--"]
-re-ipa-merkle = [ "run", "--example", "merkle-kzg", "--release", "--"]
+re-kzg-merkle =   [ "run", "--example", "merkle", "--release", "--", "--json-logs", "halo2-kzg"]
+re-ipa-merkle =   [ "run", "--example", "merkle", "--release", "--", "--json-logs", "halo2-ipa"]
