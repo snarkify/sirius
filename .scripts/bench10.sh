@@ -17,32 +17,32 @@ fi
 
 echo "investigate 10"
 
-# Sirius 10 (2,5)
+# Sirius 10 _2,5_
 cargo re-cli merkle-tree trivial \
     --primary-commitment-key-size 27 \
     --primary-repeat-count 2 \
     --fold-step-count 5 \
     --primary-circuit-k-table-size 17 \
-    --json-logs > $FOLDER_PATH/sirius(2_5)_10;
+    --json-logs > $FOLDER_PATH/sirius_2_5_10;
 
 cargo re-cli merkle-tree trivial \
     --primary-commitment-key-size 27 \
     --primary-repeat-count 5 \
     --fold-step-count 2 \
     --primary-circuit-k-table-size 17 \
-    --json-logs > $FOLDER_PATH/sirius(5_2)_10;
+    --json-logs > $FOLDER_PATH/sirius_5_2_10;
 
 cargo re-cli merkle-tree trivial \
     --primary-commitment-key-size 27 \
     --primary-repeat-count 10 \
     --fold-step-count 1 \
     --primary-circuit-k-table-size 18 \
-    --json-logs > $FOLDER_PATH/sirius(10_1)_10;
+    --json-logs > $FOLDER_PATH/sirius_10_1_10;
 
 cargo re-cli merkle-tree trivial \
     --primary-commitment-key-size 27 \
     --primary-repeat-count 1 \
     --fold-step-count 10 \
     --primary-circuit-k-table-size 17 \
-    --json-logs > $FOLDER_PATH/sirius(1_10)_10;
+    --json-logs > $FOLDER_PATH/sirius_1_10_10;
 
