@@ -69,25 +69,6 @@ harness = false
 name = "poseidon"
 harness = false
 
-[[example]]
-name = "cli"
-path = "examples/cli.rs"
-
-[[example]]
-name = "merkle-ipa"
-path = "examples/merkle_ipa.rs"
-required-features = ["merkle-tree-gadget"]
-
-[[example]]
-name = "merkle-kzg"
-path = "examples/merkle_kzg.rs"
-required-features = ["merkle-tree-gadget"]
-
-[[example]]
-name = "cli"
-path = "examples/cli.rs"
-required-features = ["merkle-tree-gadget"]
-
 [features]
 # Allows cli-example to check memory usage with dhat
 dhat-heap = []
