@@ -249,7 +249,7 @@ where
     RP1: ROPair<C1::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
     RP2: ROPair<C2::Scalar, Config = MainGateConfig<MAIN_GATE_T>>,
 {
-    #[instrument(name = "pp_new", skip_all)]
+    #[instrument(name = "keygen", skip_all)]
     pub fn new(
         primary: CircuitPublicParamsInput<'key, '_, A1, C1, RP1::Args, SC1>,
         secondary: CircuitPublicParamsInput<'key, '_, A2, C2, RP2::Args, SC2>,
