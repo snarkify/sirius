@@ -1,12 +1,17 @@
 # 're' is short for 'run example'
 
 [alias]
-re-poseidon = [ "run", "--example", "poseidon", "--release", "--", "--json"]
-re-trivial =  [ "run", "--example", "trivial", "--release", "--", "--json"]
-re-merkle =   [ "run", "--example", "merkle", "--release", "--", "--json-logs"]
-
 re-cli =      [ "run", "--example", "cli", "--release", "--"]
 re-cli-dhat = [ "run", "--example", "cli", "--release", "--features", "dhat-heap", "--"]
 
-re-kzg-merkle =   [ "run", "--example", "merkle", "--release", "--", "--json-logs", "halo2-kzg"]
-re-ipa-merkle =   [ "run", "--example", "merkle", "--release", "--", "--json-logs", "halo2-ipa"]
+re-poseidon = [ "run", "--example", "poseidon", "--release", "--", "--json"]
+re-trivial =  [ "run", "--example", "trivial", "--release", "--", "--json"]
+
+# Merkle Example
+
+## Run merkle-tree-update-circuit with sirius
+re-merkle =   [ "run", "--example", "merkle", "--release", "--", "--json-logs"]
+## Run merkle-tree-update-circuit with halo2-kzg
+re-kzg-merkle =   [ "re-merkle", "halo2-kzg"]
+## Run merkle-tree-update-circuit with halo2-ipa
+re-ipa-merkle =   [ "re-merkle", "halo2-ipa"]
