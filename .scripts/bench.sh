@@ -26,10 +26,10 @@ cargo re-cli merkle-tree trivial \
     --json-logs > $FOLDER_PATH/sirius_2_1_17;
 
 ## IPA 2
-cargo re-ipa-merkle --repeat-count 2 > $FOLDER_PATH/halo2_ipa_2;
+cargo re-merkle --repeat-count 2 halo2-ipa > $FOLDER_PATH/halo2_ipa_2;
 
 ## KZG 2
-cargo re-kzg-merkle --repeat-count 2 > $FOLDER_PATH/halo2_kzg_2;
+cargo re-merkle --repeat-count 2 halo2-kzg > $FOLDER_PATH/halo2_kzg_2;
 
 echo "10"
 
@@ -41,8 +41,8 @@ cargo re-cli merkle-tree trivial \
     --primary-circuit-k-table-size 17 \
     --json-logs > $FOLDER_PATH/sirius_10;
 
-cargo re-ipa-merkle --repeat-count 10 > $FOLDER_PATH/halo2_ipa_10;
-cargo re-kzg-merkle --repeat-count 10 > $FOLDER_PATH/halo2_kzg_10;
+cargo re-merkle --repeat-count 10 halo2-ipa > $FOLDER_PATH/halo2_ipa_10;
+cargo re-merkle --repeat-count 10 halo2-kzg > $FOLDER_PATH/halo2_kzg_10;
 
 echo "20"
 
@@ -54,8 +54,8 @@ cargo re-cli merkle-tree trivial \
     --primary-circuit-k-table-size 19 \
     --json-logs > $FOLDER_PATH/sirius_20;
 
-cargo re-ipa-merkle --repeat-count 20 > $FOLDER_PATH/halo2_ipa_20;
-cargo re-kzg-merkle --repeat-count 20 > $FOLDER_PATH/halo2_kzg_20;
+cargo re-merkle --repeat-count 20 halo2-ipa > $FOLDER_PATH/halo2_ipa_20;
+cargo re-merkle --repeat-count 20 halo2-kzg > $FOLDER_PATH/halo2_kzg_20;
 
 echo "40"
 
@@ -67,8 +67,8 @@ cargo re-cli merkle-tree trivial \
     --primary-circuit-k-table-size 18 \
     --json-logs > $FOLDER_PATH/sirius_40;
 
-cargo re-ipa-merkle --repeat-count 40 > $FOLDER_PATH/halo2_ipa_40;
-cargo re-kzg-merkle --repeat-count 40 > $FOLDER_PATH/halo2_kzg_40;
+cargo re-merkle --repeat-count 40 halo2-ipa > $FOLDER_PATH/halo2_ipa_40;
+cargo re-merkle --repeat-count 40 halo2-kzg > $FOLDER_PATH/halo2_kzg_40;
 
 echo "60"
 
@@ -80,8 +80,8 @@ cargo re-cli merkle-tree trivial \
     --primary-circuit-k-table-size 18 \
     --json-logs > $FOLDER_PATH/sirius_60;
 
-cargo re-ipa-merkle --repeat-count 60 > $FOLDER_PATH/halo2_ipa_60;
-cargo re-kzg-merkle --repeat-count 60 > $FOLDER_PATH/halo2_kzg_60;
+cargo re-merkle --repeat-count 60 halo2-ipa > $FOLDER_PATH/halo2_ipa_60;
+cargo re-merkle --repeat-count 60 halo2-kzg > $FOLDER_PATH/halo2_kzg_60;
 
 echo "80"
 
@@ -93,8 +93,8 @@ cargo re-cli merkle-tree trivial \
     --primary-circuit-k-table-size 19 \
     --json-logs > $FOLDER_PATH/sirius_80;
 
-cargo re-kzg-merkle --repeat-count 80 > $FOLDER_PATH/halo2_kzg_80;
-cargo re-ipa-merkle --repeat-count 80 > $FOLDER_PATH/halo2_ipa_80;
+cargo re-merkle --repeat-count 80 halo2-kzg > $FOLDER_PATH/halo2_kzg_80;
+cargo re-merkle --repeat-count 80 halo2-ipa > $FOLDER_PATH/halo2_ipa_80;
 
 echo "100"
 
@@ -106,5 +106,5 @@ cargo re-cli merkle-tree trivial \
     --primary-circuit-k-table-size 18 \
     --json-logs > $FOLDER_PATH/sirius_100;
 
-cargo re-ipa-merkle --repeat-count 100 > $FOLDER_PATH/halo2_ipa_100;
-cargo re-kzg-merkle --repeat-count 100 > $FOLDER_PATH/halo2_kzg_100;
+cargo re-merkle --repeat-count 100 halo2-ipa > $FOLDER_PATH/halo2_ipa_100;
+cargo re-merkle --repeat-count 100 halo2-kzg > $FOLDER_PATH/halo2_kzg_100;
