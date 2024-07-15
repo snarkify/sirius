@@ -69,13 +69,6 @@ harness = false
 name = "poseidon"
 harness = false
 
-[[example]]
-name = "merkle"
-path = "examples/merkle.rs"
-required-features = ["merkle-tree-gadget"]
-
 [features]
 # Allows cli-example to check memory usage with dhat
 dhat-heap = []
-# This gadget is used for benchmarks only, so it's hidden behind the feature
-merkle-tree-gadget = []

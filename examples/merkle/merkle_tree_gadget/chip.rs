@@ -4,7 +4,7 @@ use super::{
     off_circuit::{self as merkle_tree, NodeUpdate, Sibling},
     HasherChip, MainGateConfig, Spec,
 };
-use crate::{
+use sirius::{
     halo2_proofs::{
         circuit::AssignedCell,
         halo2curves::ff::{FromUniformBytes, PrimeFieldBits},

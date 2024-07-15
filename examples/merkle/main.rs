@@ -37,7 +37,9 @@ const ARITY: usize = 1;
 const CIRCUIT_TABLE_SIZE1: usize = 17;
 const CIRCUIT_TABLE_SIZE2: usize = 17;
 
-use sirius::gadgets::merkle_tree::{
+mod merkle_tree_gadget;
+
+use merkle_tree_gadget::{
     chip::MerkleTreeUpdateChip,
     off_circuit::{NodeUpdate, Proof, Tree},
     *,
