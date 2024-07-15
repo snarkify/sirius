@@ -10,6 +10,13 @@ use sirius::{
 };
 use tracing::info_span;
 
+pub mod circuit;
+mod merkle_tree_gadget;
+
+use circuit::MerkleTreeUpdateCircuit;
+use merkle_tree_gadget::{off_circuit::Tree, *};
+use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
+
 type C1Affine = <C1 as sirius::halo2curves::group::prime::PrimeCurve>::Affine;
 type C2Affine = <C2 as sirius::halo2curves::group::prime::PrimeCurve>::Affine;
 
@@ -28,14 +35,6 @@ const ARITY: usize = 1;
 
 const CIRCUIT_TABLE_SIZE1: usize = 17;
 const CIRCUIT_TABLE_SIZE2: usize = 17;
-
-mod merkle_tree_gadget;
-
-use merkle_tree_gadget::{off_circuit::Tree, *};
-use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
-
-pub mod circuit;
-use circuit::MerkleTreeUpdateCircuit;
 
 fn get_or_create_commitment_key<C: CurveAffine>(
     k: usize,
