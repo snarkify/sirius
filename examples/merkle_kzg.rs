@@ -20,15 +20,16 @@ use halo2_proofs::{
     SerdeFormat,
 };
 use rand_core::OsRng;
-use sirius::group::prime::PrimeCurve;
+use sirius::group::{prime::PrimeCurve, Group};
 use tracing::{metadata::LevelFilter, *};
 use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 #[allow(dead_code)]
 mod merkle;
 
-use merkle::{C1Scalar, MerkleTreeUpdateCircuit};
+use merkle::MerkleTreeUpdateCircuit;
 
+type C1Scalar = <C1 as Group>::Scalar;
 type C1Affine = <C1 as PrimeCurve>::Affine;
 
 /// Approximately manually calculated number of lines needed for merkle-tree-circuit
