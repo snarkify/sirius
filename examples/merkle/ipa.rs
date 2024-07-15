@@ -1,9 +1,4 @@
-#[cfg(feature = "dhat-heap")]
-#[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
-
 use bn256::G1 as C1;
-use clap::Parser;
 use halo2_proofs::{
     plonk,
     poly::{
@@ -20,14 +15,14 @@ use halo2_proofs::{
     },
 };
 use rand_core::OsRng;
-use sirius::{self, group::{prime::PrimeCurve, Group}, halo2curves::bn256};
-use tracing::{metadata::LevelFilter, *};
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+use sirius::{
+    self,
+    group::{prime::PrimeCurve, Group},
+    halo2curves::bn256,
+};
+use tracing::*;
 
-use crate::merkle::MerkleTreeUpdateCircuit;
-
-#[allow(dead_code)]
-mod merkle;
+use crate::circuit::MerkleTreeUpdateCircuit;
 
 type C1Affine = <C1 as PrimeCurve>::Affine;
 type C1Scalar = <C1 as Group>::Scalar;
@@ -36,29 +31,8 @@ type C1Scalar = <C1 as Group>::Scalar;
 /// Used to find the minimum required `k_table_size`
 const ROWS: usize = 20838;
 
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-struct Args {
-    #[arg(long, default_value_t = 1)]
-    repeat_count: usize,
-}
-
-fn main() {
-    #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::new_heap();
-
-    tracing_subscriber::fmt()
-        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
-        .with_env_filter(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy(),
-        )
-        .json()
-        .init();
-
-    let Args { repeat_count } = Args::parse();
-
+pub fn run(repeat_count: usize) {
+    info!("start merkle-circuit prove&verify with halo2-ipa");
     let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
         &mut rand::thread_rng(),
         repeat_count,
