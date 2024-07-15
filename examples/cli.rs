@@ -7,12 +7,12 @@ use std::num::NonZeroUsize;
 use clap::{Parser, ValueEnum};
 use halo2_proofs::halo2curves;
 
-use merkle::MerkleTreeUpdateCircuit;
+#[allow(dead_code)]
+mod poseidon;
 
 use poseidon::poseidon_step_circuit::TestPoseidonCircuit;
 use sirius::{
     ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
-    gadgets::merkle_tree::off_circuit::Tree,
     ivc::{step_circuit::trivial, CircuitPublicParamsInput, PublicParams, StepCircuit, IVC},
     poseidon::ROPair,
 };
@@ -20,10 +20,9 @@ use tracing::*;
 use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
 
 #[allow(dead_code)]
-mod poseidon;
-
-#[allow(dead_code)]
 mod merkle;
+
+use merkle::{MerkleTreeUpdateCircuit, Tree};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]

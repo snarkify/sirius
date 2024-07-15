@@ -1,7 +1,3 @@
-#[cfg(feature = "dhat-heap")]
-#[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
-
 use std::{fs, io::Write, path::Path};
 
 use bn256::G1 as C1;
@@ -20,15 +16,12 @@ use halo2_proofs::{
     SerdeFormat,
 };
 use rand_core::OsRng;
-use sirius::group::prime::PrimeCurve;
-use tracing::{metadata::LevelFilter, *};
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+use sirius::group::{prime::PrimeCurve, Group};
+use tracing::*;
 
-#[allow(dead_code)]
-mod merkle;
+use crate::circuit::MerkleTreeUpdateCircuit;
 
-use merkle::{C1Scalar, MerkleTreeUpdateCircuit};
-
+type C1Scalar = <C1 as Group>::Scalar;
 type C1Affine = <C1 as PrimeCurve>::Affine;
 
 /// Approximately manually calculated number of lines needed for merkle-tree-circuit
@@ -111,26 +104,8 @@ fn get_or_create_pk(
     }
 }
 
-fn main() {
-    #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::new_heap();
-
-    tracing_subscriber::fmt()
-        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
-        .with_env_filter(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy(),
-        )
-        .json()
-        .init();
-
-    let Args {
-        repeat_count,
-        clean_cache,
-    } = Args::parse();
-
-    info!("start with {repeat_count} repeat count & {clean_cache} refresh keygen");
+pub fn run(repeat_count: usize, clean_cache: bool) {
+    info!("start merkle-circuit prove&verify with halo2-kzg");
 
     let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
         &mut rand::thread_rng(),

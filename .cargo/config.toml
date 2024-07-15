@@ -1,15 +1,17 @@
 # 're' is short for 'run example'
 
 [alias]
-re-poseidon = ["run", "--example", "poseidon", "--release", "--", "--json"]
-re-trivial = ["run", "--example", "trivial", "--release", "--", "--json"]
-re-merkle = ["run", "--example", "merkle", "--features", "merkle-tree-gadget", "--release", "--", "--json"]
+re-cli =      [ "run", "--example", "cli", "--release", "--"]
+re-cli-dhat = [ "run", "--example", "cli", "--release", "--features", "dhat-heap", "--"]
 
-re-cli = ["run", "--example", "cli", "--release", "--features", "merkle-tree-gadget", "--"]
-re-cli-dhat = ["run", "--example", "cli", "--release", "--features", "merkle-tree-gadget,dhat-heap", "--"]
+re-poseidon = [ "run", "--example", "poseidon", "--release", "--", "--json"]
+re-trivial =  [ "run", "--example", "trivial", "--release", "--", "--json"]
 
-re-kzg-merkle = ["run", "--example", "merkle-kzg", "--features", "merkle-tree-gadget", "--release", "--"]
-re-ipa-merkle = ["run", "--example", "merkle-ipa", "--features", "merkle-tree-gadget", "--release", "--"]
+# Merkle Example
 
-re-kzg-merkle-dhat = ["run", "--example", "merkle-kzg", "--features", "merkle-tree-gadget,dhat-heap", "--release", "--"]
-re-ipa-merkle-dhat = ["run", "--example", "merkle-ipa", "--features", "merkle-tree-gadget,dhat-heap", "--release", "--"]
+## Run merkle-tree-update-circuit with sirius
+re-merkle =   [ "run", "--example", "merkle", "--release", "--", "--json-logs"]
+## Run merkle-tree-update-circuit with halo2-kzg
+re-kzg-merkle =   [ "re-merkle", "halo2-kzg"]
+## Run merkle-tree-update-circuit with halo2-ipa
+re-ipa-merkle =   [ "re-merkle", "halo2-ipa"]
