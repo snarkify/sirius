@@ -171,7 +171,7 @@ pub fn get_or_create_commitment_key<C: CurveAffine>(
     const CACHE_FOLDER: &str = ".cache/examples";
 
     // Safety: Safe if you have not manually modified the generated files in [`CACHE_FOLDER`]
-    unsafe { CommitmentKey::load_or_setup_cache(Path::new(CACHE_FOLDER), label, k) }
+    unsafe { CommitmentKey::load_or_setup_cache(Path::new(CACHE_FOLDER), label, k, false) }
 }
 
 fn main() {

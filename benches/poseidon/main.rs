@@ -97,7 +97,7 @@ fn get_or_create_commitment_key<C: CurveAffine>(
     k: usize,
     label: &'static str,
 ) -> io::Result<CommitmentKey<C>> {
-    unsafe { CommitmentKey::load_or_setup_cache(Path::new(FOLDER), label, k) }
+    unsafe { CommitmentKey::load_or_setup_cache(Path::new(FOLDER), label, k, false) }
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {

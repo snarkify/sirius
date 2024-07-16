@@ -53,13 +53,14 @@ mod sirius_mod {
     fn get_or_create_commitment_key<C: CurveAffine>(
         k: usize,
         label: &'static str,
+        is_recreate: bool,
     ) -> io::Result<CommitmentKey<C>> {
         const FOLDER: &str = ".cache/examples";
 
-        unsafe { CommitmentKey::load_or_setup_cache(Path::new(FOLDER), label, k) }
+        unsafe { CommitmentKey::load_or_setup_cache(Path::new(FOLDER), label, k, is_recreate) }
     }
 
-    pub fn run(repeat_count: usize) {
+    pub fn run(repeat_count: usize, is_recreate: bool) {
         let mut rng = rand::thread_rng();
 
         let _span = info_span!("merkle_example").entered();
@@ -72,12 +73,18 @@ mod sirius_mod {
         let primary_spec = RandomOracleConstant::<C1Scalar>::new(10, 10);
         let secondary_spec = RandomOracleConstant::<C2Scalar>::new(10, 10);
 
-        let primary_commitment_key =
-            get_or_create_commitment_key::<bn256::G1Affine>(COMMITMENT_KEY_SIZE, "bn256")
-                .expect("Failed to get secondary key");
-        let secondary_commitment_key =
-            get_or_create_commitment_key::<grumpkin::G1Affine>(COMMITMENT_KEY_SIZE, "grumpkin")
-                .expect("Failed to get primary key");
+        let primary_commitment_key = get_or_create_commitment_key::<bn256::G1Affine>(
+            COMMITMENT_KEY_SIZE,
+            "bn256",
+            is_recreate,
+        )
+        .expect("Failed to get secondary key");
+        let secondary_commitment_key = get_or_create_commitment_key::<grumpkin::G1Affine>(
+            COMMITMENT_KEY_SIZE,
+            "grumpkin",
+            is_recreate,
+        )
+        .expect("Failed to get primary key");
 
         let pp = PublicParams::<
             '_,
@@ -134,11 +141,11 @@ mod sirius_mod {
 struct Args {
     #[command(subcommand)]
     mode: Option<ProofSystem>,
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1, global = true)]
     repeat_count: usize,
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, global = true)]
     json_logs: bool,
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, global = true)]
     clean_cache: bool,
 }
 
@@ -178,7 +185,7 @@ fn main() {
     }
 
     match args.mode.unwrap_or_default() {
-        ProofSystem::Sirius => sirius_mod::run(args.repeat_count),
+        ProofSystem::Sirius => sirius_mod::run(args.repeat_count, args.clean_cache),
         ProofSystem::Halo2Ipa => ipa::run(args.repeat_count),
         ProofSystem::Halo2Kzg => kzg::run(args.repeat_count, args.clean_cache),
     }

@@ -138,10 +138,11 @@ impl<C: CurveAffine> CommitmentKey<C> {
         cache_folder: &Path,
         label: &'static str,
         k: usize,
+        is_recreate: bool,
     ) -> io::Result<Self> {
         let file_path = cache_folder.join(label).join(format!("{k}.bin"));
 
-        if file_path.exists() {
+        if file_path.exists() & !is_recreate {
             info!("{file_path:?} exists, load key");
             let key = unsafe { Self::load_from_file(&file_path, k) }?;
 
