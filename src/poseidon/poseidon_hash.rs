@@ -147,7 +147,7 @@ where
 
     #[instrument(skip_all)]
     fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
-        self.output::<C>(num_bits)
+        self.output::<C::Scalar>(num_bits)
     }
 }
 
@@ -169,7 +169,17 @@ where
         self.buf.extend_from_slice(elements);
     }
 
-    fn output<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
+    pub fn digest<F1: PrimeField>(
+        spec: Spec<F, T, RATE>,
+        elements: &[F],
+        num_bits: NonZeroUsize,
+    ) -> F1 {
+        let mut s = Self::new(spec);
+        s.update(elements);
+        s.output(num_bits)
+    }
+
+    pub fn output<F1: PrimeField>(&mut self, num_bits: NonZeroUsize) -> F1 {
         let buf = mem::take(&mut self.buf);
         debug!("Off circuit input of hash: {buf:?}");
 
@@ -183,8 +193,11 @@ where
         }
 
         let output = self.state.inner[1];
-        let bits = fe_to_bits_le(&output)[..num_bits.get()].to_vec();
-        bits_to_fe_le(bits)
+        let mut bits = fe_to_bits_le(&output);
+        if bits.len() < num_bits.get() {
+            bits.resize(num_bits.get(), false);
+        }
+        bits_to_fe_le(bits[..num_bits.get()].to_vec())
     }
 
     fn permutation(&mut self, inputs: &[F]) {

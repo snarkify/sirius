@@ -3,10 +3,11 @@ pub mod poseidon_hash;
 pub mod random_oracle;
 mod spec;
 
-use halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 pub use poseidon_hash::PoseidonHash;
 pub use random_oracle::*;
 pub use spec::Spec;
+
+use crate::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 
 pub struct PoseidonRO<const T: usize, const RATE: usize>;
 

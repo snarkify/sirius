@@ -518,9 +518,8 @@ mod tests {
         let circuit = TestCircuit::new(inputs, num_bits);
 
         let out_hash = Fp::from_str_vartime("277726250230731218669330566268314254439").unwrap();
-        let public_inputs: &[&[Fp]] = &[&[out_hash]];
 
-        create_and_verify_proof!(IPA, K, circuit, public_inputs, EqAffine);
+        create_and_verify_proof!(IPA, K, circuit, &[&[out_hash]], EqAffine);
         println!("-----poseidon circuit works fine-----");
     }
 
