@@ -15,3 +15,9 @@ re-merkle =   [ "run", "--example", "merkle", "--release", "--", "--json-logs"]
 re-kzg-merkle =   [ "re-merkle", "halo2-kzg"]
 ## Run merkle-tree-update-circuit with halo2-ipa
 re-ipa-merkle =   [ "re-merkle", "halo2-ipa"]
+
+
+## Run merkle-tree-update-circuit with halo2-kzg
+re-kzg-merkle-dhat =   [ "run", "--example", "merkle", "--release", "--features", "dhat-heap", "--", "--json-logs", "halo2-kzg"]
+## Run merkle-tree-update-circuit with halo2-ipa
+re-ipa-merkle-dhat =   [ "run", "--example", "merkle", "--release", "--features", "dhat-heap", "--", "--json-logs", "halo2-ipa"]

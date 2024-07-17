@@ -5,7 +5,7 @@ import subprocess
 import math
 
 # Define the folder path
-FOLDER_PATH = "mem_usage_logs"
+FOLDER_PATH = ".logs/mem_usage_logs"
 
 # Check if the folder exists, and create it if it doesn't
 if not os.path.exists(FOLDER_PATH):
@@ -26,11 +26,13 @@ def calculate_k_table_size(repeat_count):
 def run_command(command, stdout_file, stderr_file):
     with open(stdout_file, 'w') as out, open(stderr_file, 'w') as err:
         result = subprocess.run(command, stdout=out, stderr=err, shell=True)
+
     if os.path.exists("dhat-heap.json"):
         os.rename("dhat-heap.json", stdout_file.replace("dhat_", "dhat_heap_"))
     else:
-        print(f"lost dhat-heap.json for {command}")
-    return result.returncode == 0
+        raise ValueError(f"lost dhat-heap.json for {command}")
+
+    return None
 
 # Define configurations
 configurations = [
@@ -88,11 +90,15 @@ for config in configurations:
         stderr_file = os.path.join(FOLDER_PATH, f'dhat_halo2_ipa_{config["file_suffix"]}')
         if run_command(command, stdout_file, stderr_file):
             print(config["file_suffix"])
+        else:
+            raise ValueError("WHY")
     elif config["type"] == "KZG":
         command = f'cargo re-kzg-merkle-dhat --repeat-count {config["repeat_count"]}'
         stdout_file = os.path.join(FOLDER_PATH, f'dhat_halo2_kzg_{config["file_suffix"]}')
         stderr_file = os.path.join(FOLDER_PATH, f'dhat_halo2_kzg_{config["file_suffix"]}')
         if run_command(command, stdout_file, stderr_file):
             print(config["file_suffix"])
+        else:
+            raise ValueError("WHY")
 
 print("All commands executed successfully.")
