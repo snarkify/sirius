@@ -43,12 +43,12 @@ rev = "807f8f555313f726ca03bdf941f798098f488ba4"
 
 [dependencies.halo2_proofs]
 git = "https://github.com/snarkify/halo2"
-branch = "snarkify/dev.pse"
+branch = "pse-with-logs"
 features = ["derive_serde"]
 
 [dependencies.halo2_frontend]
 git = "https://github.com/snarkify/halo2"
-branch = "snarkify/dev.pse"
+branch = "pse-with-logs"
 features = ["derive_serde"]
 
 [dev-dependencies]
