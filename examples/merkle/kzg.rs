@@ -118,7 +118,7 @@ pub fn run(repeat_count: usize, clean_cache: bool) {
     let k_table_size = (ROWS * repeat_count).next_power_of_two().ilog2();
     info!("k table size is {k_table_size}");
 
-    let _span = info_span!("{repeat_count}_1_{k_table_size}",).entered();
+    info!("kzg repeat_count={repeat_count} k_table_size={k_table_size}");
 
     let cache = Path::new(FOLDER).join("kzg");
 
