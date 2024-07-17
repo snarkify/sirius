@@ -134,11 +134,11 @@ mod sirius_mod {
 struct Args {
     #[command(subcommand)]
     mode: Option<ProofSystem>,
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1, global = true)]
     repeat_count: usize,
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, global = true)]
     json_logs: bool,
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, global = true)]
     clean_cache: bool,
 }
 
