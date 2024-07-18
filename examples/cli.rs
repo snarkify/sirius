@@ -141,7 +141,10 @@ impl Args {
             } else {
                 builder.with_writer(file).init();
             }
-            println!("logs will be writed to: {}", log_filename.to_string_lossy());
+            println!(
+                "The logs will be written to the file: {}",
+                log_filename.to_string_lossy()
+            );
         } else if self.json_logs {
             builder.json().init();
         } else {
