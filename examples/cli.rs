@@ -2,9 +2,15 @@
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-use std::num::NonZeroUsize;
+use std::{
+    fmt,
+    fs::{self, File},
+    num::NonZeroUsize,
+    path::{Path, PathBuf},
+};
 
 use clap::{Parser, ValueEnum};
+use git2::Repository;
 use halo2_proofs::halo2curves;
 use poseidon::poseidon_step_circuit::TestPoseidonCircuit;
 use sirius::{
@@ -60,6 +66,90 @@ struct Args {
     fold_step_count: NonZeroUsize,
     #[arg(long, default_value_t = false)]
     json_logs: bool,
+    /// Push all logs into file, with name builded from params
+    #[arg(long, default_value_t = false)]
+    file_logs: bool,
+}
+
+impl Args {
+    fn build_log_filename(&self) -> Option<PathBuf> {
+        const LOGS_SUBFOLDER: &str = ".logs";
+        if !self.file_logs {
+            return None;
+        }
+
+        let Args {
+            primary_circuit,
+            primary_repeat_count,
+            secondary_circuit,
+            secondary_repeat_count,
+            fold_step_count,
+            ..
+        } = &self;
+        // Open the repository in the current directory
+        let repo = Repository::discover(".");
+
+        // Get the current branch name
+        let branch_name = repo
+            .as_ref()
+            .ok()
+            .and_then(|repo| {
+                repo.head()
+                    .ok()
+                    .and_then(|head| head.shorthand().map(String::from))
+            })
+            .unwrap_or_else(|| "unknown_branch".to_string());
+
+        let branch_log_dir = match repo {
+            Ok(repo) => repo.workdir().unwrap().join(LOGS_SUBFOLDER),
+            Err(_) => {
+                // `eprintln`, because logger not initialized
+                eprintln!("Can't find git-repo, use current dir");
+                Path::new(".").join(LOGS_SUBFOLDER)
+            }
+        }
+        .join(branch_name);
+
+        fs::create_dir_all(&branch_log_dir).unwrap_or_else(|err| {
+            panic!("Failed to create log directory {branch_log_dir:?}: {err:?}")
+        });
+
+        Some(branch_log_dir.join(format!(
+                "sirius_{primary_circuit}-{primary_repeat_count}_{secondary_circuit}-{secondary_repeat_count}_{fold_step_count}.log"
+        )))
+    }
+
+    fn init_logger(&self) {
+        let mut builder = tracing_subscriber::fmt()
+            // Adds events to track the entry and exit of the span, which are used to build
+            // time-profiling
+            .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+            // Changes the default level to INFO
+            .with_env_filter(
+                EnvFilter::builder()
+                    .with_default_directive(LevelFilter::INFO.into())
+                    .from_env_lossy(),
+            );
+
+        if let Some(log_filename) = self.build_log_filename() {
+            let file = File::create(&log_filename).expect("Unable to create log file");
+
+            builder = builder.with_ansi(false);
+
+            if self.json_logs {
+                builder.json().with_writer(file).init();
+            } else {
+                builder.with_writer(file).init();
+            }
+            println!("logs will be writed to: {}", log_filename.to_string_lossy());
+        } else if self.json_logs {
+            builder.json().init();
+        } else {
+            builder.init();
+        }
+
+        info!("start with args: {self:?}");
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -67,6 +157,20 @@ enum Circuits {
     Poseidon,
     Trivial,
     MerkleTree,
+}
+
+impl fmt::Display for Circuits {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Poseidon => "poseidon",
+                Self::Trivial => "trivial",
+                Self::MerkleTree => "merkle",
+            }
+        )
+    }
 }
 
 use bn256::G1 as C1;
@@ -204,26 +308,7 @@ fn main() {
 
     let args = Args::parse();
 
-    let builder = tracing_subscriber::fmt()
-        // Adds events to track the entry and exit of the span, which are used to build
-        // time-profiling
-        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
-        // Changes the default level to INFO
-        .with_env_filter(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy(),
-        );
-
-    // Structured logs are needed for time-profiling, while for simple run regular logs are
-    // more convenient.
-    //
-    // So this expr keeps track of the --json argument for turn-on json-logs
-    if args.json_logs {
-        builder.json().init();
-    } else {
-        builder.init();
-    }
+    args.init_logger();
 
     // To osterize the total execution time of the example
 

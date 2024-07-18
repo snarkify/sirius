@@ -2,7 +2,15 @@
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
+use std::{
+    fmt,
+    fs::{self, File},
+    path::{Path, PathBuf},
+};
+
 use clap::{Parser, Subcommand};
+use git2::Repository;
+use tracing::info;
 use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
 
 pub mod circuit;
@@ -134,15 +142,95 @@ mod sirius_mod {
 struct Args {
     #[command(subcommand)]
     mode: Option<ProofSystem>,
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1, global = true)]
     repeat_count: usize,
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, global = true)]
     json_logs: bool,
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, global = true)]
     clean_cache: bool,
+    /// Push all logs into file, with name builded from params
+    #[arg(long, default_value_t = false, global = true)]
+    file_logs: bool,
 }
 
-#[derive(Default, Debug, Subcommand)]
+impl Args {
+    fn build_log_filename(&self) -> Option<PathBuf> {
+        const LOGS_SUBFOLDER: &str = ".logs";
+        if !self.file_logs {
+            return None;
+        }
+
+        let Args {
+            mode, repeat_count, ..
+        } = &self;
+        // Open the repository in the current directory
+        let repo = Repository::discover(".");
+
+        // Get the current branch name
+        let branch_name = repo
+            .as_ref()
+            .ok()
+            .and_then(|repo| {
+                repo.head()
+                    .ok()
+                    .and_then(|head| head.shorthand().map(String::from))
+            })
+            .unwrap_or_else(|| "unknown_branch".to_string());
+
+        let branch_log_dir = match repo {
+            Ok(repo) => repo.workdir().unwrap().join(LOGS_SUBFOLDER),
+            Err(_) => {
+                // `eprintln`, because logger not initialized
+                eprintln!("Can't find git-repo, use current dir");
+                Path::new(".").join(LOGS_SUBFOLDER)
+            }
+        }
+        .join(branch_name);
+
+        fs::create_dir_all(&branch_log_dir).unwrap_or_else(|err| {
+            panic!("Failed to create log directory {branch_log_dir:?}: {err:?}")
+        });
+
+        Some(branch_log_dir.join(format!(
+            "{mode}_merkle-1_trivial-1_{repeat_count}.log",
+            mode = (*mode).unwrap_or_default()
+        )))
+    }
+
+    fn init_logger(&self) {
+        let mut builder = tracing_subscriber::fmt()
+            // Adds events to track the entry and exit of the span, which are used to build
+            // time-profiling
+            .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+            // Changes the default level to INFO
+            .with_env_filter(
+                EnvFilter::builder()
+                    .with_default_directive(LevelFilter::INFO.into())
+                    .from_env_lossy(),
+            );
+
+        if let Some(log_filename) = self.build_log_filename() {
+            let file = File::create(&log_filename).expect("Unable to create log file");
+
+            builder = builder.with_ansi(false);
+
+            if self.json_logs {
+                builder.json().with_writer(file).init();
+            } else {
+                builder.with_writer(file).init();
+            }
+            println!("logs will be writed to: {}", log_filename.to_string_lossy());
+        } else if self.json_logs {
+            builder.json().init();
+        } else {
+            builder.init();
+        }
+
+        info!("start with args: {self:?}");
+    }
+}
+
+#[derive(Default, Debug, Subcommand, Clone, Copy)]
 enum ProofSystem {
     #[default]
     Sirius,
@@ -150,32 +238,26 @@ enum ProofSystem {
     Halo2Ipa,
 }
 
+impl fmt::Display for ProofSystem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Sirius => "sirius",
+                Self::Halo2Kzg => "halo2_kzg",
+                Self::Halo2Ipa => "halo2_ipa",
+            }
+        )
+    }
+}
+
 fn main() {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
-    let builder = tracing_subscriber::fmt()
-        // Adds events to track the entry and exit of the span, which are used to build
-        // time-profiling
-        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
-        // Changes the default level to INFO
-        .with_env_filter(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy(),
-        );
-
     let args = Args::parse();
-
-    // Structured logs are needed for time-profiling, while for simple run regular logs are
-    // more convenient.
-    //
-    // So this expr keeps track of the --json argument for turn-on json-logs
-    if args.json_logs {
-        builder.json().init();
-    } else {
-        builder.init();
-    }
+    args.init_logger();
 
     match args.mode.unwrap_or_default() {
         ProofSystem::Sirius => sirius_mod::run(args.repeat_count),
