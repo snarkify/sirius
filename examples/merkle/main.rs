@@ -191,10 +191,13 @@ impl Args {
             panic!("Failed to create log directory {branch_log_dir:?}: {err:?}")
         });
 
-        Some(branch_log_dir.join(format!(
-            "{mode}_merkle-1_trivial-1_{repeat_count}.log",
-            mode = (*mode).unwrap_or_default()
-        )))
+        Some(branch_log_dir.join(match mode {
+            None | Some(ProofSystem::Sirius) => {
+                format!("sirius_merkle-1_trivial-1_{repeat_count}.log")
+            }
+            Some(ProofSystem::Halo2Kzg) => format!("halo2_kzg_merkle_{repeat_count}.log"),
+            Some(ProofSystem::Halo2Ipa) => format!("halo2_ipa_merkle_{repeat_count}.log"),
+        }))
     }
 
     fn init_logger(&self) {
