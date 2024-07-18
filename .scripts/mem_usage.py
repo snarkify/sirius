@@ -22,13 +22,23 @@ ROWS = 20838
 def calculate_k_table_size(repeat_count):
     return max(17, math.ceil(math.log2(ROWS * repeat_count)))
 
+# Function to generate file_suffix
+def generate_file_suffix(type, repeat_count):
+    return f"halo2_{type.lower()}_{repeat_count}"
+
 # Function to run a command and handle its output
-def run_command(command, stdout_file, stderr_file):
+def run_command(command, stdout_file, stderr_file, dhat_file):
     with open(stdout_file, 'w') as out, open(stderr_file, 'w') as err:
         result = subprocess.run(command, stdout=out, stderr=err, shell=True)
 
+    if result.returncode != 0:
+        print(f"Command failed with exit code {result.returncode}. Stderr output:")
+        print(result.stderr.decode())
+    else:
+        print("command running finished")
+
     if os.path.exists("dhat-heap.json"):
-        os.rename("dhat-heap.json", stdout_file.replace("dhat_", "dhat_heap_"))
+        os.rename("dhat-heap.json", dhat_file)
     else:
         raise ValueError(f"lost dhat-heap.json for {command}")
 
@@ -36,33 +46,36 @@ def run_command(command, stdout_file, stderr_file):
 
 # Define configurations
 configurations = [
-    {"type": "IPA",     "repeat_count": 2,                   "file_suffix": "halo2_ipa_2"},
-    {"type": "IPA",     "repeat_count": 10,                  "file_suffix": "halo2_ipa_10"},
-    {"type": "IPA",     "repeat_count": 20,                  "file_suffix": "halo2_ipa_20"},
-    {"type": "IPA",     "repeat_count": 40,                  "file_suffix": "halo2_ipa_40"},
-    {"type": "IPA",     "repeat_count": 60,                  "file_suffix": "halo2_ipa_60"},
-    {"type": "IPA",     "repeat_count": 80,                  "file_suffix": "halo2_ipa_80"},
-    {"type": "IPA",     "repeat_count": 100,                 "file_suffix": "halo2_ipa_100"},
+    {"type": "IPA",     "repeat_count": 2},
+    {"type": "IPA",     "repeat_count": 10},
+    {"type": "IPA",     "repeat_count": 20},
+    {"type": "IPA",     "repeat_count": 40},
+    {"type": "IPA",     "repeat_count": 60},
+    {"type": "IPA",     "repeat_count": 80},
+    {"type": "IPA",     "repeat_count": 100},
 
-    {"type": "KZG",     "repeat_count": 2,                   "file_suffix": "halo2_kzg_2"},
-    {"type": "KZG",     "repeat_count": 10,                  "file_suffix": "halo2_kzg_10"},
-    {"type": "KZG",     "repeat_count": 20,                  "file_suffix": "halo2_kzg_20"},
-    {"type": "KZG",     "repeat_count": 40,                  "file_suffix": "halo2_kzg_40"},
-    {"type": "KZG",     "repeat_count": 60,                  "file_suffix": "halo2_kzg_60"},
-    {"type": "KZG",     "repeat_count": 80,                  "file_suffix": "halo2_kzg_80"},
-    {"type": "KZG",     "repeat_count": 100,                 "file_suffix": "halo2_kzg_100"},
+    {"type": "KZG",     "repeat_count": 2},
+    {"type": "KZG",     "repeat_count": 10},
+    {"type": "KZG",     "repeat_count": 20},
+    {"type": "KZG",     "repeat_count": 40},
+    {"type": "KZG",     "repeat_count": 60},
+    {"type": "KZG",     "repeat_count": 80},
+    {"type": "KZG",     "repeat_count": 100},
 
-    {"type": "Sirius",  "repeat_count": 2,   "fold_step": 1, "file_suffix": "2"},
-    {"type": "Sirius",  "repeat_count": 10,  "fold_step": 1, "file_suffix": "10"},
-    {"type": "Sirius",  "repeat_count": 20,  "fold_step": 1, "file_suffix": "20"},
-    {"type": "Sirius",  "repeat_count": 40,  "fold_step": 1, "file_suffix": "40"},
-    {"type": "Sirius",  "repeat_count": 60,  "fold_step": 1, "file_suffix": "60"},
-    {"type": "Sirius",  "repeat_count": 80,  "fold_step": 1, "file_suffix": "80"},
-    {"type": "Sirius",  "repeat_count": 100, "fold_step": 1, "file_suffix": "100"},
+    {"type": "Sirius",  "repeat_count": 2,   "fold_step": 1},
+    {"type": "Sirius",  "repeat_count": 10,  "fold_step": 1},
+    {"type": "Sirius",  "repeat_count": 20,  "fold_step": 1},
+    {"type": "Sirius",  "repeat_count": 40,  "fold_step": 1},
+    {"type": "Sirius",  "repeat_count": 60,  "fold_step": 1},
+    {"type": "Sirius",  "repeat_count": 80,  "fold_step": 1},
+    {"type": "Sirius",  "repeat_count": 100, "fold_step": 1},
 ]
 
 # Loop through configurations and execute commands
 for config in configurations:
+    print(f"start processing {config}")
+    file_suffix = generate_file_suffix(config["type"], config["repeat_count"])
+
     if config["type"] == "Sirius":
         k_table_size = calculate_k_table_size(config["repeat_count"])
         commitment_key_size = max(21, k_table_size + 3)
@@ -74,10 +87,12 @@ for config in configurations:
                 f'--primary-repeat-count {config["repeat_count"]} --fold-step-count {config["fold_step"]} '
                 f'--primary-circuit-k-table-size {k_table_size} --json-logs'
             )
-            stdout_file = os.path.join(FOLDER_PATH, f'dhat_sirius_{config["file_suffix"]}')
-            stderr_file = os.path.join(FOLDER_PATH, f'dhat_sirius_{config["file_suffix"]}')
-            if run_command(command, stdout_file, stderr_file):
-                print(config["file_suffix"])
+            stdout_file = os.path.join(FOLDER_PATH, f'sirius_log_{file_suffix}')
+            stderr_file = os.path.join(FOLDER_PATH, f'sirius_out_{file_suffix}')
+            dhat_file = f'dhat_{file_suffix}.json'
+            print(f"run command: {command}")
+            if run_command(command, stdout_file, stderr_file, dhat_file):
+                print(file_suffix)
                 break
             else:
                 commitment_key_size += 1
@@ -86,18 +101,22 @@ for config in configurations:
             break
     elif config["type"] == "IPA":
         command = f'cargo re-ipa-merkle-dhat --repeat-count {config["repeat_count"]}'
-        stdout_file = os.path.join(FOLDER_PATH, f'dhat_halo2_ipa_{config["file_suffix"]}')
-        stderr_file = os.path.join(FOLDER_PATH, f'dhat_halo2_ipa_{config["file_suffix"]}')
-        if run_command(command, stdout_file, stderr_file):
-            print(config["file_suffix"])
+        stdout_file = os.path.join(FOLDER_PATH, f'halo2_ipa_log_{file_suffix}')
+        stderr_file = os.path.join(FOLDER_PATH, f'halo2_ipa_out_{file_suffix}')
+        dhat_file = f'dhat_{file_suffix}.json'
+        print(f"run command: {command}")
+        if run_command(command, stdout_file, stderr_file, dhat_file):
+            print(file_suffix)
         else:
             raise ValueError("WHY")
     elif config["type"] == "KZG":
         command = f'cargo re-kzg-merkle-dhat --repeat-count {config["repeat_count"]}'
-        stdout_file = os.path.join(FOLDER_PATH, f'dhat_halo2_kzg_{config["file_suffix"]}')
-        stderr_file = os.path.join(FOLDER_PATH, f'dhat_halo2_kzg_{config["file_suffix"]}')
-        if run_command(command, stdout_file, stderr_file):
-            print(config["file_suffix"])
+        stdout_file = os.path.join(FOLDER_PATH, f'halo2_kzg_log_{file_suffix}')
+        stderr_file = os.path.join(FOLDER_PATH, f'halo2_kzg_out_{file_suffix}')
+        dhat_file = f'dhat_{file_suffix}.json'
+        print(f"run command: {command}")
+        if run_command(command, stdout_file, stderr_file, dhat_file):
+            print(file_suffix)
         else:
             raise ValueError("WHY")
 
