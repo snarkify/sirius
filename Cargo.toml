@@ -42,8 +42,8 @@ git = "https://github.com/privacy-scaling-explorations/poseidon"
 rev = "807f8f555313f726ca03bdf941f798098f488ba4"
 
 [dependencies.halo2_proofs]
-git = "https://github.com/snarkify/halo2"
-branch = "snarkify/dev.scroll"
+jgit = "https://github.com/snarkify/halo2"
+branch = "dev-scroll-v1.1"
 
 [dev-dependencies]
 bincode = "1.3"
