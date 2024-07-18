@@ -154,14 +154,14 @@ pub fn run(repeat_count: usize, clean_cache: bool) {
     let strategy = SingleStrategy::new(&params);
     let mut transcript = Blake2bRead::<&[u8], C1Affine, Challenge255<C1Affine>>::init(&proof[..]);
 
-    assert!(plonk::verify_proof::<
+    plonk::verify_proof::<
         KZGCommitmentScheme<Bn256>,
         VerifierGWC<'_, Bn256>,
         Challenge255<C1Affine>,
         Blake2bRead<&[u8], C1Affine, Challenge255<C1Affine>>,
         SingleStrategy<'_, Bn256>,
-    >(&params, pk.get_vk(), strategy, &[], &mut transcript)
-    .is_ok());
+    >(&params, pk.get_vk(), strategy, &[&[]], &mut transcript)
+    .unwrap();
 
     verify.exit();
 }
