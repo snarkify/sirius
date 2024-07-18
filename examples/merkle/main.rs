@@ -153,9 +153,34 @@ struct Args {
     file_logs: bool,
 }
 
+pub fn build_log_folder() -> PathBuf {
+    const LOGS_SUBFOLDER: &str = ".logs";
+
+    let Ok(repo) = Repository::discover(".") else {
+        return Path::new(LOGS_SUBFOLDER).to_path_buf();
+    };
+
+    // Get the current branch name
+    let branch_name = repo
+        .head()
+        .ok()
+        .and_then(|head| head.shorthand().map(String::from))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let branch_log_dir = repo
+        .workdir()
+        .unwrap()
+        .join(LOGS_SUBFOLDER)
+        .join(branch_name);
+
+    fs::create_dir_all(&branch_log_dir)
+        .unwrap_or_else(|err| panic!("Failed to create log directory {branch_log_dir:?}: {err:?}"));
+
+    branch_log_dir
+}
+
 impl Args {
     fn build_log_filename(&self) -> Option<PathBuf> {
-        const LOGS_SUBFOLDER: &str = ".logs";
         if !self.file_logs {
             return None;
         }
@@ -163,35 +188,8 @@ impl Args {
         let Args {
             mode, repeat_count, ..
         } = &self;
-        // Open the repository in the current directory
-        let repo = Repository::discover(".");
 
-        // Get the current branch name
-        let branch_name = repo
-            .as_ref()
-            .ok()
-            .and_then(|repo| {
-                repo.head()
-                    .ok()
-                    .and_then(|head| head.shorthand().map(String::from))
-            })
-            .unwrap_or_else(|| "unknown_branch".to_string());
-
-        let branch_log_dir = match repo {
-            Ok(repo) => repo.workdir().unwrap().join(LOGS_SUBFOLDER),
-            Err(_) => {
-                // `eprintln`, because logger not initialized
-                eprintln!("Can't find git-repo, use current dir");
-                Path::new(".").join(LOGS_SUBFOLDER)
-            }
-        }
-        .join(branch_name);
-
-        fs::create_dir_all(&branch_log_dir).unwrap_or_else(|err| {
-            panic!("Failed to create log directory {branch_log_dir:?}: {err:?}")
-        });
-
-        Some(branch_log_dir.join(match mode {
+        Some(build_log_folder().join(match mode {
             None | Some(ProofSystem::Sirius) => {
                 format!("sirius_merkle-1_trivial-1_{repeat_count}.log")
             }
