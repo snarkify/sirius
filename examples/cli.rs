@@ -12,10 +12,6 @@ use std::{
 use clap::{Parser, ValueEnum};
 use git2::Repository;
 use halo2_proofs::halo2curves;
-
-#[allow(dead_code)]
-mod poseidon;
-
 use poseidon::poseidon_step_circuit::TestPoseidonCircuit;
 use sirius::{
     ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
@@ -24,6 +20,9 @@ use sirius::{
 };
 use tracing::*;
 use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
+
+#[allow(dead_code)]
+mod poseidon;
 
 #[allow(dead_code)]
 mod merkle;
@@ -74,50 +73,13 @@ struct Args {
 
 impl Args {
     fn build_log_filename(&self) -> Option<PathBuf> {
-        const LOGS_SUBFOLDER: &str = ".logs";
-        if !self.file_logs {
-            return None;
-        }
+        self.file_logs.then(|| {
+            let Args { primary_circuit, primary_repeat_count, secondary_circuit, secondary_repeat_count, fold_step_count, .. } = &self;
 
-        let Args {
-            primary_circuit,
-            primary_repeat_count,
-            secondary_circuit,
-            secondary_repeat_count,
-            fold_step_count,
-            ..
-        } = &self;
-        // Open the repository in the current directory
-        let repo = Repository::discover(".");
-
-        // Get the current branch name
-        let branch_name = repo
-            .as_ref()
-            .ok()
-            .and_then(|repo| {
-                repo.head()
-                    .ok()
-                    .and_then(|head| head.shorthand().map(String::from))
-            })
-            .unwrap_or_else(|| "unknown_branch".to_string());
-
-        let branch_log_dir = match repo {
-            Ok(repo) => repo.workdir().unwrap().join(LOGS_SUBFOLDER),
-            Err(_) => {
-                // `eprintln`, because logger not initialized
-                eprintln!("Can't find git-repo, use current dir");
-                Path::new(".").join(LOGS_SUBFOLDER)
-            }
-        }
-        .join(branch_name);
-
-        fs::create_dir_all(&branch_log_dir).unwrap_or_else(|err| {
-            panic!("Failed to create log directory {branch_log_dir:?}: {err:?}")
-        });
-
-        Some(branch_log_dir.join(format!(
+            build_log_folder().join(format!(
                 "sirius_{primary_circuit}-{primary_repeat_count}_{secondary_circuit}-{secondary_repeat_count}_{fold_step_count}.log"
-        )))
+        ))
+        })
     }
 
     fn init_logger(&self) {
@@ -151,6 +113,32 @@ impl Args {
 
         info!("start with args: {self:?}");
     }
+}
+
+pub fn build_log_folder() -> PathBuf {
+    const LOGS_SUBFOLDER: &str = ".logs";
+
+    let Ok(repo) = Repository::discover(".") else {
+        return Path::new(LOGS_SUBFOLDER).to_path_buf();
+    };
+
+    // Get the current branch name
+    let branch_name = repo
+        .head()
+        .ok()
+        .and_then(|head| head.shorthand().map(String::from))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let branch_log_dir = repo
+        .workdir()
+        .unwrap()
+        .join(LOGS_SUBFOLDER)
+        .join(branch_name);
+
+    fs::create_dir_all(&branch_log_dir)
+        .unwrap_or_else(|err| panic!("Failed to create log directory {branch_log_dir:?}: {err:?}"));
+
+    branch_log_dir
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]

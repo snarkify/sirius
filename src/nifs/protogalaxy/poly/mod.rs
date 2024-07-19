@@ -411,7 +411,7 @@ mod test {
         let S = runner.try_collect_plonk_structure().unwrap();
         let witness = runner.try_collect_witness().unwrap();
 
-        let (u, w) = S
+        let PlonkTrace { u, w } = S
             .run_sps_protocol(
                 &CommitmentKey::setup(17, b""),
                 &[],
