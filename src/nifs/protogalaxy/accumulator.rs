@@ -39,4 +39,8 @@ impl<C: CurveAffine> Accumulator<C> {
             trace: RelaxedPlonkTrace::new(args),
         }
     }
+
+    pub fn fold(self, gamma: C::ScalarExt) -> Self {
+        todo!("fold with {gamma:?}")
+    }
 }

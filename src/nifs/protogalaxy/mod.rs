@@ -9,8 +9,8 @@ use crate::{
     constants::NUM_CHALLENGE_BITS,
     ff::PrimeField,
     plonk::{PlonkStructure, PlonkTrace, RelaxedPlonkInstance},
-    polynomial::univariate::UnivariatePoly,
-    sps,
+    polynomial::{univariate::UnivariatePoly, lagrange},
+    sps, util,
 };
 
 mod accumulator;
@@ -115,12 +115,72 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
 
     fn prove(
         _ck: &CommitmentKey<C>,
-        _pp: &Self::ProverParam,
-        _ro_acc: &mut impl ROTrait<C::Base>,
-        _accumulator: &Self::Accumulator,
-        _incoming: &[PlonkTrace<C>; L],
+        pp: &Self::ProverParam,
+        ro_acc: &mut impl ROTrait<C::Base>,
+        accumulator: &Self::Accumulator,
+        incoming: &[PlonkTrace<C>; L],
     ) -> Result<(Self::Accumulator, Self::Proof), Error> {
-        todo!()
+        let log_n = Self::get_count_of_valuation(&pp.S)
+            .next_power_of_two()
+            .ilog2();
+
+        let delta = Self::generate_challenge(
+            &pp.pp_digest,
+            ro_acc,
+            accumulator,
+            incoming.iter().map(|t| &t.u),
+        );
+
+        let poly_F = poly::compute_F::<C::ScalarExt>(
+            accumulator.betas.iter().copied(),
+            delta,
+            &pp.S,
+            &accumulator.trace,
+        )?;
+
+        let alpha = ro_acc
+            .absorb_field_iter(
+                poly_F
+                    .iter()
+                    .map(|v| util::fe_to_fe::<C::ScalarExt, C::Base>(v).unwrap()),
+            )
+            .squeeze::<C>(NUM_CHALLENGE_BITS);
+
+        let betas_stroke = poly::PolyChallenges {
+            betas: accumulator.betas.clone(),
+            delta,
+            alpha,
+        }
+        .iter_beta_stroke()
+        .collect::<Box<[_]>>();
+
+        let poly_K = poly::compute_K::<C::ScalarExt>(
+            &pp.S,
+            alpha,
+            betas_stroke.iter().copied(),
+            accumulator.trace,
+            incoming,
+        )?;
+
+        let gamma = ro_acc
+            .absorb_field_iter(poly_K.iter().map(|v| util::fe_to_fe(v).unwrap()))
+            .squeeze::<C>(NUM_CHALLENGE_BITS);
+
+        let poly_F_alpha = poly_F.eval(alpha);
+        let lagrange_zero_for_gamma =
+            lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
+                .next()
+                .unwrap();
+        let poly_Z_for_gamme = lagrange::eval_vanish_polynomial(log_n, gamma);
+        let poly_K_gamma = poly_K.eval(gamma);
+
+        let new_accumulator = Accumulator {
+            betas: betas_stroke,
+            e: (poly_F_alpha * lagrange_zero_for_gamma) + (poly_Z_for_gamme * poly_K_gamma),
+            trace: todo!(),
+        };
+
+        Ok((accumulator.fold(gamma), ProtoGalaxyProof { poly_F, poly_K }))
     }
 
     fn verify(
