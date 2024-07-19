@@ -1,7 +1,4 @@
-use std::{
-    iter,
-    num::{NonZeroU32, NonZeroUsize},
-};
+use std::num::{NonZeroU32, NonZeroUsize};
 
 use itertools::*;
 use num_traits::Zero;
@@ -67,7 +64,7 @@ pub enum Error {
 /// except leaves.
 #[instrument(skip_all)]
 pub(crate) fn compute_F<F: PrimeField>(
-    beta: F,
+    betas: impl Iterator<Item = F>,
     delta: F,
     S: &PlonkStructure<F>,
     trace: &(impl Sync + GetChallenges<F> + GetWitness<F>),
@@ -105,10 +102,14 @@ pub(crate) fn compute_F<F: PrimeField>(
     //
     // Even for large `count_of_evaluation` this will be a small number, so we can
     // collect it
+    let betas = betas
+        .take(count_of_evaluation.next_power_of_two().ilog2() as usize)
+        .collect::<Box<[_]>>();
     let challenges_powers = lagrange::iter_cyclic_subgroup::<F>(fft_domain_size.get())
         .map(|X| {
-            iter::successors(Some(beta + X * delta), |ch| Some(ch.double()))
-                .take(count_of_evaluation.next_power_of_two().ilog2() as usize)
+            betas
+                .iter()
+                .map(|beta| *beta + X * delta)
                 .collect::<Box<_>>()
         })
         .take(points_count)
@@ -430,12 +431,16 @@ mod test {
         let (S, trace) = poseidon_trace();
         let mut rnd = rand::thread_rng();
 
-        assert!(
-            super::compute_F(Field::random(&mut rnd), Field::random(&mut rnd), &S, &trace,)
-                .unwrap()
-                .iter()
-                .all(|f| f.is_zero().into())
-        );
+        let delta = Field::random(&mut rnd);
+        assert!(super::compute_F(
+            iter::repeat_with(move || Field::random(&mut rnd)),
+            delta,
+            &S,
+            &trace,
+        )
+        .unwrap()
+        .iter()
+        .all(|f| f.is_zero().into()));
     }
 
     #[traced_test]
@@ -449,8 +454,14 @@ mod test {
             .iter_mut()
             .for_each(|row| row.iter_mut().for_each(|el| *el = Field::random(&mut rnd)));
 
+        let delta = Field::random(&mut rnd);
         assert_ne!(
-            super::compute_F(Field::random(&mut rnd), Field::random(&mut rnd), &S, &trace,),
+            super::compute_F(
+                iter::repeat_with(|| Field::random(&mut rnd)),
+                delta,
+                &S,
+                &trace,
+            ),
             Ok(UnivariatePoly::from_iter(
                 iter::repeat(Field::ZERO).take(16)
             ))
