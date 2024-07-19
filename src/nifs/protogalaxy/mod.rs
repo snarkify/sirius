@@ -1,6 +1,5 @@
 use std::{iter, marker::PhantomData};
 
-pub use accumulator::{Accumulator, AccumulatorArgs};
 use halo2_proofs::arithmetic::{CurveAffine, Field};
 use tracing::instrument;
 
@@ -15,6 +14,8 @@ use crate::{
 
 mod accumulator;
 pub(crate) mod poly;
+
+pub use accumulator::{Accumulator, AccumulatorArgs};
 
 /// ProtoGalaxy: Non Interactive Folding Scheme that implements main protocol defined in paper
 /// [protogalaxy](https://eprint.iacr.org/2023/1106)
