@@ -144,7 +144,7 @@ pub fn run(repeat_count: usize, clean_cache: bool) {
         OsRng,
         Blake2bWrite<Vec<u8>, C1Affine, Challenge255<_>>,
         _,
-    >(&params, &pk, &[circuit], &[], OsRng, &mut transcript)
+    >(&params, &pk, &[circuit], &[&[]], OsRng, &mut transcript)
     .expect("proof generation should not fail");
     let proof = transcript.finalize();
 
