@@ -33,7 +33,7 @@ pub enum Error {
     #[error("Error while calculate digest of pp")]
     WhileDigest(#[from] io::Error),
     #[error("While calculate intiail plonk relaxed trace of secondary circuit: {0:?}")]
-    WhileGeneratePlonkTrace(#[from] nifs::Error),
+    WhileGeneratePlonkTrace(#[from] nifs::vanilla::Error),
     #[error("While calculate intiail plonk relaxed trace of secondary circuit, error was occured in `process_step`: {0:?}")]
     WhileProcessStep(#[from] ivc::step_circuit::SynthesisError),
 }

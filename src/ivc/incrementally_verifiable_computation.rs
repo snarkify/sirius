@@ -52,7 +52,7 @@ pub enum Error {
     #[error("TODO")]
     Sps(#[from] sps::Error),
     #[error("TODO")]
-    NIFS(#[from] nifs::Error),
+    NIFS(#[from] nifs::vanilla::Error),
     #[error("TODO")]
     VerifyFailed(Vec<VerificationError>),
 }

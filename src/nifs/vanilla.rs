@@ -146,7 +146,22 @@ impl<C: CurveAffine> VanillaFS<C> {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("parameter not setup")]
+    ParamNotSetup,
+    #[error(transparent)]
+    Eval(#[from] EvalError),
+    #[error(transparent)]
+    Sps(#[from] SpsError),
+    #[error(transparent)]
+    Plonk(#[from] Halo2Error),
+    #[error(transparent)]
+    Commitment(#[from] commitment::Error),
+}
+
 impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
+    type Error = Error;
     type ProverParam = VanillaFSProverParam<C>;
     type VerifierParam = C;
     type Accumulator = RelaxedPlonkTrace<C>;

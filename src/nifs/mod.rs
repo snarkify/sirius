@@ -8,22 +8,23 @@
 //! For more details look at:
 //! - Paragraph '3. Folding scheme' at [Nova whitepaper](https://eprint.iacr.org/2021/370)
 //! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
+use halo2_proofs::{arithmetic::CurveAffine, plonk::Error as Halo2Error};
 use rayon::prelude::*;
 
-use halo2_proofs::arithmetic::CurveAffine;
-use halo2_proofs::plonk::Error as Halo2Error;
-
-use crate::commitment::{self, CommitmentKey};
-use crate::plonk::eval::Error as EvalError;
-use crate::plonk::{PlonkInstance, PlonkStructure, PlonkTrace};
-use crate::poseidon::ROTrait;
-use crate::sps::Error as SpsError;
+use crate::{
+    commitment::{self, CommitmentKey},
+    plonk::{eval::Error as EvalError, PlonkInstance, PlonkStructure, PlonkTrace},
+    poseidon::ROTrait,
+    sps::Error as SpsError,
+};
 
 pub mod protogalaxy;
 pub mod vanilla;
 
 /// Trait representing the NIFS folding scheme.
 pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
+    type Error;
+
     /// Metadata for prover including hash of public params
     type ProverParam;
 
@@ -42,7 +43,7 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
     fn setup_params(
         pp_digest: C,
         S: PlonkStructure<C::ScalarExt>,
-    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
+    ) -> Result<(Self::ProverParam, Self::VerifierParam), Self::Error>;
 
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
@@ -50,7 +51,7 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
         witness: &[Vec<C::ScalarExt>],
         pp: &Self::ProverParam,
         ro_nark: &mut impl ROTrait<C::Base>,
-    ) -> Result<PlonkTrace<C>, Error>;
+    ) -> Result<PlonkTrace<C>, Self::Error>;
 
     /// Perform the folding operation as a prover.
     fn prove(
@@ -59,7 +60,7 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
         ro_acc: &mut impl ROTrait<C::Base>,
         accumulator: &Self::Accumulator,
         incoming: &[PlonkTrace<C>; L],
-    ) -> Result<(Self::Accumulator, Self::Proof), Error>;
+    ) -> Result<(Self::Accumulator, Self::Proof), Self::Error>;
 
     /// Perform the folding operation as a verifier.
     fn verify(
@@ -69,21 +70,7 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
         accumulator: &Self::AccumulatorInstance,
         incoming: &[PlonkInstance<C>; L],
         proof: &Self::Proof,
-    ) -> Result<Self::AccumulatorInstance, Error>;
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("parameter not setup")]
-    ParamNotSetup,
-    #[error(transparent)]
-    Eval(#[from] EvalError),
-    #[error(transparent)]
-    Sps(#[from] SpsError),
-    #[error(transparent)]
-    Plonk(#[from] Halo2Error),
-    #[error(transparent)]
-    Commitment(#[from] commitment::Error),
+    ) -> Result<Self::AccumulatorInstance, Self::Error>;
 }
 
 #[cfg(test)]
