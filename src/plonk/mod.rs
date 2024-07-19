@@ -571,7 +571,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         advice: &[Vec<F>],
         ro_nark: &mut RO,
         num_challenges: usize,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+    ) -> Result<PlonkTrace<C>, SpsError> {
         debug!("run sps protocol with {num_challenges} challenges");
         match num_challenges {
             0 => self.run_sps_protocol_0(instance, advice, ck),
@@ -590,7 +590,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         instance: &[F],
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+    ) -> Result<PlonkTrace<C>, SpsError> {
         let _span = info_span!("witness_commit").entered();
 
         let W1 = concatenate_with_padding(advice, 1 << self.k);
@@ -601,14 +601,14 @@ impl<F: PrimeField> PlonkStructure<F> {
                 err,
             })?;
 
-        Ok((
-            PlonkInstance {
+        Ok(PlonkTrace {
+            u: PlonkInstance {
                 W_commitments: vec![C1],
                 instance: instance.to_vec(),
                 challenges: vec![],
             },
-            PlonkWitness { W: vec![W1] },
-        ))
+            w: PlonkWitness { W: vec![W1] },
+        })
     }
 
     /// run 1-round special soundness protocol to generate witnesses and challenges
@@ -623,8 +623,11 @@ impl<F: PrimeField> PlonkStructure<F> {
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
-        let (mut plonk_instance, plonk_witness) = self.run_sps_protocol_0(instance, advice, ck)?;
+    ) -> Result<PlonkTrace<C>, SpsError> {
+        let PlonkTrace {
+            u: mut plonk_instance,
+            w: plonk_witness,
+        } = self.run_sps_protocol_0(instance, advice, ck)?;
 
         let _span = info_span!("instance_commit").entered();
         ro_nark
@@ -635,7 +638,10 @@ impl<F: PrimeField> PlonkStructure<F> {
             .challenges
             .push(ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS));
 
-        Ok((plonk_instance, plonk_witness))
+        Ok(PlonkTrace {
+            u: plonk_instance,
+            w: plonk_witness,
+        })
     }
 
     /// run 2-round special soundness protocol to generate witnesses and challenges
@@ -650,7 +656,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+    ) -> Result<PlonkTrace<C>, SpsError> {
         let k_power_of_2 = 1 << self.k;
 
         // round 1
@@ -700,14 +706,14 @@ impl<F: PrimeField> PlonkStructure<F> {
         }?;
         let r2 = ro_nark.absorb_point(&C2).squeeze::<C>(NUM_CHALLENGE_BITS);
 
-        Ok((
-            PlonkInstance {
+        Ok(PlonkTrace {
+            u: PlonkInstance {
                 W_commitments: vec![C1, C2],
                 instance: instance.to_vec(),
                 challenges: vec![r1, r2],
             },
-            PlonkWitness { W: vec![W1, W2] },
-        ))
+            w: PlonkWitness { W: vec![W1, W2] },
+        })
     }
 
     /// run 3-round special soundness protocol to generate witnesses and challenges
@@ -721,7 +727,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
-    ) -> Result<(PlonkInstance<C>, PlonkWitness<F>), SpsError> {
+    ) -> Result<PlonkTrace<C>, SpsError> {
         ro_nark.absorb_field_iter(instance.iter().map(|inst| fe_to_fe(inst).unwrap()));
 
         let k_power_of_2 = 1 << self.k;
@@ -775,16 +781,16 @@ impl<F: PrimeField> PlonkStructure<F> {
         }?;
         let r3 = ro_nark.absorb_point(&C3).squeeze::<C>(NUM_CHALLENGE_BITS);
 
-        Ok((
-            PlonkInstance {
+        Ok(PlonkTrace {
+            u: PlonkInstance {
                 W_commitments: vec![C1, C2, C3],
                 instance: instance.to_vec(),
                 challenges: vec![r1, r2, r3],
             },
-            PlonkWitness {
+            w: PlonkWitness {
                 W: vec![W1, W2, W3],
             },
-        ))
+        })
     }
 }
 
@@ -1101,7 +1107,7 @@ pub(crate) mod test_eval_witness {
 
         let witness = runner.try_collect_witness().unwrap();
 
-        let (u, w) = S
+        let PlonkTrace { u, w } = S
             .run_sps_protocol(
                 &CommitmentKey::<Curve>::setup(15, b"k"),
                 &[],
