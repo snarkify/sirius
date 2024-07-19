@@ -34,6 +34,19 @@ pub trait ROTrait<F: PrimeField> {
         self
     }
 
+    fn absorb_iter<'l, I: 'l + AbsorbInRO<F, Self>>(
+        &mut self,
+        iter: impl Iterator<Item = &'l I>,
+    ) -> &mut Self
+    where
+        Self: Sized,
+    {
+        iter.for_each(|v| {
+            self.absorb(v);
+        });
+        self
+    }
+
     /// Adds a base to the internal state
     fn absorb_field(&mut self, base: F) -> &mut Self;
 
