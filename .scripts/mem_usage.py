@@ -91,7 +91,7 @@ for config in configurations:
             stderr_file = os.path.join(FOLDER_PATH, f'sirius_out_{file_suffix}')
             dhat_file = f'dhat_{file_suffix}.json'
             print(f"run command: {command}")
-            if run_command(command, stdout_file, stderr_file, dhat_file):
+            if run_command(command, stdout_file, stderr_file, dhat_file) is None:
                 print(file_suffix)
                 break
             else:
@@ -105,7 +105,7 @@ for config in configurations:
         stderr_file = os.path.join(FOLDER_PATH, f'halo2_ipa_out_{file_suffix}')
         dhat_file = f'dhat_{file_suffix}.json'
         print(f"run command: {command}")
-        if run_command(command, stdout_file, stderr_file, dhat_file):
+        if run_command(command, stdout_file, stderr_file, dhat_file) is None:
             print(file_suffix)
         else:
             raise ValueError("WHY")
@@ -115,7 +115,7 @@ for config in configurations:
         stderr_file = os.path.join(FOLDER_PATH, f'halo2_kzg_out_{file_suffix}')
         dhat_file = f'dhat_{file_suffix}.json'
         print(f"run command: {command}")
-        if run_command(command, stdout_file, stderr_file, dhat_file):
+        if run_command(command, stdout_file, stderr_file, dhat_file) is None:
             print(file_suffix)
         else:
             raise ValueError("WHY")
