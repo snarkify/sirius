@@ -1,6 +1,7 @@
 #!/bin/python
 
 import os
+import sys
 import subprocess
 import math
 
@@ -32,8 +33,7 @@ def run_command(command, stdout_file, stderr_file, dhat_file):
         result = subprocess.run(command, stdout=out, stderr=err, shell=True)
 
     if result.returncode != 0:
-        print(f"Command failed with exit code {result.returncode}. Stderr output:")
-        print(result.stderr.decode())
+        print(f"Command failed with exit code {result.returncode}")
     else:
         print("command running finished")
 
@@ -46,21 +46,21 @@ def run_command(command, stdout_file, stderr_file, dhat_file):
 
 # Define configurations
 configurations = [
-    {"type": "IPA",     "repeat_count": 2},
-    {"type": "IPA",     "repeat_count": 10},
-    {"type": "IPA",     "repeat_count": 20},
-    {"type": "IPA",     "repeat_count": 40},
-    {"type": "IPA",     "repeat_count": 60},
-    {"type": "IPA",     "repeat_count": 80},
-    {"type": "IPA",     "repeat_count": 100},
+        #{"type": "IPA",     "repeat_count": 2},
+        #{"type": "IPA",     "repeat_count": 10},
+        #{"type": "IPA",     "repeat_count": 20},
+        #{"type": "IPA",     "repeat_count": 40},
+        #{"type": "IPA",     "repeat_count": 60},
+        #{"type": "IPA",     "repeat_count": 80},
+        #{"type": "IPA",     "repeat_count": 100},
 
-    {"type": "KZG",     "repeat_count": 2},
-    {"type": "KZG",     "repeat_count": 10},
-    {"type": "KZG",     "repeat_count": 20},
-    {"type": "KZG",     "repeat_count": 40},
-    {"type": "KZG",     "repeat_count": 60},
-    {"type": "KZG",     "repeat_count": 80},
-    {"type": "KZG",     "repeat_count": 100},
+        #{"type": "KZG",     "repeat_count": 2},
+        #{"type": "KZG",     "repeat_count": 10},
+        #{"type": "KZG",     "repeat_count": 20},
+        #{"type": "KZG",     "repeat_count": 40},
+        #{"type": "KZG",     "repeat_count": 60},
+        #{"type": "KZG",     "repeat_count": 80},
+        #{"type": "KZG",     "repeat_count": 100},
 
     {"type": "Sirius",  "repeat_count": 2,   "fold_step": 1},
     {"type": "Sirius",  "repeat_count": 10,  "fold_step": 1},
@@ -78,7 +78,7 @@ for config in configurations:
 
     if config["type"] == "Sirius":
         k_table_size = calculate_k_table_size(config["repeat_count"])
-        commitment_key_size = max(21, k_table_size + 3)
+        commitment_key_size = max(21, k_table_size + 4)
         max_key_size = 27
         base_command = 'cargo re-cli-dhat merkle-tree trivial'
         while commitment_key_size <= max_key_size:
