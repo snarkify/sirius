@@ -31,7 +31,7 @@ impl<F: Field> FromIterator<F> for UnivariatePoly<F> {
 
 impl<F: Field> UnivariatePoly<F> {
     /// Evaluates the polynomial at a given challenge (point at field)
-    pub fn eval(self, challenge: F) -> F {
+    pub fn eval(&self, challenge: F) -> F {
         self.0
             .iter()
             .zip(iter::successors(Some(F::ONE), |val| Some(*val * challenge)))

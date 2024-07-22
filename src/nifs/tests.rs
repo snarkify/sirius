@@ -171,7 +171,7 @@ where
         ck,
         &pp,
         &mut ro_acc_prover,
-        &RelaxedPlonkTrace {
+        RelaxedPlonkTrace {
             U: f_U.clone(),
             W: f_W.clone(),
         },
@@ -210,7 +210,7 @@ where
         ck,
         &pp,
         &mut ro_acc_prover,
-        &RelaxedPlonkTrace {
+        RelaxedPlonkTrace {
             U: f_U.clone(),
             W: f_W,
         },

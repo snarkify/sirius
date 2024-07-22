@@ -208,7 +208,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
         ro_acc: &mut impl ROTrait<C::Base>,
-        accumulator: &Self::Accumulator,
+        accumulator: Self::Accumulator,
         incoming: &[PlonkTrace<C>; 1],
     ) -> Result<(Self::Accumulator, Self::Proof), Error> {
         let incoming = &incoming[0];

@@ -1,6 +1,6 @@
 use std::{iter, marker::PhantomData};
 
-use halo2_proofs::arithmetic::{CurveAffine, Field};
+use halo2_proofs::arithmetic::{self, CurveAffine, Field};
 use tracing::instrument;
 
 use super::*;
@@ -8,8 +8,11 @@ use crate::{
     commitment::CommitmentKey,
     constants::NUM_CHALLENGE_BITS,
     ff::PrimeField,
-    plonk::{PlonkStructure, PlonkTrace, RelaxedPlonkInstance},
-    polynomial::{univariate::UnivariatePoly, lagrange},
+    plonk::{
+        PlonkStructure, PlonkTrace, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkTrace,
+        RelaxedPlonkWitness,
+    },
+    polynomial::{lagrange, univariate::UnivariatePoly},
     sps, util,
 };
 
@@ -64,6 +67,99 @@ impl<C: CurveAffine> ProtoGalaxy<C> {
 
         accumulator
     }
+
+    fn fold_trace(
+        acc: RelaxedPlonkTrace<C>,
+        incoming: &[PlonkTrace<C>],
+        gamma: C::ScalarExt,
+        log_n: u32,
+    ) -> RelaxedPlonkTrace<C> {
+        let mut lagrange = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n);
+        let l_0: C::ScalarExt = lagrange
+            .next()
+            .expect("safe, because len of lagrange is `2^log_n`");
+
+        let mult =
+            |pt: C, val: C::ScalarExt| -> C { arithmetic::best_multiexp(&[val], &[pt]).into() };
+
+        let new_accumulator = RelaxedPlonkTrace::<C> {
+            U: RelaxedPlonkInstance {
+                W_commitments: acc
+                    .U
+                    .W_commitments
+                    .into_iter()
+                    .map(|w| mult(w, l_0))
+                    .collect(),
+                E_commitment: mult(acc.U.E_commitment, l_0),
+                instance: acc.U.instance.into_iter().map(|i| i * l_0).collect(),
+                challenges: acc.U.challenges.into_iter().map(|c| c * l_0).collect(),
+                u: acc.U.u * l_0,
+            },
+            W: RelaxedPlonkWitness {
+                W: acc
+                    .W
+                    .W
+                    .into_iter()
+                    .map(|r| r.into_iter().map(|w| w * l_0).collect())
+                    .collect(),
+                E: acc.W.E.iter().map(|e| *e * l_0).collect(),
+            },
+        };
+
+        incoming
+            .iter()
+            .zip(lagrange)
+            .fold(new_accumulator, |mut acc, (tr, l_n)| {
+                let PlonkTrace {
+                    u:
+                        PlonkInstance {
+                            W_commitments,
+                            instance,
+                            challenges,
+                        },
+                    w: PlonkWitness { W },
+                } = tr;
+
+                acc.U
+                    .W_commitments
+                    .iter_mut()
+                    .zip(W_commitments.iter())
+                    .for_each(|(acc_Wc, Wc)| {
+                        *acc_Wc = (*acc_Wc + mult(*Wc, l_n)).into();
+                    });
+
+                acc.U
+                    .instance
+                    .iter_mut()
+                    .zip(instance.iter())
+                    .for_each(|(acc_inst, inst)| {
+                        *acc_inst += *inst * l_n;
+                    });
+
+                acc.U
+                    .challenges
+                    .iter_mut()
+                    .zip(challenges.iter())
+                    .for_each(|(acc_cha, cha)| {
+                        *acc_cha += *cha * l_n;
+                    });
+
+                acc.W
+                    .W
+                    .iter_mut()
+                    .zip(W.iter())
+                    .for_each(|(acc_W_row, W_row)| {
+                        acc_W_row
+                            .iter_mut()
+                            .zip(W_row.iter())
+                            .for_each(|(acc_cell, cell)| {
+                                *acc_cell += *cell * l_n;
+                            });
+                    });
+
+                acc
+            })
+    }
 }
 
 pub struct ProtoGalaxyProverParam<C: CurveAffine> {
@@ -117,7 +213,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
         _ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
         ro_acc: &mut impl ROTrait<C::Base>,
-        accumulator: &Self::Accumulator,
+        accumulator: Self::Accumulator,
         incoming: &[PlonkTrace<C>; L],
     ) -> Result<(Self::Accumulator, Self::Proof), Error> {
         let log_n = Self::get_count_of_valuation(&pp.S)
@@ -127,7 +223,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
         let delta = Self::generate_challenge(
             &pp.pp_digest,
             ro_acc,
-            accumulator,
+            &accumulator,
             incoming.iter().map(|t| &t.u),
         );
 
@@ -158,7 +254,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
             &pp.S,
             alpha,
             betas_stroke.iter().copied(),
-            accumulator.trace,
+            &accumulator.trace,
             incoming,
         )?;
 
@@ -171,16 +267,17 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
             lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
                 .next()
                 .unwrap();
-        let poly_Z_for_gamme = lagrange::eval_vanish_polynomial(log_n, gamma);
+        let poly_Z_for_gamma = lagrange::eval_vanish_polynomial(log_n, gamma);
         let poly_K_gamma = poly_K.eval(gamma);
 
-        let new_accumulator = Accumulator {
-            betas: betas_stroke,
-            e: (poly_F_alpha * lagrange_zero_for_gamma) + (poly_Z_for_gamme * poly_K_gamma),
-            trace: todo!(),
-        };
-
-        Ok((accumulator.fold(gamma), ProtoGalaxyProof { poly_F, poly_K }))
+        Ok((
+            Accumulator {
+                betas: betas_stroke,
+                e: (poly_F_alpha * lagrange_zero_for_gamma) + (poly_Z_for_gamma * poly_K_gamma),
+                trace: Self::fold_trace(accumulator.trace, incoming, gamma, log_n),
+            },
+            ProtoGalaxyProof { poly_F, poly_K },
+        ))
     }
 
     fn verify(
