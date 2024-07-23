@@ -295,7 +295,6 @@ where
             .unwrap_or_else(|| *self.get_default_value(&index.level))
     }
 
-    #[instrument(skip(self))]
     pub fn update_leaf(&mut self, index: u32, input: F) -> Proof<F> {
         let mut current = Index::new(index, Level::zero()).unwrap();
 
