@@ -7,7 +7,7 @@ use halo2_proofs::{
     plonk,
     poly::kzg::{
         commitment::{KZGCommitmentScheme, ParamsKZG},
-        multiopen::{ProverGWC, VerifierGWC},
+        multiopen::{ProverSHPLONK, VerifierSHPLONK},
         strategy::SingleStrategy,
     },
     transcript::{
@@ -144,7 +144,7 @@ pub fn run(repeat_count: usize, clean_cache: bool) {
     let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
     plonk::create_proof::<
         KZGCommitmentScheme<Bn256>,
-        ProverGWC<'_, Bn256>,
+        ProverSHPLONK<'_, Bn256>,
         Challenge255<C1Affine>,
         OsRng,
         Blake2bWrite<Vec<u8>, C1Affine, Challenge255<_>>,
@@ -161,7 +161,7 @@ pub fn run(repeat_count: usize, clean_cache: bool) {
 
     plonk::verify_proof::<
         KZGCommitmentScheme<Bn256>,
-        VerifierGWC<'_, Bn256>,
+        VerifierSHPLONK<'_, Bn256>,
         Challenge255<C1Affine>,
         Blake2bRead<&[u8], C1Affine, Challenge255<C1Affine>>,
         SingleStrategy<'_, Bn256>,
