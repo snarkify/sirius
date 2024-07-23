@@ -110,8 +110,11 @@ pub fn run(repeat_count: usize, clean_cache: bool) {
     let k_table_size = (ROWS * repeat_count).next_power_of_two().ilog2();
     info!("k table size is {k_table_size}");
 
-    let circuit =
-        MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(&mut rand::thread_rng(), 1, 1);
+    let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
+        &mut rand::thread_rng(),
+        repeat_count,
+        1,
+    );
 
     info!("circuit created");
 
