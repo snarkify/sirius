@@ -236,6 +236,24 @@ pub struct RelaxedPlonkTrace<C: CurveAffine> {
     pub W: RelaxedPlonkWitness<C::Scalar>,
 }
 
+#[derive(Debug)]
+pub struct RelaxedPlonkTraceArgs {
+    num_io: usize,
+    num_challenges: usize,
+    num_witness: usize,
+    k_table_size: usize,
+    round_sizes: Box<[usize]>,
+}
+
+impl<C: CurveAffine> RelaxedPlonkTrace<C> {
+    pub fn new(args: RelaxedPlonkTraceArgs) -> Self {
+        Self {
+            U: RelaxedPlonkInstance::new(args.num_io, args.num_challenges, args.num_witness),
+            W: RelaxedPlonkWitness::new(args.k_table_size, &args.round_sizes),
+        }
+    }
+}
+
 // TODO #31 docs
 #[derive(Debug, Clone)]
 pub struct PlonkTrace<C: CurveAffine> {
