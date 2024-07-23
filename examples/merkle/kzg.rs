@@ -115,7 +115,12 @@ pub fn run(repeat_count: usize, clean_cache: bool) {
 
     info!("circuit created");
 
-    info!("kzg repeat_count={repeat_count}, k_table_size={k_table_size}");
+    let _s = info_span!(
+        "kzg",
+        repeat_count = repeat_count,
+        k_table_size = k_table_size
+    )
+    .entered();
 
     let cache = Path::new(FOLDER).join("merkle").join("kzg");
 
