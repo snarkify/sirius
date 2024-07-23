@@ -79,7 +79,7 @@ impl<C: CurveAffine> ProtoGalaxy<C> {
             .next()
             .expect("safe, because len of lagrange is `2^log_n`");
 
-        let mult =
+        let ecc_mul =
             |pt: C, val: C::ScalarExt| -> C { arithmetic::best_multiexp(&[val], &[pt]).into() };
 
         let new_accumulator = RelaxedPlonkTrace::<C> {
@@ -88,9 +88,9 @@ impl<C: CurveAffine> ProtoGalaxy<C> {
                     .U
                     .W_commitments
                     .into_iter()
-                    .map(|w| mult(w, l_0))
+                    .map(|w| ecc_mul(w, l_0))
                     .collect(),
-                E_commitment: mult(acc.U.E_commitment, l_0),
+                E_commitment: ecc_mul(acc.U.E_commitment, l_0),
                 instance: acc.U.instance.into_iter().map(|i| i * l_0).collect(),
                 challenges: acc.U.challenges.into_iter().map(|c| c * l_0).collect(),
                 u: acc.U.u * l_0,
@@ -125,7 +125,7 @@ impl<C: CurveAffine> ProtoGalaxy<C> {
                     .iter_mut()
                     .zip(W_commitments.iter())
                     .for_each(|(acc_Wc, Wc)| {
-                        *acc_Wc = (*acc_Wc + mult(*Wc, l_n)).into();
+                        *acc_Wc = (*acc_Wc + ecc_mul(*Wc, l_n)).into();
                     });
 
                 acc.U
