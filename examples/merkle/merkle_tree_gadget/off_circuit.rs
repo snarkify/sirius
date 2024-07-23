@@ -2,13 +2,13 @@ use std::{array, collections::HashMap, fmt, iter, num::NonZeroUsize};
 
 use itertools::Itertools;
 use serde::Serialize;
-use tracing::*;
-
-use super::{RATE, T};
 use sirius::{
     halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
     poseidon::{PoseidonRO, ROPair, Spec},
 };
+use tracing::*;
+
+use super::{RATE, T};
 
 type Hasher<F> = <PoseidonRO<T, RATE> as ROPair<F>>::OffCircuit;
 
@@ -295,7 +295,6 @@ where
             .unwrap_or_else(|| *self.get_default_value(&index.level))
     }
 
-    #[instrument(skip(self))]
     pub fn update_leaf(&mut self, index: u32, input: F) -> Proof<F> {
         let mut current = Index::new(index, Level::zero()).unwrap();
 
