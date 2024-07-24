@@ -25,6 +25,7 @@ type Base = <Affine as CurveAffine>::Base;
 
 type RO<F> = PoseidonHash<F, T, RATE>;
 type Instance<F> = Vec<F>;
+const L: usize = 2;
 
 struct Mock<CIRCUIT: Circuit<Scalar>> {
     S: PlonkStructure<Scalar>,
@@ -34,13 +35,16 @@ struct Mock<CIRCUIT: Circuit<Scalar>> {
     ro_acc_prover: RO<Base>,
     ro_acc_verifier: RO<Scalar>,
 
-    circuit_meta: [(Witness<Scalar>, Instance<Scalar>); 2],
+    circuit_meta: [(Witness<Scalar>, Instance<Scalar>); L],
+
+    pp: <ProtoGalaxy<Affine> as FoldingScheme<Affine, L>>::ProverParam,
+    vp: <ProtoGalaxy<Affine> as FoldingScheme<Affine, L>>::VerifierParam,
 
     _p: PhantomData<CIRCUIT>,
 }
 
 impl<C: Circuit<Scalar>> Mock<C> {
-    pub fn new(k_table_size: u32, circuits: [(C, Vec<Scalar>); 2]) -> Self {
+    pub fn new(k_table_size: u32, circuits: [(C, Vec<Scalar>); L]) -> Self {
         let circuits_runners =
             circuits.map(|(circuit, instance)| CircuitRunner::new(k_table_size, circuit, instance));
 
@@ -56,6 +60,12 @@ impl<C: Circuit<Scalar>> Mock<C> {
             )
         });
 
+        let (pp, vp) = <ProtoGalaxy<Affine> as FoldingScheme<Affine, 1>>::setup_params(
+            Affine::identity(),
+            S.clone(),
+        )
+        .unwrap();
+
         fn ro<F: PrimeFieldBits + FromUniformBytes<64>>() -> PoseidonHash<F, T, RATE> {
             PoseidonHash::<F, T, RATE>::new(Spec::<F, T, RATE>::new(R_F, R_P))
         }
@@ -66,9 +76,29 @@ impl<C: Circuit<Scalar>> Mock<C> {
             ro_acc_prover: ro(),
             ro_acc_verifier: ro(),
             circuit_meta,
+            pp,
+            vp,
             S,
             _p: PhantomData,
         }
+    }
+
+    pub fn generate_plonk_traces(&mut self) -> [PlonkTrace<Affine>; L] {
+        self.circuit_meta
+            .iter()
+            .map(|(witness, instance)| {
+                <ProtoGalaxy<Affine> as FoldingScheme<Affine, L>>::generate_plonk_trace(
+                    &self.ck,
+                    instance,
+                    witness,
+                    &self.pp,
+                    &mut self.ro_nark_verifier,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
     }
 }
 
@@ -84,27 +114,14 @@ fn simple_proto() {
 
     let mut m = Mock::new(10, [(circuit1, public_inputs1), (circuit2, public_inputs2)]);
 
-    let (pp, _vp) = <ProtoGalaxy<Affine> as FoldingScheme<Affine, 1>>::setup_params(
-        Affine::identity(),
-        m.S.clone(),
-    )
-    .unwrap();
+    let incoming = m.generate_plonk_traces();
 
-    let incoming = m.circuit_meta.map(|(witness, instance)| {
-        <ProtoGalaxy<Affine> as FoldingScheme<Affine, 2>>::generate_plonk_trace(
-            &m.ck,
-            &instance,
-            &witness,
-            &pp,
-            &mut m.ro_nark_verifier,
-        )
-        .unwrap()
-    });
+    let acc =
+        ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&m.S), &m.pp, &mut m.ro_acc_prover);
 
-    let acc = ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&m.S), &pp, &mut m.ro_acc_prover);
     let (_new_acc, _proof) = <ProtoGalaxy<Affine> as FoldingScheme<Affine, 2>>::prove(
         &m.ck,
-        &pp,
+        &m.pp,
         &mut m.ro_acc_prover,
         acc,
         &incoming,
