@@ -90,10 +90,11 @@ impl<C: CurveAffine> ProtoGalaxy<C> {
                     .into_iter()
                     .map(|w| ecc_mul(w, l_0))
                     .collect(),
-                E_commitment: ecc_mul(acc.U.E_commitment, l_0),
                 instance: acc.U.instance.into_iter().map(|i| i * l_0).collect(),
                 challenges: acc.U.challenges.into_iter().map(|c| c * l_0).collect(),
                 u: acc.U.u * l_0,
+                // Ignore for protogalaxy
+                E_commitment: C::identity(),
             },
             W: RelaxedPlonkWitness {
                 W: acc
