@@ -58,7 +58,7 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
         ro_acc: &mut impl ROTrait<C::Base>,
-        accumulator: &Self::Accumulator,
+        accumulator: Self::Accumulator,
         incoming: &[PlonkTrace<C>; L],
     ) -> Result<(Self::Accumulator, Self::Proof), Self::Error>;
 

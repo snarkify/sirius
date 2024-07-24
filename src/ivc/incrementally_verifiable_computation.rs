@@ -384,7 +384,7 @@ where
             pp.secondary.ck(),
             &self.secondary_nifs_pp,
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-            &self.secondary.relaxed_trace,
+            self.secondary.relaxed_trace.clone(),
             &self.secondary_trace,
         )?;
 
@@ -458,7 +458,7 @@ where
             pp.primary.ck(),
             &self.primary_nifs_pp,
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-            &self.primary.relaxed_trace,
+            self.primary.relaxed_trace.clone(),
             &primary_plonk_trace,
         )?;
 

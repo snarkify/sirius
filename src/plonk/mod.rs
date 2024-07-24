@@ -231,6 +231,7 @@ pub struct RelaxedPlonkWitness<F: PrimeField> {
 }
 
 // TODO #31 docs
+#[derive(Debug, Clone)]
 pub struct RelaxedPlonkTrace<C: CurveAffine> {
     pub U: RelaxedPlonkInstance<C>,
     pub W: RelaxedPlonkWitness<C::Scalar>,

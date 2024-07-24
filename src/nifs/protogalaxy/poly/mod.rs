@@ -218,7 +218,7 @@ pub(crate) fn compute_F<F: PrimeField>(
 pub(crate) fn compute_G<F: PrimeField>(
     S: &PlonkStructure<F>,
     betas_stroke: impl Iterator<Item = F>,
-    accumulator: impl Sync + GetChallenges<F> + GetWitness<F>,
+    accumulator: &(impl Sync + GetChallenges<F> + GetWitness<F>),
     traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
 ) -> Result<UnivariatePoly<F>, Error> {
     let ctx = QueryIndexContext::from(S);
@@ -339,11 +339,11 @@ impl<F: PrimeField> Iterator for BetaStrokeIter<F> {
 pub(crate) fn compute_K<F: WithSmallOrderMulGroup<3>>(
     S: &PlonkStructure<F>,
     f_alpha: F,
-    challenges: PolyChallenges<F>,
-    accumulator: impl Sync + GetChallenges<F> + GetWitness<F>,
+    betas_stroke: impl Iterator<Item = F>,
+    accumulator: &(impl Sync + GetChallenges<F> + GetWitness<F>),
     traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
 ) -> Result<UnivariatePoly<F>, Error> {
-    let mut g_poly = compute_G(S, challenges.iter_beta_stroke(), accumulator, traces)?;
+    let mut g_poly = compute_G(S, betas_stroke, accumulator, traces)?;
     // is coeffs here, will transform to evals by fft later
     let ctx = QueryIndexContext::from(S);
 
@@ -491,7 +491,7 @@ mod test {
         assert!(super::compute_G(
             &S,
             iter::repeat_with(|| Field::random(&mut rnd)),
-            trace.clone(),
+            &trace.clone(),
             &[trace],
         )
         .unwrap()
@@ -514,7 +514,7 @@ mod test {
             super::compute_G(
                 &S,
                 iter::repeat_with(|| Field::random(&mut rnd)),
-                trace.clone(),
+                &trace.clone(),
                 &[trace]
             ),
             Ok(UnivariatePoly::from_iter(

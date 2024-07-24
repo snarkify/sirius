@@ -17,12 +17,12 @@ pub(crate) struct FoldedTrace<F: PrimeField> {
 impl<F: PrimeField> FoldedTrace<F> {
     pub(crate) fn new(
         points_for_fft: &[F],
-        accumulator: impl Sync + GetChallenges<F> + GetWitness<F>,
+        accumulator: &(impl Sync + GetChallenges<F> + GetWitness<F>),
         traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
     ) -> Box<[Self]> {
-        let folded_witnesses_collection = fold_witnesses(points_for_fft, &accumulator, traces);
+        let folded_witnesses_collection = fold_witnesses(points_for_fft, accumulator, traces);
         let folded_challenges_collection =
-            fold_plonk_challenges(points_for_fft, &accumulator, traces);
+            fold_plonk_challenges(points_for_fft, accumulator, traces);
 
         folded_witnesses_collection
             .into_iter()
