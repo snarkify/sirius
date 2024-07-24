@@ -27,8 +27,9 @@ type RO<F> = PoseidonHash<F, T, RATE>;
 type Instance<F> = Vec<F>;
 const L: usize = 2;
 
-type ProverParam = <ProtoGalaxy<Affine, L> as FoldingScheme<Affine, L>>::ProverParam;
-type VerifierParam = <ProtoGalaxy<Affine, L> as FoldingScheme<Affine, L>>::VerifierParam;
+type ProtoGalaxy = crate::nifs::protogalaxy::ProtoGalaxy<Affine, L>;
+type ProverParam = <ProtoGalaxy as FoldingScheme<Affine, L>>::ProverParam;
+type VerifierParam = <ProtoGalaxy as FoldingScheme<Affine, L>>::VerifierParam;
 
 struct Mock<CIRCUIT: Circuit<Scalar>> {
     S: PlonkStructure<Scalar>,
@@ -63,8 +64,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
             )
         });
 
-        let (pp, vp) =
-            ProtoGalaxy::<Affine, L>::setup_params(Affine::identity(), S.clone()).unwrap();
+        let (pp, vp) = ProtoGalaxy::setup_params(Affine::identity(), S.clone()).unwrap();
 
         fn ro<F: PrimeFieldBits + FromUniformBytes<64>>() -> PoseidonHash<F, T, RATE> {
             PoseidonHash::<F, T, RATE>::new(Spec::<F, T, RATE>::new(R_F, R_P))
@@ -87,7 +87,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
         self.circuit_meta
             .iter()
             .map(|(witness, instance)| {
-                ProtoGalaxy::<Affine, L>::generate_plonk_trace(
+                ProtoGalaxy::generate_plonk_trace(
                     &self.ck,
                     instance,
                     witness,
@@ -103,26 +103,32 @@ impl<C: Circuit<Scalar>> Mock<C> {
 }
 
 #[test]
-fn simple_proto() {
-    let inputs1 = (1..10).map(Scalar::from).collect();
-    let circuit1 = RandomLinearCombinationCircuit::new(inputs1, Scalar::from_u128(2));
-    let public_inputs1 = vec![Scalar::from_u128(4097)];
-
-    let inputs2 = (2..11).map(Scalar::from).collect();
-    let circuit2 = RandomLinearCombinationCircuit::new(inputs2, Scalar::from_u128(3));
-    let public_inputs2 = vec![Scalar::from_u128(93494)];
-
-    let mut m = Mock::new(10, [(circuit1, public_inputs1), (circuit2, public_inputs2)]);
+fn random_linear_combination() {
+    let mut m = Mock::new(
+        10,
+        [
+            (
+                RandomLinearCombinationCircuit::new(
+                    (1..10).map(Scalar::from).collect(),
+                    Scalar::from(2),
+                ),
+                vec![Scalar::from(4097)],
+            ),
+            (
+                RandomLinearCombinationCircuit::new(
+                    (2..11).map(Scalar::from).collect(),
+                    Scalar::from(3),
+                ),
+                vec![Scalar::from(93494)],
+            ),
+        ],
+    );
 
     let incoming = m.generate_plonk_traces();
 
-    let acc = ProtoGalaxy::<Affine, L>::new_accumulator(
-        AccumulatorArgs::from(&m.S),
-        &m.pp,
-        &mut m.ro_acc_prover,
-    );
+    let acc =
+        ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&m.S), &m.pp, &mut m.ro_acc_prover);
 
-    let (_new_acc, _proof) =
-        ProtoGalaxy::<Affine, L>::prove(&m.ck, &m.pp, &mut m.ro_acc_prover, acc, &incoming)
-            .unwrap();
+    let (_new_acc, _proof) = ProtoGalaxy::prove(&m.ck, &m.pp, &mut m.ro_acc_prover, acc, &incoming)
+        .expect("`protogalaxy::prove` failed");
 }
