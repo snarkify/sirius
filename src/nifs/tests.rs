@@ -25,7 +25,7 @@ use crate::{
 #[derive(thiserror::Error, Debug)]
 enum Error<C: CurveAffine> {
     #[error(transparent)]
-    Nifs(#[from] nifs::Error),
+    Nifs(#[from] nifs::vanilla::Error),
     #[error(transparent)]
     Plonk(#[from] plonk::Error),
     #[error("while verify: {errors:?}")]

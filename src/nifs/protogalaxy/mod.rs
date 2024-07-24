@@ -10,6 +10,7 @@ use crate::{
     ff::PrimeField,
     plonk::{PlonkStructure, PlonkTrace, RelaxedPlonkInstance},
     polynomial::univariate::UnivariatePoly,
+    sps,
 };
 
 mod accumulator;
@@ -76,7 +77,16 @@ pub struct ProtoGalaxyProof<F: PrimeField> {
     pub poly_K: UnivariatePoly<F>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error(transparent)]
+    Sps(#[from] sps::Error),
+    #[error(transparent)]
+    Poly(#[from] poly::Error),
+}
+
 impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
+    type Error = Error;
     type ProverParam = ProtoGalaxyProverParam<C>;
     type VerifierParam = C;
     type Accumulator = Accumulator<C>;
