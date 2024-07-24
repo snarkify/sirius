@@ -17,7 +17,7 @@ mod circuit_runner;
 mod constraint_system_metainfo;
 mod witness_data;
 
-pub use circuit_runner::CircuitRunner;
+pub use circuit_runner::{CircuitRunner, Witness};
 pub(crate) use constraint_system_metainfo::ConstraintSystemMetainfo;
 pub(crate) use witness_data::WitnessCollector;
 

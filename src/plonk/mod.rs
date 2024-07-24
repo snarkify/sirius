@@ -246,12 +246,30 @@ pub struct RelaxedPlonkTraceArgs {
     round_sizes: Box<[usize]>,
 }
 
+impl<F: PrimeField> From<&PlonkStructure<F>> for RelaxedPlonkTraceArgs {
+    fn from(value: &PlonkStructure<F>) -> Self {
+        Self {
+            num_io: value.num_io,
+            num_challenges: value.num_challenges,
+            num_witness: value.round_sizes.len(),
+            k_table_size: value.k,
+            round_sizes: value.round_sizes.clone().into_boxed_slice(),
+        }
+    }
+}
+
 impl<C: CurveAffine> RelaxedPlonkTrace<C> {
     pub fn new(args: RelaxedPlonkTraceArgs) -> Self {
         Self {
             U: RelaxedPlonkInstance::new(args.num_io, args.num_challenges, args.num_witness),
             W: RelaxedPlonkWitness::new(args.k_table_size, &args.round_sizes),
         }
+    }
+}
+
+impl<C: CurveAffine> From<&PlonkStructure<C::ScalarExt>> for RelaxedPlonkTrace<C> {
+    fn from(value: &PlonkStructure<C::ScalarExt>) -> Self {
+        Self::new(RelaxedPlonkTraceArgs::from(value))
     }
 }
 

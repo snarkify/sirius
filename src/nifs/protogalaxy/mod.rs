@@ -292,3 +292,6 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
         todo!()
     }
 }
+
+#[cfg(test)]
+mod tests;
