@@ -24,11 +24,11 @@ pub use accumulator::{Accumulator, AccumulatorArgs};
 /// ProtoGalaxy: Non Interactive Folding Scheme that implements main protocol defined in paper
 /// [protogalaxy](https://eprint.iacr.org/2023/1106)
 #[derive(Clone, Debug)]
-pub struct ProtoGalaxy<C: CurveAffine> {
+pub struct ProtoGalaxy<C: CurveAffine, const L: usize> {
     _marker: PhantomData<C>,
 }
 
-impl<C: CurveAffine> ProtoGalaxy<C> {
+impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     #[instrument(skip_all)]
     pub(crate) fn generate_challenge<'i>(
         pp_digest: &C,
@@ -182,7 +182,7 @@ pub enum Error {
     Poly(#[from] poly::Error),
 }
 
-impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
+impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
     type Error = Error;
     type ProverParam = ProtoGalaxyProverParam<C>;
     type VerifierParam = C;

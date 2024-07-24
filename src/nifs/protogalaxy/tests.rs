@@ -27,6 +27,9 @@ type RO<F> = PoseidonHash<F, T, RATE>;
 type Instance<F> = Vec<F>;
 const L: usize = 2;
 
+type ProverParam = <ProtoGalaxy<Affine, L> as FoldingScheme<Affine, L>>::ProverParam;
+type VerifierParam = <ProtoGalaxy<Affine, L> as FoldingScheme<Affine, L>>::VerifierParam;
+
 struct Mock<CIRCUIT: Circuit<Scalar>> {
     S: PlonkStructure<Scalar>,
     ck: CommitmentKey<Affine>,
@@ -37,8 +40,8 @@ struct Mock<CIRCUIT: Circuit<Scalar>> {
 
     circuit_meta: [(Witness<Scalar>, Instance<Scalar>); L],
 
-    pp: <ProtoGalaxy<Affine> as FoldingScheme<Affine, L>>::ProverParam,
-    vp: <ProtoGalaxy<Affine> as FoldingScheme<Affine, L>>::VerifierParam,
+    pp: ProverParam,
+    vp: VerifierParam,
 
     _p: PhantomData<CIRCUIT>,
 }
@@ -60,11 +63,8 @@ impl<C: Circuit<Scalar>> Mock<C> {
             )
         });
 
-        let (pp, vp) = <ProtoGalaxy<Affine> as FoldingScheme<Affine, L>>::setup_params(
-            Affine::identity(),
-            S.clone(),
-        )
-        .unwrap();
+        let (pp, vp) =
+            ProtoGalaxy::<Affine, L>::setup_params(Affine::identity(), S.clone()).unwrap();
 
         fn ro<F: PrimeFieldBits + FromUniformBytes<64>>() -> PoseidonHash<F, T, RATE> {
             PoseidonHash::<F, T, RATE>::new(Spec::<F, T, RATE>::new(R_F, R_P))
@@ -87,7 +87,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
         self.circuit_meta
             .iter()
             .map(|(witness, instance)| {
-                <ProtoGalaxy<Affine> as FoldingScheme<Affine, L>>::generate_plonk_trace(
+                ProtoGalaxy::<Affine, L>::generate_plonk_trace(
                     &self.ck,
                     instance,
                     witness,
@@ -116,15 +116,13 @@ fn simple_proto() {
 
     let incoming = m.generate_plonk_traces();
 
-    let acc =
-        ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&m.S), &m.pp, &mut m.ro_acc_prover);
-
-    let (_new_acc, _proof) = <ProtoGalaxy<Affine> as FoldingScheme<Affine, 2>>::prove(
-        &m.ck,
+    let acc = ProtoGalaxy::<Affine, L>::new_accumulator(
+        AccumulatorArgs::from(&m.S),
         &m.pp,
         &mut m.ro_acc_prover,
-        acc,
-        &incoming,
-    )
-    .unwrap();
+    );
+
+    let (_new_acc, _proof) =
+        ProtoGalaxy::<Affine, L>::prove(&m.ck, &m.pp, &mut m.ro_acc_prover, acc, &incoming)
+            .unwrap();
 }
