@@ -263,3 +263,6 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         Ok(U1.fold(U2, cross_term_commits, &r))
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -5,279 +5,33 @@ use halo2_proofs::{
     plonk::{self, Advice, Circuit, Column, ConstraintSystem, Instance, Selector},
     poly::Rotation,
 };
-use some_to_err::*;
 
-use super::*;
-use crate::{
-    ff::{PrimeField, PrimeFieldBits},
-    halo2curves::{
-        bn256::{Fr, G1Affine},
-        group::ff::FromUniformBytes,
-    },
-    nifs::{self, vanilla::VanillaFS},
-    plonk::{
-        PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness,
-    },
-    table::CircuitRunner,
-    util::create_ro,
-};
+use crate::{ff::PrimeField, halo2curves::group::ff::FromUniformBytes};
 
-#[derive(thiserror::Error, Debug)]
-enum Error<C: CurveAffine> {
-    #[error(transparent)]
-    Nifs(#[from] nifs::vanilla::Error),
-    #[error(transparent)]
-    Plonk(#[from] plonk::Error),
-    #[error("while verify: {errors:?}")]
-    Verify {
-        errors: Vec<(&'static str, crate::plonk::Error)>,
-    },
-    #[error("not equal: {from_verify:?} != {from_prove:?}")]
-    VerifyProveNotMatch {
-        from_verify: Box<RelaxedPlonkInstance<C>>,
-        from_prove: Box<RelaxedPlonkInstance<C>>,
-    },
-}
-impl<C: CurveAffine> Error<C> {
-    fn check_equality(
-        from_verify: &RelaxedPlonkInstance<C>,
-        from_prove: &RelaxedPlonkInstance<C>,
-    ) -> Result<(), Self> {
-        from_verify
-            .ne(from_prove)
-            .then(|| Self::VerifyProveNotMatch {
-                from_verify: Box::new(from_verify.clone()),
-                from_prove: Box::new(from_prove.clone()),
-            })
-            .err_or(())
-    }
-}
-
-fn prepare_trace<C, F1, F2, CT>(
-    K: u32,
-    circuit1: CT,
-    circuit2: CT,
-    public_inputs1: Vec<F1>,
-    public_inputs2: Vec<F1>,
-    pp_digest: C,
-) -> Result<
-    (
-        CommitmentKey<C>,
-        PlonkStructure<F1>,
-        PlonkTrace<C>,
-        PlonkTrace<C>,
-    ),
-    Error<C>,
->
-where
-    C: CurveAffine<ScalarExt = F1, Base = F2>,
-    F1: PrimeField,
-    F2: PrimeFieldBits + FromUniformBytes<64>,
-    CT: Circuit<F1>,
-{
-    const T: usize = 3;
-    const RATE: usize = 2;
-    const R_F: usize = 4;
-    const R_P: usize = 3;
-
-    let td1 = CircuitRunner::new(K, circuit1, public_inputs1.clone());
-    let num_lookup = td1.cs.lookups().len();
-    let p1 = smallest_power(td1.cs.num_advice_columns() + 5 * num_lookup, K);
-    let p2 = smallest_power(td1.cs.num_selectors + td1.cs.num_fixed_columns(), K);
-    let ck = CommitmentKey::<C>::setup(p1.max(p2), b"prepare_trace");
-
-    let S = td1.try_collect_plonk_structure()?;
-    let W1 = td1.try_collect_witness()?;
-
-    let td2 = CircuitRunner::new(K, circuit2, public_inputs2.clone());
-    let W2 = td2.try_collect_witness()?;
-
-    let mut ro_nark_prepare = create_ro::<C::Base, T, RATE, R_F, R_P>();
-    let mut ro_nark_decider = create_ro::<C::Base, T, RATE, R_F, R_P>();
-
-    let (pp, _vp) = VanillaFS::setup_params(pp_digest, S.clone())?;
-
-    let pair1 =
-        VanillaFS::generate_plonk_trace(&ck, &public_inputs1, &W1, &pp, &mut ro_nark_prepare)?;
-    let pair1_relaxed = pair1.to_relax(S.k);
-
-    let pair2 =
-        VanillaFS::generate_plonk_trace(&ck, &public_inputs2, &W2, &pp, &mut ro_nark_prepare)?;
-    let pair2_relaxed = pair2.to_relax(S.k);
-
-    let mut errors = Vec::new();
-
-    if let Err(err) = S.is_sat(&ck, &mut ro_nark_decider, &pair1.u, &pair1.w) {
-        errors.push(("is_sat_pair1", err));
-    }
-    if let Err(err) = S.is_sat_perm(&pair1_relaxed.U, &pair1_relaxed.W) {
-        errors.push(("is_sat_perm_pair1", err));
-    }
-    if let Err(err) = S.is_sat(&ck, &mut ro_nark_decider, &pair2.u, &pair2.w) {
-        errors.push(("is_sat_pair2", err));
-    }
-    if let Err(err) = S.is_sat_perm(&pair2_relaxed.U, &pair2_relaxed.W) {
-        errors.push(("is_sat_perm_pair2", err));
-    }
-
-    if errors.is_empty() {
-        Ok((ck, S, pair1, pair2))
-    } else {
-        Err(Error::Verify { errors })
-    }
-}
-
-/// this function will fold two plonk witness-instance pairs consecutively
-/// it folds the first instance into a default relaxed plonk instance to get folded (f_U, f_W)
-/// next it folds the second instance into the first folded (f_U, f_W)
-/// there are several things to be checked: whether two such instances satisfy plonk relation
-/// (i.e. is_sat), whether two such folded instance satisfy relaxed plonk relation (i.e.
-/// is_sat_relax)
-/// We have to check:
-/// (1) each of the two individual witness-instance pairs satisfy custom gates relation as well
-/// as copy constrains relation (i.e. permutation relation)
-/// (2) the first folded witness-instance pair satisfies the relaxed polynomial relation and
-/// copy constrains relation
-/// (3) the second folded witness-instance pair satisfies the relaxed polynomial relation  and
-/// copy constrains relation
-fn fold_instances<C, F1, F2>(
-    ck: &CommitmentKey<C>,
-    S: &PlonkStructure<F1>,
-    pair1: PlonkTrace<C>,
-    pair2: PlonkTrace<C>,
-    pp_digest: C,
-) -> Result<(), Error<C>>
-where
-    C: CurveAffine<ScalarExt = F1, Base = F2>,
-    F1: PrimeField,
-    F2: PrimeFieldBits + FromUniformBytes<64>,
-{
-    const T: usize = 3;
-    const RATE: usize = 2;
-    const R_F: usize = 4;
-    const R_P: usize = 3;
-
-    let mut f_U = RelaxedPlonkInstance::new(S.num_io, S.num_challenges, S.round_sizes.len());
-    let mut f_W = RelaxedPlonkWitness::new(S.k, &S.round_sizes);
-
-    let mut ro_nark_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
-    let mut ro_acc_prover = create_ro::<C::Base, T, RATE, R_F, R_P>();
-    let mut ro_acc_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
-
-    let (pp, vp) = VanillaFS::setup_params(pp_digest, S.clone())?;
-
-    let pair1 = [pair1];
-    let (RelaxedPlonkTrace { U: U_from_prove, W }, cross_term_commits) = VanillaFS::prove(
-        ck,
-        &pp,
-        &mut ro_acc_prover,
-        RelaxedPlonkTrace {
-            U: f_U.clone(),
-            W: f_W.clone(),
-        },
-        &pair1,
-    )?;
-
-    let U_from_verify = VanillaFS::verify(
-        &vp,
-        &mut ro_nark_verifier,
-        &mut ro_acc_verifier,
-        &f_U,
-        &pair1.map(|p| p.u),
-        &cross_term_commits,
-    )?;
-    Error::check_equality(&U_from_verify, &U_from_prove)?;
-
-    f_U = U_from_verify;
-    f_W = W;
-
-    let mut errors = Vec::new();
-    if let Err(err) = S.is_sat_relaxed(ck, &f_U, &f_W) {
-        errors.push(("is_sat_relaxed 1", err));
-    }
-    if let Err(err) = S.is_sat_perm(&f_U, &f_W) {
-        errors.push(("is_sat_perm 1", err));
-    }
-
-    let pair2 = [pair2];
-    let (
-        RelaxedPlonkTrace {
-            U: U_from_prove,
-            W: _W,
-        },
-        cross_term_commits,
-    ) = VanillaFS::prove(
-        ck,
-        &pp,
-        &mut ro_acc_prover,
-        RelaxedPlonkTrace {
-            U: f_U.clone(),
-            W: f_W,
-        },
-        &pair2,
-    )?;
-
-    let U_from_verify = VanillaFS::verify(
-        &vp,
-        &mut ro_nark_verifier,
-        &mut ro_acc_verifier,
-        &f_U,
-        &pair2.map(|p| p.u),
-        &cross_term_commits,
-    )?;
-    assert_eq!(U_from_prove, U_from_verify);
-
-    f_U = U_from_verify;
-    f_W = _W;
-
-    if let Err(err) = S.is_sat_relaxed(ck, &f_U, &f_W) {
-        errors.push(("is_sat_relaxed 2", err));
-    }
-    if let Err(err) = S.is_sat_perm(&f_U, &f_W) {
-        errors.push(("is_sat_perm 2", err));
-    }
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(Error::Verify { errors })
-    }
-}
-
-/// calculate smallest w such that 2^w >= n*(2^K)
-fn smallest_power(n: usize, K: u32) -> usize {
-    let n_f64 = n as f64;
-    let mul_res = n_f64 * (2f64.powi(K as i32));
-    let log_result = mul_res.log2().ceil();
-    log_result as usize
-}
-
-// test with single custom gate without lookup
-mod zero_round_test {
-    use tracing_test::traced_test;
-
+pub(crate) mod random_linear_combination_circuit {
     use super::*;
     use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
 
     const T: usize = 3;
 
     #[derive(Clone, Debug)]
-    struct TestCircuitConfig {
+    pub struct TestCircuitConfig {
         pconfig: MainGateConfig<T>,
         instance: Column<Instance>,
     }
 
-    struct TestCircuit<F: PrimeField> {
+    pub struct RandomLinearCombinationCircuit<F: PrimeField> {
         inputs: Vec<F>,
         r: F,
     }
 
-    impl<F: PrimeField> TestCircuit<F> {
-        fn new(inputs: Vec<F>, r: F) -> Self {
+    impl<F: PrimeField> RandomLinearCombinationCircuit<F> {
+        pub fn new(inputs: Vec<F>, r: F) -> Self {
             Self { inputs, r }
         }
     }
 
-    impl<F: PrimeField + FromUniformBytes<64>> Circuit<F> for TestCircuit<F> {
+    impl<F: PrimeField + FromUniformBytes<64>> Circuit<F> for RandomLinearCombinationCircuit<F> {
         type Config = TestCircuitConfig;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -314,45 +68,18 @@ mod zero_round_test {
             Ok(())
         }
     }
-
-    #[traced_test]
-    #[test]
-    fn test_nifs() -> Result<(), Error<G1Affine>> {
-        const K: u32 = 4;
-        let inputs1 = (1..10).map(Fr::from).collect();
-        let inputs2 = (2..11).map(Fr::from).collect();
-        let circuit1 = TestCircuit::new(inputs1, Fr::from_u128(2));
-        let output1 = Fr::from_u128(4097);
-        let public_inputs1 = vec![output1];
-
-        let circuit2 = TestCircuit::new(inputs2, Fr::from_u128(3));
-        let output2 = Fr::from_u128(93494);
-        let public_inputs2 = vec![output2];
-
-        let (ck, S, pair1, pair2) = prepare_trace(
-            K,
-            circuit1,
-            circuit2,
-            public_inputs1,
-            public_inputs2,
-            G1Affine::default(),
-        )?;
-        fold_instances(&ck, &S, pair1, pair2, G1Affine::default())
-    }
 }
 
 // test multiple gates without lookup
 // test example adapted from https://github.com/icemelon/halo2-tutorial
-mod one_round_test {
-    use tracing_test::traced_test;
-
+pub(crate) mod fibo_circuit {
     use super::*;
 
     #[derive(Clone)]
     struct Number<F: PrimeField>(AssignedCell<F, F>);
 
     #[derive(Debug, Clone)]
-    struct FiboConfig {
+    pub struct FiboConfig {
         a: Column<Advice>,
         b: Column<Advice>,
         selector: Selector,
@@ -453,10 +180,10 @@ mod one_round_test {
     }
 
     #[derive(Default)]
-    struct FiboCircuit<F> {
-        a: F,
-        b: F,
-        num: usize,
+    pub struct FiboCircuit<F> {
+        pub a: F,
+        pub b: F,
+        pub num: usize,
     }
 
     impl<F: PrimeField> Circuit<F> for FiboCircuit<F> {
@@ -487,7 +214,7 @@ mod one_round_test {
         }
     }
 
-    fn get_fibo_seq(a: u64, b: u64, num: usize) -> Vec<u64> {
+    pub fn get_fibo_seq(a: u64, b: u64, num: usize) -> Vec<u64> {
         let mut seq = vec![0; num];
         seq[0] = a;
         seq[1] = b;
@@ -496,48 +223,13 @@ mod one_round_test {
         }
         seq
     }
-
-    #[traced_test]
-    #[test]
-    fn test_nifs() -> Result<(), Error<G1Affine>> {
-        const K: u32 = 4;
-        const SIZE: usize = 16;
-        // circuit 1
-        let seq = get_fibo_seq(1, 1, SIZE);
-        let circuit1 = FiboCircuit {
-            a: Fr::from(seq[0]),
-            b: Fr::from(seq[1]),
-            num: SIZE,
-        };
-        let public_inputs1 = vec![Fr::from(seq[SIZE - 1])];
-
-        // circuit 2
-        let seq = get_fibo_seq(2, 3, SIZE);
-        let circuit2 = FiboCircuit {
-            a: Fr::from(seq[0]),
-            b: Fr::from(seq[1]),
-            num: SIZE,
-        };
-        let public_inputs2 = vec![Fr::from(seq[SIZE - 1])];
-
-        let (ck, S, pair1, pair2) = prepare_trace(
-            K,
-            circuit1,
-            circuit2,
-            public_inputs1,
-            public_inputs2,
-            G1Affine::default(),
-        )?;
-        fold_instances(&ck, &S, pair1, pair2, G1Affine::default())
-    }
 }
 
 // test vector lookup
 // test example adapted from https://github.com/icemelon/halo2-tutorial
-mod three_rounds_test {
+pub(crate) mod fibo_circuit_with_lookup {
     use halo2_proofs::{circuit::Chip, plonk::TableColumn};
     use num_bigint::BigUint as BigUintRaw;
-    use tracing_test::traced_test;
 
     use super::*;
 
@@ -551,15 +243,15 @@ mod three_rounds_test {
     struct Number<F: PrimeField>(AssignedCell<F, F>);
 
     #[derive(Debug, Clone)]
-    struct FiboConfig {
+    pub struct FiboConfig {
         advice: [Column<Advice>; 3],
         s_add: Selector,
         s_xor: Selector,
         xor_table: [TableColumn; 3],
     }
 
-    struct FiboChip<F: PrimeField> {
-        config: FiboConfig,
+    pub struct FiboChip<F: PrimeField> {
+        pub config: FiboConfig,
         _marker: PhantomData<F>,
     }
 
@@ -750,14 +442,14 @@ mod three_rounds_test {
     }
 
     #[derive(Default)]
-    struct FiboCircuit<F> {
-        a: F,
-        b: F,
-        c: F,
-        num: usize,
+    pub struct FiboCircuitWithLookup<F> {
+        pub a: F,
+        pub b: F,
+        pub c: F,
+        pub num: usize,
     }
 
-    impl<F: PrimeField> Circuit<F> for FiboCircuit<F> {
+    impl<F: PrimeField> Circuit<F> for FiboCircuitWithLookup<F> {
         type Config = FiboConfig;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -795,7 +487,7 @@ mod three_rounds_test {
         }
     }
 
-    fn get_sequence(a: u64, b: u64, c: u64, num: usize) -> Vec<u64> {
+    pub fn get_sequence(a: u64, b: u64, c: u64, num: usize) -> Vec<u64> {
         let mut seq = vec![0; num];
         seq[0] = a;
         seq[1] = b;
@@ -805,33 +497,5 @@ mod three_rounds_test {
         }
         seq
     }
-
-    #[traced_test]
-    #[test]
-    fn test_nifs() -> Result<(), Error<G1Affine>> {
-        const K: u32 = 5;
-        let num = 7;
-
-        // circuit 1
-        let seq = get_sequence(1, 3, 2, num);
-        let circuit1 = FiboCircuit {
-            a: Fr::from(seq[0]),
-            b: Fr::from(seq[1]),
-            c: Fr::from(seq[2]),
-            num,
-        };
-
-        // circuit 2
-        let seq = get_sequence(3, 2, 2, num);
-        let circuit2 = FiboCircuit {
-            a: Fr::from(seq[0]),
-            b: Fr::from(seq[1]),
-            c: Fr::from(seq[2]),
-            num,
-        };
-
-        let (ck, S, pair1, pair2) =
-            prepare_trace(K, circuit1, circuit2, vec![], vec![], G1Affine::default())?;
-        fold_instances(&ck, &S, pair1, pair2, G1Affine::default())
-    }
 }
+

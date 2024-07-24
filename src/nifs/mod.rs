@@ -74,4 +74,4 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
