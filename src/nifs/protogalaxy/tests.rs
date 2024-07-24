@@ -60,7 +60,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
             )
         });
 
-        let (pp, vp) = <ProtoGalaxy<Affine> as FoldingScheme<Affine, 1>>::setup_params(
+        let (pp, vp) = <ProtoGalaxy<Affine> as FoldingScheme<Affine, L>>::setup_params(
             Affine::identity(),
             S.clone(),
         )
