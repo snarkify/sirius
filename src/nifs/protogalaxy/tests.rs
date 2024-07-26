@@ -31,6 +31,20 @@ type ProtoGalaxy = crate::nifs::protogalaxy::ProtoGalaxy<Affine, L>;
 type ProverParam = <ProtoGalaxy as FoldingScheme<Affine, L>>::ProverParam;
 type VerifierParam = <ProtoGalaxy as FoldingScheme<Affine, L>>::VerifierParam;
 
+struct CircuitCtx {
+    witness: Witness<Scalar>,
+    instance: Instance<Scalar>,
+}
+
+impl CircuitCtx {
+    fn collect<CIR: Circuit<Scalar>>(cr: CircuitRunner<Scalar, CIR>) -> Self {
+        Self {
+            witness: cr.try_collect_witness().expect("failed to collect witness"),
+            instance: cr.instance,
+        }
+    }
+}
+
 struct Mock<CIRCUIT: Circuit<Scalar>> {
     S: PlonkStructure<Scalar>,
     ck: CommitmentKey<Affine>,
@@ -39,7 +53,7 @@ struct Mock<CIRCUIT: Circuit<Scalar>> {
     ro_acc_prover: RO<Base>,
     ro_acc_verifier: RO<Scalar>,
 
-    circuit_meta: [(Witness<Scalar>, Instance<Scalar>); L],
+    circuits_ctx: [CircuitCtx; L],
 
     pp: ProverParam,
     vp: VerifierParam,
@@ -57,13 +71,6 @@ impl<C: Circuit<Scalar>> Mock<C> {
             .try_collect_plonk_structure()
             .expect("failed to collect plonk structure");
 
-        let circuit_meta = circuits_runners.map(|cr| {
-            (
-                cr.try_collect_witness().expect("failed to collect witness"),
-                cr.instance,
-            )
-        });
-
         let (pp, vp) = ProtoGalaxy::setup_params(Affine::identity(), S.clone()).unwrap();
 
         fn ro<F: PrimeFieldBits + FromUniformBytes<64>>() -> PoseidonHash<F, T, RATE> {
@@ -75,7 +82,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
             ro_nark_verifier: ro(),
             ro_acc_prover: ro(),
             ro_acc_verifier: ro(),
-            circuit_meta,
+            circuits_ctx: circuits_runners.map(CircuitCtx::collect),
             pp,
             vp,
             S,
@@ -84,13 +91,13 @@ impl<C: Circuit<Scalar>> Mock<C> {
     }
 
     pub fn generate_plonk_traces(&mut self) -> [PlonkTrace<Affine>; L] {
-        self.circuit_meta
+        self.circuits_ctx
             .iter()
-            .map(|(witness, instance)| {
+            .map(|ctx| {
                 ProtoGalaxy::generate_plonk_trace(
                     &self.ck,
-                    instance,
-                    witness,
+                    &ctx.instance,
+                    &ctx.witness,
                     &self.pp,
                     &mut self.ro_nark_verifier,
                 )
