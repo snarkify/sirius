@@ -21,8 +21,16 @@ pub(crate) mod poly;
 
 pub use accumulator::{Accumulator, AccumulatorArgs};
 
-/// ProtoGalaxy: Non Interactive Folding Scheme that implements main protocol defined in paper
-/// [protogalaxy](https://eprint.iacr.org/2023/1106)
+/// ProtoGalaxy: Non-Interactive Folding Scheme that implements the main protocol defined in the
+/// paper [protogalaxy.pdf](https://eprint.iacr.org/2023/1106).
+///
+/// # Generic Parameters
+///
+/// - `C`: 'Curve' - represents the elliptic curve used in the protocol.
+///                  Circuit will be proved in `C::Scalar` field
+///
+/// - `L`: 'Length' - constant representing the number of instances to
+///                   fold in a single `prove`
 #[derive(Clone, Debug)]
 pub struct ProtoGalaxy<C: CurveAffine, const L: usize> {
     _marker: PhantomData<C>,
