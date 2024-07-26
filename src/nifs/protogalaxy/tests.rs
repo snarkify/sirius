@@ -15,7 +15,11 @@ const R_P: usize = 3;
 
 use crate::{
     halo2curves::bn256::G1Affine as Affine,
-    nifs::tests::random_linear_combination_circuit::RandomLinearCombinationCircuit,
+    nifs::tests::{
+        fibo_circuit::{get_fibo_seq, FiboCircuit},
+        fibo_circuit_with_lookup::{get_sequence, FiboCircuitWithLookup},
+        random_linear_combination_circuit::RandomLinearCombinationCircuit,
+    },
     poseidon::{PoseidonHash, Spec},
     table::{CircuitRunner, Witness},
 };
@@ -127,6 +131,87 @@ fn random_linear_combination() {
                     Scalar::from(3),
                 ),
                 vec![Scalar::from(93494)],
+            ),
+        ],
+    );
+
+    let incoming = m.generate_plonk_traces();
+
+    let acc =
+        ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&m.S), &m.pp, &mut m.ro_acc_prover);
+
+    let (_new_acc, _proof) = ProtoGalaxy::prove(&m.ck, &m.pp, &mut m.ro_acc_prover, acc, &incoming)
+        .expect("`protogalaxy::prove` failed");
+}
+
+#[test]
+fn fibo() {
+    const K: u32 = 4;
+    const SIZE: usize = 16;
+
+    let seq1 = get_fibo_seq(1, 1, SIZE);
+    let seq2 = get_fibo_seq(2, 3, SIZE);
+
+    let mut m = Mock::new(
+        10,
+        [
+            (
+                FiboCircuit {
+                    a: Scalar::from(seq1[0]),
+                    b: Scalar::from(seq1[1]),
+                    num: SIZE,
+                },
+                vec![Scalar::from(seq1[SIZE - 1])],
+            ),
+            (
+                FiboCircuit {
+                    a: Scalar::from(seq2[0]),
+                    b: Scalar::from(seq2[1]),
+                    num: SIZE,
+                },
+                vec![Scalar::from(seq2[SIZE - 1])],
+            ),
+        ],
+    );
+
+    let incoming = m.generate_plonk_traces();
+
+    let acc =
+        ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&m.S), &m.pp, &mut m.ro_acc_prover);
+
+    let (_new_acc, _proof) = ProtoGalaxy::prove(&m.ck, &m.pp, &mut m.ro_acc_prover, acc, &incoming)
+        .expect("`protogalaxy::prove` failed");
+}
+
+#[test]
+fn fibo_lookup() {
+    const K: u32 = 5;
+    const SIZE: usize = 7;
+
+    // circuit 1
+    let seq1 = get_sequence(1, 3, 2, SIZE);
+    let seq2 = get_sequence(3, 2, 2, SIZE);
+
+    let mut m = Mock::new(
+        10,
+        [
+            (
+                FiboCircuitWithLookup {
+                    a: Scalar::from(seq1[0]),
+                    b: Scalar::from(seq1[1]),
+                    c: Scalar::from(seq1[2]),
+                    num: SIZE,
+                },
+                vec![],
+            ),
+            (
+                FiboCircuitWithLookup {
+                    a: Scalar::from(seq2[0]),
+                    b: Scalar::from(seq2[1]),
+                    c: Scalar::from(seq2[2]),
+                    num: SIZE,
+                },
+                vec![],
             ),
         ],
     );

@@ -307,24 +307,24 @@ fn one_round_test() -> Result<(), Error<G1Affine>> {
 #[test]
 fn three_rounds_test() -> Result<(), Error<G1Affine>> {
     const K: u32 = 5;
-    let num = 7;
+    const NUM: usize = 7;
 
     // circuit 1
-    let seq = get_sequence(1, 3, 2, num);
+    let seq = get_sequence(1, 3, 2, NUM);
     let circuit1 = FiboCircuitWithLookup {
         a: Fr::from(seq[0]),
         b: Fr::from(seq[1]),
         c: Fr::from(seq[2]),
-        num,
+        num: NUM,
     };
 
     // circuit 2
-    let seq = get_sequence(3, 2, 2, num);
+    let seq = get_sequence(3, 2, 2, NUM);
     let circuit2 = FiboCircuitWithLookup {
         a: Fr::from(seq[0]),
         b: Fr::from(seq[1]),
         c: Fr::from(seq[2]),
-        num,
+        num: NUM,
     };
 
     let (ck, S, pair1, pair2) =
