@@ -34,6 +34,8 @@ const L: usize = 2;
 type ProtoGalaxy = crate::nifs::protogalaxy::ProtoGalaxy<Affine, L>;
 type ProverParam = <ProtoGalaxy as FoldingScheme<Affine, L>>::ProverParam;
 type VerifierParam = <ProtoGalaxy as FoldingScheme<Affine, L>>::VerifierParam;
+type Proof = <ProtoGalaxy as FoldingScheme<Affine, L>>::Proof;
+type Accumulator = <ProtoGalaxy as FoldingScheme<Affine, L>>::Accumulator;
 
 struct CircuitCtx {
     witness: Witness<Scalar>,
@@ -111,11 +113,24 @@ impl<C: Circuit<Scalar>> Mock<C> {
             .try_into()
             .unwrap()
     }
+
+    pub fn prove(mut self) -> (Accumulator, Proof) {
+        let incoming = self.generate_plonk_traces();
+
+        let acc = ProtoGalaxy::new_accumulator(
+            AccumulatorArgs::from(&self.S),
+            &self.pp,
+            &mut self.ro_acc_prover,
+        );
+
+        ProtoGalaxy::prove(&self.ck, &self.pp, &mut self.ro_acc_prover, acc, &incoming)
+            .expect("`protogalaxy::prove` failed")
+    }
 }
 
 #[test]
 fn random_linear_combination() {
-    let mut m = Mock::new(
+    let (_new_acc, _proof) = Mock::new(
         10,
         [
             (
@@ -133,15 +148,8 @@ fn random_linear_combination() {
                 vec![Scalar::from(93494)],
             ),
         ],
-    );
-
-    let incoming = m.generate_plonk_traces();
-
-    let acc =
-        ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&m.S), &m.pp, &mut m.ro_acc_prover);
-
-    let (_new_acc, _proof) = ProtoGalaxy::prove(&m.ck, &m.pp, &mut m.ro_acc_prover, acc, &incoming)
-        .expect("`protogalaxy::prove` failed");
+    )
+    .prove();
 }
 
 #[test]
@@ -152,7 +160,7 @@ fn fibo() {
     let seq1 = get_fibo_seq(1, 1, SIZE);
     let seq2 = get_fibo_seq(2, 3, SIZE);
 
-    let mut m = Mock::new(
+    let (_new_acc, _proof) = Mock::new(
         10,
         [
             (
@@ -172,15 +180,8 @@ fn fibo() {
                 vec![Scalar::from(seq2[SIZE - 1])],
             ),
         ],
-    );
-
-    let incoming = m.generate_plonk_traces();
-
-    let acc =
-        ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&m.S), &m.pp, &mut m.ro_acc_prover);
-
-    let (_new_acc, _proof) = ProtoGalaxy::prove(&m.ck, &m.pp, &mut m.ro_acc_prover, acc, &incoming)
-        .expect("`protogalaxy::prove` failed");
+    )
+    .prove();
 }
 
 #[test]
@@ -192,7 +193,7 @@ fn fibo_lookup() {
     let seq1 = get_sequence(1, 3, 2, SIZE);
     let seq2 = get_sequence(3, 2, 2, SIZE);
 
-    let mut m = Mock::new(
+    let (_new_acc, _proof) = Mock::new(
         10,
         [
             (
@@ -214,13 +215,6 @@ fn fibo_lookup() {
                 vec![],
             ),
         ],
-    );
-
-    let incoming = m.generate_plonk_traces();
-
-    let acc =
-        ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&m.S), &m.pp, &mut m.ro_acc_prover);
-
-    let (_new_acc, _proof) = ProtoGalaxy::prove(&m.ck, &m.pp, &mut m.ro_acc_prover, acc, &incoming)
-        .expect("`protogalaxy::prove` failed");
+    )
+    .prove();
 }
