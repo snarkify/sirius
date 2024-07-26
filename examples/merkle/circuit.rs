@@ -75,6 +75,8 @@ where
     }
 
     pub fn random_update_leaves(&mut self, mut rng: &mut impl Rng) {
+        // 'allow' is necessary, because otherwise the closure captures rnd and we have to copy it
+        #[allow(clippy::needless_borrows_for_generic_args)]
         self.update_leaves(iter::repeat_with(move || {
             (rng.gen::<u32>() % INDEX_LIMIT, F::random(&mut rng))
         }));

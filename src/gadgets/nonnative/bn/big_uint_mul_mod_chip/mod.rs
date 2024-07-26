@@ -1169,7 +1169,7 @@ impl<F: PrimeField> BigUintMulModChip<F> {
     /// # Order of Operations
     /// 1. Convert `lhs`, `rhs`, and `modulus` to `BigUint` objects using [`big_uint::BigUint::from_assigned_cells`].
     /// 2. Perform the modular multiplication `lhs * rhs` using the converted `BigUint` numbers.
-    /// 2.1. This includes the calculation of the quotient and remainder.
+    ///     2.1. This includes the calculation of the quotient and remainder.
     /// 3. Assign the modular multiplication to the left using [`Self::assign_mult`].
     /// 4. Calculate `q * m` and the sum `q * m + r` using [`Self::assign_mult`] and [`Self::assign_sum`] respectively.
     /// 5. Group the limbs of left and right operations using [`Self::group_limbs`].
@@ -1282,7 +1282,7 @@ impl<F: PrimeField> BigUintMulModChip<F> {
     /// 1. Convert `val` and `modulus` to `BigUint` objects using
     ///    [`big_uint::BigUint::from_assigned_cells`].
     /// 2. Perform the modular reduction `val % modulus` using the converted `BigUint` numbers.
-    /// 2.1. This includes the calculation of the quotient and remainder.
+    ///     2.1. This includes the calculation of the quotient and remainder.
     /// 3. Assign the reduction result using [`Self::assign_mult`] for `q * m` (quotient times modulus)
     ///    and [`Self::assign_sum`] for `q * m + r` (sum of quotient times modulus and remainder).
     /// 4. Group the limbs of the calculated values using [`Self::group_limbs`].
