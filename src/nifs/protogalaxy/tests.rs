@@ -55,9 +55,10 @@ struct Mock<CIRCUIT: Circuit<Scalar>> {
     S: PlonkStructure<Scalar>,
     ck: CommitmentKey<Affine>,
 
+    ro_nark_generate: RO<Base>,
     ro_nark_verifier: RO<Base>,
     ro_acc_prover: RO<Base>,
-    ro_acc_verifier: RO<Scalar>,
+    ro_acc_verifier: RO<Base>,
 
     circuits_ctx: [CircuitCtx; L],
 
@@ -85,6 +86,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
 
         Mock {
             ck,
+            ro_nark_generate: ro(),
             ro_nark_verifier: ro(),
             ro_acc_prover: ro(),
             ro_acc_verifier: ro(),
@@ -105,7 +107,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
                     &ctx.instance,
                     &ctx.witness,
                     &self.pp,
-                    &mut self.ro_nark_verifier,
+                    &mut self.ro_nark_generate,
                 )
                 .unwrap()
             })
@@ -114,7 +116,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
             .unwrap()
     }
 
-    pub fn prove(mut self) -> (Accumulator, Proof) {
+    pub fn run(mut self) {
         let incoming = self.generate_plonk_traces();
 
         let acc = ProtoGalaxy::new_accumulator(
@@ -123,14 +125,25 @@ impl<C: Circuit<Scalar>> Mock<C> {
             &mut self.ro_acc_prover,
         );
 
-        ProtoGalaxy::prove(&self.ck, &self.pp, &mut self.ro_acc_prover, acc, &incoming)
-            .expect("`protogalaxy::prove` failed")
+        let (accumulator, proof) =
+            ProtoGalaxy::prove(&self.ck, &self.pp, &mut self.ro_acc_prover, acc, &incoming)
+                .expect("`protogalaxy::prove` failed");
+
+        let _acc_instance = ProtoGalaxy::verify(
+            &self.vp,
+            &mut self.ro_nark_verifier,
+            &mut self.ro_acc_verifier,
+            &AccumulatorInstance::from(accumulator),
+            &incoming.map(|tr| tr.u),
+            &proof,
+        )
+        .unwrap();
     }
 }
 
 #[test]
 fn random_linear_combination() {
-    let (_new_acc, _proof) = Mock::new(
+    Mock::new(
         10,
         [
             (
@@ -149,7 +162,7 @@ fn random_linear_combination() {
             ),
         ],
     )
-    .prove();
+    .run();
 }
 
 #[test]
@@ -160,7 +173,7 @@ fn fibo() {
     let seq1 = get_fibo_seq(1, 1, SIZE);
     let seq2 = get_fibo_seq(2, 3, SIZE);
 
-    let (_new_acc, _proof) = Mock::new(
+    Mock::new(
         10,
         [
             (
@@ -181,7 +194,7 @@ fn fibo() {
             ),
         ],
     )
-    .prove();
+    .run();
 }
 
 #[test]
@@ -193,7 +206,7 @@ fn fibo_lookup() {
     let seq1 = get_sequence(1, 3, 2, SIZE);
     let seq2 = get_sequence(3, 2, 2, SIZE);
 
-    let (_new_acc, _proof) = Mock::new(
+    Mock::new(
         10,
         [
             (
@@ -216,5 +229,5 @@ fn fibo_lookup() {
             ),
         ],
     )
-    .prove();
+    .run();
 }
