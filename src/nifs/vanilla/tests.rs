@@ -9,7 +9,7 @@ use crate::{
         bn256::{Fr, G1Affine},
         group::ff::FromUniformBytes,
     },
-    nifs::{self, vanilla::VanillaFS},
+    nifs::{self, tests::setup_smallest_commitment_key, vanilla::VanillaFS},
     plonk::{
         PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness,
     },
@@ -33,6 +33,7 @@ enum Error<C: CurveAffine> {
         from_prove: Box<RelaxedPlonkInstance<C>>,
     },
 }
+
 impl<C: CurveAffine> Error<C> {
     fn check_equality(
         from_verify: &RelaxedPlonkInstance<C>,
@@ -76,10 +77,7 @@ where
     const R_P: usize = 3;
 
     let td1 = CircuitRunner::new(K, circuit1, public_inputs1.clone());
-    let num_lookup = td1.cs.lookups().len();
-    let p1 = smallest_power(td1.cs.num_advice_columns() + 5 * num_lookup, K);
-    let p2 = smallest_power(td1.cs.num_selectors + td1.cs.num_fixed_columns(), K);
-    let ck = CommitmentKey::<C>::setup(p1.max(p2), b"prepare_trace");
+    let ck = setup_smallest_commitment_key(K, &td1.cs, b"prepare_trace");
 
     let S = td1.try_collect_plonk_structure()?;
     let W1 = td1.try_collect_witness()?;
@@ -236,14 +234,6 @@ where
     } else {
         Err(Error::Verify { errors })
     }
-}
-
-/// calculate smallest w such that 2^w >= n*(2^K)
-fn smallest_power(n: usize, K: u32) -> usize {
-    let n_f64 = n as f64;
-    let mul_res = n_f64 * (2f64.powi(K as i32));
-    let log_result = mul_res.log2().ceil();
-    log_result as usize
 }
 
 // test with single custom gate without lookup

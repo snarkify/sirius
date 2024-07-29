@@ -1119,6 +1119,8 @@ mod tests {
     }
 
     fn generate_random_plonk_instance(mut rnd: &mut ThreadRng) -> PlonkInstance<C1> {
+        // 'allow' is necessary, because otherwise the closure captures rnd and we have to copy it
+        #[allow(clippy::needless_borrows_for_generic_args)]
         PlonkInstance {
             W_commitments: iter::repeat_with(|| C1::random(&mut rnd))
                 .take(NUM_WITNESS)

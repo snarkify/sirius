@@ -21,14 +21,22 @@ pub(crate) mod poly;
 
 pub use accumulator::{Accumulator, AccumulatorArgs};
 
-/// ProtoGalaxy: Non Interactive Folding Scheme that implements main protocol defined in paper
-/// [protogalaxy](https://eprint.iacr.org/2023/1106)
+/// ProtoGalaxy: Non-Interactive Folding Scheme that implements the main protocol defined in the
+/// paper [protogalaxy.pdf](https://eprint.iacr.org/2023/1106).
+///
+/// # Generic Parameters
+///
+/// - `C`: 'Curve' - represents the elliptic curve used in the protocol.
+///                  Circuit will be proved in `C::Scalar` field
+///
+/// - `L`: 'Length' - constant representing the number of instances to
+///                   fold in a single `prove`
 #[derive(Clone, Debug)]
-pub struct ProtoGalaxy<C: CurveAffine> {
+pub struct ProtoGalaxy<C: CurveAffine, const L: usize> {
     _marker: PhantomData<C>,
 }
 
-impl<C: CurveAffine> ProtoGalaxy<C> {
+impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     #[instrument(skip_all)]
     pub(crate) fn generate_challenge<'i>(
         pp_digest: &C,
@@ -182,7 +190,7 @@ pub enum Error {
     Poly(#[from] poly::Error),
 }
 
-impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
+impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
     type Error = Error;
     type ProverParam = ProtoGalaxyProverParam<C>;
     type VerifierParam = C;
@@ -292,3 +300,6 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C> {
         todo!()
     }
 }
+
+#[cfg(test)]
+mod tests;
