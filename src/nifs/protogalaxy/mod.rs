@@ -256,6 +256,36 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
             .run_sps_protocol(ck, instance, witness, ro_nark, pp.S.num_challenges)?)
     }
 
+    /// Proves a statement using the ProtoGalaxy protocol.
+    ///
+    /// # Algorithm
+    ///
+    /// The logic of the proof generation follows several key steps:
+    ///
+    /// 1. **Generate Delta:**
+    ///     - **RO Seeds**: includes all input parameters except `ck` & witness from `incoming`
+    ///     - `delta = ro_acc.squeeze()`
+    ///
+    /// 2. **Compute Polynomial F:**
+    ///     - `F = [`poly::compute_F`]`
+    ///
+    /// 3. **Generate Alpha:**
+    ///     - **RO Update**: absorb `poly_F`
+    ///     - `alpha = ro_acc.squeeze()`
+    ///
+    /// 4. **Update Beta* Values:**
+    ///     - `beta*[i] = beta[i] + alpha * delta[i]`
+    ///
+    /// 5. **Compute Polynomial K:**
+    ///     - `G = [`poly::compute_G`]
+    ///     - `K = [`poly::compute_K`]
+    ///
+    /// 6. **Generate Gamma:**
+    ///     - **RO Update**: Absorb `poly_K`
+    ///     - `gamma = ro_acc.squeeze()`
+    ///
+    /// 7. **Fold the Trace:**
+    ///     - [`ProtoGalaxy::fold_witness`] & [`ProtoGalaxy::fold_instance`]
     fn prove(
         _ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
@@ -332,6 +362,32 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         ))
     }
 
+    /// Proves a statement using the ProtoGalaxy protocol.
+    ///
+    /// # Algorithm
+    ///
+    /// The logic of the proof generation follows several key steps:
+    ///
+    /// 1. **Verify SPS**
+    ///     - Verify SPS correctness in `incoming` plonk instances
+    ///
+    /// 2. **Generate Delta:**
+    ///     - **RO Seeds**: includes all input parameters except `ck`
+    ///     - `delta = ro_acc.squeeze()`
+    ///
+    /// 3. **Generate Alpha:**
+    ///     - **RO Update**: absorb `proof.poly_F`
+    ///     - `alpha = ro_acc.squeeze()`
+    ///
+    /// 4. **Update Beta* Values:**
+    ///     - `beta*[i] = beta[i] + alpha * delta[i]`
+    ///
+    /// 5. **Generate Gamma:**
+    ///     - **RO Update**: Absorb `proof.poly_K`
+    ///     - `gamma = ro_acc.squeeze()`
+    ///
+    /// 6. **Fold the Instance:**
+    ///     - [`ProtoGalaxy::fold_instance`]
     fn verify(
         vp: &Self::VerifierParam,
         ro_nark: &mut impl ROTrait<C::Base>,
@@ -372,6 +428,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
     }
 }
 
+// F(alpha) * L(gamma) + Z(gamma) * K(gamma)
 fn calculate_e<C: CurveAffine>(
     poly_F: &UnivariatePoly<C::Scalar>,
     poly_K: &UnivariatePoly<C::Scalar>,
@@ -379,14 +436,15 @@ fn calculate_e<C: CurveAffine>(
     alpha: C::Scalar,
     log_n: u32,
 ) -> C::Scalar {
-    let poly_F_alpha = poly_F.eval(alpha);
     let lagrange_zero_for_gamma = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
         .next()
         .unwrap();
-    let poly_Z_for_gamma = lagrange::eval_vanish_polynomial(log_n, gamma);
+
+    let poly_F_alpha = poly_F.eval(alpha);
+    let poly_Z_gamma = lagrange::eval_vanish_polynomial(log_n, gamma);
     let poly_K_gamma = poly_K.eval(gamma);
 
-    (poly_F_alpha * lagrange_zero_for_gamma) + (poly_Z_for_gamma * poly_K_gamma)
+    (poly_F_alpha * lagrange_zero_for_gamma) + (poly_Z_gamma * poly_K_gamma)
 }
 
 #[cfg(test)]
