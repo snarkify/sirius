@@ -333,7 +333,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
             .absorb_field_iter(poly_K.iter().map(|v| util::fe_to_fe(v).unwrap()))
             .squeeze::<C>(NUM_CHALLENGE_BITS);
 
-        let lagrange_for_gamma = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
+        let polys_L_in_gamma = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
             .take(L + 1)
             .collect::<Box<[_]>>();
 
@@ -345,12 +345,12 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
                     u: Self::fold_instance(
                         accumulator.trace.u,
                         incoming.iter().map(|tr| &tr.u),
-                        lagrange_for_gamma.iter().copied(),
+                        polys_L_in_gamma.iter().copied(),
                     ),
                     w: Self::fold_witness(
                         accumulator.trace.w,
                         incoming.iter().map(|tr| &tr.w),
-                        lagrange_for_gamma.iter().copied(),
+                        polys_L_in_gamma.iter().copied(),
                     ),
                 },
             },
