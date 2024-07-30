@@ -15,7 +15,11 @@ const R_P: usize = 3;
 
 use crate::{
     halo2curves::bn256::G1Affine as Affine,
-    nifs::tests::random_linear_combination_circuit::RandomLinearCombinationCircuit,
+    nifs::tests::{
+        fibo_circuit::{get_fibo_seq, FiboCircuit},
+        fibo_circuit_with_lookup::{get_sequence, FiboCircuitWithLookup},
+        random_linear_combination_circuit::RandomLinearCombinationCircuit,
+    },
     poseidon::{PoseidonHash, Spec},
     table::{CircuitRunner, Witness},
 };
@@ -30,6 +34,8 @@ const L: usize = 2;
 type ProtoGalaxy = crate::nifs::protogalaxy::ProtoGalaxy<Affine, L>;
 type ProverParam = <ProtoGalaxy as FoldingScheme<Affine, L>>::ProverParam;
 type VerifierParam = <ProtoGalaxy as FoldingScheme<Affine, L>>::VerifierParam;
+type Proof = <ProtoGalaxy as FoldingScheme<Affine, L>>::Proof;
+type Accumulator = <ProtoGalaxy as FoldingScheme<Affine, L>>::Accumulator;
 
 struct CircuitCtx {
     witness: Witness<Scalar>,
@@ -107,11 +113,24 @@ impl<C: Circuit<Scalar>> Mock<C> {
             .try_into()
             .unwrap()
     }
+
+    pub fn prove(mut self) -> (Accumulator, Proof) {
+        let incoming = self.generate_plonk_traces();
+
+        let acc = ProtoGalaxy::new_accumulator(
+            AccumulatorArgs::from(&self.S),
+            &self.pp,
+            &mut self.ro_acc_prover,
+        );
+
+        ProtoGalaxy::prove(&self.ck, &self.pp, &mut self.ro_acc_prover, acc, &incoming)
+            .expect("`protogalaxy::prove` failed")
+    }
 }
 
 #[test]
 fn random_linear_combination() {
-    let mut m = Mock::new(
+    let (_new_acc, _proof) = Mock::new(
         10,
         [
             (
@@ -129,13 +148,73 @@ fn random_linear_combination() {
                 vec![Scalar::from(93494)],
             ),
         ],
-    );
+    )
+    .prove();
+}
 
-    let incoming = m.generate_plonk_traces();
+#[test]
+fn fibo() {
+    const K: u32 = 4;
+    const SIZE: usize = 16;
 
-    let acc =
-        ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&m.S), &m.pp, &mut m.ro_acc_prover);
+    let seq1 = get_fibo_seq(1, 1, SIZE);
+    let seq2 = get_fibo_seq(2, 3, SIZE);
 
-    let (_new_acc, _proof) = ProtoGalaxy::prove(&m.ck, &m.pp, &mut m.ro_acc_prover, acc, &incoming)
-        .expect("`protogalaxy::prove` failed");
+    let (_new_acc, _proof) = Mock::new(
+        10,
+        [
+            (
+                FiboCircuit {
+                    a: Scalar::from(seq1[0]),
+                    b: Scalar::from(seq1[1]),
+                    num: SIZE,
+                },
+                vec![Scalar::from(seq1[SIZE - 1])],
+            ),
+            (
+                FiboCircuit {
+                    a: Scalar::from(seq2[0]),
+                    b: Scalar::from(seq2[1]),
+                    num: SIZE,
+                },
+                vec![Scalar::from(seq2[SIZE - 1])],
+            ),
+        ],
+    )
+    .prove();
+}
+
+#[test]
+fn fibo_lookup() {
+    const K: u32 = 5;
+    const SIZE: usize = 7;
+
+    // circuit 1
+    let seq1 = get_sequence(1, 3, 2, SIZE);
+    let seq2 = get_sequence(3, 2, 2, SIZE);
+
+    let (_new_acc, _proof) = Mock::new(
+        10,
+        [
+            (
+                FiboCircuitWithLookup {
+                    a: Scalar::from(seq1[0]),
+                    b: Scalar::from(seq1[1]),
+                    c: Scalar::from(seq1[2]),
+                    num: SIZE,
+                },
+                vec![],
+            ),
+            (
+                FiboCircuitWithLookup {
+                    a: Scalar::from(seq2[0]),
+                    b: Scalar::from(seq2[1]),
+                    c: Scalar::from(seq2[2]),
+                    num: SIZE,
+                },
+                vec![],
+            ),
+        ],
+    )
+    .prove();
 }
