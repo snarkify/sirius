@@ -20,7 +20,8 @@ use crate::{
         StepCircuit,
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
-    plonk::{PlonkInstance, RelaxedPlonkInstance},
+    nifs::vanilla::accumulator::RelaxedPlonkInstance,
+    plonk::PlonkInstance,
     poseidon::ROCircuitTrait,
     table::ConstraintSystemMetainfo,
 };
