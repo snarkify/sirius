@@ -15,7 +15,7 @@ use crate::{
         step_folding_circuit::{StepFoldingCircuit, StepInputs},
     },
     main_gate::MainGateConfig,
-    nifs::{self, vanilla::VanillaFS, FoldingScheme},
+    nifs::{self, vanilla::VanillaFS, FoldingScheme, IsSatAccumulator},
     plonk::{self, PlonkTrace, RelaxedPlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
@@ -589,11 +589,9 @@ where
             });
         });
 
-        if let Err(err) = pp.primary.S().is_sat_relaxed(
-            pp.primary.ck(),
-            &self.primary.relaxed_trace.U,
-            &self.primary.relaxed_trace.W,
-        ) {
+        if let Err(err) =
+            VanillaFS::is_sat_acc(pp.primary.ck(), pp.primary.S(), &self.primary.relaxed_trace)
+        {
             errors.push(VerificationError::NotSat {
                 err,
                 is_primary: true,
@@ -601,10 +599,10 @@ where
             })
         }
 
-        if let Err(err) = pp.secondary.S().is_sat_relaxed(
+        if let Err(err) = VanillaFS::is_sat_acc(
             pp.secondary.ck(),
-            &self.secondary.relaxed_trace.U,
-            &self.secondary.relaxed_trace.W,
+            pp.secondary.S(),
+            &self.secondary.relaxed_trace,
         ) {
             errors.push(VerificationError::NotSat {
                 err,
@@ -626,11 +624,7 @@ where
             })
         }
 
-        if let Err(err) = pp
-            .primary
-            .S()
-            .is_sat_perm(&self.primary.relaxed_trace.U, &self.primary.relaxed_trace.W)
-        {
+        if let Err(err) = VanillaFS::is_sat_perm(pp.primary.S(), &self.primary.relaxed_trace) {
             errors.push(VerificationError::NotSat {
                 err,
                 is_primary: false,
@@ -638,10 +632,7 @@ where
             })
         }
 
-        if let Err(err) = pp.secondary.S().is_sat_perm(
-            &self.secondary.relaxed_trace.U,
-            &self.secondary.relaxed_trace.W,
-        ) {
+        if let Err(err) = VanillaFS::is_sat_perm(pp.secondary.S(), &self.secondary.relaxed_trace) {
             errors.push(VerificationError::NotSat {
                 err,
                 is_primary: false,
