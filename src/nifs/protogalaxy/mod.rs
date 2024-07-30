@@ -1,8 +1,12 @@
-use std::{iter, marker::PhantomData};
+use std::{
+    iter,
+    marker::PhantomData,
+    ops::{Not, Sub},
+};
 
 use halo2_proofs::arithmetic::{self, CurveAffine, Field};
 use itertools::Itertools;
-use tracing::instrument;
+use tracing::{instrument, warn};
 
 use self::accumulator::AccumulatorInstance;
 use super::*;
@@ -10,8 +14,8 @@ use crate::{
     commitment::CommitmentKey,
     constants::NUM_CHALLENGE_BITS,
     ff::PrimeField,
-    plonk::{PlonkStructure, PlonkTrace, PlonkWitness},
-    polynomial::{lagrange, univariate::UnivariatePoly},
+    plonk::{self, PlonkStructure, PlonkTrace, PlonkWitness},
+    polynomial::{lagrange, sparse, univariate::UnivariatePoly},
     poseidon::AbsorbInRO,
     sps::{self, SpecialSoundnessVerifier},
     util,
@@ -299,9 +303,9 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         );
 
         let poly_F = poly::compute_F::<C::ScalarExt>(
+            &pp.S,
             accumulator.betas.iter().copied(),
             delta,
-            &pp.S,
             &accumulator.trace,
         )?;
 
@@ -323,7 +327,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
 
         let poly_K = poly::compute_K::<C::ScalarExt>(
             &pp.S,
-            alpha,
+            poly_F.eval(alpha),
             betas_stroke.iter().copied(),
             &accumulator.trace,
             incoming,
@@ -337,18 +341,24 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
             .take(L + 1)
             .collect::<Box<[_]>>();
 
+        let Accumulator {
+            trace: PlonkTrace { u, w },
+            betas: _,
+            e: _,
+        } = accumulator;
+
         Ok((
             Accumulator {
                 e: calculate_e::<C>(&poly_F, &poly_K, gamma, alpha, log_n),
                 betas: betas_stroke,
                 trace: PlonkTrace {
                     u: Self::fold_instance(
-                        accumulator.trace.u,
+                        u,
                         incoming.iter().map(|tr| &tr.u),
                         polys_L_in_gamma.iter().copied(),
                     ),
                     w: Self::fold_witness(
-                        accumulator.trace.w,
+                        w,
                         incoming.iter().map(|tr| &tr.w),
                         polys_L_in_gamma.iter().copied(),
                     ),
@@ -428,6 +438,96 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum VerifyError<F: PrimeField> {
+    #[error("Error while evaluate witness: {0:?}")]
+    PlonkEval(plonk::eval::Error),
+    #[error("Expected `e` {expected_e:?}, but evaluated is {evaluated_e:?}")]
+    MismatchE { expected_e: F, evaluated_e: F },
+    #[error("Permutation check failed")]
+    Perm(plonk::Error),
+}
+
+impl<C: CurveAffine, const L: usize> IsSatAccumulator<C, L> for ProtoGalaxy<C, L> {
+    type VerifyError = VerifyError<C::ScalarExt>;
+
+    fn is_sat_acc(
+        _ck: &CommitmentKey<C>,
+        S: &PlonkStructure<C::ScalarExt>,
+        acc: &Accumulator<C>,
+    ) -> Result<(), Self::VerifyError> {
+        struct Node<F: PrimeField> {
+            value: F,
+            height: usize,
+        }
+
+        let evaluated_e = plonk::iter_evaluate_witness::<C::ScalarExt>(S, &acc.trace)
+            .map(|result_with_evaluated_gate| {
+                result_with_evaluated_gate.map(|value| Node { value, height: 0 })
+            })
+            // TODO #324 Migrate to a parallel algorithm
+            // TODO #324 Implement `try_tree_reduce` to stop on the first error
+            .tree_reduce(|left_w, right_w| {
+                let (mut left_n, right_n) = (left_w?, right_w?);
+
+                if left_n.height != right_n.height {
+                    unreachable!(
+                        "must be unreachable, since the number of rows is the degree of 2, but: {l_height} != {r_height}",
+                        l_height = left_n.height,
+                        r_height = right_n.height
+                    )
+                }
+
+                left_n.value += right_n.value * acc.betas[right_n.height];
+                left_n.height += 1;
+
+                Ok(left_n)
+            })
+            .transpose()
+            .map_err(VerifyError::PlonkEval)?
+            .map(|n| n.value)
+            .unwrap_or_default();
+
+        if evaluated_e == acc.e {
+            Ok(())
+        } else {
+            Err(VerifyError::MismatchE {
+                expected_e: acc.e,
+                evaluated_e,
+            })
+        }
+    }
+
+    fn is_sat_perm(
+        S: &PlonkStructure<<C as CurveAffine>::ScalarExt>,
+        acc: &Accumulator<C>,
+    ) -> Result<(), Self::VerifyError> {
+        let PlonkTrace { u, w } = &acc.trace;
+
+        let Z = u
+            .instance
+            .clone()
+            .into_iter()
+            .chain(w.W[0][..(1 << S.k) * S.num_advice_columns].to_vec())
+            .collect::<Box<[_]>>();
+
+        let y = sparse::matrix_multiply(&S.permutation_matrix, &Z[..]);
+        let mismatch_count = y
+            .into_iter()
+            .zip(Z)
+            .filter(|(y, z)| y.sub(z).is_zero_vartime().not())
+            .count();
+
+        if mismatch_count == 0 {
+            Ok(())
+        } else {
+            Err(Self::VerifyError::Perm(plonk::Error::PermCheckFail {
+                mismatch_count,
+            }))
+        }
+    }
+}
+
 // F(alpha) * L(gamma) + Z(gamma) * K(gamma)
 fn calculate_e<C: CurveAffine>(
     poly_F: &UnivariatePoly<C::Scalar>,
@@ -441,7 +541,7 @@ fn calculate_e<C: CurveAffine>(
         .unwrap();
 
     let poly_F_alpha = poly_F.eval(alpha);
-    let poly_Z_gamma = lagrange::eval_vanish_polynomial(log_n, gamma);
+    let poly_Z_gamma = lagrange::eval_vanish_polynomial(1 << log_n, gamma);
     let poly_K_gamma = poly_K.eval(gamma);
 
     (poly_F_alpha * lagrange_zero_for_gamma) + (poly_Z_gamma * poly_K_gamma)

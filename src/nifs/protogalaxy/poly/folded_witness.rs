@@ -9,12 +9,12 @@ use crate::{
     util::MultiCartesianProduct,
 };
 
-pub(crate) struct FoldedTrace<F: PrimeField> {
+pub(crate) struct FoldedWitness<F: PrimeField> {
     witness: PlonkWitness<F>,
     challenges: Vec<F>,
 }
 
-impl<F: PrimeField> FoldedTrace<F> {
+impl<F: PrimeField> FoldedWitness<F> {
     pub(crate) fn new(
         points_for_fft: &[F],
         accumulator: &(impl Sync + GetChallenges<F> + GetWitness<F>),
@@ -34,12 +34,12 @@ impl<F: PrimeField> FoldedTrace<F> {
             .collect()
     }
 }
-impl<F: PrimeField> GetChallenges<F> for FoldedTrace<F> {
+impl<F: PrimeField> GetChallenges<F> for FoldedWitness<F> {
     fn get_challenges(&self) -> &[F] {
         &self.challenges
     }
 }
-impl<F: PrimeField> GetWitness<F> for FoldedTrace<F> {
+impl<F: PrimeField> GetWitness<F> for FoldedWitness<F> {
     fn get_witness(&self) -> &[Vec<F>] {
         &self.witness.W
     }
@@ -50,7 +50,7 @@ impl<F: PrimeField> GetWitness<F> for FoldedTrace<F> {
 ///
 /// Since the number of rows is large, we do this in one pass, counting the points for each
 /// challenge at each iteration, and laying them out in separate [`PlonkWitness`] at the end.
-fn fold_witnesses<F: PrimeField>(
+pub fn fold_witnesses<F: PrimeField>(
     X_challenges: &[F],
     accumulator: &(impl GetWitness<F> + Sync),
     witnesses: &[impl Sync + GetWitness<F>],

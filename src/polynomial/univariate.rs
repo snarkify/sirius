@@ -1,6 +1,8 @@
 use std::iter;
 
-use crate::ff::Field;
+use halo2_proofs::halo2curves::ff::{PrimeField, WithSmallOrderMulGroup};
+
+use crate::{ff::Field, fft};
 
 /// Represents a univariate polynomial
 ///
@@ -14,6 +16,15 @@ impl<F: Field> UnivariatePoly<F> {
     }
     pub fn iter(&self) -> impl Iterator<Item = &F> {
         self.0.iter()
+    }
+}
+
+impl<F: Field> IntoIterator for UnivariatePoly<F> {
+    type Item = F;
+    type IntoIter = <Box<[F]> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        <Box<[F]> as IntoIterator>::into_iter(self.0)
     }
 }
 
@@ -38,6 +49,38 @@ impl<F: Field> UnivariatePoly<F> {
             .fold(F::ZERO, |res, (coeff, challenge_in_degree)| {
                 res + (challenge_in_degree * *coeff)
             })
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<F: PrimeField> UnivariatePoly<F> {
+    pub fn fft(mut self) -> Box<[F]> {
+        fft::fft(self.as_mut());
+        self.0
+    }
+
+    pub fn ifft(mut input: Box<[F]>) -> Self {
+        fft::ifft(&mut input);
+        Self(input)
+    }
+}
+
+impl<F: WithSmallOrderMulGroup<3>> UnivariatePoly<F> {
+    pub fn coset_fft(mut self) -> Box<[F]> {
+        fft::coset_fft(self.as_mut());
+        self.0
+    }
+
+    pub fn coset_ifft(mut input: Box<[F]>) -> Self {
+        fft::coset_ifft(&mut input);
+        Self(input)
     }
 }
 #[cfg(test)]
