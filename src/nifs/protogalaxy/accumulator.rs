@@ -8,13 +8,19 @@ use crate::{
     util,
 };
 
-/// TODO#266 Docs
+/// Represents an accumulator for folding multiple instances into a single instance,
+/// following the accumulation schemes.
 pub struct Accumulator<C: CurveAffine> {
-    /// TODO#266 Docs
-    pub(super) betas: Box<[C::ScalarExt]>,
-    /// TODO#266 Docs
+    /// `φ`: Represents the combined state of all instances & witnesses. It is a summary that
+    /// captures the essential data and relationships from the instances being merged.
     pub(super) trace: RelaxedPlonkTrace<C>,
-    /// TODO#266 Docs
+
+    /// `β`: A random value used in the folding process. It helps ensure the unique
+    /// and secure combination of instances, preventing manipulation.
+    pub(super) betas: Box<[C::ScalarExt]>,
+
+    /// `e`: an accumulated value that encapsulates the result of the folding operation. it serves
+    /// as a concise representation of the correctness and properties of the folded instances.
     pub(super) e: C::ScalarExt,
 }
 
@@ -41,12 +47,19 @@ impl<C: CurveAffine> Accumulator<C> {
     }
 }
 
+/// Represents an accumulator for folding multiple instances into a single instance,
+/// following the accumulation schemes.
 pub struct AccumulatorInstance<C: CurveAffine> {
-    /// TODO#266 Docs
-    pub(super) betas: Box<[C::ScalarExt]>,
-    /// TODO#266 Docs
+    /// `φ`: Represents the combined state of all instances. It is a summary that captures the
+    /// essential data and relationships from the instances being merged.
     pub(super) U: RelaxedPlonkInstance<C>,
-    /// TODO#266 Docs
+
+    /// `β`: A random value used in the folding process. It helps ensure the unique
+    /// and secure combination of instances, preventing manipulation.
+    pub(super) betas: Box<[C::ScalarExt]>,
+
+    /// `e`: an accumulated value that encapsulates the result of the folding operation. it serves
+    /// as a concise representation of the correctness and properties of the folded instances.
     pub(super) e: C::ScalarExt,
 }
 
