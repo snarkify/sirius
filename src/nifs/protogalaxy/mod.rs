@@ -83,11 +83,9 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     fn fold_witness<'i>(
         acc: RelaxedPlonkWitness<C::Scalar>,
         incoming: impl Iterator<Item = &'i PlonkWitness<C::Scalar>>,
-        gamma: C::ScalarExt,
-        log_n: u32,
+        mut lagrange_for_gamma: impl Iterator<Item = C::Scalar>,
     ) -> RelaxedPlonkWitness<C::Scalar> {
-        let mut lagrange = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n);
-        let l_0: C::ScalarExt = lagrange
+        let l_0: C::ScalarExt = lagrange_for_gamma
             .next()
             .expect("safe, because len of lagrange is `2^log_n`");
 
@@ -101,7 +99,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         };
 
         incoming
-            .zip(lagrange)
+            .zip(lagrange_for_gamma)
             .fold(new_accumulator, |mut acc, (w, l_n)| {
                 acc.W
                     .iter_mut()
@@ -122,11 +120,9 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     fn fold_instance<'i>(
         acc: RelaxedPlonkInstance<C>,
         incoming: impl Iterator<Item = &'i PlonkInstance<C>>,
-        gamma: C::ScalarExt,
-        log_n: u32,
+        mut lagrange_for_gamma: impl Iterator<Item = C::Scalar>,
     ) -> RelaxedPlonkInstance<C> {
-        let mut lagrange = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n);
-        let l_0: C::ScalarExt = lagrange
+        let l_0: C::ScalarExt = lagrange_for_gamma
             .next()
             .expect("safe, because len of lagrange is `2^log_n`");
 
@@ -147,7 +143,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         };
 
         incoming
-            .zip(lagrange)
+            .zip(lagrange_for_gamma)
             .fold(new_accumulator, |mut acc, (u, l_n)| {
                 let PlonkInstance {
                     W_commitments,
@@ -344,6 +340,10 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
             .absorb_field_iter(poly_K.iter().map(|v| util::fe_to_fe(v).unwrap()))
             .squeeze::<C>(NUM_CHALLENGE_BITS);
 
+        let lagrange_for_gamma = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
+            .take(L + 1)
+            .collect::<Box<[_]>>();
+
         Ok((
             Accumulator {
                 e: calculate_e::<C>(&poly_F, &poly_K, gamma, alpha, log_n),
@@ -352,14 +352,12 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
                     U: Self::fold_instance(
                         accumulator.trace.U,
                         incoming.iter().map(|tr| &tr.u),
-                        gamma,
-                        log_n,
+                        lagrange_for_gamma.iter().copied(),
                     ),
                     W: Self::fold_witness(
                         accumulator.trace.W,
                         incoming.iter().map(|tr| &tr.w),
-                        gamma,
-                        log_n,
+                        lagrange_for_gamma.iter().copied(),
                     ),
                 },
             },
@@ -427,7 +425,11 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
 
         Ok(AccumulatorInstance {
             betas: betas_stroke,
-            U: Self::fold_instance(accumulator.U.clone(), incoming.iter(), gamma, vp.log_n),
+            U: Self::fold_instance(
+                accumulator.U.clone(),
+                incoming.iter(),
+                lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, vp.log_n),
+            ),
             e: calculate_e::<C>(&proof.poly_F, &proof.poly_K, gamma, alpha, vp.log_n),
         })
     }
