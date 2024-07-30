@@ -3,13 +3,14 @@ use std::iter;
 use crate::{
     ff::Field,
     halo2curves::CurveAffine,
-    plonk::{self, PlonkInstance, PlonkTrace},
+    plonk::{self, PlonkInstance, PlonkTrace, PlonkWitness},
     poseidon::{AbsorbInRO, ROTrait},
     util,
 };
 
 /// Represents an accumulator for folding multiple instances into a single instance,
 /// following the accumulation schemes.
+#[derive(Clone, Debug)]
 pub struct Accumulator<C: CurveAffine> {
     /// `φ`: Represents the combined state of all instances & witnesses. It is a summary that
     /// captures the essential data and relationships from the instances being merged.
@@ -49,6 +50,7 @@ impl<C: CurveAffine> Accumulator<C> {
 
 /// Represents an accumulator for folding multiple instances into a single instance,
 /// following the accumulation schemes.
+#[derive(Debug, PartialEq, Eq)]
 pub struct AccumulatorInstance<C: CurveAffine> {
     /// `φ`: Represents the combined state of all instances. It is a summary that captures the
     /// essential data and relationships from the instances being merged.
@@ -61,6 +63,17 @@ pub struct AccumulatorInstance<C: CurveAffine> {
     /// `e`: an accumulated value that encapsulates the result of the folding operation. it serves
     /// as a concise representation of the correctness and properties of the folded instances.
     pub(super) e: C::ScalarExt,
+}
+
+impl<C: CurveAffine> AccumulatorInstance<C> {
+    pub fn into_acc(self, w: PlonkWitness<C::Scalar>) -> Accumulator<C> {
+        let Self { ins, betas, e } = self;
+        Accumulator {
+            trace: PlonkTrace { u: ins, w },
+            betas,
+            e,
+        }
+    }
 }
 
 impl<C: CurveAffine> From<Accumulator<C>> for AccumulatorInstance<C> {

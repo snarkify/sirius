@@ -1,20 +1,22 @@
-use std::num::{NonZeroU32, NonZeroUsize};
+use std::{
+    iter,
+    num::{NonZeroU32, NonZeroUsize},
+};
 
 use itertools::*;
-use num_traits::Zero;
 use tracing::*;
 
 use crate::{
     ff::PrimeField,
-    fft::{self, coset_fft, coset_ifft},
+    fft,
     group::ff::WithSmallOrderMulGroup,
     plonk::{self, eval, GetChallenges, GetWitness, PlonkStructure},
     polynomial::{expression::QueryIndexContext, lagrange, univariate::UnivariatePoly},
     util::TryMultiProduct,
 };
 
-mod folded_trace;
-use folded_trace::FoldedTrace;
+mod folded_witness;
+pub(crate) use folded_witness::{fold_witnesses, FoldedWitness};
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum Error {
@@ -64,9 +66,9 @@ pub enum Error {
 /// except leaves.
 #[instrument(skip_all)]
 pub(crate) fn compute_F<F: PrimeField>(
+    S: &PlonkStructure<F>,
     betas: impl Iterator<Item = F>,
     delta: F,
-    S: &PlonkStructure<F>,
     trace: &(impl Sync + GetChallenges<F> + GetWitness<F>),
 ) -> Result<UnivariatePoly<F>, Error> {
     let count_of_rows = 2usize.pow(S.k as u32);
@@ -102,14 +104,18 @@ pub(crate) fn compute_F<F: PrimeField>(
     //
     // Even for large `count_of_evaluation` this will be a small number, so we can
     // collect it
-    let betas = betas
-        .take(count_of_evaluation.next_power_of_two().ilog2() as usize)
+    let leaf_count = count_of_evaluation.next_power_of_two().ilog2() as usize;
+    let betas = betas.take(leaf_count).collect::<Box<[_]>>();
+    let deltas = iter::successors(Some(delta), |d| Some(d.double()))
+        .take(leaf_count)
         .collect::<Box<[_]>>();
+
     let challenges_powers = lagrange::iter_cyclic_subgroup::<F>(fft_domain_size.get())
         .map(|X| {
             betas
                 .iter()
-                .map(|beta| *beta + X * delta)
+                .zip(deltas.iter())
+                .map(|(beta, delta)| *beta + (X * delta))
                 .collect::<Box<_>>()
         })
         .take(points_count)
@@ -129,9 +135,12 @@ pub(crate) fn compute_F<F: PrimeField>(
     }
 
     let evaluated = plonk::iter_evaluate_witness::<F>(S, trace)
-        .map(|result_with_evaluated_gate| result_with_evaluated_gate.map(Node::Leaf))
-        // TODO #259 Migrate to a parallel algorithm
-        // TODO #259 Implement `try_tree_reduce` to stop on the first error
+        .map(|result_with_evaluated_gate| {
+            debug!("witness row: {:?}", result_with_evaluated_gate);
+            result_with_evaluated_gate.map(Node::Leaf)
+        })
+        // TODO #324 Migrate to a parallel algorithm
+        // TODO #324 Implement `try_tree_reduce` to stop on the first error
         .tree_reduce(|left_w, right_w| {
             let (left_w, right_w) = (left_w?, right_w?);
 
@@ -170,6 +179,12 @@ pub(crate) fn compute_F<F: PrimeField>(
 
     match evaluated {
         Some(Ok(Node::Calculated { mut points, .. })) => {
+            points
+                .iter()
+                .zip(lagrange::iter_cyclic_subgroup::<F>(fft_domain_size.get()))
+                .for_each(|(res, X)| {
+                    debug!("F[{X:?}] = {res:?}");
+                });
             fft::ifft(&mut points, fft_domain_size.get());
             Ok(UnivariatePoly(points))
         }
@@ -221,31 +236,19 @@ pub(crate) fn compute_G<F: PrimeField>(
     accumulator: &(impl Sync + GetChallenges<F> + GetWitness<F>),
     traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
 ) -> Result<UnivariatePoly<F>, Error> {
-    let ctx = QueryIndexContext::from(S);
-    let max_degree = S
-        .gates
-        .iter()
-        .map(|poly| poly.degree(&ctx))
-        .max()
-        .unwrap_or_default();
-
     if traces.is_empty() {
         return Err(Error::EmptyTracesNotAllowed);
     }
 
-    let count_of_rows = 2usize.pow(S.k as u32);
-    let count_of_gates = S.gates.len();
-
-    let count_of_evaluation = count_of_rows * count_of_gates;
-    if count_of_evaluation.is_zero() {
+    let Some(count_of_evaluation) = get_count_of_valuation(S) else {
         return Ok(UnivariatePoly::new_zeroed(0));
-    }
+    };
 
-    let points_count = (traces.len() * max_degree + 1).next_power_of_two();
+    let points_count = get_points_count(S, traces.len()); // (traces.len() * max_degree + 1).next_power_of_two();
     let fft_domain_size = points_count.ilog2();
 
     let betas_stroke = betas_stroke
-        .take(count_of_evaluation.next_power_of_two().ilog2() as usize)
+        .take(count_of_evaluation.get().next_power_of_two().ilog2() as usize)
         .collect::<Box<[_]>>();
 
     let points_for_fft = lagrange::iter_cyclic_subgroup(fft_domain_size)
@@ -259,7 +262,8 @@ pub(crate) fn compute_G<F: PrimeField>(
         height: usize,
     }
 
-    let evaluated = FoldedTrace::new(&points_for_fft, accumulator, traces)
+    let evaluated =
+        FoldedWitness::new(&points_for_fft, accumulator, traces)
         .iter()
         .map(|folded_trace| plonk::iter_evaluate_witness::<F>(S, folded_trace))
         .try_multi_product()
@@ -338,15 +342,51 @@ impl<F: PrimeField> Iterator for BetaStrokeIter<F> {
 
 pub(crate) fn compute_K<F: WithSmallOrderMulGroup<3>>(
     S: &PlonkStructure<F>,
-    f_alpha: F,
+    evaluated_poly_F_in_alpha: F,
     betas_stroke: impl Iterator<Item = F>,
     accumulator: &(impl Sync + GetChallenges<F> + GetWitness<F>),
     traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
 ) -> Result<UnivariatePoly<F>, Error> {
-    let mut g_poly = compute_G(S, betas_stroke, accumulator, traces)?;
     // is coeffs here, will transform to evals by fft later
-    let ctx = QueryIndexContext::from(S);
+    let poly_G = compute_G(S, betas_stroke, accumulator, traces)?;
 
+    let points_count = get_points_count(S, traces.len());
+    let fft_domain_size = points_count.ilog2();
+
+    let mut k_evals = lagrange::iter_cyclic_subgroup::<F>(fft_domain_size)
+        .map(|X| F::ZETA * X)
+        .map(|X| {
+            let g_y = poly_G.eval(X);
+            let l_0 = lagrange::iter_eval_lagrange_poly_for_cyclic_group(X, fft_domain_size)
+                .next()
+                .unwrap();
+
+            let z_y = lagrange::eval_vanish_polynomial(fft_domain_size, X);
+
+            dbg!((evaluated_poly_F_in_alpha, l_0, z_y));
+
+            (g_y - (evaluated_poly_F_in_alpha * l_0))
+                * z_y
+                    .invert()
+                    .expect("when z_y is on coset domain, invert is save")
+        })
+        .take(points_count)
+        .collect::<Box<[_]>>();
+
+    fft::coset_ifft(k_evals.as_mut());
+
+    Ok(UnivariatePoly(k_evals))
+}
+
+fn get_count_of_valuation<F: PrimeField>(S: &PlonkStructure<F>) -> Option<NonZeroUsize> {
+    let count_of_rows = 2usize.pow(S.k as u32);
+    let count_of_gates = S.gates.len();
+
+    NonZeroUsize::new(count_of_rows * count_of_gates)
+}
+
+fn get_points_count<F: PrimeField>(S: &PlonkStructure<F>, traces_len: usize) -> usize {
+    let ctx = QueryIndexContext::from(S);
     let max_degree = S
         .gates
         .iter()
@@ -354,45 +394,28 @@ pub(crate) fn compute_K<F: WithSmallOrderMulGroup<3>>(
         .max()
         .unwrap_or_default();
 
-    let points_count = (traces.len() * max_degree + 1).next_power_of_two();
-    let log_n = points_count.ilog2();
-
-    coset_fft(g_poly.as_mut());
-
-    let mut k_evals = lagrange::iter_cyclic_subgroup::<F>(log_n)
-        .map(|pt| F::ZETA * pt)
-        .zip(g_poly.iter())
-        .map(|(pt, g_y)| {
-            let l_y = f_alpha
-                * lagrange::iter_eval_lagrange_poly_for_cyclic_group(pt, log_n)
-                    .next()
-                    .unwrap();
-
-            let z_y = lagrange::eval_vanish_polynomial(log_n, pt);
-
-            // when z_y is on coset domain, invert is save
-            (*g_y - l_y) * z_y.invert().unwrap()
-        })
-        .take(points_count)
-        .collect::<Box<[_]>>();
-
-    coset_ifft(k_evals.as_mut());
-
-    Ok(UnivariatePoly(k_evals))
+    (traces_len * max_degree + 1).next_power_of_two()
 }
 
 #[cfg(test)]
 mod test {
     use std::iter;
 
+    use bitter::{BitReader, LittleEndianReader};
+    use halo2_proofs::{
+        halo2curves::ff::{PrimeField, WithSmallOrderMulGroup},
+        plonk::Circuit,
+    };
+    use tracing::debug;
     use tracing_test::traced_test;
 
+    use super::{folded_witness::FoldedWitness, get_count_of_valuation, get_points_count};
     use crate::{
         commitment::CommitmentKey,
         ff::Field as _Field,
         halo2curves::{bn256, CurveAffine},
-        plonk::{test_eval_witness::poseidon_circuit, PlonkStructure, PlonkTrace},
-        polynomial::univariate::UnivariatePoly,
+        plonk::{self, test_eval_witness::poseidon_circuit, PlonkStructure, PlonkTrace},
+        polynomial::{expression::QueryIndexContext, lagrange, univariate::UnivariatePoly},
         poseidon::{
             random_oracle::{self, ROTrait},
             PoseidonRO, Spec,
@@ -416,12 +439,12 @@ mod test {
         <Curve as CurveAffine>::Base,
     >>::OffCircuit;
 
-    fn poseidon_trace() -> (PlonkStructure<Field>, PlonkTrace<Curve>) {
-        let runner = CircuitRunner::<Field, _>::new(
-            12,
-            poseidon_circuit::TestPoseidonCircuit::default(),
-            vec![],
-        );
+    fn get_trace(
+        k_table_size: u32,
+        circuit: impl Circuit<Field>,
+        instance: Vec<Field>,
+    ) -> (PlonkStructure<Field>, PlonkTrace<Curve>) {
+        let runner = CircuitRunner::<Field, _>::new(k_table_size, circuit, vec![]);
 
         let S = runner.try_collect_plonk_structure().unwrap();
         let witness = runner.try_collect_witness().unwrap();
@@ -429,7 +452,7 @@ mod test {
         let PlonkTrace { u, w } = S
             .run_sps_protocol(
                 &CommitmentKey::setup(17, b""),
-                &[],
+                &instance,
                 &witness,
                 &mut RO::new(PoseidonSpec::new(R_F1, R_P1)),
                 S.num_challenges,
@@ -437,6 +460,226 @@ mod test {
             .unwrap();
 
         (S, PlonkTrace { u, w })
+    }
+
+    fn poseidon_trace() -> (PlonkStructure<Field>, PlonkTrace<Curve>) {
+        get_trace(
+            10,
+            poseidon_circuit::TestPoseidonCircuit::default(),
+            vec![Field::from(4097)],
+        )
+    }
+
+    fn pow_i<'l, F: PrimeField>(
+        i: usize,
+        t: usize,
+        challenges_powers: impl Iterator<Item = &'l F>,
+    ) -> F {
+        let bytes = i.to_le_bytes();
+        let mut reader = LittleEndianReader::new(&bytes);
+
+        iter::repeat_with(|| reader.read_bit().unwrap_or(false))
+            .zip(challenges_powers)
+            .map(|(b_j, beta_in_2j)| match b_j {
+                true => *beta_in_2j,
+                false => F::ONE,
+            })
+            .take(t)
+            .reduce(|acc, coeff| acc * coeff)
+            .unwrap()
+    }
+
+    #[traced_test]
+    #[test]
+    fn cmp_with_direct_eval_of_F() {
+        let (S, mut trace) = poseidon_trace();
+
+        let mut rnd = rand::thread_rng();
+        let mut gen = iter::repeat_with(|| Field::random(&mut rnd));
+
+        trace.w.W.iter_mut().for_each(|row| {
+            row.iter_mut()
+                .for_each(|v| *v = gen.by_ref().next().unwrap())
+        });
+
+        let count_of_rows = 2usize.pow(S.k as u32);
+        let count_of_gates = S.gates.len();
+
+        let count_of_evaluation = count_of_rows * count_of_gates;
+
+        let points_count = count_of_evaluation
+            .next_power_of_two()
+            .ilog2()
+            .next_power_of_two() as usize;
+
+        let delta = gen.by_ref().next().unwrap();
+        let betas = gen.by_ref().take(count_of_evaluation).collect::<Box<[_]>>();
+
+        let evaluated_poly_F = super::compute_F(&S, betas.iter().copied(), delta, &trace).unwrap();
+
+        lagrange::iter_cyclic_subgroup::<Field>(points_count.ilog2())
+            .take(points_count)
+            .chain(gen.take(10))
+            .for_each(|X| {
+                let challenge_vector = betas
+                    .iter()
+                    .zip(iter::successors(Some(delta), |d| Some(d.double())))
+                    .take(count_of_evaluation)
+                    .map(|(beta, delta)| beta + (X * delta))
+                    .collect::<Box<[_]>>();
+
+                let result_with_direct_algo = plonk::iter_evaluate_witness::<Field>(&S, &trace)
+                    .enumerate()
+                    .map(|(index, f_i)| {
+                        pow_i(index, count_of_evaluation, challenge_vector.iter()) * f_i.unwrap()
+                    })
+                    .sum();
+
+                assert_eq!(
+                    evaluated_poly_F.eval(X),
+                    result_with_direct_algo,
+                    "not match for {X:?}"
+                );
+            })
+    }
+
+    #[traced_test]
+    #[test]
+    fn cmp_with_direct_eval_of_G() {
+        let (S, trace) = poseidon_trace();
+        let mut rnd = rand::thread_rng();
+        let mut gen = iter::repeat_with(|| Field::random(&mut rnd));
+
+        let count_of_rows = 2usize.pow(S.k as u32);
+        let count_of_gates = S.gates.len();
+
+        let count_of_evaluation = count_of_rows * count_of_gates;
+
+        let beta_stroke = gen.by_ref().take(count_of_evaluation).collect::<Box<[_]>>();
+
+        let traces = iter::repeat_with(|| {
+            let mut trace = trace.clone();
+            trace
+                .w
+                .W
+                .iter_mut()
+                .for_each(|row| row.iter_mut().zip(gen.by_ref()).for_each(|(v, r)| *v = r));
+            trace
+        })
+        .take(2)
+        .collect::<Box<[_]>>();
+
+        let accumulator = trace;
+        let evaluated_poly_G =
+            super::compute_G(&S, beta_stroke.iter().copied(), &accumulator, &traces).unwrap();
+
+        let max_degree = S
+            .gates
+            .iter()
+            .map(|poly| poly.degree(&QueryIndexContext::from(&S)))
+            .max()
+            .unwrap_or_default();
+        let points_count = (traces.len() * max_degree + 1).next_power_of_two();
+        let fft_domain_size = points_count.ilog2();
+
+        let points_for_fft = lagrange::iter_cyclic_subgroup(fft_domain_size)
+            .take(points_count)
+            .collect::<Box<[_]>>();
+
+        FoldedWitness::new(&points_for_fft, &accumulator, &traces)
+            .iter()
+            .map(|folded_trace| plonk::iter_evaluate_witness::<Field>(&S, folded_trace))
+            .zip(points_for_fft.iter().copied().chain(gen.take(10)))
+            .for_each(|(folded_witness, X)| {
+                let result_with_direct_algo = folded_witness
+                    .enumerate()
+                    .map(|(index, f_i)| {
+                        pow_i(index, count_of_evaluation, beta_stroke.iter()) * f_i.unwrap()
+                    })
+                    .sum();
+
+                assert_eq!(
+                    evaluated_poly_G.eval(X),
+                    result_with_direct_algo,
+                    "for {X:?}"
+                );
+            });
+    }
+
+    #[traced_test]
+    #[test]
+    fn cmp_with_direct_eval_of_K() {
+        let (S, trace) = poseidon_trace();
+
+        let mut rnd = rand::thread_rng();
+        let mut gen = iter::repeat_with(|| Field::random(&mut rnd));
+
+        let count_of_evaluation = get_count_of_valuation(&S).unwrap();
+
+        let delta = gen.next().unwrap();
+        let alpha = gen.next().unwrap();
+
+        let betas = gen
+            .by_ref()
+            .take(count_of_evaluation.get())
+            .collect::<Box<[_]>>();
+
+        let traces = vec![trace.clone(), trace.clone(), trace.clone(), trace.clone()];
+        let accumulator = trace;
+
+        let betas_stroke = super::PolyChallenges {
+            betas: betas.clone(),
+            delta,
+            alpha,
+        }
+        .iter_beta_stroke()
+        .collect::<Box<[_]>>();
+
+        let poly_F =
+            super::compute_F::<Field>(&S, betas.iter().copied(), delta, &accumulator).unwrap();
+
+        let poly_G =
+            super::compute_G(&S, betas_stroke.iter().copied(), &accumulator, &traces).unwrap();
+
+        let poly_K = super::compute_K::<Field>(
+            &S,
+            poly_F.eval(alpha),
+            betas_stroke.iter().copied(),
+            &accumulator,
+            &traces,
+        )
+        .unwrap();
+
+        let points_count = get_points_count(&S, traces.len());
+        let fft_domain_size = points_count.ilog2();
+
+        lagrange::iter_cyclic_subgroup::<Field>(fft_domain_size)
+            .map(|pt| Field::ZETA * pt)
+            .take(points_count)
+            .chain(
+                gen.take(10)
+                    .inspect(|X| debug!("start with random X: {X:?}")),
+            )
+            .for_each(|cha_X| {
+                let poly_L_in_X =
+                    lagrange::iter_eval_lagrange_poly_for_cyclic_group(cha_X, fft_domain_size)
+                        .next()
+                        .unwrap();
+
+                let poly_F_in_alpha = poly_F.eval(alpha);
+                let poly_Z_in_X = lagrange::eval_vanish_polynomial(fft_domain_size, cha_X);
+                let poly_K_in_X = poly_K.eval(cha_X);
+                let poly_G_in_X = poly_G.eval(cha_X);
+
+                dbg!((poly_F_in_alpha, poly_L_in_X, poly_Z_in_X, poly_K_in_X));
+
+                // G(X) = F(alpha) * L(X) + Z(X) * K(X)
+                assert_eq!(
+                    (poly_F_in_alpha * poly_L_in_X) + (poly_Z_in_X * poly_K_in_X),
+                    poly_G_in_X,
+                    "for {cha_X:?}"
+                );
+            });
     }
 
     #[traced_test]
@@ -447,9 +690,9 @@ mod test {
 
         let delta = Field::random(&mut rnd);
         assert!(super::compute_F(
+            &S,
             iter::repeat_with(move || Field::random(&mut rnd)),
             delta,
-            &S,
             &trace,
         )
         .unwrap()
@@ -471,9 +714,9 @@ mod test {
         let delta = Field::random(&mut rnd);
         assert_ne!(
             super::compute_F(
+                &S,
                 iter::repeat_with(|| Field::random(&mut rnd)),
                 delta,
-                &S,
                 &trace,
             ),
             Ok(UnivariatePoly::from_iter(
