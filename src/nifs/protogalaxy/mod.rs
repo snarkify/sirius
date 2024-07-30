@@ -199,12 +199,18 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
 
 pub struct ProverParam<C: CurveAffine> {
     pub(crate) S: PlonkStructure<C::ScalarExt>,
-    /// digest of public parameter of IVC circuit
+    /// Digest of public parameter of IVC circuit
     pp_digest: C,
 }
 
 pub struct VerifierParam<C: CurveAffine> {
+    /// This field, `log_n`, represents the base-2 logarithm of the next power of two
+    /// that is greater than or equal to the product of the number of rows and the number of gates.
+    ///
+    /// In formula terms, it is calculated using:
+    /// (Count_of_rows * Count_of_gates).next_power_of_two().ilog2()
     log_n: u32,
+    /// Digest of public parameter of IVC circuit
     pp_digest: C,
 }
 
@@ -243,7 +249,6 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         ))
     }
 
-    // TODO: if this function turned out to be the same, consider move to trait
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
         instance: &[C::ScalarExt],
