@@ -73,18 +73,18 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
     ) -> Result<Self::AccumulatorInstance, Self::Error>;
 }
 
-pub trait IsSatAccumulator<C: CurveAffine>: FoldingScheme<C> {
+pub trait IsSatAccumulator<C: CurveAffine, const L: usize = 1>: FoldingScheme<C, L> {
     type VerifyError;
 
     fn is_sat_acc(
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
-        acc: &<Self as FoldingScheme<C>>::Accumulator,
+        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError>;
 
     fn is_sat_perm(
         S: &PlonkStructure<C::ScalarExt>,
-        acc: &<Self as FoldingScheme<C>>::Accumulator,
+        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError>;
 }
 
