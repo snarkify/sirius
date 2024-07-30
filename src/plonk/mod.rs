@@ -37,7 +37,7 @@ use crate::{
         expression::{HomogeneousExpression, QueryIndexContext},
         graph_evaluator::GraphEvaluator,
         grouped_poly::GroupedPoly,
-        sparse::{matrix_multiply, SparseMatrix},
+        sparse::SparseMatrix,
         Expression,
     },
     poseidon::{AbsorbInRO, ROTrait},
@@ -457,101 +457,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         Ok(())
     }
 
-    pub fn is_sat_relaxed<C>(
-        &self,
-        ck: &CommitmentKey<C>,
-        U: &RelaxedPlonkInstance<C>,
-        W: &RelaxedPlonkWitness<F>,
-    ) -> Result<(), Error>
-    where
-        C: CurveAffine<ScalarExt = F>,
-    {
-        let total_row = 1 << self.k;
-
-        let data = PlonkEvalDomain {
-            num_advice: self.num_advice_columns,
-            num_lookup: self.num_lookups(),
-            challenges: &concat_vec!(&U.challenges, &[U.u]),
-            selectors: &self.selectors,
-            fixed: &self.fixed_columns,
-            W1s: &W.W,
-            W2s: &[],
-        };
-
-        let evaluator = GraphEvaluator::new(self.custom_gates_lookup_compressed.homogeneous());
-        (0..total_row)
-            .into_par_iter()
-            .map(|row| {
-                evaluator.evaluate(&data, row).map(|eval_of_row| {
-                    let expected = W.E[row];
-
-                    if eval_of_row.eq(&expected) {
-                        0
-                    } else {
-                        warn!("row {row} invalid: expected {expected:?}, but {eval_of_row:?}");
-                        1
-                    }
-                })
-            })
-            .try_reduce(
-                || 0,
-                |mismatch_count, is_missed| Ok(mismatch_count + is_missed),
-            )
-            .map(|mismatch_count| {
-                Some(Error::EvaluationMismatch {
-                    mismatch_count: NonZeroUsize::new(mismatch_count)?,
-                    total_row,
-                })
-            })?
-            .err_or(())?;
-
-        if !self.is_sat_log_derivative(&W.W) {
-            return Err(Error::LogDerivativeNotSat);
-        }
-
-        U.W_commitments
-            .iter()
-            .zip_eq(W.W.iter())
-            .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
-            .count_to_non_zero()
-            .map(|mismatch_count| Error::CommitmentMismatch { mismatch_count })
-            .err_or(())?;
-
-        if ck.commit(&W.E).unwrap().ne(&U.E_commitment) {
-            return Err(Error::ECommitmentMismatch);
-        }
-
-        Ok(())
-    }
-
     // permutation check for folding instance-witness pair
-    pub fn is_sat_perm<C>(
-        &self,
-        U: &RelaxedPlonkInstance<C>,
-        W: &RelaxedPlonkWitness<F>,
-    ) -> Result<(), Error>
-    where
-        C: CurveAffine<ScalarExt = F>,
-    {
-        let Z = U
-            .instance
-            .clone()
-            .into_iter()
-            .chain(W.W[0][..(1 << self.k) * self.num_advice_columns].to_vec())
-            .collect::<Vec<_>>();
-        let y = matrix_multiply(&self.permutation_matrix, &Z[..]);
-        let mismatch_count = y
-            .into_iter()
-            .zip(Z)
-            .map(|(y, z)| y - z)
-            .filter(|d| F::ZERO.ne(d))
-            .count();
-        if mismatch_count == 0 {
-            Ok(())
-        } else {
-            Err(Error::PermCheckFail { mismatch_count })
-        }
-    }
 
     /// check whether the log-derivative equation is satisfied
     pub fn is_sat_log_derivative(&self, W: &[Vec<F>]) -> bool {

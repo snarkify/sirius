@@ -103,13 +103,13 @@ where
     if let Err(err) = S.is_sat(&ck, &mut ro_nark_decider, &pair1.u, &pair1.w) {
         errors.push(("is_sat_pair1", err));
     }
-    if let Err(err) = S.is_sat_perm(&pair1_relaxed.U, &pair1_relaxed.W) {
+    if let Err(err) = VanillaFS::is_sat_perm(&S, &pair1_relaxed) {
         errors.push(("is_sat_perm_pair1", err));
     }
     if let Err(err) = S.is_sat(&ck, &mut ro_nark_decider, &pair2.u, &pair2.w) {
         errors.push(("is_sat_pair2", err));
     }
-    if let Err(err) = S.is_sat_perm(&pair2_relaxed.U, &pair2_relaxed.W) {
+    if let Err(err) = VanillaFS::is_sat_perm(&S, &pair2_relaxed) {
         errors.push(("is_sat_perm_pair2", err));
     }
 
@@ -150,8 +150,10 @@ where
     const R_F: usize = 4;
     const R_P: usize = 3;
 
-    let mut f_U = RelaxedPlonkInstance::new(S.num_io, S.num_challenges, S.round_sizes.len());
-    let mut f_W = RelaxedPlonkWitness::new(S.k, &S.round_sizes);
+    let mut f_tr = RelaxedPlonkTrace {
+        U: RelaxedPlonkInstance::new(S.num_io, S.num_challenges, S.round_sizes.len()),
+        W: RelaxedPlonkWitness::new(S.k, &S.round_sizes),
+    };
 
     let mut ro_nark_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_acc_prover = create_ro::<C::Base, T, RATE, R_F, R_P>();
@@ -160,35 +162,28 @@ where
     let (pp, vp) = VanillaFS::setup_params(pp_digest, S.clone())?;
 
     let pair1 = [pair1];
-    let (RelaxedPlonkTrace { U: U_from_prove, W }, cross_term_commits) = VanillaFS::prove(
-        ck,
-        &pp,
-        &mut ro_acc_prover,
-        RelaxedPlonkTrace {
-            U: f_U.clone(),
-            W: f_W.clone(),
-        },
-        &pair1,
-    )?;
+    let (RelaxedPlonkTrace { U: U_from_prove, W }, cross_term_commits) =
+        VanillaFS::prove(ck, &pp, &mut ro_acc_prover, f_tr.clone(), &pair1)?;
 
     let U_from_verify = VanillaFS::verify(
         &vp,
         &mut ro_nark_verifier,
         &mut ro_acc_verifier,
-        &f_U,
+        &f_tr.U,
         &pair1.map(|p| p.u),
         &cross_term_commits,
     )?;
     Error::check_equality(&U_from_verify, &U_from_prove)?;
 
-    f_U = U_from_verify;
-    f_W = W;
+    f_tr.U = U_from_verify;
+    f_tr.W = W;
 
     let mut errors = Vec::new();
-    if let Err(err) = S.is_sat_relaxed(ck, &f_U, &f_W) {
-        errors.push(("is_sat_relaxed 1", err));
+
+    if let Err(err) = VanillaFS::is_sat_acc(ck, S, &f_tr) {
+        errors.push(("is_sat_acc 1", err));
     }
-    if let Err(err) = S.is_sat_perm(&f_U, &f_W) {
+    if let Err(err) = VanillaFS::is_sat_perm(S, &f_tr) {
         errors.push(("is_sat_perm 1", err));
     }
 
@@ -204,8 +199,8 @@ where
         &pp,
         &mut ro_acc_prover,
         RelaxedPlonkTrace {
-            U: f_U.clone(),
-            W: f_W,
+            U: f_tr.U.clone(),
+            W: f_tr.W,
         },
         &pair2,
     )?;
@@ -214,19 +209,19 @@ where
         &vp,
         &mut ro_nark_verifier,
         &mut ro_acc_verifier,
-        &f_U,
+        &f_tr.U,
         &pair2.map(|p| p.u),
         &cross_term_commits,
     )?;
     assert_eq!(U_from_prove, U_from_verify);
 
-    f_U = U_from_verify;
-    f_W = _W;
+    f_tr.U = U_from_verify;
+    f_tr.W = _W;
 
-    if let Err(err) = S.is_sat_relaxed(ck, &f_U, &f_W) {
+    if let Err(err) = VanillaFS::is_sat_acc(ck, S, &f_tr) {
         errors.push(("is_sat_relaxed 2", err));
     }
-    if let Err(err) = S.is_sat_perm(&f_U, &f_W) {
+    if let Err(err) = VanillaFS::is_sat_perm(S, &f_tr) {
         errors.push(("is_sat_perm 2", err));
     }
     if errors.is_empty() {

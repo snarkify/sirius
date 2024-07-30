@@ -1,6 +1,9 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, num::NonZeroUsize};
 
+use count_to_non_zero::CountToNonZeroExt;
 use halo2_proofs::arithmetic::CurveAffine;
+use itertools::Itertools;
+use some_to_err::ErrOr;
 use tracing::*;
 
 use super::*;
@@ -10,11 +13,12 @@ use crate::{
     constants::NUM_CHALLENGE_BITS,
     ff::Field,
     plonk::{
+        self,
         eval::{GetDataForEval, PlonkEvalDomain},
         PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness, RelaxedPlonkInstance,
         RelaxedPlonkTrace, RelaxedPlonkWitness,
     },
-    polynomial::graph_evaluator::GraphEvaluator,
+    polynomial::{graph_evaluator::GraphEvaluator, sparse},
     poseidon::ROTrait,
     sps::SpecialSoundnessVerifier,
 };
@@ -261,6 +265,102 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         let r = VanillaFS::generate_challenge(vp, ro_acc, U1, U2, cross_term_commits)?;
 
         Ok(U1.fold(U2, cross_term_commits, &r))
+    }
+}
+
+impl<C: CurveAffine> IsSatAccumulator<C> for VanillaFS<C> {
+    type VerifyError = plonk::Error;
+
+    fn is_sat_acc(
+        ck: &CommitmentKey<C>,
+        S: &PlonkStructure<C::ScalarExt>,
+        acc: &<Self as FoldingScheme<C>>::Accumulator,
+    ) -> Result<(), Self::VerifyError> {
+        let RelaxedPlonkTrace { U, W } = acc;
+
+        let total_row = 1 << S.k;
+        let data = PlonkEvalDomain {
+            num_advice: S.num_advice_columns,
+            num_lookup: S.num_lookups(),
+            challenges: &concat_vec!(&U.challenges, &[U.u]),
+            selectors: &S.selectors,
+            fixed: &S.fixed_columns,
+            W1s: &W.W,
+            W2s: &[],
+        };
+
+        let evaluator = GraphEvaluator::new(S.custom_gates_lookup_compressed.homogeneous());
+        (0..total_row)
+            .into_par_iter()
+            .map(|row| {
+                evaluator.evaluate(&data, row).map(|eval_of_row| {
+                    let expected = W.E[row];
+
+                    if eval_of_row.eq(&expected) {
+                        0
+                    } else {
+                        warn!("row {row} invalid: expected {expected:?}, but {eval_of_row:?}");
+                        1
+                    }
+                })
+            })
+            .try_reduce(
+                || 0,
+                |mismatch_count, is_missed| Ok(mismatch_count + is_missed),
+            )
+            .map(|mismatch_count| {
+                Some(Self::VerifyError::EvaluationMismatch {
+                    mismatch_count: NonZeroUsize::new(mismatch_count)?,
+                    total_row,
+                })
+            })?
+            .err_or(())?;
+
+        if !S.is_sat_log_derivative(&W.W) {
+            return Err(Self::VerifyError::LogDerivativeNotSat);
+        }
+
+        U.W_commitments
+            .iter()
+            .zip_eq(W.W.iter())
+            .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
+            .count_to_non_zero()
+            .map(|mismatch_count| Self::VerifyError::CommitmentMismatch { mismatch_count })
+            .err_or(())?;
+
+        if ck.commit(&W.E).unwrap().ne(&U.E_commitment) {
+            return Err(Self::VerifyError::ECommitmentMismatch);
+        }
+
+        Ok(())
+    }
+
+    fn is_sat_perm(
+        S: &PlonkStructure<C::ScalarExt>,
+        acc: &<Self as FoldingScheme<C>>::Accumulator,
+    ) -> Result<(), Self::VerifyError> {
+        let RelaxedPlonkTrace { U, W } = acc;
+
+        let Z = U
+            .instance
+            .clone()
+            .into_iter()
+            .chain(W.W[0][..(1 << S.k) * S.num_advice_columns].to_vec())
+            .collect::<Vec<_>>();
+
+        let y = sparse::matrix_multiply(&S.permutation_matrix, &Z[..]);
+        let mismatch_count = y
+            .into_iter()
+            .zip(Z)
+            .map(|(y, z)| y - z)
+            .filter(|d| C::ScalarExt::ZERO.ne(d))
+            .count();
+
+        if mismatch_count == 0 {
+            Ok(())
+        } else {
+            Err(Self::VerifyError::PermCheckFail { mismatch_count })
+        }
     }
 }
 
