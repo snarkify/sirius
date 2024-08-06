@@ -10,7 +10,7 @@ use crate::{ff::PrimeField, main_gate::RegionCtx, table::WitnessCollector};
 #[derive(Debug, thiserror::Error)]
 pub enum SynthesisError {
     #[error(transparent)]
-    Halo2(halo2_proofs::plonk::Error),
+    Halo2(#[from] halo2_proofs::plonk::Error),
     #[error(transparent)]
     FoldError(#[from] fold_relaxed_plonk_instance_chip::Error),
 }
