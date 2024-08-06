@@ -65,7 +65,8 @@ use crate::{
         AdviceCyclicAssignor, AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx,
         WrapValue,
     },
-    plonk::{PlonkInstance, RelaxedPlonkInstance},
+    nifs::vanilla::accumulator::RelaxedPlonkInstance,
+    plonk::PlonkInstance,
     poseidon::ROCircuitTrait,
     util::{self, CellsValuesView},
 };
@@ -268,14 +269,12 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             };
 
         Ok(Some(RelaxedPlonkInstance {
-            W_commitments: unwrap_result_option!(folded_W
-                .iter()
-                .map(AssignedPoint::to_curve)
-                .collect()),
-            E_commitment: unwrap_result_option!(folded_E.to_curve()),
-            u: util::fe_to_fe_safe(&unwrap_result_option!(folded_u.value().unwrap().copied()))
-                .expect("fields same bytes len"),
-            instance: vec![
+            inner: PlonkInstance {
+                W_commitments: unwrap_result_option!(folded_W
+                    .iter()
+                    .map(AssignedPoint::to_curve)
+                    .collect()),
+                instance: vec![
                 util::fe_to_fe_safe(&folded_X0.into_f().expect(
                     "since biguint calculations are modulo the scalar field, any result must fit",
                 ))
@@ -285,10 +284,15 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
                 ))
                 .expect("fields same bytes len"),
             ],
-            challenges: folded_challenges
-                .iter()
-                .flat_map(|c| to_diff_bn(c))
-                .collect::<Result<Vec<_>, _>>()?,
+                challenges: folded_challenges
+                    .iter()
+                    .flat_map(|c| to_diff_bn(c))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+
+            E_commitment: unwrap_result_option!(folded_E.to_curve()),
+            u: util::fe_to_fe_safe(&unwrap_result_option!(folded_u.value().unwrap().copied()))
+                .expect("fields same bytes len"),
         }))
     }
 }
@@ -1139,7 +1143,7 @@ mod tests {
     fn generate_challenge() {
         let mut rnd = rand::thread_rng();
 
-        let relaxed = generate_random_plonk_instance(&mut rnd).to_relax();
+        let relaxed = RelaxedPlonkInstance::from(generate_random_plonk_instance(&mut rnd));
 
         let (mut ws, config) = get_witness_collector();
 

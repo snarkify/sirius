@@ -15,8 +15,12 @@ use crate::{
         step_folding_circuit::{StepFoldingCircuit, StepInputs},
     },
     main_gate::MainGateConfig,
-    nifs::{self, vanilla::VanillaFS, FoldingScheme, IsSatAccumulator},
-    plonk::{self, PlonkTrace, RelaxedPlonkTrace},
+    nifs::{
+        self,
+        vanilla::{accumulator::RelaxedPlonkTrace, VanillaFS},
+        FoldingScheme, IsSatAccumulator,
+    },
+    plonk::{self, PlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
     table::CircuitRunner,
@@ -200,8 +204,10 @@ where
         debug!("primary z output calculated off-circuit");
 
         // Will be used as input & output `U` of zero-step of IVC
-        let secondary_relaxed_trace =
-            secondary_pre_round_plonk_trace.to_relax(pp.secondary.k_table_size() as usize);
+        let secondary_relaxed_trace = RelaxedPlonkTrace::from_regular(
+            secondary_pre_round_plonk_trace.clone(),
+            pp.secondary.k_table_size() as usize,
+        );
 
         // Prepare primary constraint system for folding
         let primary_instance = {
@@ -268,8 +274,10 @@ where
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?;
 
-        let primary_relaxed_trace =
-            primary_plonk_trace.to_relax(pp.primary.k_table_size() as usize);
+        let primary_relaxed_trace = RelaxedPlonkTrace::from_regular(
+            primary_plonk_trace.clone(),
+            pp.primary.k_table_size() as usize,
+        );
 
         primary_span.exit();
         let _secondary_span = info_span!("secondary").entered();
