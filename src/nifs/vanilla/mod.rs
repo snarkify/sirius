@@ -12,16 +12,18 @@ use crate::{
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
     ff::Field,
+    nifs::vanilla::accumulator::{RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness},
     plonk::{
         self,
         eval::{GetDataForEval, PlonkEvalDomain},
-        PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness, RelaxedPlonkInstance,
-        RelaxedPlonkTrace, RelaxedPlonkWitness,
+        PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness,
     },
     polynomial::{graph_evaluator::GraphEvaluator, sparse},
     poseidon::ROTrait,
     sps::SpecialSoundnessVerifier,
 };
+
+pub mod accumulator;
 
 /// Represent intermediate polynomial terms that arise when folding
 /// two polynomial relations into one.
@@ -90,7 +92,12 @@ impl<C: CurveAffine> VanillaFS<C> {
         let data = PlonkEvalDomain {
             num_advice: S.num_advice_columns,
             num_lookup: S.num_lookups(),
-            challenges: &concat_vec!(&U1.challenges, &[U1.u], &U2.challenges, &[U2.to_relax().u]),
+            challenges: &concat_vec!(
+                &U1.challenges,
+                &[U1.u],
+                &U2.challenges,
+                &[RelaxedPlonkInstance::<C>::DEFAULT_u]
+            ),
             selectors: &S.selectors,
             fixed: &S.fixed_columns,
             W1s: &W1.W,

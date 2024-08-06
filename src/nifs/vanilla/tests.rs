@@ -9,10 +9,15 @@ use crate::{
         bn256::{Fr, G1Affine},
         group::ff::FromUniformBytes,
     },
-    nifs::{self, tests::setup_smallest_commitment_key, vanilla::VanillaFS},
-    plonk::{
-        PlonkStructure, PlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness,
+    nifs::{
+        self,
+        tests::setup_smallest_commitment_key,
+        vanilla::{
+            accumulator::{RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness},
+            VanillaFS,
+        },
     },
+    plonk::{PlonkStructure, PlonkTrace},
     table::CircuitRunner,
     util::create_ro,
 };
@@ -92,11 +97,11 @@ where
 
     let pair1 =
         VanillaFS::generate_plonk_trace(&ck, &public_inputs1, &W1, &pp, &mut ro_nark_prepare)?;
-    let pair1_relaxed = pair1.to_relax(S.k);
+    let pair1_relaxed = RelaxedPlonkTrace::from_regular(pair1.clone(), S.k);
 
     let pair2 =
         VanillaFS::generate_plonk_trace(&ck, &public_inputs2, &W2, &pp, &mut ro_nark_prepare)?;
-    let pair2_relaxed = pair2.to_relax(S.k);
+    let pair2_relaxed = RelaxedPlonkTrace::from_regular(pair2.clone(), S.k);
 
     let mut errors = Vec::new();
 

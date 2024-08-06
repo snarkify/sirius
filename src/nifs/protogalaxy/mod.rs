@@ -10,10 +10,7 @@ use crate::{
     commitment::CommitmentKey,
     constants::NUM_CHALLENGE_BITS,
     ff::PrimeField,
-    plonk::{
-        PlonkStructure, PlonkTrace, PlonkWitness, RelaxedPlonkInstance, RelaxedPlonkTrace,
-        RelaxedPlonkWitness,
-    },
+    plonk::{PlonkStructure, PlonkTrace, PlonkWitness},
     polynomial::{lagrange, univariate::UnivariatePoly},
     poseidon::AbsorbInRO,
     sps::{self, SpecialSoundnessVerifier},
@@ -81,21 +78,20 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     }
 
     fn fold_witness<'i>(
-        acc: RelaxedPlonkWitness<C::Scalar>,
+        acc: PlonkWitness<C::Scalar>,
         incoming: impl Iterator<Item = &'i PlonkWitness<C::Scalar>>,
         mut lagrange_for_gamma: impl Iterator<Item = C::Scalar>,
-    ) -> RelaxedPlonkWitness<C::Scalar> {
+    ) -> PlonkWitness<C::Scalar> {
         let l_0: C::ScalarExt = lagrange_for_gamma
             .next()
             .expect("safe, because len of lagrange is `2^log_n`");
 
-        let new_accumulator = RelaxedPlonkWitness {
+        let new_accumulator = PlonkWitness {
             W: acc
                 .W
                 .into_iter()
                 .map(|r| r.into_iter().map(|w| w * l_0).collect())
                 .collect(),
-            E: acc.E.iter().map(|e| *e * l_0).collect(),
         };
 
         incoming
@@ -118,10 +114,10 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     }
 
     fn fold_instance<'i>(
-        acc: RelaxedPlonkInstance<C>,
+        acc: PlonkInstance<C>,
         incoming: impl Iterator<Item = &'i PlonkInstance<C>>,
         mut lagrange_for_gamma: impl Iterator<Item = C::Scalar>,
-    ) -> RelaxedPlonkInstance<C> {
+    ) -> PlonkInstance<C> {
         let l_0: C::ScalarExt = lagrange_for_gamma
             .next()
             .expect("safe, because len of lagrange is `2^log_n`");
@@ -129,7 +125,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         let ecc_mul =
             |pt: C, val: C::ScalarExt| -> C { arithmetic::best_multiexp(&[val], &[pt]).into() };
 
-        let new_accumulator = RelaxedPlonkInstance {
+        let new_accumulator = PlonkInstance {
             W_commitments: acc
                 .W_commitments
                 .into_iter()
@@ -137,9 +133,6 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
                 .collect(),
             instance: acc.instance.into_iter().map(|i| i * l_0).collect(),
             challenges: acc.challenges.into_iter().map(|c| c * l_0).collect(),
-            u: acc.u * l_0,
-            // Ignore for protogalaxy
-            E_commitment: C::identity(),
         };
 
         incoming
@@ -348,14 +341,14 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
             Accumulator {
                 e: calculate_e::<C>(&poly_F, &poly_K, gamma, alpha, log_n),
                 betas: betas_stroke,
-                trace: RelaxedPlonkTrace {
-                    U: Self::fold_instance(
-                        accumulator.trace.U,
+                trace: PlonkTrace {
+                    u: Self::fold_instance(
+                        accumulator.trace.u,
                         incoming.iter().map(|tr| &tr.u),
                         lagrange_for_gamma.iter().copied(),
                     ),
-                    W: Self::fold_witness(
-                        accumulator.trace.W,
+                    w: Self::fold_witness(
+                        accumulator.trace.w,
                         incoming.iter().map(|tr| &tr.w),
                         lagrange_for_gamma.iter().copied(),
                     ),
@@ -425,8 +418,8 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
 
         Ok(AccumulatorInstance {
             betas: betas_stroke,
-            U: Self::fold_instance(
-                accumulator.U.clone(),
+            ins: Self::fold_instance(
+                accumulator.ins.clone(),
                 incoming.iter(),
                 lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, vp.log_n),
             ),
