@@ -365,7 +365,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         ))
     }
 
-    /// Proves a statement using the ProtoGalaxy protocol.
+    /// Verifies a statement using the ProtoGalaxy protocol.
     ///
     /// # Algorithm
     ///
