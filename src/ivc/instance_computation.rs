@@ -10,7 +10,7 @@ use crate::{
     gadgets::{ecc::AssignedPoint, nonnative::bn::big_uint::BigUint},
     halo2curves::CurveAffine,
     main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
-    plonk::RelaxedPlonkInstance,
+    nifs::vanilla::accumulator::RelaxedPlonkInstance,
     poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
     util,
 };
@@ -180,6 +180,7 @@ mod tests {
     use crate::{
         ff::Field,
         halo2curves::{bn256, grumpkin},
+        plonk::PlonkInstance,
     };
 
     type C1 = <bn256::G1 as PrimeCurve>::Affine;
@@ -211,10 +212,12 @@ mod tests {
         let z_0 = [Base::from_u128(0x1024); 10];
         let z_i = [Base::from_u128(0x2048); 10];
         let relaxed = RelaxedPlonkInstance {
-            W_commitments: vec![CommitmentKey::<C1>::default_value(); 10],
+            inner: PlonkInstance {
+                W_commitments: vec![CommitmentKey::<C1>::default_value(); 10],
+                instance: vec![Scalar::from_u128(0x67899); 2],
+                challenges: vec![Scalar::from_u128(0x123456); 10],
+            },
             E_commitment: CommitmentKey::<C1>::default_value(),
-            instance: vec![Scalar::from_u128(0x67899); 2],
-            challenges: vec![Scalar::from_u128(0x123456); 10],
             u: Scalar::from_u128(u128::MAX),
         };
 
