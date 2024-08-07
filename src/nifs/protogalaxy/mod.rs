@@ -1,8 +1,10 @@
 use std::{iter, marker::PhantomData};
 
 use halo2_proofs::arithmetic::{self, CurveAffine, Field};
+use itertools::Itertools;
 use tracing::instrument;
 
+use self::accumulator::AccumulatorInstance;
 use super::*;
 use crate::{
     commitment::CommitmentKey,
@@ -13,7 +15,9 @@ use crate::{
         RelaxedPlonkWitness,
     },
     polynomial::{lagrange, univariate::UnivariatePoly},
-    sps, util,
+    poseidon::AbsorbInRO,
+    sps::{self, SpecialSoundnessVerifier},
+    util,
 };
 
 mod accumulator;
@@ -38,10 +42,10 @@ pub struct ProtoGalaxy<C: CurveAffine, const L: usize> {
 
 impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     #[instrument(skip_all)]
-    pub(crate) fn generate_challenge<'i>(
+    pub(crate) fn generate_challenge<'i, RO: ROTrait<C::Base>>(
         pp_digest: &C,
-        ro_acc: &mut impl ROTrait<C::Base>,
-        accumulator: &Accumulator<C>,
+        ro_acc: &mut RO,
+        accumulator: &impl AbsorbInRO<C::Base, RO>,
         instances: impl Iterator<Item = &'i PlonkInstance<C>>,
     ) -> <C as CurveAffine>::ScalarExt {
         ro_acc
@@ -60,7 +64,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
 
     pub(crate) fn new_accumulator(
         args: AccumulatorArgs,
-        params: &ProtoGalaxyProverParam<C>,
+        params: &ProverParam<C>,
         ro_acc: &mut impl ROTrait<C::Base>,
     ) -> Accumulator<C> {
         let mut accumulator = Accumulator::new(args, Self::get_count_of_valuation(&params.S));
@@ -76,91 +80,34 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         accumulator
     }
 
-    fn fold_trace(
-        acc: RelaxedPlonkTrace<C>,
-        incoming: &[PlonkTrace<C>],
-        gamma: C::ScalarExt,
-        log_n: u32,
-    ) -> RelaxedPlonkTrace<C> {
-        let mut lagrange = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n);
-        let l_0: C::ScalarExt = lagrange
+    fn fold_witness<'i>(
+        acc: RelaxedPlonkWitness<C::Scalar>,
+        incoming: impl Iterator<Item = &'i PlonkWitness<C::Scalar>>,
+        mut lagrange_for_gamma: impl Iterator<Item = C::Scalar>,
+    ) -> RelaxedPlonkWitness<C::Scalar> {
+        let l_0: C::ScalarExt = lagrange_for_gamma
             .next()
             .expect("safe, because len of lagrange is `2^log_n`");
 
-        let ecc_mul =
-            |pt: C, val: C::ScalarExt| -> C { arithmetic::best_multiexp(&[val], &[pt]).into() };
-
-        let new_accumulator = RelaxedPlonkTrace::<C> {
-            U: RelaxedPlonkInstance {
-                W_commitments: acc
-                    .U
-                    .W_commitments
-                    .into_iter()
-                    .map(|w| ecc_mul(w, l_0))
-                    .collect(),
-                instance: acc.U.instance.into_iter().map(|i| i * l_0).collect(),
-                challenges: acc.U.challenges.into_iter().map(|c| c * l_0).collect(),
-                u: acc.U.u * l_0,
-                // Ignore for protogalaxy
-                E_commitment: C::identity(),
-            },
-            W: RelaxedPlonkWitness {
-                W: acc
-                    .W
-                    .W
-                    .into_iter()
-                    .map(|r| r.into_iter().map(|w| w * l_0).collect())
-                    .collect(),
-                E: acc.W.E.iter().map(|e| *e * l_0).collect(),
-            },
+        let new_accumulator = RelaxedPlonkWitness {
+            W: acc
+                .W
+                .into_iter()
+                .map(|r| r.into_iter().map(|w| w * l_0).collect())
+                .collect(),
+            E: acc.E.iter().map(|e| *e * l_0).collect(),
         };
 
         incoming
-            .iter()
-            .zip(lagrange)
-            .fold(new_accumulator, |mut acc, (tr, l_n)| {
-                let PlonkTrace {
-                    u:
-                        PlonkInstance {
-                            W_commitments,
-                            instance,
-                            challenges,
-                        },
-                    w: PlonkWitness { W },
-                } = tr;
-
-                acc.U
-                    .W_commitments
-                    .iter_mut()
-                    .zip(W_commitments.iter())
-                    .for_each(|(acc_Wc, Wc)| {
-                        *acc_Wc = (*acc_Wc + ecc_mul(*Wc, l_n)).into();
-                    });
-
-                acc.U
-                    .instance
-                    .iter_mut()
-                    .zip(instance.iter())
-                    .for_each(|(acc_inst, inst)| {
-                        *acc_inst += *inst * l_n;
-                    });
-
-                acc.U
-                    .challenges
-                    .iter_mut()
-                    .zip(challenges.iter())
-                    .for_each(|(acc_cha, cha)| {
-                        *acc_cha += *cha * l_n;
-                    });
-
+            .zip(lagrange_for_gamma)
+            .fold(new_accumulator, |mut acc, (w, l_n)| {
                 acc.W
-                    .W
                     .iter_mut()
-                    .zip(W.iter())
+                    .zip_eq(w.W.iter())
                     .for_each(|(acc_W_row, W_row)| {
                         acc_W_row
                             .iter_mut()
-                            .zip(W_row.iter())
+                            .zip_eq(W_row.iter())
                             .for_each(|(acc_cell, cell)| {
                                 *acc_cell += *cell * l_n;
                             });
@@ -169,11 +116,97 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
                 acc
             })
     }
+
+    fn fold_instance<'i>(
+        acc: RelaxedPlonkInstance<C>,
+        incoming: impl Iterator<Item = &'i PlonkInstance<C>>,
+        mut lagrange_for_gamma: impl Iterator<Item = C::Scalar>,
+    ) -> RelaxedPlonkInstance<C> {
+        let l_0: C::ScalarExt = lagrange_for_gamma
+            .next()
+            .expect("safe, because len of lagrange is `2^log_n`");
+
+        let ecc_mul =
+            |pt: C, val: C::ScalarExt| -> C { arithmetic::best_multiexp(&[val], &[pt]).into() };
+
+        let new_accumulator = RelaxedPlonkInstance {
+            W_commitments: acc
+                .W_commitments
+                .into_iter()
+                .map(|w| ecc_mul(w, l_0))
+                .collect(),
+            instance: acc.instance.into_iter().map(|i| i * l_0).collect(),
+            challenges: acc.challenges.into_iter().map(|c| c * l_0).collect(),
+            u: acc.u * l_0,
+            // Ignore for protogalaxy
+            E_commitment: C::identity(),
+        };
+
+        incoming
+            .zip(lagrange_for_gamma)
+            .fold(new_accumulator, |mut acc, (u, l_n)| {
+                let PlonkInstance {
+                    W_commitments,
+                    instance,
+                    challenges,
+                } = u;
+
+                acc.W_commitments
+                    .iter_mut()
+                    .zip_eq(W_commitments.iter())
+                    .for_each(|(acc_Wc, Wc)| {
+                        *acc_Wc = (*acc_Wc + ecc_mul(*Wc, l_n)).into();
+                    });
+
+                acc.instance
+                    .iter_mut()
+                    .zip_eq(instance.iter())
+                    .for_each(|(acc_inst, inst)| {
+                        *acc_inst += *inst * l_n;
+                    });
+
+                acc.challenges
+                    .iter_mut()
+                    .zip_eq(challenges.iter())
+                    .for_each(|(acc_cha, cha)| {
+                        *acc_cha += *cha * l_n;
+                    });
+
+                acc
+            })
+    }
+
+    pub fn verify_sps<'l>(
+        incoming: impl Iterator<Item = &'l PlonkInstance<C>>,
+        ro_nark: &mut impl ROTrait<C::Base>,
+    ) -> Result<(), Error> {
+        let errors = incoming
+            .enumerate()
+            .filter_map(|(i, plonk_instance)| Some((i, plonk_instance.sps_verify(ro_nark).err()?)))
+            .collect::<Box<[_]>>();
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::VerifySps(errors))
+        }
+    }
 }
 
-pub struct ProtoGalaxyProverParam<C: CurveAffine> {
+pub struct ProverParam<C: CurveAffine> {
     pub(crate) S: PlonkStructure<C::ScalarExt>,
-    /// digest of public parameter of IVC circuit
+    /// Digest of public parameter of IVC circuit
+    pp_digest: C,
+}
+
+pub struct VerifierParam<C: CurveAffine> {
+    /// This field, `log_n`, represents the base-2 logarithm of the next power of two
+    /// that is greater than or equal to the product of the number of rows and the number of gates.
+    ///
+    /// In formula terms, it is calculated using:
+    /// (Count_of_rows * Count_of_gates).next_power_of_two().ilog2()
+    log_n: u32,
+    /// Digest of public parameter of IVC circuit
     pp_digest: C,
 }
 
@@ -188,24 +221,30 @@ pub enum Error {
     Sps(#[from] sps::Error),
     #[error(transparent)]
     Poly(#[from] poly::Error),
+    #[error("Error while verify plonk instance with sps: {0:?}")]
+    VerifySps(Box<[(usize, sps::Error)]>),
 }
 
 impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
     type Error = Error;
-    type ProverParam = ProtoGalaxyProverParam<C>;
-    type VerifierParam = C;
+    type ProverParam = ProverParam<C>;
+    type VerifierParam = VerifierParam<C>;
     type Accumulator = Accumulator<C>;
-    type AccumulatorInstance = RelaxedPlonkInstance<C>;
+    type AccumulatorInstance = AccumulatorInstance<C>;
     type Proof = ProtoGalaxyProof<C::ScalarExt>;
 
     fn setup_params(
         pp_digest: C,
         S: PlonkStructure<C::ScalarExt>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
-        Ok((ProtoGalaxyProverParam { S, pp_digest }, pp_digest))
+        let log_n = Self::get_count_of_valuation(&S).next_power_of_two().ilog2();
+
+        Ok((
+            ProverParam { S, pp_digest },
+            VerifierParam { pp_digest, log_n },
+        ))
     }
 
-    // TODO: if this function turned out to be the same, consider move to trait
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
         instance: &[C::ScalarExt],
@@ -218,6 +257,36 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
             .run_sps_protocol(ck, instance, witness, ro_nark, pp.S.num_challenges)?)
     }
 
+    /// Proves a statement using the ProtoGalaxy protocol.
+    ///
+    /// # Algorithm
+    ///
+    /// The logic of the proof generation follows several key steps:
+    ///
+    /// 1. **Generate Delta:**
+    ///     - **RO Seeds**: includes all input parameters except `ck` & witness from `incoming`
+    ///     - `delta = ro_acc.squeeze()`
+    ///
+    /// 2. **Compute Polynomial F:**
+    ///     - `F = [`poly::compute_F`]`
+    ///
+    /// 3. **Generate Alpha:**
+    ///     - **RO Update**: absorb `poly_F`
+    ///     - `alpha = ro_acc.squeeze()`
+    ///
+    /// 4. **Update Beta* Values:**
+    ///     - `beta*[i] = beta[i] + alpha * delta[i]`
+    ///
+    /// 5. **Compute Polynomial K:**
+    ///     - `G = [`poly::compute_G`]
+    ///     - `K = [`poly::compute_K`]
+    ///
+    /// 6. **Generate Gamma:**
+    ///     - **RO Update**: Absorb `poly_K`
+    ///     - `gamma = ro_acc.squeeze()`
+    ///
+    /// 7. **Fold the Trace:**
+    ///     - [`ProtoGalaxy::fold_witness`] & [`ProtoGalaxy::fold_instance`]
     fn prove(
         _ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
@@ -271,34 +340,118 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
             .absorb_field_iter(poly_K.iter().map(|v| util::fe_to_fe(v).unwrap()))
             .squeeze::<C>(NUM_CHALLENGE_BITS);
 
-        let poly_F_alpha = poly_F.eval(alpha);
-        let lagrange_zero_for_gamma =
-            lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
-                .next()
-                .unwrap();
-        let poly_Z_for_gamma = lagrange::eval_vanish_polynomial(log_n, gamma);
-        let poly_K_gamma = poly_K.eval(gamma);
+        let lagrange_for_gamma = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
+            .take(L + 1)
+            .collect::<Box<[_]>>();
 
         Ok((
             Accumulator {
+                e: calculate_e::<C>(&poly_F, &poly_K, gamma, alpha, log_n),
                 betas: betas_stroke,
-                e: (poly_F_alpha * lagrange_zero_for_gamma) + (poly_Z_for_gamma * poly_K_gamma),
-                trace: Self::fold_trace(accumulator.trace, incoming, gamma, log_n),
+                trace: RelaxedPlonkTrace {
+                    U: Self::fold_instance(
+                        accumulator.trace.U,
+                        incoming.iter().map(|tr| &tr.u),
+                        lagrange_for_gamma.iter().copied(),
+                    ),
+                    W: Self::fold_witness(
+                        accumulator.trace.W,
+                        incoming.iter().map(|tr| &tr.w),
+                        lagrange_for_gamma.iter().copied(),
+                    ),
+                },
             },
             ProtoGalaxyProof { poly_F, poly_K },
         ))
     }
 
+    /// Verifies a statement using the ProtoGalaxy protocol.
+    ///
+    /// # Algorithm
+    ///
+    /// The logic of the proof generation follows several key steps:
+    ///
+    /// 1. **Verify SPS**
+    ///     - Verify SPS correctness in `incoming` plonk instances
+    ///
+    /// 2. **Generate Delta:**
+    ///     - **RO Seeds**: includes all input parameters except `ck`
+    ///     - `delta = ro_acc.squeeze()`
+    ///
+    /// 3. **Generate Alpha:**
+    ///     - **RO Update**: absorb `proof.poly_F`
+    ///     - `alpha = ro_acc.squeeze()`
+    ///
+    /// 4. **Update Beta* Values:**
+    ///     - `beta*[i] = beta[i] + alpha * delta[i]`
+    ///
+    /// 5. **Generate Gamma:**
+    ///     - **RO Update**: Absorb `proof.poly_K`
+    ///     - `gamma = ro_acc.squeeze()`
+    ///
+    /// 6. **Fold the Instance:**
+    ///     - [`ProtoGalaxy::fold_instance`]
     fn verify(
-        _vp: &Self::VerifierParam,
-        _ro_nark: &mut impl ROTrait<C::Base>,
-        _ro_acc: &mut impl ROTrait<C::Base>,
-        _accumulator: &Self::AccumulatorInstance,
-        _incoming: &[PlonkInstance<C>; L],
-        _proof: &Self::Proof,
+        vp: &Self::VerifierParam,
+        ro_nark: &mut impl ROTrait<C::Base>,
+        ro_acc: &mut impl ROTrait<C::Base>,
+        accumulator: &Self::AccumulatorInstance,
+        incoming: &[PlonkInstance<C>; L],
+        proof: &Self::Proof,
     ) -> Result<Self::AccumulatorInstance, Error> {
-        todo!()
+        Self::verify_sps(incoming.iter(), ro_nark)?;
+
+        let delta = Self::generate_challenge(&vp.pp_digest, ro_acc, accumulator, incoming.iter());
+        let alpha = ro_acc
+            .absorb_field_iter(
+                proof
+                    .poly_F
+                    .iter()
+                    .map(|v| util::fe_to_fe::<C::ScalarExt, C::Base>(v).unwrap()),
+            )
+            .squeeze::<C>(NUM_CHALLENGE_BITS);
+
+        let betas_stroke = poly::PolyChallenges {
+            betas: accumulator.betas.clone(),
+            delta,
+            alpha,
+        }
+        .iter_beta_stroke()
+        .collect::<Box<[_]>>();
+
+        let gamma = ro_acc
+            .absorb_field_iter(proof.poly_K.iter().map(|v| util::fe_to_fe(v).unwrap()))
+            .squeeze::<C>(NUM_CHALLENGE_BITS);
+
+        Ok(AccumulatorInstance {
+            betas: betas_stroke,
+            U: Self::fold_instance(
+                accumulator.U.clone(),
+                incoming.iter(),
+                lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, vp.log_n),
+            ),
+            e: calculate_e::<C>(&proof.poly_F, &proof.poly_K, gamma, alpha, vp.log_n),
+        })
     }
+}
+
+// F(alpha) * L(gamma) + Z(gamma) * K(gamma)
+fn calculate_e<C: CurveAffine>(
+    poly_F: &UnivariatePoly<C::Scalar>,
+    poly_K: &UnivariatePoly<C::Scalar>,
+    gamma: C::Scalar,
+    alpha: C::Scalar,
+    log_n: u32,
+) -> C::Scalar {
+    let lagrange_zero_for_gamma = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
+        .next()
+        .unwrap();
+
+    let poly_F_alpha = poly_F.eval(alpha);
+    let poly_Z_gamma = lagrange::eval_vanish_polynomial(log_n, gamma);
+    let poly_K_gamma = poly_K.eval(gamma);
+
+    (poly_F_alpha * lagrange_zero_for_gamma) + (poly_Z_gamma * poly_K_gamma)
 }
 
 #[cfg(test)]
