@@ -738,11 +738,13 @@ pub(crate) mod test_eval_witness {
         }
 
         #[derive(Debug, Default)]
-        pub struct TestPoseidonCircuit<F: PrimeFieldBits> {
+        pub struct TestPoseidonCircuit<F: PrimeFieldBits, const L: usize = 50> {
             _p: PhantomData<F>,
         }
 
-        impl<F: PrimeFieldBits + FromUniformBytes<64>> Circuit<F> for TestPoseidonCircuit<F> {
+        impl<F: PrimeFieldBits + FromUniformBytes<64>, const L: usize> Circuit<F>
+            for TestPoseidonCircuit<F, L>
+        {
             type Config = TestPoseidonCircuitConfig;
             type FloorPlanner = SimpleFloorPlanner;
 
@@ -765,7 +767,7 @@ pub(crate) mod test_eval_witness {
                 layouter.assign_region(
                     || "poseidon hash",
                     move |region| {
-                        let z_i: [F; 50] = array::from_fn(|i| F::from(i as u64));
+                        let z_i: [F; L] = array::from_fn(|i| F::from(i as u64));
                         let ctx = &mut RegionCtx::new(region, 0);
 
                         let mut pchip = PoseidonChip::new(config.pconfig.clone(), spec.clone());
@@ -818,7 +820,7 @@ pub(crate) mod test_eval_witness {
     fn basic() {
         let runner = CircuitRunner::<Field, _>::new(
             12,
-            poseidon_circuit::TestPoseidonCircuit::default(),
+            poseidon_circuit::TestPoseidonCircuit::<_, 50>::default(),
             vec![],
         );
 

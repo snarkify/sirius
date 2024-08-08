@@ -5,14 +5,10 @@ use halo2_proofs::{
     },
     plonk::Circuit,
 };
+use tracing::info_span;
+use tracing_test::traced_test;
 
 use super::{super::tests::*, *};
-
-const T: usize = 3;
-const RATE: usize = 2;
-const R_F: usize = 4;
-const R_P: usize = 3;
-
 use crate::{
     halo2curves::bn256::G1Affine as Affine,
     nifs::tests::{
@@ -24,12 +20,17 @@ use crate::{
     table::{CircuitRunner, Witness},
 };
 
+const T: usize = 3;
+const RATE: usize = 2;
+const R_F: usize = 4;
+const R_P: usize = 3;
+const L: usize = 2;
+
 type Scalar = <Affine as CurveAffine>::ScalarExt;
 type Base = <Affine as CurveAffine>::Base;
 
 type RO<F> = PoseidonHash<F, T, RATE>;
 type Instance<F> = Vec<F>;
-const L: usize = 2;
 
 type ProtoGalaxy = crate::nifs::protogalaxy::ProtoGalaxy<Affine, L>;
 type ProverParam = <ProtoGalaxy as FoldingScheme<Affine, L>>::ProverParam;
@@ -55,17 +56,16 @@ struct Mock<CIRCUIT: Circuit<Scalar>> {
     S: PlonkStructure<Scalar>,
     ck: CommitmentKey<Affine>,
 
-    ro_nark_generate: RO<Base>,
-    ro_nark_verifier: RO<Base>,
-    ro_acc_prover: RO<Base>,
-    ro_acc_verifier: RO<Base>,
-
     circuits_ctx: [CircuitCtx; L],
 
     pp: ProverParam,
     vp: VerifierParam,
 
     _p: PhantomData<CIRCUIT>,
+}
+
+fn ro<F: PrimeFieldBits + FromUniformBytes<64>>() -> PoseidonHash<F, T, RATE> {
+    PoseidonHash::<F, T, RATE>::new(Spec::<F, T, RATE>::new(R_F, R_P))
 }
 
 impl<C: Circuit<Scalar>> Mock<C> {
@@ -80,16 +80,8 @@ impl<C: Circuit<Scalar>> Mock<C> {
 
         let (pp, vp) = ProtoGalaxy::setup_params(Affine::identity(), S.clone()).unwrap();
 
-        fn ro<F: PrimeFieldBits + FromUniformBytes<64>>() -> PoseidonHash<F, T, RATE> {
-            PoseidonHash::<F, T, RATE>::new(Spec::<F, T, RATE>::new(R_F, R_P))
-        }
-
         Mock {
             ck,
-            ro_nark_generate: ro(),
-            ro_nark_verifier: ro(),
-            ro_acc_prover: ro(),
-            ro_acc_verifier: ro(),
             circuits_ctx: circuits_runners.map(CircuitCtx::collect),
             pp,
             vp,
@@ -107,7 +99,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
                     &ctx.instance,
                     &ctx.witness,
                     &self.pp,
-                    &mut self.ro_nark_generate,
+                    &mut ro(),
                 )
                 .unwrap()
             })
@@ -119,28 +111,46 @@ impl<C: Circuit<Scalar>> Mock<C> {
     pub fn run(mut self) {
         let incoming = self.generate_plonk_traces();
 
-        let acc = ProtoGalaxy::new_accumulator(
-            AccumulatorArgs::from(&self.S),
+        let init_accumulator =
+            ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&self.S), &self.pp, &mut ro());
+
+        ProtoGalaxy::is_sat_acc(&self.ck, &self.S, &init_accumulator)
+            .expect("The newly created accumulator is not satisfactory");
+
+        let (accumulator_from_prove, proof) = ProtoGalaxy::prove(
+            &self.ck,
             &self.pp,
-            &mut self.ro_acc_prover,
-        );
+            &mut ro(),
+            init_accumulator.clone(),
+            &incoming,
+        )
+        .expect("`protogalaxy::prove` failed");
 
-        let (accumulator, proof) =
-            ProtoGalaxy::prove(&self.ck, &self.pp, &mut self.ro_acc_prover, acc, &incoming)
-                .expect("`protogalaxy::prove` failed");
+        ProtoGalaxy::is_sat_acc(&self.ck, &self.S, &accumulator_from_prove)
+            .expect("The accumulator after calling `prove` is not satisfactory");
 
-        let _acc_instance = ProtoGalaxy::verify(
+        let accumulator_from_verify = ProtoGalaxy::verify(
             &self.vp,
-            &mut self.ro_nark_verifier,
-            &mut self.ro_acc_verifier,
-            &AccumulatorInstance::from(accumulator),
+            &mut ro(),
+            &mut ro(),
+            &init_accumulator.into(),
             &incoming.map(|tr| tr.u),
             &proof,
         )
         .unwrap();
+
+        let accumulator_inst_from_prove = AccumulatorInstance::from(accumulator_from_prove);
+
+        assert_eq!(
+            accumulator_inst_from_prove.betas,
+            accumulator_from_verify.betas,
+        );
+        assert_eq!(accumulator_inst_from_prove.e, accumulator_from_verify.e,);
+        assert_eq!(accumulator_inst_from_prove.ins, accumulator_from_verify.ins);
     }
 }
 
+#[traced_test]
 #[test]
 fn random_linear_combination() {
     Mock::new(
@@ -165,8 +175,11 @@ fn random_linear_combination() {
     .run();
 }
 
+#[traced_test]
 #[test]
 fn fibo() {
+    let _s = info_span!("fibo").entered();
+
     const K: u32 = 4;
     const SIZE: usize = 16;
 
@@ -197,8 +210,11 @@ fn fibo() {
     .run();
 }
 
+#[traced_test]
 #[test]
 fn fibo_lookup() {
+    let _s = info_span!("fibo_lookup").entered();
+
     const K: u32 = 5;
     const SIZE: usize = 7;
 
