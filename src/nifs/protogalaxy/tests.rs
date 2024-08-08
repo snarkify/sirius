@@ -5,6 +5,7 @@ use halo2_proofs::{
     },
     plonk::Circuit,
 };
+use tracing::info_span;
 use tracing_test::traced_test;
 
 use super::{super::tests::*, *};
@@ -177,6 +178,8 @@ fn random_linear_combination() {
 #[traced_test]
 #[test]
 fn fibo() {
+    let _s = info_span!("fibo").entered();
+
     const K: u32 = 4;
     const SIZE: usize = 16;
 
@@ -210,6 +213,8 @@ fn fibo() {
 #[traced_test]
 #[test]
 fn fibo_lookup() {
+    let _s = info_span!("fibo_lookup").entered();
+
     const K: u32 = 5;
     const SIZE: usize = 7;
 
