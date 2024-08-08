@@ -882,7 +882,6 @@ mod decompose_tests {
                             F::from_u128(u128::MAX),
                             F::from_u128(u128::MAX) * F::from_u128(1_000_000_000),
                         ] {
-                            dbg!(&val);
                             region.next();
 
                             let new_val = region
