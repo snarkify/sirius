@@ -742,7 +742,9 @@ pub(crate) mod test_eval_witness {
             _p: PhantomData<F>,
         }
 
-        impl<F: PrimeFieldBits + FromUniformBytes<64>, const L: usize> Circuit<F> for TestPoseidonCircuit<F, L> {
+        impl<F: PrimeFieldBits + FromUniformBytes<64>, const L: usize> Circuit<F>
+            for TestPoseidonCircuit<F, L>
+        {
             type Config = TestPoseidonCircuitConfig;
             type FloorPlanner = SimpleFloorPlanner;
 

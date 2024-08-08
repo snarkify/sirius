@@ -593,6 +593,88 @@ mod test {
 
     #[traced_test]
     #[test]
+    fn runme() {
+        let (S, trace) = poseidon_trace();
+
+        let mut rnd = rand::thread_rng();
+        let mut gen = iter::repeat_with(|| Field::random(&mut rnd));
+
+        let count_of_evaluation = get_count_of_valuation(&S).unwrap();
+
+        let delta = gen.next().unwrap();
+        let alpha = gen.next().unwrap();
+
+        let betas = gen
+            .by_ref()
+            .take(count_of_evaluation.get())
+            .collect::<Box<[_]>>();
+
+        let traces = iter::repeat_with(|| {
+            let mut trace = trace.clone();
+            trace
+                .w
+                .W
+                .iter_mut()
+                .for_each(|row| row.iter_mut().zip(gen.by_ref()).for_each(|(v, r)| *v = r));
+            trace
+        })
+        .take(5)
+        .collect::<Box<[_]>>();
+
+        let accumulator = traces.first().cloned().unwrap();
+
+        let points_count = get_points_count(&S, traces.len());
+        let fft_domain_size = points_count.ilog2();
+
+        let poly_F =
+            super::compute_F::<Field>(&S, betas.iter().copied(), delta, &accumulator).unwrap();
+        let poly_K_rnd = UnivariatePoly::from_iter(gen.by_ref().take(points_count));
+
+        let poly_F_in_alpha = poly_F.eval(alpha);
+        let poly_Z_eval = |X: Field| lagrange::eval_vanish_polynomial(fft_domain_size, X);
+        let poly_L_eval = |X: Field| {
+            lagrange::iter_eval_lagrange_poly_for_cyclic_group(X, fft_domain_size)
+                .next()
+                .unwrap()
+        };
+
+        let poly_G = lagrange::iter_cyclic_subgroup::<Field>(fft_domain_size)
+            .map(|pt| Field::ZETA * pt)
+            .take(points_count)
+            .map(|cha_X| {
+                let poly_K_in_X = poly_K_rnd.eval(cha_X);
+                let poly_L_in_X = poly_L_eval(cha_X);
+                let poly_Z_in_X = poly_Z_eval(cha_X);
+
+                (poly_F_in_alpha * poly_L_in_X) + (poly_Z_in_X * poly_K_in_X)
+            })
+            .collect::<UnivariatePoly<Field>>();
+
+        let poly_K = UnivariatePoly::coset_ifft(
+            lagrange::iter_cyclic_subgroup::<Field>(fft_domain_size)
+                .map(|X| Field::ZETA * X)
+                .zip(poly_G.coset_fft())
+                .map(|(X, poly_G_in_X)| {
+                    let poly_L_in_X = poly_L_eval(X);
+                    let poly_Z_in_X = poly_Z_eval(X);
+                    let poly_K_in_X = (poly_G_in_X - (poly_F_in_alpha * poly_L_in_X))
+                        * poly_Z_in_X.invert().unwrap();
+
+                    assert_eq!(
+                        (poly_F_in_alpha * poly_L_in_X) + (poly_Z_in_X * poly_K_in_X),
+                        poly_G_in_X
+                    );
+
+                    poly_K_in_X
+                })
+                .collect::<Box<[_]>>(),
+        );
+
+        assert_eq!(poly_K, poly_K_rnd);
+    }
+
+    #[traced_test]
+    #[test]
     fn cmp_with_direct_eval_of_K() {
         let seq = get_sequence(1, 3, 2, 7);
 
