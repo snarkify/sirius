@@ -8,7 +8,10 @@ use std::{
 };
 
 use digest::{ExtendableOutput, Update};
-use halo2_proofs::arithmetic::{best_multiexp, CurveAffine, CurveExt};
+use halo2_proofs::{
+    arithmetic::{best_multiexp, CurveAffine, CurveExt},
+    plonk::ConstraintSystem,
+};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha3::Shake256;
@@ -165,6 +168,22 @@ impl<C: CurveAffine> CommitmentKey<C> {
             Ok(key)
         }
     }
+}
+
+pub fn setup_smallest_key<C: CurveAffine>(
+    k_table_size: u32,
+    cs: &ConstraintSystem<C::ScalarExt>,
+    tag: &'static [u8],
+) -> CommitmentKey<C> {
+    /// calculate smallest w such that 2^w >= n*(2^K)
+    pub fn smallest_power(n: usize, K: u32) -> usize {
+        ((n * 2usize.pow(K)) as f64).log2().ceil() as usize
+    }
+
+    let num_lookup = cs.lookups().len();
+    let p1 = smallest_power(cs.num_advice_columns() + 5 * num_lookup, k_table_size);
+    let p2 = smallest_power(cs.num_selectors + cs.num_fixed_columns(), k_table_size);
+    CommitmentKey::<C>::setup(p1.max(p2), tag)
 }
 
 #[cfg(test)]

@@ -1,11 +1,17 @@
-use halo2_proofs::{
-    circuit::{floor_planner::single_pass::SingleChipLayouter, AssignedCell, Layouter, Value},
-    plonk::ConstraintSystem,
-};
 use tracing::*;
 
 use super::fold_relaxed_plonk_instance_chip;
-use crate::{ff::PrimeField, main_gate::RegionCtx, table::WitnessCollector};
+pub use crate::halo2_proofs::{
+    circuit::{AssignedCell, Layouter},
+    plonk::ConstraintSystem,
+};
+
+use crate::{
+    ff::PrimeField,
+    halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Value},
+    main_gate::RegionCtx,
+    table::WitnessCollector,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SynthesisError {

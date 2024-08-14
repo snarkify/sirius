@@ -2,28 +2,11 @@ use std::marker::PhantomData;
 
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
-    halo2curves::CurveAffine,
     plonk::{self, Advice, Circuit, Column, ConstraintSystem, Instance, Selector},
     poly::Rotation,
 };
 
-use crate::{commitment::CommitmentKey, ff::PrimeField, halo2curves::group::ff::FromUniformBytes};
-
-/// calculate smallest w such that 2^w >= n*(2^K)
-pub fn smallest_power(n: usize, K: u32) -> usize {
-    ((n * 2usize.pow(K)) as f64).log2().ceil() as usize
-}
-
-pub fn setup_smallest_commitment_key<C: CurveAffine>(
-    k_table_size: u32,
-    cs: &ConstraintSystem<C::ScalarExt>,
-    tag: &'static [u8],
-) -> CommitmentKey<C> {
-    let num_lookup = cs.lookups().len();
-    let p1 = smallest_power(cs.num_advice_columns() + 5 * num_lookup, k_table_size);
-    let p2 = smallest_power(cs.num_selectors + cs.num_fixed_columns(), k_table_size);
-    CommitmentKey::<C>::setup(p1.max(p2), tag)
-}
+use crate::{ff::PrimeField, halo2curves::group::ff::FromUniformBytes};
 
 pub(crate) mod random_linear_combination_circuit {
     use super::*;
