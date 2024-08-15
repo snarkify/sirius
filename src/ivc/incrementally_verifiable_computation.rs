@@ -15,8 +15,12 @@ use crate::{
         step_folding_circuit::{StepFoldingCircuit, StepInputs},
     },
     main_gate::MainGateConfig,
-    nifs::{self, vanilla::VanillaFS, FoldingScheme},
-    plonk::{self, PlonkTrace, RelaxedPlonkTrace},
+    nifs::{
+        self,
+        vanilla::{accumulator::RelaxedPlonkTrace, VanillaFS},
+        FoldingScheme, IsSatAccumulator,
+    },
+    plonk::{self, PlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
     table::CircuitRunner,
@@ -200,8 +204,10 @@ where
         debug!("primary z output calculated off-circuit");
 
         // Will be used as input & output `U` of zero-step of IVC
-        let secondary_relaxed_trace =
-            secondary_pre_round_plonk_trace.to_relax(pp.secondary.k_table_size() as usize);
+        let secondary_relaxed_trace = RelaxedPlonkTrace::from_regular(
+            secondary_pre_round_plonk_trace.clone(),
+            pp.secondary.k_table_size() as usize,
+        );
 
         // Prepare primary constraint system for folding
         let primary_instance = {
@@ -268,8 +274,10 @@ where
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?;
 
-        let primary_relaxed_trace =
-            primary_plonk_trace.to_relax(pp.primary.k_table_size() as usize);
+        let primary_relaxed_trace = RelaxedPlonkTrace::from_regular(
+            primary_plonk_trace.clone(),
+            pp.primary.k_table_size() as usize,
+        );
 
         primary_span.exit();
         let _secondary_span = info_span!("secondary").entered();
@@ -589,11 +597,9 @@ where
             });
         });
 
-        if let Err(err) = pp.primary.S().is_sat_relaxed(
-            pp.primary.ck(),
-            &self.primary.relaxed_trace.U,
-            &self.primary.relaxed_trace.W,
-        ) {
+        if let Err(err) =
+            VanillaFS::is_sat_acc(pp.primary.ck(), pp.primary.S(), &self.primary.relaxed_trace)
+        {
             errors.push(VerificationError::NotSat {
                 err,
                 is_primary: true,
@@ -601,10 +607,10 @@ where
             })
         }
 
-        if let Err(err) = pp.secondary.S().is_sat_relaxed(
+        if let Err(err) = VanillaFS::is_sat_acc(
             pp.secondary.ck(),
-            &self.secondary.relaxed_trace.U,
-            &self.secondary.relaxed_trace.W,
+            pp.secondary.S(),
+            &self.secondary.relaxed_trace,
         ) {
             errors.push(VerificationError::NotSat {
                 err,
@@ -626,11 +632,7 @@ where
             })
         }
 
-        if let Err(err) = pp
-            .primary
-            .S()
-            .is_sat_perm(&self.primary.relaxed_trace.U, &self.primary.relaxed_trace.W)
-        {
+        if let Err(err) = VanillaFS::is_sat_perm(pp.primary.S(), &self.primary.relaxed_trace) {
             errors.push(VerificationError::NotSat {
                 err,
                 is_primary: false,
@@ -638,10 +640,7 @@ where
             })
         }
 
-        if let Err(err) = pp.secondary.S().is_sat_perm(
-            &self.secondary.relaxed_trace.U,
-            &self.secondary.relaxed_trace.W,
-        ) {
+        if let Err(err) = VanillaFS::is_sat_perm(pp.secondary.S(), &self.secondary.relaxed_trace) {
             errors.push(VerificationError::NotSat {
                 err,
                 is_primary: false,
