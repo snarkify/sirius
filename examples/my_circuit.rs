@@ -50,6 +50,8 @@ impl<const A: usize, F: PrimeField> StepCircuit<A, F> for MyStepCircuit {
     /// Configure the step circuit. This method initializes necessary
     /// fixed columns and advice columns, but does not create any instance
     /// columns.
+    ///
+    // TODO #329
     fn configure(_cs: &mut ConstraintSystem<F>) -> Self::Config {
         todo!()
     }
