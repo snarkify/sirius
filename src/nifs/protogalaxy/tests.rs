@@ -6,7 +6,7 @@ use halo2_proofs::{
     plonk::Circuit,
 };
 
-use super::{super::tests::*, *};
+use super::*;
 
 const T: usize = 3;
 const RATE: usize = 2;
@@ -14,6 +14,7 @@ const R_F: usize = 4;
 const R_P: usize = 3;
 
 use crate::{
+    commitment,
     halo2curves::bn256::G1Affine as Affine,
     nifs::tests::{
         fibo_circuit::{get_fibo_seq, FiboCircuit},
@@ -73,7 +74,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
         let circuits_runners =
             circuits.map(|(circuit, instance)| CircuitRunner::new(k_table_size, circuit, instance));
 
-        let ck = setup_smallest_commitment_key(k_table_size, &circuits_runners[0].cs, b"");
+        let ck = commitment::setup_smallest_key(k_table_size, &circuits_runners[0].cs, b"");
         let S = circuits_runners[0]
             .try_collect_plonk_structure()
             .expect("failed to collect plonk structure");

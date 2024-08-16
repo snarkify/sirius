@@ -4,6 +4,7 @@ use tracing_test::traced_test;
 
 use super::*;
 use crate::{
+    commitment,
     ff::{PrimeField, PrimeFieldBits},
     halo2curves::{
         bn256::{Fr, G1Affine},
@@ -11,7 +12,6 @@ use crate::{
     },
     nifs::{
         self,
-        tests::setup_smallest_commitment_key,
         vanilla::{
             accumulator::{RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness},
             VanillaFS,
@@ -82,7 +82,7 @@ where
     const R_P: usize = 3;
 
     let td1 = CircuitRunner::new(K, circuit1, public_inputs1.clone());
-    let ck = setup_smallest_commitment_key(K, &td1.cs, b"prepare_trace");
+    let ck = commitment::setup_smallest_key(K, &td1.cs, b"prepare_trace");
 
     let S = td1.try_collect_plonk_structure()?;
     let W1 = td1.try_collect_witness()?;
