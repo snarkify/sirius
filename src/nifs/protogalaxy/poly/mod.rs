@@ -162,12 +162,6 @@ pub(crate) fn compute_F<F: PrimeField>(
 
     match evaluated {
         Some(Ok(Node::Calculated { mut points, .. })) => {
-            points
-                .iter()
-                .zip(lagrange::iter_cyclic_subgroup::<F>(points_count.ilog2()))
-                .for_each(|(res, X)| {
-                    debug!("F[{X:?}] = {res:?}");
-                });
             fft::ifft(&mut points);
             Ok(UnivariatePoly(points))
         }
@@ -281,6 +275,7 @@ pub(crate) fn compute_G<F: PrimeField>(
         Some(Ok(Node {
             values: mut points, ..
         })) => {
+            assert_eq!(points.len(), points_count);
             fft::ifft(&mut points);
             Ok(UnivariatePoly(points))
         }
@@ -330,23 +325,33 @@ pub(crate) fn compute_K<F: WithSmallOrderMulGroup<3>>(
     accumulator: &(impl Sync + GetChallenges<F> + GetWitness<F>),
     traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
 ) -> Result<UnivariatePoly<F>, Error> {
-    // is coeffs here, will transform to evals by fft later
-    let poly_G = compute_G(S, betas_stroke, accumulator, traces)?;
+    Ok(compute_K_from_G(
+        compute_G(S, betas_stroke, accumulator, traces)?,
+        poly_F_in_alpha,
+    ))
+}
 
+fn compute_K_from_G<F: WithSmallOrderMulGroup<3>>(
+    poly_G: UnivariatePoly<F>,
+    poly_F_in_alpha: F,
+) -> UnivariatePoly<F> {
     let points_count = poly_G.len();
     let fft_domain_size = points_count.ilog2();
 
-    Ok(UnivariatePoly::coset_ifft(
+    UnivariatePoly::coset_ifft(
         lagrange::iter_cyclic_subgroup::<F>(fft_domain_size)
             .map(|X| F::ZETA * X)
-            .zip(poly_G.coset_fft())
-            .map(|(X, poly_G_in_X)| {
+            //.zip(poly_G.coset_fft())
+            //.map(|(X, poly_G_in_X)| {
+            .map(|X| {
+                let poly_G_in_X = poly_G.eval(X);
+
                 let poly_L_in_X =
                     lagrange::iter_eval_lagrange_poly_for_cyclic_group(X, fft_domain_size)
                         .next()
                         .unwrap();
 
-                let poly_Z_in_X = lagrange::eval_vanish_polynomial(points_count, X);
+                let poly_Z_in_X = lagrange::eval_vanish_polynomial(points_count - 1, X);
 
                 let poly_K_in_X =
                     (poly_G_in_X - (poly_F_in_alpha * poly_L_in_X)) * poly_Z_in_X.invert().unwrap();
@@ -359,7 +364,7 @@ pub(crate) fn compute_K<F: WithSmallOrderMulGroup<3>>(
                 poly_K_in_X
             })
             .collect::<Box<[_]>>(),
-    ))
+    )
 }
 
 fn get_count_of_valuation<F: PrimeField>(S: &PlonkStructure<F>) -> Option<NonZeroUsize> {
@@ -390,7 +395,6 @@ mod test {
         halo2curves::ff::{PrimeField, WithSmallOrderMulGroup},
         plonk::Circuit,
     };
-    use itertools::*;
     use tracing::debug;
     use tracing_test::traced_test;
 
@@ -399,7 +403,10 @@ mod test {
         commitment::CommitmentKey,
         ff::Field as _Field,
         halo2curves::{bn256, CurveAffine},
-        nifs::tests::fibo_circuit_with_lookup::{get_sequence, FiboCircuitWithLookup},
+        nifs::{
+            protogalaxy::poly::compute_K_from_G,
+            tests::fibo_circuit_with_lookup::{get_sequence, FiboCircuitWithLookup},
+        },
         plonk::{self, test_eval_witness::poseidon_circuit, PlonkStructure, PlonkTrace},
         polynomial::{expression::QueryIndexContext, lagrange, univariate::UnivariatePoly},
         poseidon::{
@@ -601,7 +608,7 @@ mod test {
 
     #[traced_test]
     #[test]
-    fn runme() {
+    fn poly_K_eval_from_G() {
         let (S, trace) = poseidon_trace();
 
         let mut rnd = rand::thread_rng();
@@ -632,9 +639,10 @@ mod test {
 
         let points_count = get_points_count(&S, traces.len());
         let fft_domain_size = points_count.ilog2();
+        dbg!((points_count, fft_domain_size));
 
         // ====== START ======
-        let poly_K_rnd = UnivariatePoly::from_iter(gen.by_ref().take(points_count));
+        let poly_K_rnd = UnivariatePoly::from_iter(gen.by_ref().take(1));
 
         let poly_F =
             super::compute_F::<Field>(&S, betas.iter().copied(), delta, &accumulator).unwrap();
@@ -646,9 +654,8 @@ mod test {
         let poly_Z = {
             debug!("start Z");
             let poly = vanish_poly(points_count);
-            assert_eq!(poly.len(), poly_K_rnd.len());
 
-            let poly_Z_eval = |X: Field| lagrange::eval_vanish_polynomial(points_count, X);
+            let poly_Z_eval = |X: Field| lagrange::eval_vanish_polynomial(points_count - 1, X);
             assert_eq!(poly.eval(rnd_cha_X), poly_Z_eval(rnd_cha_X));
 
             //let poly_Z_eval_dir = |X: Field| {
@@ -680,7 +687,6 @@ mod test {
                     .map(poly_L_eval)
                     .collect(),
             );
-            assert_eq!(poly.len(), poly_K_rnd.len());
 
             assert_eq!(poly.eval(rnd_cha_X), poly_L_eval(rnd_cha_X));
 
@@ -690,14 +696,7 @@ mod test {
         let poly_G = {
             debug!("start G");
 
-            let poly = poly_K_rnd
-                .iter()
-                .zip_eq(poly_L.iter())
-                .zip_eq(poly_Z.iter())
-                .map(|((poly_Ki, poly_Li), poly_Zi)| {
-                    (poly_F_in_alpha * poly_Li) + (poly_Zi * poly_Ki)
-                })
-                .collect::<UnivariatePoly<Field>>();
+            let poly = poly_L.scale(poly_F_in_alpha) + (poly_Z.clone() * &poly_K_rnd);
 
             lagrange::iter_cyclic_subgroup::<Field>(fft_domain_size)
                 .take(points_count)
@@ -712,31 +711,19 @@ mod test {
                     );
                 });
 
+            assert!(
+                poly.len().is_power_of_two(),
+                "G{}, L{} Z{} K{}",
+                poly.len(),
+                poly_L.len(),
+                poly_Z.len(),
+                poly_K_rnd.len()
+            );
+
             poly
         };
 
-        let poly_K = UnivariatePoly::coset_ifft(
-            lagrange::iter_cyclic_subgroup::<Field>(fft_domain_size)
-                .map(|X| Field::ZETA * X)
-                .take(points_count)
-                .map(|X| {
-                    let poly_G_in_X = poly_G.eval(X);
-                    let poly_L_in_X = poly_L.eval(X);
-                    let poly_Z_in_X = poly_Z.eval(X);
-                    let poly_K_in_X = (poly_G_in_X - (poly_F_in_alpha * poly_L_in_X))
-                        * poly_Z_in_X.invert().unwrap();
-
-                    assert_eq!(poly_K_in_X, poly_K_rnd.eval(X));
-
-                    assert_eq!(
-                        (poly_F_in_alpha * poly_L_in_X) + (poly_Z_in_X * poly_K_in_X),
-                        poly_G_in_X
-                    );
-
-                    poly_K_in_X
-                })
-                .collect::<Box<[_]>>(),
-        );
+        let poly_K = compute_K_from_G(poly_G, poly_F_in_alpha);
 
         assert_eq!(poly_K, poly_K_rnd);
     }
@@ -794,6 +781,7 @@ mod test {
 
         let poly_F =
             super::compute_F::<Field>(&S, betas.iter().copied(), delta, &accumulator).unwrap();
+        let poly_F_in_alpha = poly_F.eval(alpha);
 
         let poly_G =
             super::compute_G(&S, betas_stroke.iter().copied(), &accumulator, &traces).unwrap();
@@ -810,7 +798,6 @@ mod test {
         let points_count = get_points_count(&S, traces.len());
         let fft_domain_size = points_count.ilog2();
 
-        let poly_F_in_alpha = poly_F.eval(alpha);
         let poly_L_eval = |X: Field| {
             lagrange::iter_eval_lagrange_poly_for_cyclic_group(X, fft_domain_size)
                 .next()

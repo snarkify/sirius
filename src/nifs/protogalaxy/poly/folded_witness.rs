@@ -1,6 +1,7 @@
 use std::iter;
 
 use rayon::prelude::*;
+use itertools::*;
 
 use crate::{
     ff::PrimeField,
@@ -26,7 +27,7 @@ impl<F: PrimeField> FoldedWitness<F> {
 
         folded_witnesses_collection
             .into_iter()
-            .zip(folded_challenges_collection)
+            .zip_eq(folded_challenges_collection)
             .map(|(witness, challenges)| Self {
                 witness,
                 challenges,

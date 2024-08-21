@@ -1,4 +1,7 @@
-use std::iter;
+use std::{
+    iter,
+    ops::{Add, Mul},
+};
 
 use halo2_proofs::halo2curves::ff::{PrimeField, WithSmallOrderMulGroup};
 
@@ -7,7 +10,7 @@ use crate::{ff::Field, fft};
 /// Represents a univariate polynomial
 ///
 /// Coefficients of the polynomial are presented from smaller to larger
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnivariatePoly<F: Field>(pub(crate) Box<[F]>);
 
 impl<F: Field> UnivariatePoly<F> {
@@ -51,12 +54,82 @@ impl<F: Field> UnivariatePoly<F> {
             })
     }
 
+    pub fn resize(self, new_len: usize) -> Self {
+        if self.len() == new_len {
+            return self;
+        }
+
+        let mut coeff = self.0.into_vec();
+        coeff.resize(new_len, F::ZERO);
+        Self(coeff.into_boxed_slice())
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// Multiplies all coefficients of the polynomial by a field element.
+    pub fn scale(&self, factor: F) -> UnivariatePoly<F> {
+        let scaled_coeffs: Vec<F> = self.iter().map(|&coeff| coeff * factor).collect();
+        UnivariatePoly(scaled_coeffs.into_boxed_slice())
+    }
+}
+
+impl<F: Field> Mul<&UnivariatePoly<F>> for UnivariatePoly<F> {
+    type Output = UnivariatePoly<F>;
+
+    fn mul(self, rhs: &UnivariatePoly<F>) -> UnivariatePoly<F> {
+        let new_len = self.len() + rhs.len() - 1;
+        let mut result = vec![F::ZERO; new_len];
+
+        for (i, &a) in self.iter().enumerate() {
+            for (j, &b) in rhs.iter().enumerate() {
+                result[i + j] += a * b;
+            }
+        }
+
+        // Skip trailing zeros using itertools
+        // Efficiently remove trailing zeros
+        let last_non_zero = result
+            .iter()
+            .rposition(|&x| x != F::ZERO)
+            .map_or(0, |pos| pos + 1);
+
+        result.truncate(last_non_zero);
+
+        UnivariatePoly(result.into_boxed_slice())
+    }
+}
+
+impl<F: Field> Add for UnivariatePoly<F> {
+    type Output = UnivariatePoly<F>;
+
+    fn add(self, rhs: UnivariatePoly<F>) -> UnivariatePoly<F> {
+        let (longer, shorter) = if self.len() >= rhs.len() {
+            (self, rhs)
+        } else {
+            (rhs, self)
+        };
+
+        let mut result = longer.0.into_vec();
+
+        for (res_coeff, &short_coeff) in result.iter_mut().zip(shorter.iter()) {
+            *res_coeff += short_coeff;
+        }
+
+        // Efficiently remove trailing zeros
+        let last_non_zero = result
+            .iter()
+            .rposition(|&x| x != F::ZERO)
+            .map_or(0, |pos| pos + 1);
+
+        result.truncate(last_non_zero);
+
+        UnivariatePoly(result.into_boxed_slice())
     }
 }
 
@@ -83,6 +156,7 @@ impl<F: WithSmallOrderMulGroup<3>> UnivariatePoly<F> {
         Self(input)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use std::iter;

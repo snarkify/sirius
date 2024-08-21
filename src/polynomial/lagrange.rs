@@ -22,7 +22,7 @@ use crate::{ff::PrimeField, fft};
 pub fn iter_cyclic_subgroup<F: PrimeField>(log_n: u32) -> impl Iterator<Item = F> {
     let generator: F = fft::get_omega_or_inv(log_n, false);
 
-    iter::successors(Some(F::ONE), move |val| Some(*val * generator))
+    iter::successors(Some(F::ONE), move |val| Some(*val * generator)).take(1 << log_n)
 }
 
 /// Lazy eval the values of the Lagrange polynomial for a cyclic subgroup of length `n` (`2.pow(log_n)`) at
@@ -59,15 +59,15 @@ pub fn iter_eval_lagrange_poly_for_cyclic_group<F: PrimeField>(
 
     iter_cyclic_subgroup::<F>(log_n)
         .map(move |value| {
-            let challenge_sub_value_inverted = X.sub(value).invert();
-            let X_pow_n_sub_1 = eval_vanish_polynomial(n, X);
+            let X_sub_value_inverted = X.sub(value).invert();
+            let X_pow_n_sub_1 = X.pow([n as u64]) - F::ONE;
 
             // During the calculation, this part of the expression should be reduced to 1, but we
             // get 0/0 here, so we insert an explicit `if`.
-            if X_pow_n_sub_1.is_zero_vartime() && challenge_sub_value_inverted.is_none().into() {
+            if X_pow_n_sub_1.is_zero_vartime() && X_sub_value_inverted.is_none().into() {
                 F::ONE
             } else {
-                value * inverted_n * (X_pow_n_sub_1 * challenge_sub_value_inverted.unwrap())
+                value * inverted_n * (X_pow_n_sub_1 * X_sub_value_inverted.unwrap())
             }
         })
         .take(n)
@@ -81,7 +81,7 @@ pub fn iter_eval_lagrange_poly_for_cyclic_group<F: PrimeField>(
 /// X^{2^log_n} - 1
 /// -1 * X^0 + 0 * X^1 + ... + a * X^{2^log_n}
 pub fn eval_vanish_polynomial<F: PrimeField>(degree: usize, point: F) -> F {
-    point.pow([(degree - 1) as u64]) - F::ONE
+    point.pow([degree as u64]) - F::ONE
 }
 
 #[cfg(test)]
