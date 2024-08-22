@@ -106,12 +106,51 @@ impl<'sc, const A: usize, F: PrimeField, SC: StepCircuit<A, F>> Circuit<F>
     }
 }
 
+/// A wrapper for the Halo2 `MockProver` designed to assist in testing step circuits
+///
+/// This struct provides additional functionalities for initializing and verifying
+/// circuits, as well as capturing the outputs of the step circuits after the proof process.
+///
+/// # Type Parameters
+///
+/// * `A`: The size of the arrays used in the step circuit.
+/// * `F`: The field type, which must implement `PrimeField`.
+///
+/// # Examples
+///
+/// ```
+/// use sirius::{ivc::step_circuit::trivial, mock_prover::MockProver};
+/// use halo2_proofs::halo2curves::pasta::Fq;
+///
+/// let z_in = std::array::from_fn(|i| Fq::from(i as u64));
+/// MockProver::run(10, &trivial::Circuit::<10, Fq>::default(), vec![], z_in)
+///     .unwrap()
+///     .verify(z_in)
+///     .unwrap();
+/// ```
 pub struct MockProver<'a, const A: usize, F: Field> {
     mock_prover: Halo2MockProver<'a, F>,
     last_z_out: [Value<F>; A],
 }
 
 impl<'a, const A: usize, F: Field> MockProver<'a, A, F> {
+    /// Runs the step circuit with the provided initial input and returns
+    /// a `MockProver` instance containing the resulting outputs.
+    ///
+    /// # Arguments
+    ///
+    /// * `k_table_size` - The size of the circuit's table (2^k).
+    /// * `step_circuit` - A reference to the step circuit to be tested.
+    /// * `instance` - The public instance values used in the circuit.
+    /// * `z_i` - The initial input array for the step circuit.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`halo2_proofs::plonk::Error`] if the proof process fails.
+    ///
+    /// # Examples
+    ///
+    /// See the main struct-level example.
     pub fn run<SC: StepCircuit<A, F>>(
         k_table_size: u32,
         step_circuit: &SC,
@@ -130,6 +169,20 @@ impl<'a, const A: usize, F: Field> MockProver<'a, A, F> {
         })
     }
 
+    /// Verifies that the final output of the step circuit matches the expected output.
+    ///
+    /// # Arguments
+    ///
+    /// * `expected_z_out` - The expected output array to be compared with the circuit's final output.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`VerifyFailure`] if the verification fails, either due to the PLONK proof failing
+    /// or the outputs not matching the expected values.
+    ///
+    /// # Examples
+    ///
+    /// See the main struct-level example.
     pub fn verify(&self, expected_z_out: [F; A]) -> Result<(), VerifyFailure<A, F>>
     where
         F: FromUniformBytes<64> + Ord,
