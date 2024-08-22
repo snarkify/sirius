@@ -5,7 +5,6 @@ pub use crate::halo2_proofs::{
     circuit::{AssignedCell, Layouter},
     plonk::ConstraintSystem,
 };
-
 use crate::{
     ff::PrimeField,
     halo2_proofs::circuit::{floor_planner::single_pass::SingleChipLayouter, Value},
@@ -178,6 +177,24 @@ pub mod trivial {
             z_i: &[AssignedCell<F, F>; ARITY],
         ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError> {
             Ok(z_i.clone())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::array;
+
+        use halo2_proofs::halo2curves::pasta::Fq;
+
+        use crate::mock_prover::MockProver;
+
+        #[test]
+        fn simple() {
+            let z_in = array::from_fn(|i| Fq::from(i as u64));
+            MockProver::run(10, &super::Circuit::<10, Fq>::default(), vec![], z_in)
+                .unwrap()
+                .verify(z_in)
+                .unwrap();
         }
     }
 }
