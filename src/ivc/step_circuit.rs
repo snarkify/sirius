@@ -186,7 +186,7 @@ pub mod trivial {
 
         use halo2_proofs::halo2curves::pasta::Fq;
 
-        use crate::mock_prover::MockProver;
+        use crate::util::mock_prover::MockProver;
 
         #[test]
         fn simple() {

@@ -10,7 +10,6 @@ pub mod fft;
 pub mod gadgets;
 pub mod ivc;
 pub mod main_gate;
-pub mod mock_prover;
 pub mod nifs;
 pub mod plonk;
 pub mod polynomial;

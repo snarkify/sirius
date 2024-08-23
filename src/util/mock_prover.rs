@@ -119,7 +119,7 @@ impl<'sc, const A: usize, F: PrimeField, SC: StepCircuit<A, F>> Circuit<F>
 /// # Examples
 ///
 /// ```
-/// use sirius::{ivc::step_circuit::trivial, mock_prover::MockProver};
+/// use sirius::{ivc::step_circuit::trivial, util::mock_prover::MockProver};
 /// use halo2_proofs::halo2curves::pasta::Fq;
 ///
 /// let z_in = std::array::from_fn(|i| Fq::from(i as u64));

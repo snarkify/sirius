@@ -15,6 +15,10 @@ use crate::{
     poseidon::{PoseidonHash, ROTrait, Spec},
 };
 
+pub mod mock_prover;
+
+pub use mock_prover::MockProver;
+
 pub fn bytes_to_bits_le(bytes: Vec<u8>) -> Vec<bool> {
     let mut bits = Vec::new();
 
