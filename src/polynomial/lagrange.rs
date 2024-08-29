@@ -49,18 +49,18 @@ pub fn iter_cyclic_subgroup<F: PrimeField>(log_n: u32) -> impl Iterator<Item = F
 /// more details
 pub fn iter_eval_lagrange_poly_for_cyclic_group<F: PrimeField>(
     X: F,
-    log_n: u32,
+    lagrange_domain: u32,
 ) -> impl Iterator<Item = F> {
-    let n = 2usize.pow(log_n);
+    let points_count = 2usize.pow(lagrange_domain);
 
-    let inverted_n = F::from_u128(n as u128)
+    let inverted_n = F::from_u128(points_count as u128)
         .invert()
         .expect("safe because it's `2^log_n`");
 
-    iter_cyclic_subgroup::<F>(log_n)
+    iter_cyclic_subgroup::<F>(lagrange_domain)
         .map(move |value| {
             let X_sub_value_inverted = X.sub(value).invert();
-            let X_pow_n_sub_1 = X.pow([n as u64]) - F::ONE;
+            let X_pow_n_sub_1 = X.pow([points_count as u64]) - F::ONE;
 
             // During the calculation, this part of the expression should be reduced to 1, but we
             // get 0/0 here, so we insert an explicit `if`.
@@ -70,7 +70,7 @@ pub fn iter_eval_lagrange_poly_for_cyclic_group<F: PrimeField>(
                 value * inverted_n * (X_pow_n_sub_1 * X_sub_value_inverted.unwrap())
             }
         })
-        .take(n)
+        .take(points_count)
 }
 
 /// This fn calculates vanishing polynomial $Z(X)$ from the formula $G(X)=F(\alpha)L_0(X)+K(X)Z(X)$

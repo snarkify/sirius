@@ -1,7 +1,7 @@
 use std::iter;
 
-use rayon::prelude::*;
 use itertools::*;
+use rayon::prelude::*;
 
 use crate::{
     ff::PrimeField,
@@ -20,8 +20,10 @@ impl<F: PrimeField> FoldedWitness<F> {
         points_for_fft: &[F],
         accumulator: &(impl Sync + GetChallenges<F> + GetWitness<F>),
         traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
+        lagrange_domain: u32,
     ) -> Box<[Self]> {
-        let folded_witnesses_collection = fold_witnesses(points_for_fft, accumulator, traces);
+        let folded_witnesses_collection =
+            fold_witnesses(points_for_fft, accumulator, traces, lagrange_domain);
         let folded_challenges_collection =
             fold_plonk_challenges(points_for_fft, accumulator, traces);
 
@@ -55,13 +57,12 @@ pub fn fold_witnesses<F: PrimeField>(
     X_challenges: &[F],
     accumulator: &(impl GetWitness<F> + Sync),
     witnesses: &[impl Sync + GetWitness<F>],
+    lagrange_domain: u32,
 ) -> Vec<PlonkWitness<F>> {
-    let log_n = (witnesses.len() + 1).next_power_of_two().ilog2();
-
     let lagrange_poly_by_challenge = X_challenges
         .iter()
         .map(|X| {
-            lagrange::iter_eval_lagrange_poly_for_cyclic_group(*X, log_n).collect::<Box<[_]>>()
+            lagrange::iter_eval_lagrange_poly_for_cyclic_group(*X, lagrange_domain).collect::<Box<[_]>>()
         })
         .collect::<Box<[_]>>();
 
@@ -86,21 +87,36 @@ pub fn fold_witnesses<F: PrimeField>(
         .map(|(col, row)| {
             iter::once(accumulator.get_witness())
                 .chain(witnesses.iter().map(GetWitness::get_witness))
+                .map(|witness| witness[col][row])
                 .zip(
                     lagrange_poly_by_challenge
                         .iter()
                         .map(|m| m.iter().copied())
                         .multi_product(),
                 )
+                // (w0_00, [L0(X0),  L0(X1), ...])
+                // (w0_01, [L0(X0),  L0(X1), ...])
+                // (w0_02, [L0(X0),  L0(X1), ...])
+                // (w0_10, [L0(X0),  L0(X1), ...])
+                // (w0_11, [L0(X0),  L0(X1), ...])
+                // (w0_12, [L0(X0),  L0(X1), ...])
+                // (w1_00, [L1(X0),  L1(X1), ...])
+                // (w1_01, [L1(X0),  L1(X1), ...])
+                // (w1_02, [L1(X0),  L1(X1), ...])
+                // (w1_10, [L1(X0),  L1(X1), ...])
+                // (w1_11, [L1(X0),  L1(X1), ...])
+                // (w1_12, [L1(X0),  L1(X1), ...])
+                //
+                // (w0_ij, [L0(X0),  L0(X1), ...]) + (w1_ij, [L1(X0),  L1(X1), ...])
                 .fold(
                     vec![F::ZERO; X_challenges.len()].into_boxed_slice(),
                     // every element of this collection - one cell for each `X_challenge`
-                    |mut cells_by_challenge, (witness, multiplier)| {
+                    |mut cells_by_challenge, (witness, lagrange_by_challenge)| {
                         cells_by_challenge
                             .iter_mut()
-                            .zip(multiplier.iter())
-                            .for_each(|(res, cell)| {
-                                *res += *cell * witness[col][row];
+                            .zip(lagrange_by_challenge.iter())
+                            .for_each(|(res, poly_L_i_in_X)| {
+                                *res += *poly_L_i_in_X * witness;
                             });
 
                         cells_by_challenge

@@ -1,4 +1,5 @@
 use halo2_proofs::{
+    dev::MockProver,
     halo2curves::{
         ff::{FromUniformBytes, PrimeFieldBits},
         group::prime::PrimeCurveAffine,
@@ -25,7 +26,7 @@ const T: usize = 3;
 const RATE: usize = 2;
 const R_F: usize = 4;
 const R_P: usize = 3;
-const L: usize = 2;
+const L: usize = 3;
 
 type Scalar = <Affine as CurveAffine>::ScalarExt;
 type Base = <Affine as CurveAffine>::Base;
@@ -71,8 +72,19 @@ fn ro<F: PrimeFieldBits + FromUniformBytes<64>>() -> PoseidonHash<F, T, RATE> {
 
 impl<C: Circuit<Scalar>> Mock<C> {
     pub fn new(k_table_size: u32, circuits: [(C, Vec<Scalar>); L]) -> Self {
-        let circuits_runners =
-            circuits.map(|(circuit, instance)| CircuitRunner::new(k_table_size, circuit, instance));
+        let circuits_runners = circuits.map(|(circuit, instance)| {
+            let instances = if instance.is_empty() {
+                vec![]
+            } else {
+                vec![instance.clone()]
+            };
+            MockProver::run(k_table_size, &circuit, instances)
+                .unwrap()
+                .verify()
+                .unwrap();
+
+            CircuitRunner::new(k_table_size, circuit, instance)
+        });
 
         let ck = commitment::setup_smallest_key(k_table_size, &circuits_runners[0].cs, b"");
         let S = circuits_runners[0]
@@ -92,6 +104,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
     }
 
     pub fn generate_plonk_traces(&mut self) -> [PlonkTrace<Affine>; L] {
+        let mut ro = ro();
         self.circuits_ctx
             .iter()
             .map(|ctx| {
@@ -100,7 +113,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
                     &ctx.instance,
                     &ctx.witness,
                     &self.pp,
-                    &mut ro(),
+                    &mut ro,
                 )
                 .unwrap()
             })
@@ -166,6 +179,13 @@ fn random_linear_combination() {
             ),
             (
                 RandomLinearCombinationCircuit::new(
+                    (1..10).map(Scalar::from).collect(),
+                    Scalar::from(2),
+                ),
+                vec![Scalar::from(4097)],
+            ),
+            (
+                RandomLinearCombinationCircuit::new(
                     (2..11).map(Scalar::from).collect(),
                     Scalar::from(3),
                 ),
@@ -186,6 +206,7 @@ fn fibo() {
 
     let seq1 = get_fibo_seq(1, 1, SIZE);
     let seq2 = get_fibo_seq(2, 3, SIZE);
+    let seq3 = get_fibo_seq(3, 5, SIZE);
 
     Mock::new(
         10,
@@ -206,6 +227,14 @@ fn fibo() {
                 },
                 vec![Scalar::from(seq2[SIZE - 1])],
             ),
+            (
+                FiboCircuit {
+                    a: Scalar::from(seq3[0]),
+                    b: Scalar::from(seq3[1]),
+                    num: SIZE,
+                },
+                vec![Scalar::from(seq3[SIZE - 1])],
+            ),
         ],
     )
     .run();
@@ -222,6 +251,7 @@ fn fibo_lookup() {
     // circuit 1
     let seq1 = get_sequence(1, 3, 2, SIZE);
     let seq2 = get_sequence(3, 2, 2, SIZE);
+    let seq3 = get_sequence(3, 2, 2, SIZE);
 
     Mock::new(
         10,
@@ -240,6 +270,15 @@ fn fibo_lookup() {
                     a: Scalar::from(seq2[0]),
                     b: Scalar::from(seq2[1]),
                     c: Scalar::from(seq2[2]),
+                    num: SIZE,
+                },
+                vec![],
+            ),
+            (
+                FiboCircuitWithLookup {
+                    a: Scalar::from(seq3[0]),
+                    b: Scalar::from(seq3[1]),
+                    c: Scalar::from(seq3[2]),
                     num: SIZE,
                 },
                 vec![],

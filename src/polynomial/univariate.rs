@@ -20,6 +20,14 @@ impl<F: Field> UnivariatePoly<F> {
     pub fn iter(&self) -> impl Iterator<Item = &F> {
         self.0.iter()
     }
+    pub fn degree(&self) -> usize {
+        self.0
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(i, coeff)| F::ZERO.ne(coeff).then_some(i))
+            .unwrap_or_default()
+    }
 }
 
 impl<F: Field> IntoIterator for UnivariatePoly<F> {
