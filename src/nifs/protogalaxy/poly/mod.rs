@@ -170,7 +170,7 @@ pub(crate) fn compute_F<F: PrimeField>(
 
     match evaluated {
         Some(Ok(Node::Calculated { mut points, .. })) => {
-            fft::ifft(&mut points, fft_domain_size.get());
+            fft::ifft(&mut points);
             Ok(UnivariatePoly(points))
         }
         Some(Err(err)) => Err(err.into()),
@@ -294,7 +294,7 @@ pub(crate) fn compute_G<F: PrimeField>(
         Some(Ok(Node {
             values: mut points, ..
         })) => {
-            fft::ifft(&mut points, fft_domain_size);
+            fft::ifft(&mut points);
             Ok(UnivariatePoly(points))
         }
         Some(Err(err)) => Err(err.into()),

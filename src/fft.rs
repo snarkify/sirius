@@ -38,6 +38,16 @@ where
 {
 }
 
+fn bitreverse(input: usize, limit: usize) -> usize {
+    assert!(
+        limit <= usize::BITS as usize,
+        "Bit length exceeds `usize` capacity"
+    );
+
+    let mask = (1 << limit) - 1;
+    input.reverse_bits() >> (usize::BITS as usize - limit) & mask
+}
+
 /// Performs a radix-$2$ Fast-Fourier Transformation (FFT) on a vector of size
 /// $n = 2^k$, when provided `log_n` = $k$ and an element of multiplicative
 /// order $n$ called `omega` ($\omega$). The result is that the vector `a`, when
@@ -49,16 +59,6 @@ where
 ///
 /// This will use multithreading if beneficial.
 pub(crate) fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, log_n: u32) {
-    fn bitreverse(input: usize, limit: usize) -> usize {
-        assert!(
-            limit <= usize::BITS as usize,
-            "Bit length exceeds `usize` capacity"
-        );
-
-        let mask = (1 << limit) - 1;
-        input.reverse_bits() >> (usize::BITS as usize - limit) & mask
-    }
-
     let threads = rayon::current_num_threads();
     let log_threads = threads.ilog2();
     let n = a.len();
@@ -157,15 +157,23 @@ pub(crate) fn recursive_butterfly_arithmetic<Scalar: Field, G: FftGroup<Scalar>>
 /// FFT with input size 1 << log_n
 ///
 /// This is a wrapper around fn [`best_fft`]
-pub fn fft<F: PrimeField>(a: &mut [F], log_n: u32) {
+pub fn fft<F: PrimeField>(a: &mut [F]) {
+    assert!(a.len().is_power_of_two());
+    let log_n = a.len().ilog2();
+
     best_fft(a, get_omega_or_inv(log_n, false), log_n);
 }
 
 /// Inverse fft with input size 1 << log_n
-pub fn ifft<F: PrimeField>(a: &mut [F], log_n: u32) {
+pub fn ifft<F: PrimeField>(a: &mut [F]) {
+    assert!(a.len().is_power_of_two());
+    let log_n = a.len().ilog2();
+
     let omega_inv = get_omega_or_inv(log_n, true);
     let divisor = get_ifft_divisor(log_n);
+
     best_fft(a, omega_inv, log_n);
+
     util::parallelize(a, |(a, _)| {
         for a in a {
             *a *= &divisor;
@@ -176,21 +184,15 @@ pub fn ifft<F: PrimeField>(a: &mut [F], log_n: u32) {
 /// coset FFT
 /// input `a` corresponds to coefficients of a polynoimal
 pub fn coset_fft<F: WithSmallOrderMulGroup<3>>(a: &mut [F]) {
-    assert!(a.len().is_power_of_two());
-    let log_n = a.len().ilog2();
-
     distribute_powers_zeta(a, F::ZETA, F::ZETA.square(), true);
 
-    fft(a, log_n);
+    fft(a);
 }
 
 /// coset IFFT
 /// input `a` corresponds to values of a polynoimal on coset domain zeta*{1,omega,omega^2,...}
 pub fn coset_ifft<F: WithSmallOrderMulGroup<3>>(a: &mut [F]) -> UnivariatePoly<F> {
-    assert!(a.len().is_power_of_two());
-    let log_n = a.len().ilog2();
-
-    ifft(a, log_n);
+    ifft(a);
     distribute_powers_zeta(a, F::ZETA, F::ZETA.square(), false);
     UnivariatePoly(a.to_vec().into_boxed_slice())
 }
@@ -227,7 +229,7 @@ fn distribute_powers_zeta<F: PrimeField>(
 
 #[cfg(test)]
 mod tests {
-    use std::array;
+    use std::{array, iter};
 
     use itertools::Itertools;
     use rand_core::OsRng;
@@ -250,7 +252,7 @@ mod tests {
         .map(|s| Fr::from_str_vartime(s).unwrap());
 
         let mut a: [Fr; 8] = array::from_fn(|idx| Fr::from_u128(idx as u128));
-        fft(&mut a, 3);
+        fft(&mut a);
 
         a.iter().zip_eq(test_vector.iter()).for_each(|(lhs, rhs)| {
             assert_eq!(*lhs, *rhs);
@@ -258,23 +260,66 @@ mod tests {
     }
 
     fn generate_random_input<F: PrimeField>(k: u32) -> Vec<F> {
-        let n = 1 << k;
-        vec![F::random(OsRng); n]
+        iter::repeat_with(|| F::random(OsRng))
+            .take(1 << k)
+            .collect()
     }
 
     #[test]
     fn fft_random_input_test() {
         for k in [4, 5, 6, 7, 8] {
-            let input: Vec<Fr> = generate_random_input(k);
-            let mut a: Vec<Fr> = input.clone();
+            let original = generate_random_input::<Fr>(k);
+            let mut actual = original.clone();
 
-            fft(&mut a, k);
+            fft(&mut actual);
+            ifft(&mut actual);
 
-            ifft(&mut a, k);
-
-            a.into_iter().zip_eq(input).for_each(|(ai, bi)| {
+            actual.into_iter().zip_eq(original).for_each(|(ai, bi)| {
                 assert_eq!(ai, bi);
             });
         }
+    }
+
+    #[test]
+    fn coset_fft_random_input_test() {
+        for k in [4, 5, 6, 7, 8] {
+            let original = generate_random_input::<Fr>(k);
+            let mut actual = original.clone();
+
+            coset_fft(&mut actual);
+            coset_ifft(&mut actual);
+
+            actual.into_iter().zip_eq(original).for_each(|(ai, bi)| {
+                assert_eq!(ai, bi);
+            });
+        }
+    }
+
+    #[test]
+    fn test_bitreverse_basic() {
+        assert_eq!(bitreverse(0b0001, 4), 0b1000);
+        assert_eq!(bitreverse(0b0010, 4), 0b0100);
+        assert_eq!(bitreverse(0b0100, 4), 0b0010);
+        assert_eq!(bitreverse(0b1000, 4), 0b0001);
+    }
+
+    #[test]
+    fn test_bitreverse_edge_cases() {
+        assert_eq!(bitreverse(0b0001, 1), 0b1);
+        assert_eq!(bitreverse(0b0000, 1), 0b0);
+        assert_eq!(bitreverse(usize::MAX, 8), 0b11111111);
+        assert_eq!(bitreverse(usize::MAX, 16), 0b1111111111111111);
+    }
+
+    #[test]
+    fn test_bitreverse_different_limits() {
+        assert_eq!(bitreverse(0b1101, 4), 0b1011);
+        assert_eq!(bitreverse(0b1101, 3), 0b101);
+    }
+
+    #[test]
+    #[should_panic(expected = "Bit length exceeds `usize` capacity")]
+    fn test_bitreverse_panic_exceeds_capacity() {
+        bitreverse(0b1101, usize::BITS as usize + 1);
     }
 }
