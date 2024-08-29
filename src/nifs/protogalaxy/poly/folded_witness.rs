@@ -62,7 +62,8 @@ pub fn fold_witnesses<F: PrimeField>(
     let lagrange_poly_by_challenge = X_challenges
         .iter()
         .map(|X| {
-            lagrange::iter_eval_lagrange_poly_for_cyclic_group(*X, lagrange_domain).collect::<Box<[_]>>()
+            lagrange::iter_eval_lagrange_poly_for_cyclic_group(*X, lagrange_domain)
+                .collect::<Box<[_]>>()
         })
         .collect::<Box<[_]>>();
 

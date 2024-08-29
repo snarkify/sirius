@@ -1,4 +1,4 @@
-use std::{iter, num::NonZeroUsize};
+use std::{iter, num::NonZeroUsize, ops::Add};
 
 use itertools::*;
 use tracing::*;
@@ -390,8 +390,11 @@ fn compute_K_from_G<F: WithSmallOrderMulGroup<3>>(
     poly_G: UnivariatePoly<F>,
     poly_F_in_alpha: F,
 ) -> UnivariatePoly<F> {
-    let fft_domain_size_K =
-        (poly_G.degree() - ctx.instances_to_fold + 1).next_power_of_two() as u32;
+    let fft_domain_size_K = poly_G
+        .degree()
+        .add(1)
+        .saturating_sub(ctx.instances_to_fold)
+        .next_power_of_two() as u32;
 
     UnivariatePoly::coset_ifft(
         lagrange::iter_cyclic_subgroup::<F>(fft_domain_size_K)
@@ -609,7 +612,7 @@ mod test {
                 .for_each(|row| row.iter_mut().zip(gen.by_ref()).for_each(|(v, r)| *v = r));
             trace
         })
-        .take(2)
+        .take(3)
         .collect::<Box<[_]>>();
 
         let ctx = PolyContext::new(&S, &traces);
