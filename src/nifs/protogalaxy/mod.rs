@@ -1,6 +1,9 @@
-use std::{iter, marker::PhantomData};
+use std::{
+    iter,
+    marker::PhantomData,
+    ops::{Not, Sub},
+};
 
-use halo2_proofs::arithmetic::{self, CurveAffine, Field};
 use itertools::Itertools;
 use tracing::{instrument, warn};
 
@@ -10,9 +13,10 @@ use crate::{
     commitment::CommitmentKey,
     constants::NUM_CHALLENGE_BITS,
     ff::PrimeField,
+    halo2_proofs::arithmetic::{self, CurveAffine, Field},
     nifs::protogalaxy::poly::PolyContext,
-    plonk::{PlonkStructure, PlonkTrace, PlonkWitness},
-    polynomial::{lagrange, univariate::UnivariatePoly},
+    plonk::{self, PlonkStructure, PlonkTrace, PlonkWitness},
+    polynomial::{lagrange, sparse, univariate::UnivariatePoly},
     poseidon::AbsorbInRO,
     sps::{self, SpecialSoundnessVerifier},
     util,
@@ -422,6 +426,96 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
             ),
             e: calculate_e::<C>(&proof.poly_F, &proof.poly_K, gamma, alpha, lagrange_domain),
         })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum VerifyError<F: PrimeField> {
+    #[error("Error while evaluate witness: {0:?}")]
+    PlonkEval(plonk::eval::Error),
+    #[error("Expected `e` {expected_e:?}, but evaluated is {evaluated_e:?}")]
+    MismatchE { expected_e: F, evaluated_e: F },
+    #[error("Permutation check failed")]
+    Perm(plonk::Error),
+}
+
+impl<C: CurveAffine, const L: usize> IsSatAccumulator<C, L> for ProtoGalaxy<C, L> {
+    type VerifyError = VerifyError<C::ScalarExt>;
+
+    fn is_sat_acc(
+        _ck: &CommitmentKey<C>,
+        S: &PlonkStructure<C::ScalarExt>,
+        acc: &Accumulator<C>,
+    ) -> Result<(), Self::VerifyError> {
+        struct Node<F: PrimeField> {
+            value: F,
+            height: usize,
+        }
+
+        let evaluated_e = plonk::iter_evaluate_witness::<C::ScalarExt>(S, &acc.trace)
+            .map(|result_with_evaluated_gate| {
+                result_with_evaluated_gate.map(|value| Node { value, height: 0 })
+            })
+            // TODO #324 Migrate to a parallel algorithm
+            // TODO #324 Implement `try_tree_reduce` to stop on the first error
+            .tree_reduce(|left_w, right_w| {
+                let (mut left_n, right_n) = (left_w?, right_w?);
+
+                if left_n.height != right_n.height {
+                    unreachable!(
+                        "must be unreachable, since the number of rows is the degree of 2, but: {l_height} != {r_height}",
+                        l_height = left_n.height,
+                        r_height = right_n.height
+                    )
+                }
+
+                left_n.value += right_n.value * acc.betas[right_n.height];
+                left_n.height += 1;
+
+                Ok(left_n)
+            })
+            .transpose()
+            .map_err(VerifyError::PlonkEval)?
+            .map(|n| n.value)
+            .unwrap_or_default();
+
+        if evaluated_e == acc.e {
+            Ok(())
+        } else {
+            Err(VerifyError::MismatchE {
+                expected_e: acc.e,
+                evaluated_e,
+            })
+        }
+    }
+
+    fn is_sat_perm(
+        S: &PlonkStructure<<C as CurveAffine>::ScalarExt>,
+        acc: &Accumulator<C>,
+    ) -> Result<(), Self::VerifyError> {
+        let PlonkTrace { u, w } = &acc.trace;
+
+        let Z = u
+            .instance
+            .clone()
+            .into_iter()
+            .chain(w.W[0][..(1 << S.k) * S.num_advice_columns].to_vec())
+            .collect::<Box<[_]>>();
+
+        let y = sparse::matrix_multiply(&S.permutation_matrix, &Z[..]);
+        let mismatch_count = y
+            .into_iter()
+            .zip(Z)
+            .filter(|(y, z)| y.sub(z).is_zero_vartime().not())
+            .count();
+
+        if mismatch_count == 0 {
+            Ok(())
+        } else {
+            Err(Self::VerifyError::Perm(plonk::Error::PermCheckFail {
+                mismatch_count,
+            }))
+        }
     }
 }
 
