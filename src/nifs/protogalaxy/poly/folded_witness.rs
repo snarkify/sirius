@@ -1,5 +1,6 @@
 use std::iter;
 
+use itertools::*;
 use rayon::prelude::*;
 
 use crate::{
@@ -9,24 +10,34 @@ use crate::{
     util::MultiCartesianProduct,
 };
 
-pub(crate) struct FoldedTrace<F: PrimeField> {
+pub(crate) struct FoldedWitness<F: PrimeField> {
     witness: PlonkWitness<F>,
     challenges: Vec<F>,
 }
 
-impl<F: PrimeField> FoldedTrace<F> {
+impl<F: PrimeField> FoldedWitness<F> {
     pub(crate) fn new(
         points_for_fft: &[F],
+        lagrange_domain: u32,
         accumulator: &(impl Sync + GetChallenges<F> + GetWitness<F>),
         traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
     ) -> Box<[Self]> {
-        let folded_witnesses_collection = fold_witnesses(points_for_fft, accumulator, traces);
+        let polys_L_in_challenges = points_for_fft
+            .iter()
+            .map(|X| {
+                lagrange::iter_eval_lagrange_poly_for_cyclic_group(*X, lagrange_domain)
+                    .collect::<Box<[_]>>()
+            })
+            .collect::<Box<[_]>>();
+
+        let folded_witnesses_collection =
+            fold_witnesses(&polys_L_in_challenges, accumulator, traces);
         let folded_challenges_collection =
-            fold_plonk_challenges(points_for_fft, accumulator, traces);
+            fold_plonk_challenges(&polys_L_in_challenges, accumulator, traces);
 
         folded_witnesses_collection
             .into_iter()
-            .zip(folded_challenges_collection)
+            .zip_eq(folded_challenges_collection)
             .map(|(witness, challenges)| Self {
                 witness,
                 challenges,
@@ -34,12 +45,12 @@ impl<F: PrimeField> FoldedTrace<F> {
             .collect()
     }
 }
-impl<F: PrimeField> GetChallenges<F> for FoldedTrace<F> {
+impl<F: PrimeField> GetChallenges<F> for FoldedWitness<F> {
     fn get_challenges(&self) -> &[F] {
         &self.challenges
     }
 }
-impl<F: PrimeField> GetWitness<F> for FoldedTrace<F> {
+impl<F: PrimeField> GetWitness<F> for FoldedWitness<F> {
     fn get_witness(&self) -> &[Vec<F>] {
         &self.witness.W
     }
@@ -51,19 +62,10 @@ impl<F: PrimeField> GetWitness<F> for FoldedTrace<F> {
 /// Since the number of rows is large, we do this in one pass, counting the points for each
 /// challenge at each iteration, and laying them out in separate [`PlonkWitness`] at the end.
 fn fold_witnesses<F: PrimeField>(
-    X_challenges: &[F],
+    polys_L_in_challenges: &[Box<[F]>],
     accumulator: &(impl GetWitness<F> + Sync),
     witnesses: &[impl Sync + GetWitness<F>],
 ) -> Vec<PlonkWitness<F>> {
-    let log_n = (witnesses.len() + 1).next_power_of_two().ilog2();
-
-    let lagrange_poly_by_challenge = X_challenges
-        .iter()
-        .map(|X| {
-            lagrange::iter_eval_lagrange_poly_for_cyclic_group(*X, log_n).collect::<Box<[_]>>()
-        })
-        .collect::<Box<[_]>>();
-
     let witness_placeholder = accumulator.get_witness().to_vec();
 
     // TODO Create on the fly to avoid multiple rows iterations
@@ -71,7 +73,7 @@ fn fold_witnesses<F: PrimeField>(
         PlonkWitness {
             W: witness_placeholder
         };
-        X_challenges.len()
+        polys_L_in_challenges.len()
     ];
 
     accumulator
@@ -85,21 +87,34 @@ fn fold_witnesses<F: PrimeField>(
         .map(|(col, row)| {
             iter::once(accumulator.get_witness())
                 .chain(witnesses.iter().map(GetWitness::get_witness))
+                .map(|witness| witness[col][row])
                 .zip(
-                    lagrange_poly_by_challenge
+                    polys_L_in_challenges
                         .iter()
                         .map(|m| m.iter().copied())
                         .multi_product(),
                 )
+                // Element of iterator:
+                // ```
+                // (w0_00, [L0(X0),  L0(X1), ...])
+                // (w0_01, [L0(X0),  L0(X1), ...])
+                // ...
+                // (w1_00, [L1(X0),  L1(X1), ...])
+                // (w1_01, [L1(X0),  L1(X1), ...])
+                // ...
+                // ```
+                //
+                // The next `fold` call doing next action:
+                // (w0_ij, [L0(X0),  L0(X1), ...]) + (w1_ij, [L1(X0),  L1(X1), ...])
                 .fold(
-                    vec![F::ZERO; X_challenges.len()].into_boxed_slice(),
+                    vec![F::ZERO; polys_L_in_challenges.len()].into_boxed_slice(),
                     // every element of this collection - one cell for each `X_challenge`
-                    |mut cells_by_challenge, (witness, multiplier)| {
+                    |mut cells_by_challenge, (witness, lagrange_by_challenge)| {
                         cells_by_challenge
                             .iter_mut()
-                            .zip(multiplier.iter())
-                            .for_each(|(res, cell)| {
-                                *res += *cell * witness[col][row];
+                            .zip(lagrange_by_challenge.iter())
+                            .for_each(|(res, poly_L_i_in_X)| {
+                                *res += *poly_L_i_in_X * witness;
                             });
 
                         cells_by_challenge
@@ -133,31 +148,22 @@ fn fold_witnesses<F: PrimeField>(
 }
 
 fn fold_plonk_challenges<F: PrimeField>(
-    X_challenges: &[F],
+    polys_L_in_challenges: &[Box<[F]>],
     accumulator: &(impl GetChallenges<F> + Sync),
     plonk_challenges: &[impl Sync + GetChallenges<F>],
 ) -> Vec<Vec<F>> {
-    let log_n = (plonk_challenges.len() + 1).next_power_of_two().ilog2();
-
-    let lagrange_poly_by_challenge = X_challenges
-        .iter()
-        .map(|X| {
-            lagrange::iter_eval_lagrange_poly_for_cyclic_group(*X, log_n).collect::<Box<[_]>>()
-        })
-        .collect::<Box<[_]>>();
-
     let plonk_challenges_len = accumulator.get_challenges().len();
 
     iter::once(accumulator.get_challenges())
         .chain(plonk_challenges.iter().map(GetChallenges::get_challenges))
         .zip(
-            lagrange_poly_by_challenge
+            polys_L_in_challenges
                 .iter()
                 .map(|m| m.iter().copied())
                 .multi_product(),
         )
         .fold(
-            vec![vec![F::ZERO; plonk_challenges_len]; X_challenges.len()],
+            vec![vec![F::ZERO; plonk_challenges_len]; polys_L_in_challenges.len()],
             |mut folded, (plonk_challenge, lagrange_by_X_challenges)| {
                 folded
                     .iter_mut()

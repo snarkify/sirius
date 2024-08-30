@@ -2,7 +2,7 @@ use std::{iter, marker::PhantomData};
 
 use halo2_proofs::arithmetic::{self, CurveAffine, Field};
 use itertools::Itertools;
-use tracing::instrument;
+use tracing::{instrument, warn};
 
 use self::accumulator::AccumulatorInstance;
 use super::*;
@@ -10,6 +10,7 @@ use crate::{
     commitment::CommitmentKey,
     constants::NUM_CHALLENGE_BITS,
     ff::PrimeField,
+    nifs::protogalaxy::poly::PolyContext,
     plonk::{PlonkStructure, PlonkTrace, PlonkWitness},
     polynomial::{lagrange, univariate::UnivariatePoly},
     poseidon::AbsorbInRO,
@@ -193,12 +194,6 @@ pub struct ProverParam<C: CurveAffine> {
 }
 
 pub struct VerifierParam<C: CurveAffine> {
-    /// This field, `log_n`, represents the base-2 logarithm of the next power of two
-    /// that is greater than or equal to the product of the number of rows and the number of gates.
-    ///
-    /// In formula terms, it is calculated using:
-    /// (Count_of_rows * Count_of_gates).next_power_of_two().ilog2()
-    log_n: u32,
     /// Digest of public parameter of IVC circuit
     pp_digest: C,
 }
@@ -230,12 +225,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         pp_digest: C,
         S: PlonkStructure<C::ScalarExt>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
-        let log_n = Self::get_count_of_valuation(&S).next_power_of_two().ilog2();
-
-        Ok((
-            ProverParam { S, pp_digest },
-            VerifierParam { pp_digest, log_n },
-        ))
+        Ok((ProverParam { S, pp_digest }, VerifierParam { pp_digest }))
     }
 
     fn generate_plonk_trace(
@@ -287,9 +277,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         accumulator: Self::Accumulator,
         incoming: &[PlonkTrace<C>; L],
     ) -> Result<(Self::Accumulator, Self::Proof), Error> {
-        let log_n = Self::get_count_of_valuation(&pp.S)
-            .next_power_of_two()
-            .ilog2();
+        let ctx = PolyContext::new(&pp.S, incoming);
 
         let delta = Self::generate_challenge(
             &pp.pp_digest,
@@ -299,9 +287,9 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         );
 
         let poly_F = poly::compute_F::<C::ScalarExt>(
+            &ctx,
             accumulator.betas.iter().copied(),
             delta,
-            &pp.S,
             &accumulator.trace,
         )?;
 
@@ -322,8 +310,8 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         .collect::<Box<[_]>>();
 
         let poly_K = poly::compute_K::<C::ScalarExt>(
-            &pp.S,
-            alpha,
+            &ctx,
+            poly_F.eval(alpha),
             betas_stroke.iter().copied(),
             &accumulator.trace,
             incoming,
@@ -333,24 +321,31 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
             .absorb_field_iter(poly_K.iter().map(|v| util::fe_to_fe(v).unwrap()))
             .squeeze::<C>(NUM_CHALLENGE_BITS);
 
-        let lagrange_for_gamma = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
-            .take(L + 1)
-            .collect::<Box<[_]>>();
+        let polys_L_in_gamma =
+            lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, ctx.lagrange_domain())
+                .take(L + 1)
+                .collect::<Box<[_]>>();
+
+        let Accumulator {
+            trace: PlonkTrace { u, w },
+            betas: _,
+            e: _,
+        } = accumulator;
 
         Ok((
             Accumulator {
-                e: calculate_e::<C>(&poly_F, &poly_K, gamma, alpha, log_n),
+                e: calculate_e::<C>(&poly_F, &poly_K, gamma, alpha, ctx.lagrange_domain()),
                 betas: betas_stroke,
                 trace: PlonkTrace {
                     u: Self::fold_instance(
-                        accumulator.trace.u,
+                        u,
                         incoming.iter().map(|tr| &tr.u),
-                        lagrange_for_gamma.iter().copied(),
+                        polys_L_in_gamma.iter().copied(),
                     ),
                     w: Self::fold_witness(
-                        accumulator.trace.w,
+                        w,
                         incoming.iter().map(|tr| &tr.w),
-                        lagrange_for_gamma.iter().copied(),
+                        polys_L_in_gamma.iter().copied(),
                     ),
                 },
             },
@@ -392,6 +387,8 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         incoming: &[PlonkInstance<C>; L],
         proof: &Self::Proof,
     ) -> Result<Self::AccumulatorInstance, Error> {
+        let lagrange_domain = PolyContext::<C::Base>::get_lagrange_domain::<L>();
+
         Self::verify_sps(incoming.iter(), ro_nark)?;
 
         let delta = Self::generate_challenge(&vp.pp_digest, ro_acc, accumulator, incoming.iter());
@@ -421,9 +418,9 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
             ins: Self::fold_instance(
                 accumulator.ins.clone(),
                 incoming.iter(),
-                lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, vp.log_n),
+                lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, lagrange_domain),
             ),
-            e: calculate_e::<C>(&proof.poly_F, &proof.poly_K, gamma, alpha, vp.log_n),
+            e: calculate_e::<C>(&proof.poly_F, &proof.poly_K, gamma, alpha, lagrange_domain),
         })
     }
 }
@@ -436,15 +433,15 @@ fn calculate_e<C: CurveAffine>(
     alpha: C::Scalar,
     log_n: u32,
 ) -> C::Scalar {
-    let lagrange_zero_for_gamma = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
+    let poly_L0_in_gamma = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
         .next()
         .unwrap();
 
     let poly_F_alpha = poly_F.eval(alpha);
-    let poly_Z_gamma = lagrange::eval_vanish_polynomial(log_n, gamma);
+    let poly_Z_gamma = lagrange::eval_vanish_polynomial(1 << log_n, gamma);
     let poly_K_gamma = poly_K.eval(gamma);
 
-    (poly_F_alpha * lagrange_zero_for_gamma) + (poly_Z_gamma * poly_K_gamma)
+    (poly_F_alpha * poly_L0_in_gamma) + (poly_Z_gamma * poly_K_gamma)
 }
 
 #[cfg(test)]
