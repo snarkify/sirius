@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     iter,
     ops::{Add, Mul},
 };
@@ -9,7 +10,7 @@ use crate::{ff::Field, fft};
 
 /// Represents a univariate polynomial
 ///
-/// Coefficients of the polynomial are presented from smaller to larger
+/// Coefficients of the polynomial are presented from smaller degree to larger degree
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnivariatePoly<F: Field>(pub(crate) Box<[F]>);
 
@@ -62,14 +63,16 @@ impl<F: Field> UnivariatePoly<F> {
             })
     }
 
-    pub fn resize(self, new_len: usize) -> Self {
-        if self.len() == new_len {
-            return self;
+    pub fn pad_with_zeroes(self, new_len: usize) -> Result<Self, Self> {
+        match self.len().cmp(&new_len) {
+            Ordering::Equal => Ok(self),
+            Ordering::Less => {
+                let mut coeff = self.0.into_vec();
+                coeff.resize(new_len, F::ZERO);
+                Ok(Self(coeff.into_boxed_slice()))
+            }
+            Ordering::Greater => Err(self),
         }
-
-        let mut coeff = self.0.into_vec();
-        coeff.resize(new_len, F::ZERO);
-        Self(coeff.into_boxed_slice())
     }
 
     pub fn len(&self) -> usize {
@@ -170,7 +173,7 @@ mod tests {
     use std::iter;
 
     use super::UnivariatePoly;
-    use crate::{halo2_proofs::arithmetic::Field, halo2curves::bn256::Fr};
+    use crate::halo2curves::bn256::Fr;
 
     // Helper to create an `Fr` iterator from a `u64` iterator
     trait ToF<I: Into<Fr>>: Sized + IntoIterator<Item = I> {
@@ -287,11 +290,10 @@ mod tests {
     #[test]
     fn test_resize_polynomial_larger() {
         let poly = UnivariatePoly::from_iter((0..3).map(Fr::from));
-        let resized = poly.clone().resize(5);
-        let expected =
-            UnivariatePoly::from_iter((0..3).map(Fr::from).chain(iter::repeat(Fr::ZERO).take(2)));
+
         assert_eq!(
-            resized, expected,
+            poly.clone().pad_with_zeroes(5),
+            Ok(UnivariatePoly::from_iter([0, 1, 2, 0, 0].map(Fr::from))),
             "Resizing polynomial to a larger size failed."
         );
     }
@@ -299,10 +301,11 @@ mod tests {
     #[test]
     fn test_resize_polynomial_smaller() {
         let poly = UnivariatePoly::from_iter((0..5).map(Fr::from));
-        let resized = poly.clone().resize(3);
-        let expected = UnivariatePoly::from_iter((0..3).map(Fr::from));
+        let expected = poly.clone();
+
         assert_eq!(
-            resized, expected,
+            poly.pad_with_zeroes(3),
+            Err(expected),
             "Resizing polynomial to a smaller size failed."
         );
     }
@@ -310,9 +313,11 @@ mod tests {
     #[test]
     fn test_resize_polynomial_same_size() {
         let poly = UnivariatePoly::from_iter((0..3).map(Fr::from));
-        let resized = poly.clone().resize(3);
+        let resized = poly.clone().pad_with_zeroes(3);
+
         assert_eq!(
-            resized, poly,
+            resized,
+            Ok(poly),
             "Resizing polynomial to the same size failed."
         );
     }
