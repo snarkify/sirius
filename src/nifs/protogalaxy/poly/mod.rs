@@ -231,6 +231,13 @@ impl<'s, F: PrimeField> PolyContext<'s, F> {
         assert!(instances_to_fold.is_power_of_two());
         instances_to_fold.ilog2()
     }
+
+    pub fn fft_log_domain_size_K(&self) -> u32 {
+        self.fft_points_count_G
+            .add(1)
+            .saturating_sub(self.instances_to_fold)
+            .next_power_of_two() as u32
+    }
 }
 
 /// This function calculates G(X), which mathematically looks like this:
@@ -391,14 +398,8 @@ fn compute_K_from_G<F: WithSmallOrderMulGroup<3>>(
     poly_G: UnivariatePoly<F>,
     poly_F_in_alpha: F,
 ) -> UnivariatePoly<F> {
-    let fft_log_domain_size_K = poly_G
-        .degree()
-        .add(1)
-        .saturating_sub(ctx.instances_to_fold)
-        .next_power_of_two() as u32;
-
     UnivariatePoly::coset_ifft(
-        lagrange::iter_cyclic_subgroup::<F>(fft_log_domain_size_K)
+        lagrange::iter_cyclic_subgroup::<F>(ctx.fft_log_domain_size_K())
             .map(|X| F::ZETA * X)
             // TODO #293
             //.zip(poly_G.coset_fft())
