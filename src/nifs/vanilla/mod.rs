@@ -279,7 +279,6 @@ impl<C: CurveAffine> IsSatAccumulator<C> for VanillaFS<C> {
     type VerifyError = plonk::Error;
 
     fn is_sat_acc(
-        ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
         acc: &<Self as FoldingScheme<C>>::Accumulator,
     ) -> Result<(), Self::VerifyError> {
@@ -327,18 +326,6 @@ impl<C: CurveAffine> IsSatAccumulator<C> for VanillaFS<C> {
             return Err(Self::VerifyError::LogDerivativeNotSat);
         }
 
-        U.W_commitments
-            .iter()
-            .zip_eq(W.W.iter())
-            .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
-            .count_to_non_zero()
-            .map(|mismatch_count| Self::VerifyError::CommitmentMismatch { mismatch_count })
-            .err_or(())?;
-
-        if ck.commit(&W.E).unwrap().ne(&U.E_commitment) {
-            return Err(Self::VerifyError::ECommitmentMismatch);
-        }
-
         Ok(())
     }
 
@@ -368,6 +355,27 @@ impl<C: CurveAffine> IsSatAccumulator<C> for VanillaFS<C> {
         } else {
             Err(Self::VerifyError::PermCheckFail { mismatch_count })
         }
+    }
+
+    fn is_sat_commit(
+        ck: &CommitmentKey<C>,
+        acc: &<Self as FoldingScheme<C, 1>>::Accumulator,
+    ) -> Result<(), Self::VerifyError> {
+        let RelaxedPlonkTrace { U, W } = acc;
+
+        U.W_commitments
+            .iter()
+            .zip_eq(W.W.iter())
+            .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
+            .count_to_non_zero()
+            .map(|mismatch_count| Self::VerifyError::CommitmentMismatch { mismatch_count })
+            .err_or(())?;
+
+        if ck.commit(&W.E).unwrap().ne(&U.E_commitment) {
+            return Err(Self::VerifyError::ECommitmentMismatch);
+        }
+
+        Ok(())
     }
 }
 

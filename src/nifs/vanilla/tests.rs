@@ -185,11 +185,8 @@ where
 
     let mut errors = Vec::new();
 
-    if let Err(err) = VanillaFS::is_sat_acc(ck, S, &f_tr) {
-        errors.push(("is_sat_acc 1", err));
-    }
-    if let Err(err) = VanillaFS::is_sat_perm(S, &f_tr) {
-        errors.push(("is_sat_perm 1", err));
+    if let Err(err) = VanillaFS::is_sat(ck, S, &f_tr) {
+        errors.extend(err.into_iter().map(|err| ("f_tr", err)));
     }
 
     let pair2 = [pair2];
@@ -223,12 +220,10 @@ where
     f_tr.U = U_from_verify;
     f_tr.W = _W;
 
-    if let Err(err) = VanillaFS::is_sat_acc(ck, S, &f_tr) {
-        errors.push(("is_sat_relaxed 2", err));
+    if let Err(err) = VanillaFS::is_sat(ck, S, &f_tr) {
+        errors.extend(err.into_iter().map(|err| ("f_tr", err)));
     }
-    if let Err(err) = VanillaFS::is_sat_perm(S, &f_tr) {
-        errors.push(("is_sat_perm 2", err));
-    }
+
     if errors.is_empty() {
         Ok(())
     } else {

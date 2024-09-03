@@ -5,6 +5,7 @@ use std::{
 };
 
 use itertools::Itertools;
+use some_to_err::ErrOr;
 use tracing::{instrument, warn};
 
 use self::accumulator::AccumulatorInstance;
@@ -437,13 +438,14 @@ pub enum VerifyError<F: PrimeField> {
     MismatchE { expected_e: F, evaluated_e: F },
     #[error("Permutation check failed")]
     Perm(plonk::Error),
+    #[error("Commitment of")]
+    WitnessCommitmentMismatch(Box<[usize]>),
 }
 
 impl<C: CurveAffine, const L: usize> IsSatAccumulator<C, L> for ProtoGalaxy<C, L> {
     type VerifyError = VerifyError<C::ScalarExt>;
 
     fn is_sat_acc(
-        _ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
         acc: &Accumulator<C>,
     ) -> Result<(), Self::VerifyError> {
@@ -516,6 +518,13 @@ impl<C: CurveAffine, const L: usize> IsSatAccumulator<C, L> for ProtoGalaxy<C, L
                 mismatch_count,
             }))
         }
+    }
+
+    fn is_sat_commit(
+        _ck: &CommitmentKey<C>,
+        _acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+    ) -> Result<(), Self::VerifyError> {
+        todo!()
     }
 }
 

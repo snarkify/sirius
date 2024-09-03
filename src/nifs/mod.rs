@@ -77,7 +77,6 @@ pub trait IsSatAccumulator<C: CurveAffine, const L: usize = 1>: FoldingScheme<C,
     type VerifyError;
 
     fn is_sat_acc(
-        ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
         acc: &<Self as FoldingScheme<C, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError>;
@@ -86,6 +85,35 @@ pub trait IsSatAccumulator<C: CurveAffine, const L: usize = 1>: FoldingScheme<C,
         S: &PlonkStructure<C::ScalarExt>,
         acc: &<Self as FoldingScheme<C, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError>;
+
+    fn is_sat_commit(
+        ck: &CommitmentKey<C>,
+        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+    ) -> Result<(), Self::VerifyError>;
+
+    fn is_sat(
+        ck: &CommitmentKey<C>,
+        S: &PlonkStructure<C::ScalarExt>,
+        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+    ) -> Result<(), Vec<Self::VerifyError>> {
+        let mut errors = vec![];
+        if let Err(err) = Self::is_sat_acc(S, acc) {
+            errors.push(err);
+        }
+        if let Err(err) = Self::is_sat_perm(S, acc) {
+            errors.push(err);
+        }
+
+        if let Err(err) = Self::is_sat_commit(ck, acc) {
+            errors.push(err);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
 }
 
 #[cfg(test)]
