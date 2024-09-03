@@ -30,7 +30,8 @@ type Base = <Affine as CurveAffine>::Base;
 
 type RO<F> = PoseidonHash<F, T, RATE>;
 type Instance<F> = Vec<F>;
-const L: usize = 2;
+
+const L: usize = 3;
 
 type ProtoGalaxy = crate::nifs::protogalaxy::ProtoGalaxy<Affine, L>;
 type ProverParam = <ProtoGalaxy as FoldingScheme<Affine, L>>::ProverParam;
@@ -156,6 +157,13 @@ fn random_linear_combination() {
             ),
             (
                 RandomLinearCombinationCircuit::new(
+                    (1..10).map(Scalar::from).collect(),
+                    Scalar::from(2),
+                ),
+                vec![Scalar::from(4097)],
+            ),
+            (
+                RandomLinearCombinationCircuit::new(
                     (2..11).map(Scalar::from).collect(),
                     Scalar::from(3),
                 ),
@@ -173,6 +181,7 @@ fn fibo() {
 
     let seq1 = get_fibo_seq(1, 1, SIZE);
     let seq2 = get_fibo_seq(2, 3, SIZE);
+    let seq3 = get_fibo_seq(4, 5, SIZE);
 
     Mock::new(
         10,
@@ -191,6 +200,14 @@ fn fibo() {
                     b: Scalar::from(seq2[1]),
                     num: SIZE,
                 },
+                vec![Scalar::from(seq1[SIZE - 1])],
+            ),
+            (
+                FiboCircuit {
+                    a: Scalar::from(seq3[0]),
+                    b: Scalar::from(seq3[1]),
+                    num: SIZE,
+                },
                 vec![Scalar::from(seq2[SIZE - 1])],
             ),
         ],
@@ -206,6 +223,7 @@ fn fibo_lookup() {
     // circuit 1
     let seq1 = get_sequence(1, 3, 2, SIZE);
     let seq2 = get_sequence(3, 2, 2, SIZE);
+    let seq3 = get_sequence(3, 2, 2, SIZE);
 
     Mock::new(
         10,
@@ -224,6 +242,15 @@ fn fibo_lookup() {
                     a: Scalar::from(seq2[0]),
                     b: Scalar::from(seq2[1]),
                     c: Scalar::from(seq2[2]),
+                    num: SIZE,
+                },
+                vec![],
+            ),
+            (
+                FiboCircuitWithLookup {
+                    a: Scalar::from(seq3[0]),
+                    b: Scalar::from(seq3[1]),
+                    c: Scalar::from(seq3[2]),
                     num: SIZE,
                 },
                 vec![],
