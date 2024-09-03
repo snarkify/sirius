@@ -5,7 +5,6 @@ use std::{
 };
 
 use itertools::Itertools;
-use some_to_err::ErrOr;
 use tracing::{instrument, warn};
 
 use self::accumulator::AccumulatorInstance;
@@ -521,10 +520,27 @@ impl<C: CurveAffine, const L: usize> IsSatAccumulator<C, L> for ProtoGalaxy<C, L
     }
 
     fn is_sat_commit(
-        _ck: &CommitmentKey<C>,
-        _acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+        ck: &CommitmentKey<C>,
+        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError> {
-        todo!()
+        let Accumulator {
+            trace: PlonkTrace { u, w },
+            ..
+        } = acc;
+
+        let errors = u
+            .W_commitments
+            .iter()
+            .zip_eq(&w.W)
+            .enumerate()
+            .filter_map(|(i, (Ci, Wi))| ck.commit(Wi).unwrap().ne(Ci).then_some(i))
+            .collect::<Box<[_]>>();
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(VerifyError::WitnessCommitmentMismatch(errors))
+        }
     }
 }
 
