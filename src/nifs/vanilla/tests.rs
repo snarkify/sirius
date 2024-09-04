@@ -108,13 +108,13 @@ where
     if let Err(err) = S.is_sat(&ck, &mut ro_nark_decider, &pair1.u, &pair1.w) {
         errors.push(("is_sat_pair1", err));
     }
-    if let Err(err) = VanillaFS::is_sat_perm(&S, &pair1_relaxed) {
+    if let Err(err) = VanillaFS::is_sat_permutation(&S, &pair1_relaxed) {
         errors.push(("is_sat_perm_pair1", err));
     }
     if let Err(err) = S.is_sat(&ck, &mut ro_nark_decider, &pair2.u, &pair2.w) {
         errors.push(("is_sat_pair2", err));
     }
-    if let Err(err) = VanillaFS::is_sat_perm(&S, &pair2_relaxed) {
+    if let Err(err) = VanillaFS::is_sat_permutation(&S, &pair2_relaxed) {
         errors.push(("is_sat_perm_pair2", err));
     }
 

@@ -128,7 +128,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
         let init_accumulator =
             ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&self.S), &self.pp, &mut ro());
 
-        ProtoGalaxy::is_sat_acc(&self.S, &init_accumulator)
+        ProtoGalaxy::is_sat_accumulation(&self.S, &init_accumulator)
             .expect("The newly created accumulator is not satisfactory");
 
         let (accumulator_from_prove, proof) = ProtoGalaxy::prove(

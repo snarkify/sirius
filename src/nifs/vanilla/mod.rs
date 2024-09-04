@@ -275,10 +275,10 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     }
 }
 
-impl<C: CurveAffine> IsSatAccumulator<C> for VanillaFS<C> {
+impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
     type VerifyError = plonk::Error;
 
-    fn is_sat_acc(
+    fn is_sat_accumulation(
         S: &PlonkStructure<C::ScalarExt>,
         acc: &<Self as FoldingScheme<C>>::Accumulator,
     ) -> Result<(), Self::VerifyError> {
@@ -329,7 +329,7 @@ impl<C: CurveAffine> IsSatAccumulator<C> for VanillaFS<C> {
         Ok(())
     }
 
-    fn is_sat_perm(
+    fn is_sat_permutation(
         S: &PlonkStructure<C::ScalarExt>,
         acc: &<Self as FoldingScheme<C>>::Accumulator,
     ) -> Result<(), Self::VerifyError> {
@@ -357,7 +357,7 @@ impl<C: CurveAffine> IsSatAccumulator<C> for VanillaFS<C> {
         }
     }
 
-    fn is_sat_commit(
+    fn is_sat_witness_commit(
         ck: &CommitmentKey<C>,
         acc: &<Self as FoldingScheme<C, 1>>::Accumulator,
     ) -> Result<(), Self::VerifyError> {

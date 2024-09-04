@@ -441,10 +441,10 @@ pub enum VerifyError<F: PrimeField> {
     WitnessCommitmentMismatch(Box<[usize]>),
 }
 
-impl<C: CurveAffine, const L: usize> IsSatAccumulator<C, L> for ProtoGalaxy<C, L> {
+impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C, L> {
     type VerifyError = VerifyError<C::ScalarExt>;
 
-    fn is_sat_acc(
+    fn is_sat_accumulation(
         S: &PlonkStructure<C::ScalarExt>,
         acc: &Accumulator<C>,
     ) -> Result<(), Self::VerifyError> {
@@ -490,7 +490,7 @@ impl<C: CurveAffine, const L: usize> IsSatAccumulator<C, L> for ProtoGalaxy<C, L
         }
     }
 
-    fn is_sat_perm(
+    fn is_sat_permutation(
         S: &PlonkStructure<<C as CurveAffine>::ScalarExt>,
         acc: &Accumulator<C>,
     ) -> Result<(), Self::VerifyError> {
@@ -519,7 +519,7 @@ impl<C: CurveAffine, const L: usize> IsSatAccumulator<C, L> for ProtoGalaxy<C, L
         }
     }
 
-    fn is_sat_commit(
+    fn is_sat_witness_commit(
         ck: &CommitmentKey<C>,
         acc: &<Self as FoldingScheme<C, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError> {
