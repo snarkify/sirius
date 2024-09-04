@@ -598,25 +598,25 @@ where
         });
 
         if let Err(err) =
-            VanillaFS::is_sat_acc(pp.primary.ck(), pp.primary.S(), &self.primary.relaxed_trace)
+            VanillaFS::is_sat(pp.primary.ck(), pp.primary.S(), &self.primary.relaxed_trace)
         {
-            errors.push(VerificationError::NotSat {
+            errors.extend(err.into_iter().map(|err| VerificationError::NotSat {
                 err,
                 is_primary: true,
-                is_relaxed: false,
-            })
+                is_relaxed: true,
+            }));
         }
 
-        if let Err(err) = VanillaFS::is_sat_acc(
+        if let Err(err) = VanillaFS::is_sat(
             pp.secondary.ck(),
             pp.secondary.S(),
             &self.secondary.relaxed_trace,
         ) {
-            errors.push(VerificationError::NotSat {
+            errors.extend(err.into_iter().map(|err| VerificationError::NotSat {
                 err,
                 is_primary: false,
                 is_relaxed: true,
-            })
+            }));
         }
 
         if let Err(err) = pp.secondary.S().is_sat(
@@ -628,23 +628,7 @@ where
             errors.push(VerificationError::NotSat {
                 err,
                 is_primary: false,
-                is_relaxed: true,
-            })
-        }
-
-        if let Err(err) = VanillaFS::is_sat_perm(pp.primary.S(), &self.primary.relaxed_trace) {
-            errors.push(VerificationError::NotSat {
-                err,
-                is_primary: false,
-                is_relaxed: true,
-            })
-        }
-
-        if let Err(err) = VanillaFS::is_sat_perm(pp.secondary.S(), &self.secondary.relaxed_trace) {
-            errors.push(VerificationError::NotSat {
-                err,
-                is_primary: false,
-                is_relaxed: true,
+                is_relaxed: false,
             })
         }
 

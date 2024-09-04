@@ -437,13 +437,14 @@ pub enum VerifyError<F: PrimeField> {
     MismatchE { expected_e: F, evaluated_e: F },
     #[error("Permutation check failed")]
     Perm(plonk::Error),
+    #[error("Commitment of")]
+    WitnessCommitmentMismatch(Box<[usize]>),
 }
 
-impl<C: CurveAffine, const L: usize> IsSatAccumulator<C, L> for ProtoGalaxy<C, L> {
+impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C, L> {
     type VerifyError = VerifyError<C::ScalarExt>;
 
-    fn is_sat_acc(
-        _ck: &CommitmentKey<C>,
+    fn is_sat_accumulation(
         S: &PlonkStructure<C::ScalarExt>,
         acc: &Accumulator<C>,
     ) -> Result<(), Self::VerifyError> {
@@ -489,7 +490,7 @@ impl<C: CurveAffine, const L: usize> IsSatAccumulator<C, L> for ProtoGalaxy<C, L
         }
     }
 
-    fn is_sat_perm(
+    fn is_sat_permutation(
         S: &PlonkStructure<<C as CurveAffine>::ScalarExt>,
         acc: &Accumulator<C>,
     ) -> Result<(), Self::VerifyError> {
@@ -515,6 +516,30 @@ impl<C: CurveAffine, const L: usize> IsSatAccumulator<C, L> for ProtoGalaxy<C, L
             Err(Self::VerifyError::Perm(plonk::Error::PermCheckFail {
                 mismatch_count,
             }))
+        }
+    }
+
+    fn is_sat_witness_commit(
+        ck: &CommitmentKey<C>,
+        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+    ) -> Result<(), Self::VerifyError> {
+        let Accumulator {
+            trace: PlonkTrace { u, w },
+            ..
+        } = acc;
+
+        let errors = u
+            .W_commitments
+            .iter()
+            .zip_eq(&w.W)
+            .enumerate()
+            .filter_map(|(i, (Ci, Wi))| ck.commit(Wi).unwrap().ne(Ci).then_some(i))
+            .collect::<Box<[_]>>();
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(VerifyError::WitnessCommitmentMismatch(errors))
         }
     }
 }

@@ -73,20 +73,79 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
     ) -> Result<Self::AccumulatorInstance, Self::Error>;
 }
 
-pub trait IsSatAccumulator<C: CurveAffine, const L: usize = 1>: FoldingScheme<C, L> {
+/// Trait representing the requirements for checking the satisfaction of
+/// accumulation relations in a Non-Interactive Folding Scheme (NIFS).
+pub trait VerifyAccumulation<C: CurveAffine, const L: usize = 1>: FoldingScheme<C, L> {
     type VerifyError;
 
-    fn is_sat_acc(
-        ck: &CommitmentKey<C>,
+    /// Checks if the given accumulator satisfies the specified polynomial
+    /// relations.
+    ///
+    /// This method verifies the accumulation of polynomial relations to ensure
+    /// they adhere to the constraints defined in the folding scheme.
+    fn is_sat_accumulation(
         S: &PlonkStructure<C::ScalarExt>,
         acc: &<Self as FoldingScheme<C, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError>;
 
-    fn is_sat_perm(
+    /// Checks if the permutation relations in the accumulator are satisfied.
+    ///
+    /// This method ensures that the permutation relations, which could
+    /// originate from copy constraints in the PLONK protocol, are correctly
+    /// enforced in the accumulator.
+    fn is_sat_permutation(
         S: &PlonkStructure<C::ScalarExt>,
+        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+    ) -> Result<(), Self::VerifyError>;
+
+    /// Checks if the witness commitments in the accumulator are satisfied.
+    ///
+    /// This method ensures that the commitments to the witness data are
+    /// correctly enforced in the accumulator.
+    fn is_sat_witness_commit(
+        ck: &CommitmentKey<C>,
         acc: &<Self as FoldingScheme<C, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError>;
 }
+
+/// Trait defining a complete satisfaction check for accumulators
+///
+/// This trait combines multiple specific satisfaction checks into one method
+/// for comprehensive verification of accumulators.
+pub trait IsSatAccumulator<C: CurveAffine, const L: usize = 1>: VerifyAccumulation<C, L> {
+    /// Comprehensive satisfaction check for an accumulator.
+    ///
+    /// This method runs multiple checks ([`IsSatAccumulation::is_sat_accumulation`],
+    /// [`IsSatAccumulation::is_sat_permutation`], [`IsSatAccumulation::is_sat_witness_commit`]) to
+    /// ensure that all required constraints are satisfied in the accumulator.
+    fn is_sat(
+        ck: &CommitmentKey<C>,
+        S: &PlonkStructure<C::ScalarExt>,
+        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+    ) -> Result<(), Vec<Self::VerifyError>> {
+        let mut errors = vec![];
+
+        if let Err(err) = Self::is_sat_accumulation(S, acc) {
+            errors.push(err);
+        }
+
+        if let Err(err) = Self::is_sat_permutation(S, acc) {
+            errors.push(err);
+        }
+
+        if let Err(err) = Self::is_sat_witness_commit(ck, acc) {
+            errors.push(err);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+impl<C: CurveAffine, const L: usize, F: VerifyAccumulation<C, L>> IsSatAccumulator<C, L> for F {}
 
 #[cfg(test)]
 pub(crate) mod tests;
