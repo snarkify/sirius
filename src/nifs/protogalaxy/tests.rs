@@ -104,7 +104,8 @@ impl<C: Circuit<Scalar>> Mock<C> {
     }
 
     pub fn generate_plonk_traces(&mut self) -> [PlonkTrace<Affine>; L] {
-        let mut ro = ro();
+        let mut generate_ro = ro();
+        let mut is_sat_ro = ro();
         self.circuits_ctx
             .iter()
             .map(|ctx| {
@@ -113,9 +114,14 @@ impl<C: Circuit<Scalar>> Mock<C> {
                     &ctx.instance,
                     &ctx.witness,
                     &self.pp,
-                    &mut ro,
+                    &mut generate_ro,
                 )
                 .unwrap()
+            })
+            .inspect(|trace| {
+                self.S
+                    .is_sat(&self.ck, &mut is_sat_ro, &trace.u, &trace.w)
+                    .unwrap()
             })
             .collect::<Vec<_>>()
             .try_into()
