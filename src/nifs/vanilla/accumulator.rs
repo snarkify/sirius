@@ -5,6 +5,7 @@ use itertools::Itertools;
 use rayon::prelude::*;
 use tracing::{debug, instrument, warn};
 
+use super::GetConsistencyMarkers;
 use crate::{
     commitment::CommitmentKey,
     ff::{Field, PrimeField},
@@ -50,7 +51,7 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
         Self {
             inner: PlonkInstance {
                 W_commitments: vec![CommitmentKey::<C>::default_value(); num_witness],
-                instance: vec![C::ScalarExt::ZERO; num_io],
+                instances: vec![vec![C::ScalarExt::ZERO; num_io]],
                 challenges: vec![C::ScalarExt::ZERO; num_challenges],
             },
             E_commitment: CommitmentKey::<C>::default_value(),
@@ -96,9 +97,9 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             .collect::<Vec<C>>();
 
         let instance = self
-            .instance
+            .get_consistency_markers()
             .par_iter()
-            .zip(&U2.instance)
+            .zip(U2.get_consistency_markers())
             .map(|(a, b)| *a + *r * b)
             .collect::<Vec<C::ScalarExt>>();
 
@@ -120,7 +121,7 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
         RelaxedPlonkInstance {
             inner: PlonkInstance {
                 W_commitments,
-                instance,
+                instances: vec![instance],
                 challenges,
             },
             u,
@@ -214,9 +215,10 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPl
         ro.absorb_point_iter(self.W_commitments.iter())
             .absorb_point(&self.E_commitment)
             .absorb_field_iter(
-                self.instance
+                self.instances
                     .iter()
-                    .map(|inst| util::fe_to_fe(inst).unwrap()),
+                    .flat_map(|instance| instance.iter())
+                    .map(|value| util::fe_to_fe(value).unwrap()),
             )
             .absorb_field_iter(
                 self.challenges

@@ -65,7 +65,7 @@ use crate::{
         AdviceCyclicAssignor, AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx,
         WrapValue,
     },
-    nifs::vanilla::accumulator::RelaxedPlonkInstance,
+    nifs::vanilla::{accumulator::RelaxedPlonkInstance, GetConsistencyMarkers},
     plonk::PlonkInstance,
     poseidon::ROCircuitTrait,
     util::{self, CellsValuesView},
@@ -274,16 +274,16 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
                     .iter()
                     .map(AssignedPoint::to_curve)
                     .collect()),
-                instance: vec![
-                util::fe_to_fe_safe(&folded_X0.into_f().expect(
-                    "since biguint calculations are modulo the scalar field, any result must fit",
-                ))
-                .expect("fields same bytes len"),
-                util::fe_to_fe_safe(&folded_X1.into_f().expect(
-                    "since biguint calculations are modulo the scalar field, any result must fit",
-                ))
-                .expect("fields same bytes len"),
-            ],
+                instances: vec![vec![
+                    util::fe_to_fe_safe(&folded_X0.into_f().expect(
+                        "since biguint calculations are modulo the scalar field, any result must fit",
+                    ))
+                    .expect("fields same bytes len"),
+                    util::fe_to_fe_safe(&folded_X1.into_f().expect(
+                        "since biguint calculations are modulo the scalar field, any result must fit",
+                    ))
+                    .expect("fields same bytes len"),
+                ]],
                 challenges: folded_challenges
                     .iter()
                     .flat_map(|c| to_diff_bn(c))
@@ -778,9 +778,9 @@ where
             .collect::<Result<Vec<_>, _>>()?;
         let assigned_E = assign_point!(&self.relaxed.E_commitment)?;
 
-        let assigned_X0 = assign_diff_field_as_bn!(&self.relaxed.instance[0], || "X0")?;
-        let assigned_X1 = assign_diff_field_as_bn!(&self.relaxed.instance[1], || "X1")?;
-        assert_eq!(self.relaxed.instance.len(), 2);
+        let [X0, X1] = self.relaxed.get_consistency_markers();
+        let assigned_X0 = assign_diff_field_as_bn!(X0, || "X0")?;
+        let assigned_X1 = assign_diff_field_as_bn!(X1, || "X1")?;
 
         let assigned_challenges = self
             .relaxed
@@ -872,10 +872,10 @@ where
         let assigned_E = assign_and_absorb_point!(&self.relaxed.E_commitment)?;
 
         let assigned_X0 =
-            assign_and_absorb_diff_field_as_bn!(&self.relaxed.instance[0], || "X0")?.1;
+            assign_and_absorb_diff_field_as_bn!(&self.relaxed.get_consistency_markers()[0], || "X0")?.1;
         let assigned_X1 =
-            assign_and_absorb_diff_field_as_bn!(&self.relaxed.instance[1], || "X1")?.1;
-        assert_eq!(self.relaxed.instance.len(), 2);
+            assign_and_absorb_diff_field_as_bn!(&self.relaxed.get_consistency_markers()[1], || "X1")?.1;
+        assert_eq!(self.relaxed.get_consistency_markers().len(), 2);
 
         let assigned_challenges = self
             .relaxed
@@ -904,8 +904,7 @@ where
             .map(|com| assign_and_absorb_point!(com))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let assigned_input_instance = input_plonk
-            .instance
+        let assigned_input_instance = input_plonk.get_consistency_markers()
             .iter()
             .enumerate()
             .map(|(index, instance)| {
@@ -1063,7 +1062,7 @@ mod tests {
         let mut cs = ConstraintSystem::default();
         let config = MainGate::<Base, T>::configure(&mut cs);
         let witness = WitnessCollector {
-            instance: vec![],
+            instances: vec![vec![]],
             advice: vec![vec![Base::ZERO.into(); 1 << K]; cs.num_advice_columns()],
         };
 
@@ -1129,9 +1128,9 @@ mod tests {
             W_commitments: iter::repeat_with(|| C1::random(&mut rnd))
                 .take(NUM_WITNESS)
                 .collect(),
-            instance: iter::repeat_with(|| ScalarExt::random(&mut rnd))
+            instances: vec![iter::repeat_with(|| ScalarExt::random(&mut rnd))
                 .take(NUM_INSTANCES)
-                .collect(),
+                .collect()],
             challenges: iter::repeat_with(|| ScalarExt::random(&mut rnd))
                 .take(NUM_CHALLENGES)
                 .collect(),
@@ -1263,7 +1262,7 @@ mod tests {
             plonk = plonk.fold(
                 &PlonkInstance {
                     W_commitments: input_W.clone(),
-                    instance: vec![],
+                    instances: vec![vec![]],
                     challenges: vec![],
                 },
                 &[],
@@ -1307,10 +1306,10 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, 0);
+        let mut plonk = RelaxedPlonkInstance::<C1>::new(2, 0, 0);
 
         let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new(
-            RelaxedPlonkInstance::new(0, 0, 0),
+            RelaxedPlonkInstance::new(2, 0, 0),
             LIMB_WIDTH,
             LIMBS_COUNT,
             config.clone(),
@@ -1357,7 +1356,7 @@ mod tests {
             plonk = plonk.fold(
                 &PlonkInstance {
                     W_commitments: vec![],
-                    instance: vec![],
+                    instances: vec![vec![Field::ZERO; 2]],
                     challenges: vec![],
                 },
                 &cross_term_commits,
@@ -1441,7 +1440,7 @@ mod tests {
                         .unwrap();
 
                     let assigned_fold_instances = relaxed_plonk
-                        .instance
+                        .get_consistency_markers()
                         .iter()
                         .map(|instance| {
                             assign_scalar_as_bn!(&mut ctx, instance, "folded instance".to_owned())
@@ -1484,7 +1483,7 @@ mod tests {
             relaxed_plonk = relaxed_plonk.fold(
                 &PlonkInstance {
                     W_commitments: vec![],
-                    instance: input_instances.to_vec(),
+                    instances: vec![input_instances.to_vec()],
                     challenges: vec![],
                 },
                 &[],
@@ -1492,7 +1491,7 @@ mod tests {
             );
 
             let off_circuit_instances = relaxed_plonk
-                .instance
+                .get_consistency_markers()
                 .iter()
                 .map(|instance| {
                     BigUint::from_f(
@@ -1625,7 +1624,7 @@ mod tests {
             relaxed_plonk = relaxed_plonk.fold(
                 &PlonkInstance {
                     W_commitments: vec![],
-                    instance: vec![],
+                    instances: vec![vec![]],
                     challenges: input_challenges.to_vec(),
                 },
                 &[],

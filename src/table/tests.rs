@@ -80,7 +80,7 @@ fn test_assembly() -> Result<(), Error> {
     }
     let circuit = TestCircuit::new(inputs, Fp::ONE);
     let output = Fp::from_str_vartime("45").unwrap();
-    let public_inputs = vec![output];
+    let public_inputs = vec![vec![output]];
 
     let td = CircuitRunner::<Fp, _>::new(K, circuit, public_inputs);
     let witness = td.try_collect_witness()?;

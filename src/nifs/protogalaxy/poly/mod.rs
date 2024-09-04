@@ -510,7 +510,7 @@ mod test {
         let PlonkTrace { u, w } = S
             .run_sps_protocol(
                 &key,
-                &instance,
+                &[instance],
                 &witness,
                 &mut RO::new(PoseidonSpec::new(R_F1, R_P1)),
                 S.num_challenges,

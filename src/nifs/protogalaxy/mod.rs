@@ -131,12 +131,9 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
             |pt: C, val: C::ScalarExt| -> C { arithmetic::best_multiexp(&[val], &[pt]).into() };
 
         let new_accumulator = PlonkInstance {
-            W_commitments: acc
-                .W_commitments
-                .into_iter()
-                .map(|w| ecc_mul(w, l_0))
-                .collect(),
-            instance: acc.instance.into_iter().map(|i| i * l_0).collect(),
+            W_commitments: acc.W_commitments.iter().map(|w| ecc_mul(*w, l_0)).collect(),
+            // TODO# 316
+            instances: vec![acc.instance(0).iter().copied().map(|i| i * l_0).collect()],
             challenges: acc.challenges.into_iter().map(|c| c * l_0).collect(),
         };
 
@@ -145,7 +142,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
             .fold(new_accumulator, |mut acc, (u, l_n)| {
                 let PlonkInstance {
                     W_commitments,
-                    instance,
+                    instances,
                     challenges,
                 } = u;
 
@@ -156,9 +153,9 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
                         *acc_Wc = (*acc_Wc + ecc_mul(*Wc, l_n)).into();
                     });
 
-                acc.instance
+                acc.instance_mut(0)
                     .iter_mut()
-                    .zip_eq(instance.iter())
+                    .zip_eq(instances[0].iter())
                     .for_each(|(acc_inst, inst)| {
                         *acc_inst += *inst * l_n;
                     });
@@ -234,14 +231,14 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
 
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
-        instance: &[C::ScalarExt],
+        instances: &[Vec<C::ScalarExt>],
         witness: &[Vec<C::ScalarExt>],
         pp: &Self::ProverParam,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
         Ok(pp
             .S
-            .run_sps_protocol(ck, instance, witness, ro_nark, pp.S.num_challenges)?)
+            .run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)?)
     }
 
     /// Proves a statement using the ProtoGalaxy protocol.
@@ -497,10 +494,10 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
         let PlonkTrace { u, w } = &acc.trace;
 
         let Z = u
-            .instance
-            .clone()
-            .into_iter()
-            .chain(w.W[0][..(1 << S.k) * S.num_advice_columns].to_vec())
+            .instance(0)
+            .iter()
+            .chain(w.W[0].iter().take((1 << S.k) * S.num_advice_columns))
+            .copied()
             .collect::<Box<[_]>>();
 
         let y = sparse::matrix_multiply(&S.permutation_matrix, &Z[..]);

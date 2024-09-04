@@ -17,11 +17,11 @@ pub struct CircuitRunner<F: PrimeField, CT: Circuit<F>> {
     pub(crate) circuit: CT,
     pub(crate) cs: ConstraintSystem<F>,
     pub(crate) config: CT::Config,
-    pub(crate) instance: Vec<F>,
+    pub(crate) instances: Vec<Vec<F>>,
 }
 
 impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
-    pub fn new(k: u32, circuit: CT, instance: Vec<F>) -> Self {
+    pub fn new(k: u32, circuit: CT, instances: Vec<Vec<F>>) -> Self {
         let mut cs = ConstraintSystem::default();
 
         CircuitRunner {
@@ -29,7 +29,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
             k,
             circuit,
             cs,
-            instance,
+            instances,
         }
     }
 
@@ -55,7 +55,11 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
 
         Ok(PlonkStructure {
             k: self.k as usize,
-            num_io: self.instance.len(),
+            num_io: self
+                .instances
+                .get(0)
+                .map(|instance| instance.len())
+                .unwrap_or_default(),
             selectors,
             fixed_columns,
             num_advice_columns: self.cs.num_advice_columns(),
@@ -71,7 +75,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
     #[instrument(name = "circuit_collect_witness", skip_all)]
     pub fn try_collect_witness(&self) -> Result<Witness<F>, Error> {
         let mut witness = WitnessCollector {
-            instance: self.instance.clone(),
+            instances: self.instances.clone(),
             advice: vec![vec![F::ZERO.into(); 1 << self.k]; self.cs.num_advice_columns()],
         };
 
@@ -85,7 +89,11 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
 
         let mut circuit_data = CircuitData {
             k: self.k,
-            num_io: self.instance.len(),
+            num_io: self
+                .instances
+                .get(0)
+                .map(|instance| instance.len())
+                .unwrap_or_default(),
             fixed: vec![vec![F::ZERO.into(); nrow]; self.cs.num_fixed_columns()],
             selector: vec![vec![false; nrow]; self.cs.num_selectors],
             permutation: plonk::permutation::Assembly::new(nrow, &self.cs.permutation),
@@ -101,7 +109,10 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
         Ok(PreprocessingData {
             permutation_matrix: plonk::util::construct_permutation_matrix(
                 self.k as usize,
-                self.instance.len(),
+                self.instances
+                    .get(0)
+                    .map(|instance| instance.len())
+                    .unwrap_or_default(),
                 &self.cs,
                 &circuit_data.permutation,
             ),

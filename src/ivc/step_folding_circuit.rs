@@ -20,7 +20,7 @@ use crate::{
         StepCircuit,
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
-    nifs::vanilla::accumulator::RelaxedPlonkInstance,
+    nifs::vanilla::{accumulator::RelaxedPlonkInstance, GetConsistencyMarkers},
     plonk::PlonkInstance,
     poseidon::ROCircuitTrait,
     table::ConstraintSystemMetainfo,
@@ -138,7 +138,9 @@ where
 
 pub struct StepConfig<const ARITY: usize, F: PrimeField, SP: StepCircuit<ARITY, F>, const T: usize>
 {
-    pub instance: Column<Instance>,
+    /// This column stores in the 0 row a hash checking the consistency of the input data, and in
+    /// the the 1 row hash checks the consistency of the output data
+    pub consistency_marker: Column<Instance>,
     pub step_config: SP::Config,
     pub main_gate_config: MainGateConfig<T>,
 }
@@ -150,7 +152,7 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            instance: self.instance,
+            consistency_marker: self.consistency_marker,
             step_config: self.step_config.clone(),
             main_gate_config: self.main_gate_config.clone(),
         }
@@ -196,6 +198,22 @@ where
     pub input: StepInputs<'link, ARITY, C, RO>,
 }
 
+impl<'link, const ARITY: usize, C, SC, RO, const T: usize>
+    StepFoldingCircuit<'link, ARITY, C, SC, RO, T>
+where
+    C: CurveAffine,
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C::Scalar: PrimeFieldBits + FromUniformBytes<64>,
+    SC: StepCircuit<ARITY, C::Base> + Sized,
+    RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
+{
+    pub fn instances(&self, consistency_markers: [C::Base; 2]) -> Vec<Vec<C::Base>> {
+        let mut instances = self.step_circuit.instances();
+        instances.insert(0, consistency_markers.to_vec());
+        instances
+    }
+}
+
 impl<'link, const ARITY: usize, C, SC, RO, const T: usize> Circuit<C::Base>
     for StepFoldingCircuit<'link, ARITY, C, SC, RO, T>
 where
@@ -219,12 +237,12 @@ where
                 z_i: [C::Base::ZERO; ARITY],
                 cross_term_commits: vec![C::identity(); self.input.cross_term_commits.len()],
                 U: RelaxedPlonkInstance::new(
-                    self.input.U.instance.len(),
+                    self.input.U.get_consistency_markers().len(),
                     self.input.U.challenges.len(),
                     self.input.U.W_commitments.len(),
                 ),
                 u: PlonkInstance::new(
-                    self.input.u.instance.len(),
+                    2,
                     self.input.u.challenges.len(),
                     self.input.u.W_commitments.len(),
                 ),
@@ -233,19 +251,14 @@ where
     }
 
     fn configure(cs: &mut ConstraintSystem<C::Base>) -> Self::Config {
-        let before = cs.num_instance_columns();
-
         let main_gate_config = MainGate::configure(cs);
         let step_config = <SC as StepCircuit<ARITY, C::Base>>::configure(cs);
 
-        if before != cs.num_instance_columns() {
-            panic!("You can't use instance column");
-        }
-
         let instance = cs.instance_column();
         cs.enable_equality(instance);
+
         StepConfig {
-            instance,
+            consistency_marker: instance,
             step_config,
             main_gate_config,
         }
@@ -487,7 +500,7 @@ where
         layouter
             .constrain_instance(
                 assigned_input_witness.input_instance[1].0.cell(),
-                config.instance,
+                config.consistency_marker,
                 0,
             )
             .map_err(|err| {
@@ -497,7 +510,7 @@ where
 
         // Check that new_X1 == output_hash
         layouter
-            .constrain_instance(output_hash.cell(), config.instance, 1)
+            .constrain_instance(output_hash.cell(), config.consistency_marker, 1)
             .map_err(|err| {
                 error!("while check that new_X1 == output_hash: {err:?}");
                 halo2_proofs::plonk::Error::Synthesis

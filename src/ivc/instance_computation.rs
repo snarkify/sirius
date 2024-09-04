@@ -10,7 +10,7 @@ use crate::{
     gadgets::{ecc::AssignedPoint, nonnative::bn::big_uint::BigUint},
     halo2curves::CurveAffine,
     main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
-    nifs::vanilla::accumulator::RelaxedPlonkInstance,
+    nifs::vanilla::{accumulator::RelaxedPlonkInstance, GetConsistencyMarkers},
     poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
     util,
 };
@@ -89,7 +89,7 @@ where
         pub struct RelaxedPlonkInstanceBigUintView<'l, C: CurveAffine> {
             pub(crate) W_commitments: &'l Vec<C>,
             pub(crate) E_commitment: &'l C,
-            pub(crate) instance: Vec<BigUint<C::Base>>,
+            pub(crate) consistency_marker: Vec<BigUint<C::Base>>,
             pub(crate) challenges: Vec<BigUint<C::Base>>,
             pub(crate) u: &'l C::ScalarExt,
         }
@@ -101,7 +101,7 @@ where
                 ro.absorb_point_iter(self.W_commitments.iter())
                     .absorb_point(self.E_commitment)
                     .absorb_field_iter(
-                        self.instance
+                        self.consistency_marker
                             .iter()
                             .flat_map(|bn| bn.limbs().iter())
                             .copied(),
@@ -119,9 +119,7 @@ where
         let relaxed = RelaxedPlonkInstanceBigUintView {
             W_commitments: &self.relaxed.W_commitments,
             E_commitment: &self.relaxed.E_commitment,
-            instance: self
-                .relaxed
-                .instance
+            consistency_marker: self.relaxed.get_consistency_markers()
                 .iter()
                 .map(|v| {
                     BigUint::from_f(
@@ -214,7 +212,7 @@ mod tests {
         let relaxed = RelaxedPlonkInstance {
             inner: PlonkInstance {
                 W_commitments: vec![CommitmentKey::<C1>::default_value(); 10],
-                instance: vec![Scalar::from_u128(0x67899); 2],
+                instances: vec![vec![Scalar::from_u128(0x67899); 2]],
                 challenges: vec![Scalar::from_u128(0x123456); 10],
             },
             E_commitment: CommitmentKey::<C1>::default_value(),
@@ -242,7 +240,7 @@ mod tests {
         let config = MainGate::<Base, 10>::configure(&mut cs);
 
         let mut td = WitnessCollector {
-            instance: vec![],
+            instances: vec![vec![]],
             advice: vec![vec![Base::ZERO.into(); 1 << K_TABLE_SIZE]; cs.num_advice_columns()],
         };
 

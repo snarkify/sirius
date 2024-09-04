@@ -1,7 +1,6 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
 use count_to_non_zero::CountToNonZeroExt;
-use halo2_proofs::arithmetic::CurveAffine;
 use itertools::Itertools;
 use some_to_err::ErrOr;
 use tracing::*;
@@ -12,6 +11,7 @@ use crate::{
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
     ff::Field,
+    halo2_proofs::arithmetic::CurveAffine,
     nifs::vanilla::accumulator::{RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness},
     plonk::{
         self,
@@ -189,14 +189,14 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     #[instrument(skip_all)]
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
-        instance: &[C::ScalarExt],
+        instances: &[Vec<C::ScalarExt>],
         witness: &[Vec<C::ScalarExt>],
         pp: &VanillaFSProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
         Ok(pp
             .S
-            .run_sps_protocol(ck, instance, witness, ro_nark, pp.S.num_challenges)?)
+            .run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)?)
     }
 
     /// Generates a proof of correct folding using the NIFS protocol.
@@ -336,10 +336,10 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
         let RelaxedPlonkTrace { U, W } = acc;
 
         let Z = U
-            .instance
-            .clone()
-            .into_iter()
-            .chain(W.W[0][..(1 << S.k) * S.num_advice_columns].to_vec())
+            .get_consistency_markers()
+            .iter()
+            .chain(W.W[0].iter().take((1 << S.k) * S.num_advice_columns))
+            .copied()
             .collect::<Vec<_>>();
 
         let y = sparse::matrix_multiply(&S.permutation_matrix, &Z[..]);
@@ -376,6 +376,26 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
         }
 
         Ok(())
+    }
+}
+
+pub trait GetConsistencyMarkers<F> {
+    fn get_consistency_markers(&self) -> &[F; 2];
+}
+
+impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for PlonkInstance<C> {
+    fn get_consistency_markers(&self) -> &[C::ScalarExt; 2] {
+        self.instance(0)
+            .try_into()
+            .expect("Failed to get X0 & X1 from `PlonkInstance`")
+    }
+}
+
+impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for RelaxedPlonkInstance<C> {
+    fn get_consistency_markers(&self) -> &[C::ScalarExt; 2] {
+        self.instance(0)
+            .try_into()
+            .expect("Failed to get X0 & X1 from `RelaxedPlonkInstance`")
     }
 }
 

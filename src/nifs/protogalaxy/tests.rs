@@ -42,14 +42,14 @@ type Accumulator = <ProtoGalaxy as FoldingScheme<Affine, L>>::Accumulator;
 
 struct CircuitCtx {
     witness: Witness<Scalar>,
-    instance: Instance<Scalar>,
+    instances: Vec<Instance<Scalar>>,
 }
 
 impl CircuitCtx {
     fn collect<CIR: Circuit<Scalar>>(cr: CircuitRunner<Scalar, CIR>) -> Self {
         Self {
             witness: cr.try_collect_witness().expect("failed to collect witness"),
-            instance: cr.instance,
+            instances: cr.instances,
         }
     }
 }
@@ -71,19 +71,14 @@ fn ro<F: PrimeFieldBits + FromUniformBytes<64>>() -> PoseidonHash<F, T, RATE> {
 }
 
 impl<C: Circuit<Scalar>> Mock<C> {
-    pub fn new(k_table_size: u32, circuits: [(C, Vec<Scalar>); L]) -> Self {
-        let circuits_runners = circuits.map(|(circuit, instance)| {
-            let instances = if instance.is_empty() {
-                vec![]
-            } else {
-                vec![instance.clone()]
-            };
-            MockProver::run(k_table_size, &circuit, instances)
+    pub fn new(k_table_size: u32, circuits: [(C, Vec<Vec<Scalar>>); L]) -> Self {
+        let circuits_runners = circuits.map(|(circuit, instances)| {
+            MockProver::run(k_table_size, &circuit, instances.clone())
                 .unwrap()
                 .verify()
                 .unwrap();
 
-            CircuitRunner::new(k_table_size, circuit, instance)
+            CircuitRunner::new(k_table_size, circuit, instances)
         });
 
         let ck = commitment::setup_smallest_key(k_table_size, &circuits_runners[0].cs, b"");
@@ -111,7 +106,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
             .map(|ctx| {
                 ProtoGalaxy::generate_plonk_trace(
                     &self.ck,
-                    &ctx.instance,
+                    &ctx.instances,
                     &ctx.witness,
                     &self.pp,
                     &mut generate_ro,
@@ -181,21 +176,21 @@ fn random_linear_combination() {
                     (1..10).map(Scalar::from).collect(),
                     Scalar::from(2),
                 ),
-                vec![Scalar::from(4097)],
+                vec![vec![Scalar::from(4097)]],
             ),
             (
                 RandomLinearCombinationCircuit::new(
                     (1..10).map(Scalar::from).collect(),
                     Scalar::from(2),
                 ),
-                vec![Scalar::from(4097)],
+                vec![vec![Scalar::from(4097)]],
             ),
             (
                 RandomLinearCombinationCircuit::new(
                     (2..11).map(Scalar::from).collect(),
                     Scalar::from(3),
                 ),
-                vec![Scalar::from(93494)],
+                vec![vec![Scalar::from(93494)]],
             ),
         ],
     )
@@ -223,7 +218,7 @@ fn fibo() {
                     b: Scalar::from(seq1[1]),
                     num: SIZE,
                 },
-                vec![Scalar::from(seq1[SIZE - 1])],
+                vec![vec![Scalar::from(seq1[SIZE - 1])]],
             ),
             (
                 FiboCircuit {
@@ -231,7 +226,7 @@ fn fibo() {
                     b: Scalar::from(seq2[1]),
                     num: SIZE,
                 },
-                vec![Scalar::from(seq2[SIZE - 1])],
+                vec![vec![Scalar::from(seq2[SIZE - 1])]],
             ),
             (
                 FiboCircuit {
@@ -239,7 +234,7 @@ fn fibo() {
                     b: Scalar::from(seq3[1]),
                     num: SIZE,
                 },
-                vec![Scalar::from(seq3[SIZE - 1])],
+                vec![vec![Scalar::from(seq3[SIZE - 1])]],
             ),
         ],
     )

@@ -165,7 +165,7 @@ pub struct PlonkInstance<C: CurveAffine> {
     /// `W_commitments = round_sizes.len()`, see [`PlonkStructure::round_sizes`]
     pub(crate) W_commitments: Vec<C>,
     /// inst = [X0, X1]
-    pub(crate) instance: Vec<C::ScalarExt>,
+    pub(crate) instances: Vec<Vec<C::ScalarExt>>,
     /// challenges generated in special soundness protocol
     /// we will have 0 ~ 3 challenges depending on different cases:
     /// name them as r1, r2, r3.
@@ -180,7 +180,7 @@ impl<C: CurveAffine> Default for PlonkInstance<C> {
     fn default() -> Self {
         Self {
             W_commitments: vec![],
-            instance: vec![C::ScalarExt::ZERO, C::ScalarExt::ZERO], // TODO Fix Me
+            instances: vec![vec![C::ScalarExt::ZERO, C::ScalarExt::ZERO]], // TODO Fix Me
             challenges: vec![],
         }
     }
@@ -279,7 +279,11 @@ impl<C: CurveAffine> GetChallenges<C::ScalarExt> for PlonkTrace<C> {
 impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for PlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb_point_iter(self.W_commitments.iter())
-            .absorb_field_iter(self.instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
+            .absorb_field_iter(
+                self.instances
+                    .iter()
+                    .flat_map(|instance| instance.iter().map(|value| fe_to_fe(value).unwrap())),
+            )
             .absorb_field_iter(self.challenges.iter().map(|cha| fe_to_fe(cha).unwrap()));
     }
 }
@@ -424,17 +428,20 @@ impl<F: PrimeField> PlonkStructure<F> {
     pub fn run_sps_protocol<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
         ck: &CommitmentKey<C>,
-        instance: &[F],
+        instances: &[Vec<F>],
         advice: &[Vec<F>],
         ro_nark: &mut RO,
         num_challenges: usize,
     ) -> Result<PlonkTrace<C>, SpsError> {
         debug!("run sps protocol with {num_challenges} challenges");
+        assert_eq!(instances.len(), 1, "TODO Will rm this assert in #329");
+        assert_eq!(instances[0].len(), 2, "TODO Will rm this assert in #329");
+
         match num_challenges {
-            0 => self.run_sps_protocol_0(instance, advice, ck),
-            1 => self.run_sps_protocol_1(instance, advice, ck, ro_nark),
-            2 => self.run_sps_protocol_2(instance, advice, ck, ro_nark),
-            3 => self.run_sps_protocol_3(instance, advice, ck, ro_nark),
+            0 => self.run_sps_protocol_0(&instances[0], advice, ck),
+            1 => self.run_sps_protocol_1(&instances[0], advice, ck, ro_nark),
+            2 => self.run_sps_protocol_2(&instances[0], advice, ck, ro_nark),
+            3 => self.run_sps_protocol_3(&instances[0], advice, ck, ro_nark),
             challenges_count => Err(SpsError::UnsupportedChallengesCount { challenges_count }),
         }
     }
@@ -461,7 +468,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         Ok(PlonkTrace {
             u: PlonkInstance {
                 W_commitments: vec![C1],
-                instance: instance.to_vec(),
+                instances: vec![instance.to_vec()],
                 challenges: vec![],
             },
             w: PlonkWitness { W: vec![W1] },
@@ -566,7 +573,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         Ok(PlonkTrace {
             u: PlonkInstance {
                 W_commitments: vec![C1, C2],
-                instance: instance.to_vec(),
+                instances: vec![instance.to_vec()],
                 challenges: vec![r1, r2],
             },
             w: PlonkWitness { W: vec![W1, W2] },
@@ -641,7 +648,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         Ok(PlonkTrace {
             u: PlonkInstance {
                 W_commitments: vec![C1, C2, C3],
-                instance: instance.to_vec(),
+                instances: vec![instance.to_vec()],
                 challenges: vec![r1, r2, r3],
             },
             w: PlonkWitness {
@@ -655,9 +662,29 @@ impl<C: CurveAffine> PlonkInstance<C> {
     pub fn new(num_io: usize, num_challenges: usize, num_witness: usize) -> Self {
         Self {
             W_commitments: vec![CommitmentKey::<C>::default_value(); num_witness],
-            instance: vec![C::ScalarExt::ZERO; num_io],
+            instances: vec![vec![C::ScalarExt::ZERO; num_io]],
             challenges: vec![C::ScalarExt::ZERO; num_challenges],
         }
+    }
+
+    pub fn instance(&self, index: usize) -> &[C::ScalarExt] {
+        match self.instances.get(index) {
+            Some(col) => col,
+            None if index == 0 => &[],
+            None => panic!("wrong instance index"),
+        }
+    }
+
+    pub fn instance_mut(&mut self, index: usize) -> &mut [C::ScalarExt] {
+        match self.instances.get_mut(index) {
+            Some(col) => col,
+            None if index == 0 => &mut [],
+            None => panic!("wrong instance index"),
+        }
+    }
+
+    pub fn instances_len(&self) -> usize {
+        self.instances.len()
     }
 }
 

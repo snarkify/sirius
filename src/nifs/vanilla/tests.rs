@@ -81,13 +81,13 @@ where
     const R_F: usize = 4;
     const R_P: usize = 3;
 
-    let td1 = CircuitRunner::new(K, circuit1, public_inputs1.clone());
+    let td1 = CircuitRunner::new(K, circuit1, vec![public_inputs1.clone()]);
     let ck = commitment::setup_smallest_key(K, &td1.cs, b"prepare_trace");
 
     let S = td1.try_collect_plonk_structure()?;
     let W1 = td1.try_collect_witness()?;
 
-    let td2 = CircuitRunner::new(K, circuit2, public_inputs2.clone());
+    let td2 = CircuitRunner::new(K, circuit2, vec![public_inputs2.clone()]);
     let W2 = td2.try_collect_witness()?;
 
     let mut ro_nark_prepare = create_ro::<C::Base, T, RATE, R_F, R_P>();
@@ -96,11 +96,11 @@ where
     let (pp, _vp) = VanillaFS::setup_params(pp_digest, S.clone())?;
 
     let pair1 =
-        VanillaFS::generate_plonk_trace(&ck, &public_inputs1, &W1, &pp, &mut ro_nark_prepare)?;
+        VanillaFS::generate_plonk_trace(&ck, &[public_inputs1], &W1, &pp, &mut ro_nark_prepare)?;
     let pair1_relaxed = RelaxedPlonkTrace::from_regular(pair1.clone(), S.k);
 
     let pair2 =
-        VanillaFS::generate_plonk_trace(&ck, &public_inputs2, &W2, &pp, &mut ro_nark_prepare)?;
+        VanillaFS::generate_plonk_trace(&ck, &[public_inputs2], &W2, &pp, &mut ro_nark_prepare)?;
     let pair2_relaxed = RelaxedPlonkTrace::from_regular(pair2.clone(), S.k);
 
     let mut errors = Vec::new();
@@ -156,7 +156,7 @@ where
     const R_P: usize = 3;
 
     let mut f_tr = RelaxedPlonkTrace {
-        U: RelaxedPlonkInstance::new(S.num_io, S.num_challenges, S.round_sizes.len()),
+        U: RelaxedPlonkInstance::new(2, S.num_challenges, S.round_sizes.len()),
         W: RelaxedPlonkWitness::new(S.k, &S.round_sizes),
     };
 
@@ -276,7 +276,7 @@ fn one_round_test() -> Result<(), Error<G1Affine>> {
         b: Fr::from(seq[1]),
         num: SIZE,
     };
-    let public_inputs1 = vec![Fr::from(seq[SIZE - 1])];
+    let public_inputs1 = vec![Fr::from(seq[SIZE - 1]), Fr::ZERO];
 
     // circuit 2
     let seq = get_fibo_seq(2, 3, SIZE);
@@ -285,7 +285,7 @@ fn one_round_test() -> Result<(), Error<G1Affine>> {
         b: Fr::from(seq[1]),
         num: SIZE,
     };
-    let public_inputs2 = vec![Fr::from(seq[SIZE - 1])];
+    let public_inputs2 = vec![Fr::from(seq[SIZE - 1]), Fr::ZERO];
 
     let (ck, S, pair1, pair2) = prepare_trace(
         K,
@@ -322,7 +322,13 @@ fn three_rounds_test() -> Result<(), Error<G1Affine>> {
         num: NUM,
     };
 
-    let (ck, S, pair1, pair2) =
-        prepare_trace(K, circuit1, circuit2, vec![], vec![], G1Affine::default())?;
+    let (ck, S, pair1, pair2) = prepare_trace(
+        K,
+        circuit1,
+        circuit2,
+        vec![Fr::ZERO, Fr::ZERO],
+        vec![Fr::ZERO, Fr::ZERO],
+        G1Affine::default(),
+    )?;
     fold_instances(&ck, &S, pair1, pair2, G1Affine::default())
 }
