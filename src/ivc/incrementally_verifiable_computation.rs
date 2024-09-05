@@ -275,7 +275,7 @@ where
 
         let primary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.primary.ck(),
-            &primary_instances[0],
+            &primary_instances,
             &primary_witness,
             &primary_nifs_pp,
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
@@ -361,7 +361,7 @@ where
 
         let secondary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.secondary.ck(),
-            &secondary_instances[0],
+            &secondary_instances,
             &secondary_witness,
             &secondary_nifs_pp,
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
@@ -477,7 +477,7 @@ where
 
         let primary_plonk_trace = [VanillaFS::generate_plonk_trace(
             pp.primary.ck(),
-            &primary_instances[0],
+            &primary_instances,
             &primary_witness,
             &self.primary_nifs_pp,
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
@@ -561,7 +561,7 @@ where
 
         self.secondary_trace = [VanillaFS::generate_plonk_trace(
             pp.secondary.ck(),
-            &secondary_instance[0],
+            &secondary_instance,
             &secondary_witness,
             &self.secondary_nifs_pp,
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),

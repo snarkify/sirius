@@ -58,8 +58,8 @@ fn prepare_trace<C, F1, F2, CT>(
     K: u32,
     circuit1: CT,
     circuit2: CT,
-    public_inputs1: Vec<F1>,
-    public_inputs2: Vec<F1>,
+    public_inputs1: Vec<Vec<F1>>,
+    public_inputs2: Vec<Vec<F1>>,
     pp_digest: C,
 ) -> Result<
     (
@@ -81,13 +81,13 @@ where
     const R_F: usize = 4;
     const R_P: usize = 3;
 
-    let td1 = CircuitRunner::new(K, circuit1, vec![public_inputs1.clone()]);
+    let td1 = CircuitRunner::new(K, circuit1, public_inputs1.clone());
     let ck = commitment::setup_smallest_key(K, &td1.cs, b"prepare_trace");
 
     let S = td1.try_collect_plonk_structure()?;
     let W1 = td1.try_collect_witness()?;
 
-    let td2 = CircuitRunner::new(K, circuit2, vec![public_inputs2.clone()]);
+    let td2 = CircuitRunner::new(K, circuit2, public_inputs2.clone());
     let W2 = td2.try_collect_witness()?;
 
     let mut ro_nark_prepare = create_ro::<C::Base, T, RATE, R_F, R_P>();
@@ -257,8 +257,8 @@ fn zero_round_test() -> Result<(), Error<G1Affine>> {
         K,
         circuit1,
         circuit2,
-        public_inputs1,
-        public_inputs2,
+        vec![public_inputs1],
+        vec![public_inputs2],
         G1Affine::default(),
     )?;
     fold_instances(&ck, &S, pair1, pair2, G1Affine::default())
@@ -291,8 +291,8 @@ fn one_round_test() -> Result<(), Error<G1Affine>> {
         K,
         circuit1,
         circuit2,
-        public_inputs1,
-        public_inputs2,
+        vec![public_inputs1],
+        vec![public_inputs2],
         G1Affine::default(),
     )?;
     fold_instances(&ck, &S, pair1, pair2, G1Affine::default())

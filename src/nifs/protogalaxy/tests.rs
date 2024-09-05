@@ -111,7 +111,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
             .map(|ctx| {
                 ProtoGalaxy::generate_plonk_trace(
                     &self.ck,
-                    &ctx.instances.first().cloned().unwrap_or_default(),
+                    &ctx.instances,
                     &ctx.witness,
                     &self.pp,
                     &mut generate_ro,
