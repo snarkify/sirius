@@ -237,7 +237,11 @@ where
                 z_i: [C::Base::ZERO; ARITY],
                 cross_term_commits: vec![C::identity(); self.input.cross_term_commits.len()],
                 U: RelaxedPlonkInstance::new(
-                    self.input.U.get_consistency_markers().len(),
+                    self.input
+                        .U
+                        .get_consistency_markers()
+                        .map(|m| m.len())
+                        .unwrap_or_default(),
                     self.input.U.challenges.len(),
                     self.input.U.W_commitments.len(),
                 ),

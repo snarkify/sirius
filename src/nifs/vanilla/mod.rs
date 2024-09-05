@@ -337,6 +337,8 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
 
         let Z = U
             .get_consistency_markers()
+            .copied()
+            .unwrap_or_default()
             .iter()
             .chain(W.W[0].iter().take((1 << S.k) * S.num_advice_columns))
             .copied()
@@ -380,22 +382,18 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
 }
 
 pub trait GetConsistencyMarkers<F> {
-    fn get_consistency_markers(&self) -> &[F; 2];
+    fn get_consistency_markers(&self) -> Option<&[F; 2]>;
 }
 
 impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for PlonkInstance<C> {
-    fn get_consistency_markers(&self) -> &[C::ScalarExt; 2] {
-        self.instance(0)
-            .try_into()
-            .expect("Failed to get X0 & X1 from `PlonkInstance`")
+    fn get_consistency_markers(&self) -> Option<&[C::ScalarExt; 2]> {
+        self.instance(0).try_into().ok()
     }
 }
 
 impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for RelaxedPlonkInstance<C> {
-    fn get_consistency_markers(&self) -> &[C::ScalarExt; 2] {
-        self.instance(0)
-            .try_into()
-            .expect("Failed to get X0 & X1 from `RelaxedPlonkInstance`")
+    fn get_consistency_markers(&self) -> Option<&[C::ScalarExt; 2]> {
+        self.instance(0).try_into().ok()
     }
 }
 

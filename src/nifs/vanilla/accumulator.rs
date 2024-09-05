@@ -98,8 +98,9 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
 
         let instance = self
             .get_consistency_markers()
+            .unwrap()
             .par_iter()
-            .zip(U2.get_consistency_markers())
+            .zip(U2.get_consistency_markers().unwrap())
             .map(|(a, b)| *a + *r * b)
             .collect::<Vec<C::ScalarExt>>();
 

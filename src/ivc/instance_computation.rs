@@ -120,6 +120,7 @@ where
             W_commitments: &self.relaxed.W_commitments,
             E_commitment: &self.relaxed.E_commitment,
             consistency_marker: self.relaxed.get_consistency_markers()
+                .unwrap()
                 .iter()
                 .map(|v| {
                     BigUint::from_f(

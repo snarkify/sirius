@@ -778,7 +778,7 @@ where
             .collect::<Result<Vec<_>, _>>()?;
         let assigned_E = assign_point!(&self.relaxed.E_commitment)?;
 
-        let [X0, X1] = self.relaxed.get_consistency_markers();
+        let [X0, X1] = self.relaxed.get_consistency_markers().unwrap();
         let assigned_X0 = assign_diff_field_as_bn!(X0, || "X0")?;
         let assigned_X1 = assign_diff_field_as_bn!(X1, || "X1")?;
 
@@ -871,11 +871,9 @@ where
             .collect::<Result<Vec<_>, _>>()?;
         let assigned_E = assign_and_absorb_point!(&self.relaxed.E_commitment)?;
 
-        let assigned_X0 =
-            assign_and_absorb_diff_field_as_bn!(&self.relaxed.get_consistency_markers()[0], || "X0")?.1;
-        let assigned_X1 =
-            assign_and_absorb_diff_field_as_bn!(&self.relaxed.get_consistency_markers()[1], || "X1")?.1;
-        assert_eq!(self.relaxed.get_consistency_markers().len(), 2);
+        let [X0, X1] = self.relaxed.get_consistency_markers().unwrap();
+        let assigned_X0 = assign_and_absorb_diff_field_as_bn!(X0, || "X0")?.1;
+        let assigned_X1 = assign_and_absorb_diff_field_as_bn!(X1, || "X1")?.1;
 
         let assigned_challenges = self
             .relaxed
@@ -904,7 +902,9 @@ where
             .map(|com| assign_and_absorb_point!(com))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let assigned_input_instance = input_plonk.get_consistency_markers()
+        let assigned_input_instance = input_plonk
+            .get_consistency_markers()
+            .unwrap()
             .iter()
             .enumerate()
             .map(|(index, instance)| {
@@ -1441,6 +1441,7 @@ mod tests {
 
                     let assigned_fold_instances = relaxed_plonk
                         .get_consistency_markers()
+                        .unwrap()
                         .iter()
                         .map(|instance| {
                             assign_scalar_as_bn!(&mut ctx, instance, "folded instance".to_owned())
@@ -1492,6 +1493,7 @@ mod tests {
 
             let off_circuit_instances = relaxed_plonk
                 .get_consistency_markers()
+                .unwrap()
                 .iter()
                 .map(|instance| {
                     BigUint::from_f(

@@ -464,6 +464,7 @@ pub(crate) mod fibo_circuit_with_lookup {
                 meta.advice_column(),
             ];
             let selector = [meta.selector(), meta.complex_selector()];
+
             FiboChip::configure(meta, advice, selector)
         }
 

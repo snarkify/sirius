@@ -57,7 +57,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
             k: self.k as usize,
             num_io: self
                 .instances
-                .get(0)
+                .first()
                 .map(|instance| instance.len())
                 .unwrap_or_default(),
             selectors,
@@ -91,7 +91,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
             k: self.k,
             num_io: self
                 .instances
-                .get(0)
+                .first()
                 .map(|instance| instance.len())
                 .unwrap_or_default(),
             fixed: vec![vec![F::ZERO.into(); nrow]; self.cs.num_fixed_columns()],
@@ -110,7 +110,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
             permutation_matrix: plonk::util::construct_permutation_matrix(
                 self.k as usize,
                 self.instances
-                    .get(0)
+                    .first()
                     .map(|instance| instance.len())
                     .unwrap_or_default(),
                 &self.cs,

@@ -433,15 +433,14 @@ impl<F: PrimeField> PlonkStructure<F> {
         ro_nark: &mut RO,
         num_challenges: usize,
     ) -> Result<PlonkTrace<C>, SpsError> {
-        debug!("run sps protocol with {num_challenges} challenges");
-        assert_eq!(instances.len(), 1, "TODO Will rm this assert in #329");
-        assert_eq!(instances[0].len(), 2, "TODO Will rm this assert in #329");
+        assert!(instances.len() <= 1, "TODO #329");
+        let instance = instances.first().cloned().unwrap_or_default();
 
         match num_challenges {
-            0 => self.run_sps_protocol_0(&instances[0], advice, ck),
-            1 => self.run_sps_protocol_1(&instances[0], advice, ck, ro_nark),
-            2 => self.run_sps_protocol_2(&instances[0], advice, ck, ro_nark),
-            3 => self.run_sps_protocol_3(&instances[0], advice, ck, ro_nark),
+            0 => self.run_sps_protocol_0(&instance, advice, ck),
+            1 => self.run_sps_protocol_1(&instance, advice, ck, ro_nark),
+            2 => self.run_sps_protocol_2(&instance, advice, ck, ro_nark),
+            3 => self.run_sps_protocol_3(&instance, advice, ck, ro_nark),
             challenges_count => Err(SpsError::UnsupportedChallengesCount { challenges_count }),
         }
     }

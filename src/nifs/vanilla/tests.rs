@@ -276,7 +276,7 @@ fn one_round_test() -> Result<(), Error<G1Affine>> {
         b: Fr::from(seq[1]),
         num: SIZE,
     };
-    let public_inputs1 = vec![Fr::from(seq[SIZE - 1]), Fr::ZERO];
+    let public_inputs1 = vec![Fr::from(seq[SIZE - 1])];
 
     // circuit 2
     let seq = get_fibo_seq(2, 3, SIZE);
@@ -285,7 +285,7 @@ fn one_round_test() -> Result<(), Error<G1Affine>> {
         b: Fr::from(seq[1]),
         num: SIZE,
     };
-    let public_inputs2 = vec![Fr::from(seq[SIZE - 1]), Fr::ZERO];
+    let public_inputs2 = vec![Fr::from(seq[SIZE - 1])];
 
     let (ck, S, pair1, pair2) = prepare_trace(
         K,
@@ -322,13 +322,7 @@ fn three_rounds_test() -> Result<(), Error<G1Affine>> {
         num: NUM,
     };
 
-    let (ck, S, pair1, pair2) = prepare_trace(
-        K,
-        circuit1,
-        circuit2,
-        vec![Fr::ZERO, Fr::ZERO],
-        vec![Fr::ZERO, Fr::ZERO],
-        G1Affine::default(),
-    )?;
+    let (ck, S, pair1, pair2) =
+        prepare_trace(K, circuit1, circuit2, vec![], vec![], G1Affine::default())?;
     fold_instances(&ck, &S, pair1, pair2, G1Affine::default())
 }

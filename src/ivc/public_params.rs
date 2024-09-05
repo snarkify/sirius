@@ -19,7 +19,11 @@ use crate::{
         NUM_IO,
     },
     main_gate::MainGateConfig,
-    nifs::{self, vanilla::{VanillaFS, GetConsistencyMarkers}, FoldingScheme},
+    nifs::{
+        self,
+        vanilla::{GetConsistencyMarkers, VanillaFS},
+        FoldingScheme,
+    },
     plonk::{PlonkStructure, PlonkTrace},
     poseidon::{random_oracle::ROTrait, ROPair},
     table::CircuitRunner,
@@ -283,7 +287,13 @@ where
             );
 
             let secondary_initial_instance: [C2::Scalar; 2] = [
-                util::fe_to_fe(&secondary_initial_step_input.u.get_consistency_markers()[0]).unwrap(),
+                util::fe_to_fe(
+                    &secondary_initial_step_input
+                        .u
+                        .get_consistency_markers()
+                        .unwrap()[0],
+                )
+                .unwrap(),
                 RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: secondary.ro_constant.clone(),
                     public_params_hash: &secondary_initial_step_input.public_params_hash,
