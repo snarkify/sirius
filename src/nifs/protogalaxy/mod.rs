@@ -499,8 +499,9 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
         let Z = u
             .instance
             .clone()
-            .into_iter()
-            .chain(w.W[0][..(1 << S.k) * S.num_advice_columns].to_vec())
+            .iter()
+            .chain(w.W[0].iter().take((1 << S.k) * S.num_advice_columns))
+            .copied()
             .collect::<Box<[_]>>();
 
         let y = sparse::matrix_multiply(&S.permutation_matrix, &Z[..]);

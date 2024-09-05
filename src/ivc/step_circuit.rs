@@ -55,6 +55,20 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     /// TODO improve
     type Config: Clone;
 
+    /// Returns a vector of public input instances for each step.
+    ///
+    /// This method allows for the specification of public input instances at each step
+    ///
+    /// By default, this method returns an empty vector, indicating no public inputs
+    /// for the step. However, this method can be overridden in implementations
+    /// of `StepCircuit` to return the required instances.
+    ///
+    /// The dimensionality of the output vector must match how many instance columns you created
+    /// during the [`StepCircuit::configure`] call.
+    fn instances(&self) -> Vec<Vec<F>> {
+        vec![]
+    }
+
     /// Configure the step circuit. This method initializes necessary
     /// fixed columns and advice columns, but does not create any instance
     /// columns.
