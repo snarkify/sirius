@@ -266,7 +266,7 @@ where
         let primary_witness = CircuitRunner::new(
             pp.primary.k_table_size(),
             primary_sfc,
-            primary_instances[0].clone(),
+            primary_instances.clone(),
         )
         .try_collect_witness()?;
 
@@ -352,7 +352,7 @@ where
         let secondary_witness = CircuitRunner::new(
             pp.secondary.k_table_size(),
             secondary_sfc,
-            secondary_instances[0].clone(),
+            secondary_instances.clone(),
         )
         .try_collect_witness()?;
 
@@ -468,7 +468,7 @@ where
         let primary_witness = CircuitRunner::new(
             pp.primary.k_table_size(),
             primary_sfc,
-            primary_instances[0].clone(),
+            primary_instances.clone(),
         )
         .try_collect_witness()?;
 
@@ -552,7 +552,7 @@ where
         let secondary_witness = CircuitRunner::new(
             pp.secondary.k_table_size(),
             secondary_sfc,
-            secondary_instance[0].clone(),
+            secondary_instance.clone(),
         )
         .try_collect_witness()?;
 

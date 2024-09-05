@@ -266,7 +266,7 @@ where
                         &StepParams::new(limb_width, limbs_count, primary.ro_constant.clone()),
                     ),
                 },
-                vec![C1::Scalar::ZERO; NUM_IO],
+                vec![vec![C1::Scalar::ZERO; NUM_IO]],
             )
             .try_collect_plonk_structure()
         }?;
@@ -310,7 +310,7 @@ where
             let secondary_cr = CircuitRunner::new(
                 secondary.k_table_size,
                 secondary_sfc,
-                vec![C2::Scalar::ZERO; NUM_IO],
+                vec![vec![C2::Scalar::ZERO; NUM_IO]],
             );
 
             let secondary_S = secondary_cr.try_collect_plonk_structure()?;

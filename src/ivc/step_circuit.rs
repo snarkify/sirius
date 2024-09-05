@@ -109,7 +109,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
         let config = Self::configure(&mut cs);
 
         let mut witness = WitnessCollector {
-            instance: vec![F::ZERO, F::ZERO],
+            instances: vec![vec![F::ZERO, F::ZERO]],
             advice: vec![vec![F::ZERO.into(); 1 << k_table_size as usize]; cs.num_advice_columns()],
         };
         let mut layouter =

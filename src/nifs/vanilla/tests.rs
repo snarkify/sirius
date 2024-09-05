@@ -81,13 +81,13 @@ where
     const R_F: usize = 4;
     const R_P: usize = 3;
 
-    let td1 = CircuitRunner::new(K, circuit1, public_inputs1.clone());
+    let td1 = CircuitRunner::new(K, circuit1, vec![public_inputs1.clone()]);
     let ck = commitment::setup_smallest_key(K, &td1.cs, b"prepare_trace");
 
     let S = td1.try_collect_plonk_structure()?;
     let W1 = td1.try_collect_witness()?;
 
-    let td2 = CircuitRunner::new(K, circuit2, public_inputs2.clone());
+    let td2 = CircuitRunner::new(K, circuit2, vec![public_inputs2.clone()]);
     let W2 = td2.try_collect_witness()?;
 
     let mut ro_nark_prepare = create_ro::<C::Base, T, RATE, R_F, R_P>();
