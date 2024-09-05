@@ -132,6 +132,7 @@ impl<F: PrimeField> CompressedGates<F> {
 pub struct PlonkStructure<F: PrimeField> {
     /// k is a parameter such that 2^k is the total number of rows
     pub(crate) k: usize,
+    // TODO #329 Remove this field
     pub(crate) num_io: usize,
     pub(crate) selectors: Vec<Vec<bool>>,
     pub(crate) fixed_columns: Vec<Vec<F>>,

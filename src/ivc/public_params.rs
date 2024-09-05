@@ -291,7 +291,7 @@ where
                     &secondary_initial_step_input
                         .u
                         .get_consistency_markers()
-                        .unwrap()[0],
+                        .expect("For `vanilla::FoldingScheme` should always be")[0],
                 )
                 .unwrap(),
                 RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {

@@ -55,6 +55,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
 
         Ok(PlonkStructure {
             k: self.k as usize,
+            // TODO #329
             num_io: self.instances.first().map(|l| l.len()).unwrap_or_default(),
             selectors,
             fixed_columns,
@@ -85,6 +86,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
 
         let mut circuit_data = CircuitData {
             k: self.k,
+            // TODO #329
             num_io: self.instances.first().map(|i| i.len()).unwrap_or_default(),
             fixed: vec![vec![F::ZERO.into(); nrow]; self.cs.num_fixed_columns()],
             selector: vec![vec![false; nrow]; self.cs.num_selectors],
