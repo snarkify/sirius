@@ -780,7 +780,6 @@ where
         let [X0, X1] = self.relaxed.get_consistency_markers().unwrap();
         let assigned_X0 = assign_diff_field_as_bn!(&X0, || "X0")?;
         let assigned_X1 = assign_diff_field_as_bn!(&X1, || "X1")?;
-        assert_eq!(self.relaxed.instances.len(), 2);
 
         let assigned_challenges = self
             .relaxed
@@ -874,7 +873,6 @@ where
         let [X0, X1] = self.relaxed.get_consistency_markers().unwrap();
         let assigned_X0 = assign_and_absorb_diff_field_as_bn!(&X0, || "X0")?.1;
         let assigned_X1 = assign_and_absorb_diff_field_as_bn!(&X1, || "X1")?.1;
-        assert_eq!(self.relaxed.instances.len(), 2);
 
         let assigned_challenges = self
             .relaxed
@@ -1230,7 +1228,7 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut plonk = RelaxedPlonkInstance::<C1>::new(&[], 0, NUM_WITNESS);
+        let mut plonk = RelaxedPlonkInstance::<C1>::new(&[0], 0, NUM_WITNESS);
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
             let input_W = random_curve_vec(&mut rnd);
@@ -1263,7 +1261,7 @@ mod tests {
             plonk = plonk.fold(
                 &PlonkInstance {
                     W_commitments: input_W.clone(),
-                    instances: vec![],
+                    instances: vec![vec![]],
                     challenges: vec![],
                 },
                 &[],
@@ -1307,10 +1305,10 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut plonk = RelaxedPlonkInstance::<C1>::new(&[], 0, 0);
+        let mut plonk = RelaxedPlonkInstance::<C1>::new(&[0], 0, 0);
 
         let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new(
-            RelaxedPlonkInstance::new(&[], 0, 0),
+            RelaxedPlonkInstance::new(&[0], 0, 0),
             LIMB_WIDTH,
             LIMBS_COUNT,
             config.clone(),
@@ -1357,7 +1355,7 @@ mod tests {
             plonk = plonk.fold(
                 &PlonkInstance {
                     W_commitments: vec![],
-                    instances: vec![],
+                    instances: vec![vec![]],
                     challenges: vec![],
                 },
                 &cross_term_commits,
@@ -1627,7 +1625,7 @@ mod tests {
             relaxed_plonk = relaxed_plonk.fold(
                 &PlonkInstance {
                     W_commitments: vec![],
-                    instances: vec![],
+                    instances: vec![vec![]],
                     challenges: input_challenges.to_vec(),
                 },
                 &[],
