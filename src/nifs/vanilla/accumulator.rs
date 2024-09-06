@@ -46,11 +46,14 @@ impl<C: CurveAffine> From<&PlonkInstance<C>> for RelaxedPlonkInstance<C> {
 }
 
 impl<C: CurveAffine> RelaxedPlonkInstance<C> {
-    pub fn new(num_io: usize, num_challenges: usize, num_witness: usize) -> Self {
+    pub fn new(num_io: &[usize], num_challenges: usize, num_witness: usize) -> Self {
         Self {
             inner: PlonkInstance {
                 W_commitments: vec![CommitmentKey::<C>::default_value(); num_witness],
-                instance: vec![C::ScalarExt::ZERO; num_io],
+                instances: num_io
+                    .iter()
+                    .map(|len| vec![C::ScalarExt::ZERO; *len])
+                    .collect(),
                 challenges: vec![C::ScalarExt::ZERO; num_challenges],
             },
             E_commitment: CommitmentKey::<C>::default_value(),
@@ -96,11 +99,17 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             .collect::<Vec<C>>();
 
         let instance = self
-            .instance
-            .par_iter()
-            .zip(&U2.instance)
-            .map(|(a, b)| *a + *r * b)
-            .collect::<Vec<C::ScalarExt>>();
+            .instances
+            .iter()
+            .zip_eq(&U2.instances)
+            .map(|(s_instance, U2_instance)| {
+                s_instance
+                    .iter()
+                    .zip_eq(U2_instance)
+                    .map(|(a, b)| *a + *r * b)
+                    .collect()
+            })
+            .collect::<Vec<Vec<C::ScalarExt>>>();
 
         let challenges = self
             .challenges
@@ -120,7 +129,7 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
         RelaxedPlonkInstance {
             inner: PlonkInstance {
                 W_commitments,
-                instance,
+                instances: instance,
                 challenges,
             },
             u,
@@ -173,7 +182,7 @@ pub type RelaxedPlonkTraceArgs = plonk::PlonkTraceArgs;
 impl<C: CurveAffine> RelaxedPlonkTrace<C> {
     pub fn new(args: RelaxedPlonkTraceArgs) -> Self {
         Self {
-            U: RelaxedPlonkInstance::new(args.num_io, args.num_challenges, args.num_witness),
+            U: RelaxedPlonkInstance::new(&args.num_io, args.num_challenges, args.num_witness),
             W: RelaxedPlonkWitness::new(args.k_table_size, &args.round_sizes),
         }
     }
@@ -214,9 +223,9 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPl
         ro.absorb_point_iter(self.W_commitments.iter())
             .absorb_point(&self.E_commitment)
             .absorb_field_iter(
-                self.instance
+                self.instances
                     .iter()
-                    .map(|inst| util::fe_to_fe(inst).unwrap()),
+                    .flat_map(|inst| inst.iter().map(|val| util::fe_to_fe(val).unwrap())),
             )
             .absorb_field_iter(
                 self.challenges

@@ -20,7 +20,7 @@ use crate::{
         StepCircuit,
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
-    nifs::vanilla::{accumulator::RelaxedPlonkInstance, GetConsistencyMarkers},
+    nifs::vanilla::accumulator::RelaxedPlonkInstance,
     plonk::PlonkInstance,
     poseidon::ROCircuitTrait,
     table::ConstraintSystemMetainfo,
@@ -109,7 +109,7 @@ where
 {
     pub fn without_witness<PairedCircuit: Circuit<C::Scalar>>(
         k_table_size: u32,
-        num_io: usize,
+        num_io: &[usize],
         step_pp: &'link StepParams<C::Base, RO>,
     ) -> Self {
         let mut cs = ConstraintSystem::<C::Scalar>::default();
@@ -227,6 +227,11 @@ where
     type FloorPlanner = floor_planner::V1;
 
     fn without_witnesses(&self) -> Self {
+        let instances_len = &self
+            .instances([C::Base::ZERO, C::Base::ZERO])
+            .iter()
+            .map(|ins| ins.len())
+            .collect::<Box<[_]>>();
         Self {
             step_circuit: self.step_circuit,
             input: StepInputs {
@@ -237,16 +242,12 @@ where
                 z_i: [C::Base::ZERO; ARITY],
                 cross_term_commits: vec![C::identity(); self.input.cross_term_commits.len()],
                 U: RelaxedPlonkInstance::new(
-                    self.input
-                        .U
-                        .get_consistency_markers()
-                        .map(|m| m.len())
-                        .unwrap_or_default(),
+                    instances_len,
                     self.input.U.challenges.len(),
                     self.input.U.W_commitments.len(),
                 ),
                 u: PlonkInstance::new(
-                    2,
+                    instances_len,
                     self.input.u.challenges.len(),
                     self.input.u.W_commitments.len(),
                 ),

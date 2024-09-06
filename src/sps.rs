@@ -1,9 +1,12 @@
-use crate::commitment;
-use crate::constants::NUM_CHALLENGE_BITS;
-use crate::plonk::{eval::Error as EvalError, PlonkInstance};
-use crate::poseidon::ROTrait;
-use crate::util::fe_to_fe;
 use halo2_proofs::arithmetic::CurveAffine;
+
+use crate::{
+    commitment,
+    constants::NUM_CHALLENGE_BITS,
+    plonk::{eval::Error as EvalError, PlonkInstance},
+    poseidon::ROTrait,
+    util::fe_to_fe,
+};
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -38,7 +41,12 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> SpecialSoundnessVerifier<C, RO> for P
             return Ok(());
         }
 
-        ro_nark.absorb_field_iter(self.instance.iter().map(|inst| fe_to_fe(inst).unwrap()));
+        ro_nark.absorb_field_iter(
+            self.instances
+                .iter()
+                .flat_map(|inst| inst.iter())
+                .map(|val| fe_to_fe(val).unwrap()),
+        );
 
         for i in 0..num_challenges {
             if ro_nark

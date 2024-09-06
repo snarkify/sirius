@@ -56,7 +56,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
         Ok(PlonkStructure {
             k: self.k as usize,
             // TODO #329
-            num_io: self.instances.first().map(|l| l.len()).unwrap_or_default(),
+            num_io: self.instances.iter().map(|l| l.len()).collect(),
             selectors,
             fixed_columns,
             num_advice_columns: self.cs.num_advice_columns(),

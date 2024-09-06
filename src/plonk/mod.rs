@@ -132,8 +132,7 @@ impl<F: PrimeField> CompressedGates<F> {
 pub struct PlonkStructure<F: PrimeField> {
     /// k is a parameter such that 2^k is the total number of rows
     pub(crate) k: usize,
-    // TODO #329 Remove this field
-    pub(crate) num_io: usize,
+    pub(crate) num_io: Box<[usize]>,
     pub(crate) selectors: Vec<Vec<bool>>,
     pub(crate) fixed_columns: Vec<Vec<F>>,
 
@@ -166,7 +165,7 @@ pub struct PlonkInstance<C: CurveAffine> {
     /// `W_commitments = round_sizes.len()`, see [`PlonkStructure::round_sizes`]
     pub(crate) W_commitments: Vec<C>,
     /// inst = [X0, X1]
-    pub(crate) instance: Vec<C::ScalarExt>,
+    pub(crate) instances: Vec<Vec<C::ScalarExt>>,
     /// challenges generated in special soundness protocol
     /// we will have 0 ~ 3 challenges depending on different cases:
     /// name them as r1, r2, r3.
@@ -175,16 +174,6 @@ pub struct PlonkInstance<C: CurveAffine> {
     /// r3: combine all custom gates (P_i) and lookup relations (L_i), e.g.:
     /// (P_1, P_2, L_1, L_2) -> P_1 + r3*P_2 + r3^2*L_1 + r3^3*L_2
     pub(crate) challenges: Vec<C::ScalarExt>,
-}
-
-impl<C: CurveAffine> Default for PlonkInstance<C> {
-    fn default() -> Self {
-        Self {
-            W_commitments: vec![],
-            instance: vec![C::ScalarExt::ZERO, C::ScalarExt::ZERO], // TODO Fix Me
-            challenges: vec![],
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -210,7 +199,7 @@ pub struct PlonkTrace<C: CurveAffine> {
 
 #[derive(Debug)]
 pub struct PlonkTraceArgs {
-    pub num_io: usize,
+    pub num_io: Box<[usize]>,
     pub num_challenges: usize,
     pub num_witness: usize,
     pub k_table_size: usize,
@@ -220,7 +209,7 @@ pub struct PlonkTraceArgs {
 impl<F: PrimeField> From<&PlonkStructure<F>> for PlonkTraceArgs {
     fn from(value: &PlonkStructure<F>) -> Self {
         Self {
-            num_io: value.num_io,
+            num_io: value.num_io.clone(),
             num_challenges: value.num_challenges,
             num_witness: value.round_sizes.len(),
             k_table_size: value.k,
@@ -232,7 +221,7 @@ impl<F: PrimeField> From<&PlonkStructure<F>> for PlonkTraceArgs {
 impl<C: CurveAffine> PlonkTrace<C> {
     pub fn new(args: PlonkTraceArgs) -> Self {
         Self {
-            u: PlonkInstance::new(args.num_io, args.num_challenges, args.num_witness),
+            u: PlonkInstance::new(&args.num_io, args.num_challenges, args.num_witness),
             w: PlonkWitness::new(&args.round_sizes),
         }
     }
@@ -280,7 +269,11 @@ impl<C: CurveAffine> GetChallenges<C::ScalarExt> for PlonkTrace<C> {
 impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for PlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb_point_iter(self.W_commitments.iter())
-            .absorb_field_iter(self.instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
+            .absorb_field_iter(
+                self.instances
+                    .iter()
+                    .flat_map(|inst| inst.iter().map(|i| fe_to_fe(i).unwrap())),
+            )
             .absorb_field_iter(self.challenges.iter().map(|cha| fe_to_fe(cha).unwrap()));
     }
 }
@@ -413,7 +406,7 @@ impl<F: PrimeField> PlonkStructure<F> {
 
     pub fn dry_run_sps_protocol<C: CurveAffine<ScalarExt = F>>(&self) -> PlonkTrace<C> {
         PlonkTrace {
-            u: PlonkInstance::new(self.num_io, self.num_challenges, self.round_sizes.len()),
+            u: PlonkInstance::new(&self.num_io, self.num_challenges, self.round_sizes.len()),
             w: PlonkWitness::new(&self.round_sizes),
         }
     }
@@ -425,17 +418,16 @@ impl<F: PrimeField> PlonkStructure<F> {
     pub fn run_sps_protocol<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
         ck: &CommitmentKey<C>,
-        instance: &[F],
+        instances: &[Vec<F>],
         advice: &[Vec<F>],
         ro_nark: &mut RO,
         num_challenges: usize,
     ) -> Result<PlonkTrace<C>, SpsError> {
-        debug!("run sps protocol with {num_challenges} challenges");
         match num_challenges {
-            0 => self.run_sps_protocol_0(instance, advice, ck),
-            1 => self.run_sps_protocol_1(instance, advice, ck, ro_nark),
-            2 => self.run_sps_protocol_2(instance, advice, ck, ro_nark),
-            3 => self.run_sps_protocol_3(instance, advice, ck, ro_nark),
+            0 => self.run_sps_protocol_0(instances, advice, ck),
+            1 => self.run_sps_protocol_1(instances, advice, ck, ro_nark),
+            2 => self.run_sps_protocol_2(instances, advice, ck, ro_nark),
+            3 => self.run_sps_protocol_3(instances, advice, ck, ro_nark),
             challenges_count => Err(SpsError::UnsupportedChallengesCount { challenges_count }),
         }
     }
@@ -445,7 +437,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     #[instrument(name = "0", skip_all)]
     fn run_sps_protocol_0<C: CurveAffine<ScalarExt = F>>(
         &self,
-        instance: &[F],
+        instances: &[Vec<F>],
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
     ) -> Result<PlonkTrace<C>, SpsError> {
@@ -462,7 +454,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         Ok(PlonkTrace {
             u: PlonkInstance {
                 W_commitments: vec![C1],
-                instance: instance.to_vec(),
+                instances: instances.to_vec(),
                 challenges: vec![],
             },
             w: PlonkWitness { W: vec![W1] },
@@ -477,7 +469,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     #[instrument(name = "1", skip_all)]
     fn run_sps_protocol_1<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
-        instance: &[F],
+        instances: &[Vec<F>],
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
@@ -485,11 +477,16 @@ impl<F: PrimeField> PlonkStructure<F> {
         let PlonkTrace {
             u: mut plonk_instance,
             w: plonk_witness,
-        } = self.run_sps_protocol_0(instance, advice, ck)?;
+        } = self.run_sps_protocol_0(instances, advice, ck)?;
 
         let _span = info_span!("instance_commit").entered();
         ro_nark
-            .absorb_field_iter(instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
+            .absorb_field_iter(
+                instances
+                    .iter()
+                    .flat_map(|instance| instance.iter())
+                    .map(|val| fe_to_fe(val).unwrap()),
+            )
             .absorb_point_iter(plonk_instance.W_commitments.iter());
 
         plonk_instance
@@ -510,7 +507,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     #[instrument(name = "2", skip_all)]
     fn run_sps_protocol_2<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
-        instance: &[F],
+        instances: &[Vec<F>],
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
@@ -543,7 +540,12 @@ impl<F: PrimeField> PlonkStructure<F> {
         }?;
 
         let r1 = ro_nark
-            .absorb_field_iter(instance.iter().map(|inst| fe_to_fe(inst).unwrap()))
+            .absorb_field_iter(
+                instances
+                    .iter()
+                    .flat_map(|inst| inst.iter())
+                    .map(|val| fe_to_fe(val).unwrap()),
+            )
             .absorb_point(&C1)
             .squeeze::<C>(NUM_CHALLENGE_BITS);
 
@@ -567,7 +569,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         Ok(PlonkTrace {
             u: PlonkInstance {
                 W_commitments: vec![C1, C2],
-                instance: instance.to_vec(),
+                instances: instances.to_vec(),
                 challenges: vec![r1, r2],
             },
             w: PlonkWitness { W: vec![W1, W2] },
@@ -581,12 +583,17 @@ impl<F: PrimeField> PlonkStructure<F> {
     #[instrument(name = "3", skip_all)]
     fn run_sps_protocol_3<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
         &self,
-        instance: &[F],
+        instances: &[Vec<F>],
         advice: &[Vec<F>],
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
     ) -> Result<PlonkTrace<C>, SpsError> {
-        ro_nark.absorb_field_iter(instance.iter().map(|inst| fe_to_fe(inst).unwrap()));
+        ro_nark.absorb_field_iter(
+            instances
+                .iter()
+                .flat_map(|i| i.iter())
+                .map(|inst| fe_to_fe(inst).unwrap()),
+        );
 
         let k_power_of_2 = 1 << self.k;
 
@@ -642,7 +649,7 @@ impl<F: PrimeField> PlonkStructure<F> {
         Ok(PlonkTrace {
             u: PlonkInstance {
                 W_commitments: vec![C1, C2, C3],
-                instance: instance.to_vec(),
+                instances: instances.to_vec(),
                 challenges: vec![r1, r2, r3],
             },
             w: PlonkWitness {
@@ -653,10 +660,13 @@ impl<F: PrimeField> PlonkStructure<F> {
 }
 
 impl<C: CurveAffine> PlonkInstance<C> {
-    pub fn new(num_io: usize, num_challenges: usize, num_witness: usize) -> Self {
+    pub fn new(num_io: &[usize], num_challenges: usize, num_witness: usize) -> Self {
         Self {
             W_commitments: vec![CommitmentKey::<C>::default_value(); num_witness],
-            instance: vec![C::ScalarExt::ZERO; num_io],
+            instances: num_io
+                .iter()
+                .map(|len| vec![C::ScalarExt::ZERO; *len])
+                .collect(),
             challenges: vec![C::ScalarExt::ZERO; num_challenges],
         }
     }
