@@ -194,7 +194,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         pp: &VanillaFSProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
-        assert!(instances.len() <= 1); // TODO #316
+        assert!(instances.len() <= 1, "TODO #316");
         Ok(pp
             .S
             .run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)?)

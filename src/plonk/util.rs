@@ -131,7 +131,7 @@ pub(crate) fn construct_permutation_matrix<F: PrimeField>(
     cs: &ConstraintSystem<F>,
     permutation: &Assembly,
 ) -> SparseMatrix<F> {
-    assert!(num_io.len() <= 1, "TODO #329");
+    assert!(num_io.len() <= 1, "TODO #316");
     let num_io = num_io.first().copied().unwrap_or_default();
 
     let columns = &cs.permutation.columns;
