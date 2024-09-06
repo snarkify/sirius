@@ -242,7 +242,7 @@ mod tests {
         let config = MainGate::<Base, 10>::configure(&mut cs);
 
         let mut td = WitnessCollector {
-            instance: vec![],
+            instances: vec![vec![]],
             advice: vec![vec![Base::ZERO.into(); 1 << K_TABLE_SIZE]; cs.num_advice_columns()],
         };
 

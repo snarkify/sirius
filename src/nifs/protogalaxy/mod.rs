@@ -234,14 +234,17 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
 
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
-        instance: &[C::ScalarExt],
+        instances: &[Vec<C::ScalarExt>],
         witness: &[Vec<C::ScalarExt>],
         pp: &Self::ProverParam,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
+        // TODO #329 use all instances in sps
+        let instance = instances.first().cloned().unwrap_or_default();
+
         Ok(pp
             .S
-            .run_sps_protocol(ck, instance, witness, ro_nark, pp.S.num_challenges)?)
+            .run_sps_protocol(ck, &instance, witness, ro_nark, pp.S.num_challenges)?)
     }
 
     /// Proves a statement using the ProtoGalaxy protocol.
@@ -499,8 +502,9 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
         let Z = u
             .instance
             .clone()
-            .into_iter()
-            .chain(w.W[0][..(1 << S.k) * S.num_advice_columns].to_vec())
+            .iter()
+            .chain(w.W[0].iter().take((1 << S.k) * S.num_advice_columns))
+            .copied()
             .collect::<Box<[_]>>();
 
         let y = sparse::matrix_multiply(&S.permutation_matrix, &Z[..]);

@@ -1063,7 +1063,7 @@ mod tests {
         let mut cs = ConstraintSystem::default();
         let config = MainGate::<Base, T>::configure(&mut cs);
         let witness = WitnessCollector {
-            instance: vec![],
+            instances: vec![vec![]],
             advice: vec![vec![Base::ZERO.into(); 1 << K]; cs.num_advice_columns()],
         };
 

@@ -82,7 +82,7 @@ fn test_assembly() -> Result<(), Error> {
     let output = Fp::from_str_vartime("45").unwrap();
     let public_inputs = vec![output];
 
-    let td = CircuitRunner::<Fp, _>::new(K, circuit, public_inputs);
+    let td = CircuitRunner::<Fp, _>::new(K, circuit, vec![public_inputs]);
     let witness = td.try_collect_witness()?;
 
     let mut table = Table::new();

@@ -58,8 +58,8 @@ fn prepare_trace<C, F1, F2, CT>(
     K: u32,
     circuit1: CT,
     circuit2: CT,
-    public_inputs1: Vec<F1>,
-    public_inputs2: Vec<F1>,
+    public_inputs1: Vec<Vec<F1>>,
+    public_inputs2: Vec<Vec<F1>>,
     pp_digest: C,
 ) -> Result<
     (
@@ -257,8 +257,8 @@ fn zero_round_test() -> Result<(), Error<G1Affine>> {
         K,
         circuit1,
         circuit2,
-        public_inputs1,
-        public_inputs2,
+        vec![public_inputs1],
+        vec![public_inputs2],
         G1Affine::default(),
     )?;
     fold_instances(&ck, &S, pair1, pair2, G1Affine::default())
@@ -291,8 +291,8 @@ fn one_round_test() -> Result<(), Error<G1Affine>> {
         K,
         circuit1,
         circuit2,
-        public_inputs1,
-        public_inputs2,
+        vec![public_inputs1],
+        vec![public_inputs2],
         G1Affine::default(),
     )?;
     fold_instances(&ck, &S, pair1, pair2, G1Affine::default())

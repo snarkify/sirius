@@ -47,7 +47,7 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
 
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
-        instance: &[C::ScalarExt],
+        instances: &[Vec<C::ScalarExt>],
         witness: &[Vec<C::ScalarExt>],
         pp: &Self::ProverParam,
         ro_nark: &mut impl ROTrait<C::Base>,

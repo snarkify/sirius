@@ -17,7 +17,7 @@ use crate::{
     main_gate::MainGateConfig,
     nifs::{
         self,
-        vanilla::{accumulator::RelaxedPlonkTrace, VanillaFS},
+        vanilla::{accumulator::RelaxedPlonkTrace, GetConsistencyMarkers, VanillaFS},
         FoldingScheme, IsSatAccumulator,
     },
     plonk::{self, PlonkTrace},
@@ -210,10 +210,16 @@ where
         );
 
         // Prepare primary constraint system for folding
-        let primary_instance = {
+        let primary_consistency_marker = {
             let _s = info_span!("generate_instance").entered();
             [
-                util::fe_to_fe(&secondary_pre_round_plonk_trace.u.instance[1]).unwrap(),
+                util::fe_to_fe(
+                    &secondary_pre_round_plonk_trace
+                        .u
+                        .get_consistency_markers()
+                        .expect("For `vanilla::FoldingScheme` should always be")[1],
+                )
+                .unwrap(),
                 RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_2(),
@@ -245,12 +251,13 @@ where
             },
         };
 
+        let primary_instances = primary_sfc.instances(primary_consistency_marker);
         if debug_mode {
             let _s = debug_span!("debug").entered();
             MockProver::run(
                 pp.primary.k_table_size(),
                 &primary_sfc,
-                vec![primary_instance.to_vec()],
+                primary_instances.clone(),
             )?
             .verify()
             .map_err(|err| Error::from_mock_verify(err, true, 0))?;
@@ -259,7 +266,7 @@ where
         let primary_witness = CircuitRunner::new(
             pp.primary.k_table_size(),
             primary_sfc,
-            primary_instance.to_vec(),
+            primary_instances.clone(),
         )
         .try_collect_witness()?;
 
@@ -268,7 +275,7 @@ where
 
         let primary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.primary.ck(),
-            &primary_instance,
+            &primary_instances,
             &primary_witness,
             &primary_nifs_pp,
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
@@ -286,10 +293,16 @@ where
             secondary.process_step(&secondary_z_0, pp.secondary.k_table_size())?;
 
         // Will be used as input & output `U` of zero-step of IVC
-        let secondary_instance = {
+        let secondary_consistency_marker = {
             let _s = info_span!("generate_instance");
             [
-                util::fe_to_fe(&primary_plonk_trace.u.instance[1]).unwrap(),
+                util::fe_to_fe(
+                    &primary_plonk_trace
+                        .u
+                        .get_consistency_markers()
+                        .expect("For `vanilla::FoldingScheme` should always be")[1],
+                )
+                .unwrap(),
                 RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
@@ -324,12 +337,13 @@ where
             },
         };
 
+        let secondary_instances = secondary_sfc.instances(secondary_consistency_marker);
         if debug_mode {
             let _s = debug_span!("debug").entered();
             MockProver::run(
                 pp.secondary.k_table_size(),
                 &secondary_sfc,
-                vec![secondary_instance.to_vec()],
+                secondary_instances.clone(),
             )?
             .verify()
             .map_err(|err| Error::from_mock_verify(err, false, 0))?;
@@ -338,7 +352,7 @@ where
         let secondary_witness = CircuitRunner::new(
             pp.secondary.k_table_size(),
             secondary_sfc,
-            secondary_instance.to_vec(),
+            secondary_instances.clone(),
         )
         .try_collect_witness()?;
 
@@ -347,7 +361,7 @@ where
 
         let secondary_plonk_trace = VanillaFS::generate_plonk_trace(
             pp.secondary.ck(),
-            &secondary_instance,
+            &secondary_instances,
             &secondary_witness,
             &secondary_nifs_pp,
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
@@ -401,10 +415,16 @@ where
         // Prepare primary constraint system for folding
         let primary_z_next = primary.process_step(&self.primary.z_i, pp.primary.k_table_size())?;
 
-        let primary_instance = {
+        let primary_consistency_marker = {
             let _s = info_span!("generate_instance").entered();
             [
-                util::fe_to_fe(&self.secondary_trace[0].u.instance[1]).unwrap(),
+                util::fe_to_fe(
+                    &self.secondary_trace[0]
+                        .u
+                        .get_consistency_markers()
+                        .expect("For `vanilla::FoldingScheme` should always be")[1],
+                )
+                .unwrap(),
                 RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_2(),
@@ -433,12 +453,13 @@ where
             },
         };
 
+        let primary_instances = primary_sfc.instances(primary_consistency_marker);
         if self.debug_mode {
             let _s = debug_span!("debug").entered();
             MockProver::run(
                 pp.primary.k_table_size(),
                 &primary_sfc,
-                vec![primary_instance.to_vec()],
+                primary_instances.clone(),
             )?
             .verify()
             .map_err(|err| Error::from_mock_verify(err, true, self.step))?;
@@ -447,7 +468,7 @@ where
         let primary_witness = CircuitRunner::new(
             pp.primary.k_table_size(),
             primary_sfc,
-            primary_instance.to_vec(),
+            primary_instances.clone(),
         )
         .try_collect_witness()?;
 
@@ -456,7 +477,7 @@ where
 
         let primary_plonk_trace = [VanillaFS::generate_plonk_trace(
             pp.primary.ck(),
-            &primary_instance,
+            &primary_instances,
             &primary_witness,
             &self.primary_nifs_pp,
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
@@ -478,10 +499,16 @@ where
         let next_secondary_z_i =
             secondary.process_step(&self.secondary.z_i, pp.secondary.k_table_size())?;
 
-        let secondary_instance = {
+        let secondary_consistency_marker = {
             let _s = info_span!("generate_instance");
             [
-                util::fe_to_fe(&primary_plonk_trace[0].u.instance[1]).unwrap(),
+                util::fe_to_fe(
+                    &primary_plonk_trace[0]
+                        .u
+                        .get_consistency_markers()
+                        .expect("For `vanilla::FoldingScheme` should always be")[1],
+                )
+                .unwrap(),
                 RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
@@ -510,12 +537,13 @@ where
             },
         };
 
+        let secondary_instance = secondary_sfc.instances(secondary_consistency_marker);
         if self.debug_mode {
             let _s = debug_span!("debug").entered();
             MockProver::run(
                 pp.secondary.k_table_size(),
                 &secondary_sfc,
-                vec![secondary_instance.to_vec()],
+                secondary_instance.clone(),
             )?
             .verify()
             .map_err(|err| Error::from_mock_verify(err, false, self.step))?;
@@ -524,7 +552,7 @@ where
         let secondary_witness = CircuitRunner::new(
             pp.secondary.k_table_size(),
             secondary_sfc,
-            secondary_instance.to_vec(),
+            secondary_instance.clone(),
         )
         .try_collect_witness()?;
 
@@ -568,7 +596,10 @@ where
         .generate_with_inspect::<C2::Scalar>(|buf| {
             debug!("primary X0 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&self.secondary_trace[0].u.instance[0])
+        .ne(&self.secondary_trace[0]
+            .u
+            .get_consistency_markers()
+            .expect("For `vanilla::FoldingScheme` should always be")[0])
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 0,
@@ -589,7 +620,13 @@ where
         .generate_with_inspect::<C1::Scalar>(|buf| {
             debug!("primary X1 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&util::fe_to_fe(&self.secondary_trace[0].u.instance[1]).unwrap())
+        .ne(&util::fe_to_fe(
+            &self.secondary_trace[0]
+                .u
+                .get_consistency_markers()
+                .expect("For `vanilla::FoldingScheme` should always be")[1],
+        )
+        .unwrap())
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 1,

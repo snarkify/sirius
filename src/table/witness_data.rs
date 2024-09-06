@@ -9,7 +9,7 @@ use tracing::*;
 use crate::ff::PrimeField;
 
 pub struct WitnessCollector<F: PrimeField> {
-    pub(crate) instance: Vec<F>,
+    pub(crate) instances: Vec<Vec<F>>,
     pub(crate) advice: Vec<Vec<Assigned<F>>>,
 }
 
@@ -48,9 +48,9 @@ impl<F: PrimeField> Assignment<F> for WitnessCollector<F> {
     }
 
     fn query_instance(&self, column: Column<Instance>, row: usize) -> Result<Value<F>, Error> {
-        assert!(column.index() == 0); // require just single instance
-        self.instance
-            .get(row)
+        self.instances
+            .get(column.index())
+            .and_then(|col| col.get(row))
             .map(|v| Value::known(*v))
             .ok_or(Error::BoundsFailure)
     }

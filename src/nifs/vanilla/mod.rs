@@ -189,14 +189,17 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     #[instrument(skip_all)]
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
-        instance: &[C::ScalarExt],
+        instances: &[Vec<C::ScalarExt>],
         witness: &[Vec<C::ScalarExt>],
         pp: &VanillaFSProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
+        // TODO #329 use all instances in sps
+        let instance = instances.first().cloned().unwrap_or_default();
+
         Ok(pp
             .S
-            .run_sps_protocol(ck, instance, witness, ro_nark, pp.S.num_challenges)?)
+            .run_sps_protocol(ck, &instance, witness, ro_nark, pp.S.num_challenges)?)
     }
 
     /// Generates a proof of correct folding using the NIFS protocol.
@@ -338,11 +341,12 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
         let Z = U
             .instance
             .clone()
-            .into_iter()
-            .chain(W.W[0][..(1 << S.k) * S.num_advice_columns].to_vec())
+            .iter()
+            .chain(W.W[0].iter().take((1 << S.k) * S.num_advice_columns))
+            .copied()
             .collect::<Vec<_>>();
 
-        let y = sparse::matrix_multiply(&S.permutation_matrix, &Z[..]);
+        let y = sparse::matrix_multiply(&S.permutation_matrix, &Z);
         let mismatch_count = y
             .into_iter()
             .zip(Z)
@@ -376,6 +380,33 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
         }
 
         Ok(())
+    }
+}
+
+/// As part of the vanilla folding scheme, we use the values in the zero instance of the column for
+/// consistency between folding steps
+///
+/// - X0 is
+///     initializing value
+///     or
+///     hash of the state at the end of previous folding step
+/// - X1 is a hash of the state at the end of the current folding step
+pub trait GetConsistencyMarkers<F> {
+    // TODO #329 Remove Option
+    fn get_consistency_markers(&self) -> Option<[F; 2]>;
+}
+
+impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for PlonkInstance<C> {
+    fn get_consistency_markers(&self) -> Option<[C::ScalarExt; 2]> {
+        // TODO #329 Remove clone
+        self.instance.clone().try_into().ok()
+    }
+}
+
+impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for RelaxedPlonkInstance<C> {
+    fn get_consistency_markers(&self) -> Option<[C::ScalarExt; 2]> {
+        // TODO #329 Remove clone
+        self.instance.clone().try_into().ok()
     }
 }
 
