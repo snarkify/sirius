@@ -42,14 +42,14 @@ type Accumulator = <ProtoGalaxy as FoldingScheme<Affine, L>>::Accumulator;
 
 struct CircuitCtx {
     witness: Witness<Scalar>,
-    instance: Instance<Scalar>,
+    instances: Vec<Instance<Scalar>>,
 }
 
 impl CircuitCtx {
     fn collect<CIR: Circuit<Scalar>>(cr: CircuitRunner<Scalar, CIR>) -> Self {
         Self {
             witness: cr.try_collect_witness().expect("failed to collect witness"),
-            instance: cr.instance,
+            instances: cr.instances,
         }
     }
 }
@@ -78,12 +78,12 @@ impl<C: Circuit<Scalar>> Mock<C> {
             } else {
                 vec![instance.clone()]
             };
-            MockProver::run(k_table_size, &circuit, instances)
+            MockProver::run(k_table_size, &circuit, instances.clone())
                 .unwrap()
                 .verify()
                 .unwrap();
 
-            CircuitRunner::new(k_table_size, circuit, instance)
+            CircuitRunner::new(k_table_size, circuit, instances)
         });
 
         let ck = commitment::setup_smallest_key(k_table_size, &circuits_runners[0].cs, b"");
@@ -111,7 +111,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
             .map(|ctx| {
                 ProtoGalaxy::generate_plonk_trace(
                     &self.ck,
-                    &ctx.instance,
+                    &ctx.instances,
                     &ctx.witness,
                     &self.pp,
                     &mut generate_ro,

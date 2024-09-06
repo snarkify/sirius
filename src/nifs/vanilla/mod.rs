@@ -189,14 +189,17 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     #[instrument(skip_all)]
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
-        instance: &[C::ScalarExt],
+        instances: &[Vec<C::ScalarExt>],
         witness: &[Vec<C::ScalarExt>],
         pp: &VanillaFSProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
+        // TODO #329 use all instances in sps
+        let instance = instances.first().cloned().unwrap_or_default();
+
         Ok(pp
             .S
-            .run_sps_protocol(ck, instance, witness, ro_nark, pp.S.num_challenges)?)
+            .run_sps_protocol(ck, &instance, witness, ro_nark, pp.S.num_challenges)?)
     }
 
     /// Generates a proof of correct folding using the NIFS protocol.
