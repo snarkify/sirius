@@ -194,7 +194,7 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         pp: &VanillaFSProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
-        assert_eq!(instances.len(), 1); // TODO #316
+        assert!(instances.len() <= 1); // TODO #316
         Ok(pp
             .S
             .run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)?)
@@ -393,13 +393,11 @@ const CONSISTENCY_MARKER_COUNT: usize = 2;
 ///     hash of the state at the end of previous folding step
 /// - X1 is a hash of the state at the end of the current folding step
 pub trait GetConsistencyMarkers<F> {
-    // TODO #329 Remove Option
     fn get_consistency_markers(&self) -> Option<[F; CONSISTENCY_MARKER_COUNT]>;
 }
 
 impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for PlonkInstance<C> {
     fn get_consistency_markers(&self) -> Option<[C::ScalarExt; 2]> {
-        // TODO #329 Remove clone
         match self.instances.first() {
             Some(instance) if instance.len() == 2 => Some(instance.clone().try_into().unwrap()),
             Some(instance) => {

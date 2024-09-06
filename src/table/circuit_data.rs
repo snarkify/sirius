@@ -10,7 +10,7 @@ use crate::{ff::PrimeField, plonk};
 
 pub struct CircuitData<F: PrimeField> {
     pub(crate) k: u32,
-    pub(crate) num_io: usize,
+    pub(crate) num_io: Box<[usize]>,
     pub(crate) fixed: Vec<Vec<Assigned<F>>>,
     pub(crate) selector: Vec<Vec<bool>>,
     pub(crate) permutation: plonk::permutation::Assembly,
@@ -47,12 +47,11 @@ impl<F: PrimeField> Assignment<F> for CircuitData<F> {
     }
 
     fn query_instance(&self, column: Column<Instance>, row: usize) -> Result<Value<F>, Error> {
-        // currently only support single instance column
-        if column.index() == 0 && row < self.num_io {
-            Ok(Value::unknown())
-        } else {
-            Err(Error::BoundsFailure)
-        }
+        self.num_io
+            .get(column.index())
+            .filter(|len| &row < *len)
+            .map(|_| Value::unknown())
+            .ok_or(Error::BoundsFailure)
     }
 
     fn assign_advice<V, VR, A, AR>(
