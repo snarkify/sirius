@@ -15,7 +15,7 @@ use crate::{
     util,
 };
 
-pub(crate) struct AssignedRandomOracleComputationInstance<
+pub(crate) struct AssignedConsistencyMarkersComputation<
     'l,
     RP,
     const A: usize,
@@ -34,7 +34,7 @@ pub(crate) struct AssignedRandomOracleComputationInstance<
 }
 
 impl<'l, const A: usize, const T: usize, C: CurveAffine, RO>
-    AssignedRandomOracleComputationInstance<'l, RO, A, T, C>
+    AssignedConsistencyMarkersComputation<'l, RO, A, T, C>
 where
     C::Base: FromUniformBytes<64> + PrimeFieldBits,
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
@@ -65,7 +65,7 @@ where
     }
 }
 
-pub(crate) struct RandomOracleComputationInstance<'l, const A: usize, C, RP>
+pub(crate) struct ConsistencyMarkersComputation<'l, const A: usize, C, RP>
 where
     RP: ROTrait<C::Base>,
     C: CurveAffine + Serialize,
@@ -80,7 +80,7 @@ where
     pub limbs_count: NonZeroUsize,
 }
 
-impl<'l, C, RP, const A: usize> RandomOracleComputationInstance<'l, A, C, RP>
+impl<'l, C, RP, const A: usize> ConsistencyMarkersComputation<'l, A, C, RP>
 where
     RP: ROTrait<C::Base>,
     C: CurveAffine + Serialize,
@@ -220,9 +220,10 @@ mod tests {
             },
             E_commitment: CommitmentKey::<C1>::default_value(),
             u: Scalar::from_u128(u128::MAX),
+            instances_commitment: todo!(),
         };
 
-        let off_circuit_hash: Base = RandomOracleComputationInstance::<
+        let off_circuit_hash: Base = ConsistencyMarkersComputation::<
             '_,
             10,
             C1,
@@ -287,20 +288,15 @@ mod tests {
                     .assign_current_relaxed(&mut ctx)
                     .unwrap();
 
-                    AssignedRandomOracleComputationInstance::<
-                            PoseidonChip<Base, 10, 9>,
-                            10,
-                            10,
-                            C1,
-                        > {
-                            random_oracle_constant: random_oracle_constant.clone(),
-                            public_params_hash: &public_params_hash,
-                            step: &step,
-                            z_0: &assigned_z_0,
-                            z_i: &assigned_z_i,
-                            relaxed: &assigned_relaxed,
-                        }
-                        .generate(&mut ctx, config.clone())
+                    AssignedConsistencyMarkersComputation::<PoseidonChip<Base, 10, 9>, 10, 10, C1> {
+                        random_oracle_constant: random_oracle_constant.clone(),
+                        public_params_hash: &public_params_hash,
+                        step: &step,
+                        z_0: &assigned_z_0,
+                        z_i: &assigned_z_i,
+                        relaxed: &assigned_relaxed,
+                    }
+                    .generate(&mut ctx, config.clone())
                 },
             )
             .unwrap()

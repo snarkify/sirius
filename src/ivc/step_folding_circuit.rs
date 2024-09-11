@@ -9,7 +9,7 @@ use itertools::Itertools;
 use serde::Serialize;
 use tracing::*;
 
-use super::instance_computation::AssignedRandomOracleComputationInstance;
+use super::consistency_markers_computation::AssignedConsistencyMarkersComputation;
 use crate::{
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
     halo2curves::CurveAffine,
@@ -33,6 +33,8 @@ where
     F: PrimeFieldBits + FromUniformBytes<64>,
     RO: ROCircuitTrait<F>,
 {
+    // Column instance dimension
+    num_io: Box<[usize]>,
     limb_width: NonZeroUsize,
     limbs_count: NonZeroUsize,
     ro_constant: RO::Args,
@@ -43,11 +45,17 @@ where
     F: PrimeFieldBits + FromUniformBytes<64>,
     RO: ROCircuitTrait<F>,
 {
-    pub fn new(limb_width: NonZeroUsize, limbs_count: NonZeroUsize, ro_constant: RO::Args) -> Self {
+    pub fn new(
+        limb_width: NonZeroUsize,
+        limbs_count: NonZeroUsize,
+        ro_constant: RO::Args,
+        num_io: Box<[usize]>,
+    ) -> Self {
         Self {
             limb_width,
             limbs_count,
             ro_constant,
+            num_io,
         }
     }
 
@@ -72,6 +80,7 @@ where
             .field("limb_width", &self.limb_width)
             .field("n_limbs", &self.limbs_count)
             .field("ro_constant", &self.ro_constant)
+            .field("num_io", &self.num_io)
             .finish()
     }
 }
@@ -91,6 +100,8 @@ where
     /// Output of previous step & input of current one
     pub z_i: [C::Base; ARITY],
 
+    instances: Vec<Vec<C::Base>>,
+
     // TODO docs
     pub U: RelaxedPlonkInstance<C>,
 
@@ -109,7 +120,6 @@ where
 {
     pub fn without_witness<PairedCircuit: Circuit<C::Scalar>>(
         k_table_size: u32,
-        num_io: &[usize],
         step_pp: &'link StepParams<C::Base, RO>,
     ) -> Self {
         let mut cs = ConstraintSystem::<C::Scalar>::default();
@@ -125,14 +135,29 @@ where
 
         Self {
             step: C::Base::ZERO,
+            U: RelaxedPlonkInstance::new(&step_pp.num_io, num_challenges, round_sizes.len()),
+            u: PlonkInstance::new(&step_pp.num_io, num_challenges, round_sizes.len()),
+            instances: step_pp
+                .num_io
+                .iter()
+                .map(|len| vec![C::Base::ZERO; *len])
+                .collect(),
             step_pp,
             public_params_hash: C::identity(),
             z_0: [C::Base::ZERO; ARITY],
             z_i: [C::Base::ZERO; ARITY],
-            U: RelaxedPlonkInstance::new(num_io, num_challenges, round_sizes.len()),
-            u: PlonkInstance::new(num_io, num_challenges, round_sizes.len()),
             cross_term_commits: vec![C::identity(); folding_degree.saturating_sub(1)],
         }
+    }
+
+    pub fn instances(&self) -> &[Vec<C::Base>] {
+        assert!(self
+            .instances
+            .iter()
+            .zip_eq(self.step_pp.num_io.iter())
+            .all(|(instance_column, expected_size)| { instance_column.len() == *expected_size }));
+
+        &self.instances
     }
 }
 
@@ -143,6 +168,8 @@ pub struct StepConfig<const ARITY: usize, F: PrimeField, SP: StepCircuit<ARITY, 
     pub consistency_marker: Column<Instance>,
     pub step_config: SP::Config,
     pub main_gate_config: MainGateConfig<T>,
+
+    pub step_circuit_instances: Vec<Column<Instance>>,
 }
 
 impl<const ARITY: usize, F: PrimeField + Clone, SP: StepCircuit<ARITY, F>, const T: usize> Clone
@@ -155,6 +182,7 @@ where
             consistency_marker: self.consistency_marker,
             step_config: self.step_config.clone(),
             main_gate_config: self.main_gate_config.clone(),
+            step_circuit_instances: self.step_circuit_instances.clone(),
         }
     }
 }
@@ -227,27 +255,29 @@ where
     type FloorPlanner = floor_planner::V1;
 
     fn without_witnesses(&self) -> Self {
-        let instances_len = &self
-            .instances([C::Base::ZERO, C::Base::ZERO])
-            .iter()
-            .map(|ins| ins.len())
-            .collect::<Box<[_]>>();
         Self {
             step_circuit: self.step_circuit,
             input: StepInputs {
                 step: C::Base::ZERO,
+                instances: self
+                    .input
+                    .step_pp
+                    .num_io
+                    .iter()
+                    .map(|len| vec![C::Base::ZERO; *len])
+                    .collect(),
                 step_pp: self.input.step_pp,
                 public_params_hash: C::identity(),
                 z_0: [C::Base::ZERO; ARITY],
                 z_i: [C::Base::ZERO; ARITY],
                 cross_term_commits: vec![C::identity(); self.input.cross_term_commits.len()],
                 U: RelaxedPlonkInstance::new(
-                    instances_len,
+                    &self.input.step_pp.num_io,
                     self.input.U.challenges.len(),
                     self.input.U.W_commitments.len(),
                 ),
                 u: PlonkInstance::new(
-                    instances_len,
+                    &self.input.step_pp.num_io,
                     self.input.u.challenges.len(),
                     self.input.u.W_commitments.len(),
                 ),
@@ -256,16 +286,29 @@ where
     }
 
     fn configure(cs: &mut ConstraintSystem<C::Base>) -> Self::Config {
-        let main_gate_config = MainGate::configure(cs);
-        let step_config = <SC as StepCircuit<ARITY, C::Base>>::configure(cs);
-
         let instance = cs.instance_column();
         cs.enable_equality(instance);
+
+        let main_gate_config = MainGate::configure(cs);
+
+        let before = cs.num_instance_columns();
+        let step_config = <SC as StepCircuit<ARITY, C::Base>>::configure(cs);
+        let after = cs.num_instance_columns();
+
+        let step_circuit_instances = (1..(after - before))
+            .map(|index| {
+                // `Column::new` is private, but we can change the index
+                let mut instance = instance.clone();
+                instance.index = index;
+                instance
+            })
+            .collect();
 
         StepConfig {
             consistency_marker: instance,
             step_config,
             main_gate_config,
+            step_circuit_instances,
         }
     }
 
@@ -274,7 +317,11 @@ where
         config: StepConfig<ARITY, C::Base, SC, T>,
         mut layouter: impl Layouter<C::Base>,
     ) -> Result<(), halo2_proofs::plonk::Error> {
-        let (assigned_z_0, assigned_z_i): ([_; ARITY], [_; ARITY]) = layouter
+        let (assigned_z_0, assigned_z_i, assigned_step_circuit_instances): (
+            [_; ARITY],
+            [_; ARITY],
+            Vec<_>,
+        ) = layouter
             .assign_region(
                 || "assign z_0 & z_i",
                 |region| {
@@ -290,7 +337,34 @@ where
                         .assign_all_advice(&mut region, || "z_i", self.input.z_i.iter().copied())
                         .map(|inp| inp.try_into().unwrap())?;
 
-                    Ok((z_0, z_i))
+                    let flat_step_circuit_instances = self
+                        .input
+                        .instances()
+                        .iter()
+                        .zip_eq(config.step_circuit_instances.iter())
+                        .enumerate()
+                        .flat_map(|(column, (instance_column_values, instance_column))| {
+                            instance_column_values.iter().enumerate().map(
+                                |(row_offset, instance)| {
+                                    let assigned = assigner.assign_next_advice(
+                                        &mut region,
+                                        || format!("instance[{column}][{row_offset}]"),
+                                        *instance,
+                                    )?;
+
+                                    layouter.constrain_instance(
+                                        assigned.cell(),
+                                        *instance_column,
+                                        row_offset,
+                                    )?;
+
+                                    Ok(assigned)
+                                },
+                            )
+                        })
+                        .collect::<Result<Vec<_>, halo2_proofs::plonk::Error>>()?;
+
+                    Ok((z_0, z_i, flat_step_circuit_instances))
                 },
             )
             .map_err(|err| {
@@ -361,7 +435,7 @@ where
                 halo2_proofs::plonk::Error::Synthesis
             })?;
 
-        // Check X0 == input_params_hash
+        // Check consistency_marker[0] == input_params_hash
         let (base_case_input_check, non_base_case_input_check) = layouter
             .assign_region(
                 || "generate input hash",
@@ -376,7 +450,7 @@ where
                     ctx.next();
 
                     let expected_X0 =
-                        AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
+                        AssignedConsistencyMarkersComputation::<'_, RO, ARITY, T, C> {
                             random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                             public_params_hash: &w.public_params_hash,
                             step: &assigned_step,
@@ -391,14 +465,14 @@ where
                         )?;
 
                     debug!("expected X0: {expected_X0:?}");
-                    debug!("input instance 0: {:?}", w.input_instance[0].0);
+                    debug!("input instance 0: {:?}", w.input_consistency_markers[0].0);
 
                     Ok((
                         base_case_input_check,
                         MainGate::new(config.main_gate_config.clone()).is_equal_term(
                             &mut ctx,
                             &expected_X0,
-                            &w.input_instance[0].0,
+                            &w.input_consistency_markers[0].0,
                         )?,
                     ))
                 },
@@ -475,11 +549,11 @@ where
                 halo2_proofs::plonk::Error::Synthesis
             })?;
 
-        let output_hash = layouter
+        let output_consistency_marker = layouter
             .assign_region(
                 || "generate output hash",
                 |region| {
-                    AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
+                    AssignedConsistencyMarkersComputation::<'_, RO, ARITY, T, C> {
                         random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                         public_params_hash: &assigned_input_witness.public_params_hash,
                         step: &assigned_next_step,
@@ -499,12 +573,12 @@ where
                 halo2_proofs::plonk::Error::Synthesis
             })?;
 
-        debug!("output instance 0: {:?}", output_hash);
+        debug!("output instance 0: {:?}", output_consistency_marker);
 
         // Check that old_X1 == new_X0
         layouter
             .constrain_instance(
-                assigned_input_witness.input_instance[1].0.cell(),
+                assigned_input_witness.input_consistency_markers[1].0.cell(),
                 config.consistency_marker,
                 0,
             )
@@ -515,7 +589,11 @@ where
 
         // Check that new_X1 == output_hash
         layouter
-            .constrain_instance(output_hash.cell(), config.consistency_marker, 1)
+            .constrain_instance(
+                output_consistency_marker.cell(),
+                config.consistency_marker,
+                1,
+            )
             .map_err(|err| {
                 error!("while check that new_X1 == output_hash: {err:?}");
                 halo2_proofs::plonk::Error::Synthesis

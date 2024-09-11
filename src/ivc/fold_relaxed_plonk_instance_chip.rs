@@ -102,13 +102,12 @@ pub(crate) struct AssignedRelaxedPlonkInstance<C: CurveAffine> {
     /// Derived from [`FoldRelaxedPlonkInstanceChip::challenges`].
     pub folded_challenges: Vec<Vec<AssignedValue<C::Base>>>,
 
-    /// Vector of assigned values for each limb of the folded big number X0.
+    /// Array of vectors of assigned values for each limb
     /// Derived from [`FoldRelaxedPlonkInstanceChip::X0`]
-    pub folded_X0: Vec<AssignedValue<C::Base>>,
+    pub folded_consistency_markers: [Vec<AssignedValue<C::Base>>; 2],
 
-    /// Vector of assigned values for each limb of the folded big number X1.
-    /// Derived from [`FoldRelaxedPlonkInstanceChip::X1`]
-    pub folded_X1: Vec<AssignedValue<C::Base>>,
+    // TODO #316
+    pub folded_instances_commits: AssignedPoint<C>,
 }
 
 impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
@@ -130,8 +129,8 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             folded_E: lhs_folded_E,
             folded_u: lhs_folded_u,
             folded_challenges: lhs_folded_challenges,
-            folded_X0: lhs_folded_X0,
-            folded_X1: lhs_folded_X1,
+            folded_consistency_markers: [lhs_folded_X0, lhs_folded_X1],
+            folded_instances_commits: lhs_folded_instances_commits,
         } = lhs;
 
         let Self {
@@ -139,8 +138,8 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             folded_E: rhs_folded_E,
             folded_u: rhs_folded_u,
             folded_challenges: rhs_folded_challenges,
-            folded_X0: rhs_folded_X0,
-            folded_X1: rhs_folded_X1,
+            folded_consistency_markers: [rhs_folded_X0, rhs_folded_X1],
+            folded_instances_commits: rhs_folded_instances_commits,
         } = rhs;
 
         let folded_W = lhs_folded_W
@@ -177,13 +176,21 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             .map(|(lhs, rhs)| gate.conditional_select(region, lhs, rhs, &condition))
             .collect::<Result<Vec<_>, _>>()?;
 
+        let folded_consistency_markers = [folded_X0, folded_X1];
+
+        let folded_instances_commits = lhs_folded_instances_commits
+            .iter()
+            .zip_eq(rhs_folded_instances_commits.iter())
+            .map(|(lhs, rhs)| ecc.conditional_select(region, lhs, rhs, &condition))
+            .collect::<Result<Vec<_>, _>>()?;
+
         Ok(Self {
             folded_W,
             folded_E,
             folded_u,
             folded_challenges,
-            folded_X0,
-            folded_X1,
+            folded_consistency_markers,
+            folded_instances_commits,
         })
     }
 
@@ -196,16 +203,25 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             folded_E,
             folded_u,
             folded_challenges,
-            folded_X0,
-            folded_X1,
+            folded_consistency_markers,
+            folded_instances_commits,
         } = self;
 
         folded_W
             .iter()
             .flat_map(|W| WrapValue::from_assigned_point(W))
             .chain(WrapValue::from_assigned_point(folded_E))
-            .chain(folded_X0.iter().map(Into::into))
-            .chain(folded_X1.iter().map(Into::into))
+            .chain(
+                folded_consistency_markers
+                    .iter()
+                    .flat_map(|m| m.iter())
+                    .map(Into::into),
+            )
+            .chain(
+                folded_instances_commits
+                    .iter()
+                    .flat_map(|ins| WrapValue::from_assigned_point(ins)),
+            )
             .chain(folded_challenges.iter().flatten().map(Into::into))
             .chain(iter::once(WrapValue::from(folded_u)))
     }
@@ -221,8 +237,8 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             folded_E,
             folded_u,
             folded_challenges,
-            folded_X0,
-            folded_X1,
+            folded_consistency_markers: [folded_X0, folded_X1],
+            folded_instances_commits,
         } = self;
 
         macro_rules! unwrap_result_option {
@@ -292,6 +308,7 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             E_commitment: unwrap_result_option!(folded_E.to_curve()),
             u: util::fe_to_fe_safe(&unwrap_result_option!(folded_u.value().unwrap().copied()))
                 .expect("fields same bytes len"),
+            instances_commitment: unwrap_result_option!(folded_instances_commits.iter().map(|ins| ins.to_curve()).collect::<Option<Vec<_>>>()),
         }))
     }
 }
@@ -311,8 +328,8 @@ pub(crate) struct AssignedWitness<C: CurveAffine> {
     input_W_commitments: Vec<AssignedPoint<C>>,
 
     /// Vector of vectors of assigned values for each limb of the input instances.
-    /// Sourced directly from [`PlonkInstance::instance`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
-    pub input_instance: Vec<(AssignedValue<C::Base>, Vec<AssignedValue<C::Base>>)>,
+    /// Sourced directly from zero element of [`PlonkInstance::instances`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
+    pub input_consistency_markers: [(AssignedValue<C::Base>, Vec<AssignedValue<C::Base>>); 2],
 
     /// Vector of vectors of assigned values for each limb of the input challenges.
     /// Sourced directly from [`PlonkInstance::challenges`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
@@ -321,6 +338,9 @@ pub(crate) struct AssignedWitness<C: CurveAffine> {
     /// Vector of assigned points representing the commitments to the cross terms.
     /// Sourced directly from the `cross_term_commits` argument of [`FoldRelaxedPlonkInstanceChip::fold`].
     cross_terms_commits: Vec<AssignedPoint<C>>,
+
+    /// Column instance values
+    pub input_step_circuit_instances: Vec<Vec<AssignedValue<C::Base>>>,
 }
 
 impl<C: CurveAffine> ops::Deref for AssignedWitness<C> {
@@ -517,7 +537,7 @@ where
         region: &mut RegionCtx<C::Base>,
         bn_chip: &BigUintMulModChip<C::Base>,
         input: &[AssignedValue<C::Base>],
-        folded: Vec<AssignedValue<C::Base>>,
+        folded: &Vec<AssignedValue<C::Base>>,
         m_bn: &BigUint<C::Base>,
         r_as_bn: &[AssignedValue<C::Base>],
         limb_width: NonZeroUsize,
@@ -542,7 +562,7 @@ where
         let part_mult_r_sum_part = bn_chip
             .assign_sum(
                 region,
-                &OverflowingBigUint::new(folded, limb_width),
+                &OverflowingBigUint::new(folded.clone(), limb_width),
                 &part_mult_r,
             )?
             .res;
@@ -571,17 +591,17 @@ where
     /// ```
     ///
     /// Please check [`FoldRelaxedPlonkInstanceChip::fold_via_biguint`] for more details
-    fn fold_instances(
+    fn fold_consistency_markers(
         region: &mut RegionCtx<C::Base>,
         bn_chip: &BigUintMulModChip<C::Base>,
-        input_instances: [Vec<AssignedValue<C::Base>>; 2],
-        folded_instances: [Vec<AssignedValue<C::Base>>; 2],
+        input_consistency_markers: [Vec<AssignedValue<C::Base>>; 2],
+        folded_consistency_markers: &[Vec<AssignedValue<C::Base>>; 2],
         r_as_bn: &[AssignedCell<C::Base, C::Base>],
         m_bn: &BigUint<C::Base>,
         limb_width: NonZeroUsize,
     ) -> Result<[Vec<AssignedCell<C::Base, C::Base>>; 2], Error> {
-        let [input_X0, input_X1] = input_instances;
-        let [folded_X0, folded_X1] = folded_instances;
+        let [input_X0, input_X1] = input_consistency_markers;
+        let [folded_X0, folded_X1] = folded_consistency_markers;
 
         let new_folded_X0 = Self::fold_via_biguint(
             region, bn_chip, &input_X0, folded_X0, m_bn, r_as_bn, limb_width,
@@ -636,13 +656,21 @@ where
                     region,
                     bn_chip,
                     &input_challange,
-                    folded_challenge,
+                    &folded_challenge,
                     m_bn,
                     r_as_bn,
                     limb_width,
                 )
             })
             .collect::<Result<Vec<_>, Error>>()
+    }
+
+    fn fold_instances(
+        _region: &mut RegionCtx<C::Base>,
+        _input_instances: &[Vec<AssignedValue<C::Base>>],
+        _folded_instances: &[AssignedPoint<C>],
+    ) -> Result<AssignedPoint<C>, Error> {
+        todo!()
     }
 
     // TODO #32 rustdoc
@@ -686,19 +714,26 @@ where
         let new_folded_u = gate.add(region, &w.folded_u, &r_value)?;
         debug!("fold: u folded: {new_folded_u:?}");
 
-        let [new_folded_X0, new_folded_X1] = Self::fold_instances(
+        let [new_folded_X0, new_folded_X1] = Self::fold_consistency_markers(
             region,
             &self.bn_chip,
-            w.input_instance
+            w.input_consistency_markers
                 .iter()
                 .map(|instance| instance.1.clone())
                 .collect::<Vec<_>>()
                 .try_into()
                 .unwrap(),
-            [w.folded_X0.clone(), w.folded_X1.clone()],
+            &w.folded_consistency_markers,
             &r.as_bn_limbs,
             &m_bn,
             self.limb_width,
+        )
+        .inspect_err(|err| error!("while fold instances: {err:?}"))?;
+
+        let new_folded_instances = Self::fold_instances(
+            region,
+            &w.input_step_circuit_instances,
+            &w.folded_instances_commits,
         )
         .inspect_err(|err| error!("while fold instances: {err:?}"))?;
 
@@ -717,10 +752,10 @@ where
         let assigned_result_of_fold = AssignedRelaxedPlonkInstance {
             folded_W: new_folded_W.clone(),
             folded_E: new_folded_E.clone(),
-            folded_X0: new_folded_X0.clone(),
-            folded_X1: new_folded_X1.clone(),
+            folded_consistency_markers: [new_folded_X0, new_folded_X1],
             folded_challenges: new_folded_challenges.clone(),
             folded_u: new_folded_u.clone(),
+            folded_instances_commits: new_folded_instances,
         };
 
         Ok(FoldResult {
@@ -778,8 +813,10 @@ where
         let assigned_E = assign_point!(&self.relaxed.E_commitment)?;
 
         let [X0, X1] = self.relaxed.get_consistency_markers().unwrap();
-        let assigned_X0 = assign_diff_field_as_bn!(&X0, || "X0")?;
-        let assigned_X1 = assign_diff_field_as_bn!(&X1, || "X1")?;
+        let assigned_folded_consistency_markers = [
+            assign_diff_field_as_bn!(&X0, || "X0")?,
+            assign_diff_field_as_bn!(&X1, || "X1")?,
+        ];
 
         let assigned_challenges = self
             .relaxed
@@ -795,8 +832,8 @@ where
             folded_E: assigned_E,
             folded_u: assigned_u,
             folded_challenges: assigned_challenges,
-            folded_X0: assigned_X0,
-            folded_X1: assigned_X1,
+            folded_consistency_markers: assigned_folded_consistency_markers,
+            folded_instances: todo!(),
         })
     }
 
@@ -871,8 +908,10 @@ where
         let assigned_E = assign_and_absorb_point!(&self.relaxed.E_commitment)?;
 
         let [X0, X1] = self.relaxed.get_consistency_markers().unwrap();
-        let assigned_X0 = assign_and_absorb_diff_field_as_bn!(&X0, || "X0")?.1;
-        let assigned_X1 = assign_and_absorb_diff_field_as_bn!(&X1, || "X1")?.1;
+        let assigned_folded_consistency_markers = [
+            assign_and_absorb_diff_field_as_bn!(&X0, || "X0")?.1,
+            assign_and_absorb_diff_field_as_bn!(&X1, || "X1")?.1,
+        ];
 
         let assigned_challenges = self
             .relaxed
@@ -886,13 +925,20 @@ where
 
         let assigned_u = assign_and_absorb_diff_field!(&self.relaxed.u, || "relaxed u")?;
 
+        let assigned_instances_commits = self
+            .relaxed
+            .instances_commitment
+            .iter()
+            .map(|instance| assign_and_absorb_diff_field!(instance, || "instance column commit"))
+            .collect::<Result<Vec<_>, _>>()?;
+
         let assigned_relaxed = AssignedRelaxedPlonkInstance {
             folded_W: assigned_W,
             folded_E: assigned_E,
             folded_u: assigned_u,
             folded_challenges: assigned_challenges,
-            folded_X0: assigned_X0,
-            folded_X1: assigned_X1,
+            folded_consistency_markers: assigned_folded_consistency_markers,
+            folded_instances_commits: assigned_instances_commits,
         };
 
         let assigned_instance_W_commitment_coordinates = input_plonk
@@ -901,7 +947,7 @@ where
             .map(|com| assign_and_absorb_point!(com))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let assigned_input_instance = input_plonk
+        let assigned_consistency_markers = input_plonk
             .get_consistency_markers()
             .unwrap()
             .iter()
@@ -910,7 +956,27 @@ where
                 let annot = format!("instance {index} value");
                 assign_and_absorb_diff_field_as_bn!(instance, || annot.clone())
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .unwrap();
+
+        let assigned_input_instances = input_plonk
+            .instances
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(col_index, instance_column)| {
+                instance_column
+                    .iter()
+                    .enumerate()
+                    .map(|(row_index, instance)| {
+                        assign_and_absorb_diff_field!(instance, || format!(
+                            "instance[{col_index}][{row_index}] value"
+                        ))
+                    })
+                    .collect()
+            })
+            .collect::<Result<Vec<Vec<_>>, _>>()?;
 
         let assigned_challanges_instance = input_plonk
             .challenges
@@ -938,8 +1004,9 @@ where
                 assigned_relaxed,
                 input_challenges: assigned_challanges_instance,
                 input_W_commitments: assigned_instance_W_commitment_coordinates,
-                input_instance: assigned_input_instance,
+                input_consistency_markers: assigned_consistency_markers,
                 cross_terms_commits: assigned_cross_term_commits,
+                input_step_circuit_instances: assigned_input_instances,
             },
             r,
         ))
@@ -1438,7 +1505,7 @@ mod tests {
                         .assign_next_advice(&mut ctx, || "r", util::fe_to_fe(&r).unwrap())
                         .unwrap();
 
-                    let assigned_fold_instances = relaxed_plonk
+                    let assigned_fold_consistency_markers = relaxed_plonk
                         .get_consistency_markers()
                         .unwrap()
                         .iter()
@@ -1467,16 +1534,18 @@ mod tests {
                         .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
                         .unwrap();
 
-                    Ok(FoldRelaxedPlonkInstanceChip::<T, C1>::fold_instances(
-                        &mut ctx,
-                        &bn_chip,
-                        assigned_input_instance,
-                        assigned_fold_instances,
-                        &r_as_bn,
-                        &m_bn,
-                        LIMB_WIDTH,
+                    Ok(
+                        FoldRelaxedPlonkInstanceChip::<T, C1>::fold_consistency_markers(
+                            &mut ctx,
+                            &bn_chip,
+                            assigned_input_instance,
+                            &assigned_fold_consistency_markers,
+                            &r_as_bn,
+                            &m_bn,
+                            LIMB_WIDTH,
+                        )
+                        .unwrap(),
                     )
-                    .unwrap())
                 },
             );
 

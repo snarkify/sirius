@@ -21,6 +21,8 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
     pub(crate) E_commitment: C,
     /// homogenous variable u
     pub(crate) u: C::ScalarExt,
+    /// This variable accumulates the corresponding column instances
+    pub(crate) instances_commitment: Vec<C>,
 }
 impl<C: CurveAffine> ops::Deref for RelaxedPlonkInstance<C> {
     type Target = PlonkInstance<C>;
@@ -32,8 +34,9 @@ impl<C: CurveAffine> ops::Deref for RelaxedPlonkInstance<C> {
 impl<C: CurveAffine> From<PlonkInstance<C>> for RelaxedPlonkInstance<C> {
     fn from(inner: PlonkInstance<C>) -> Self {
         RelaxedPlonkInstance {
+            instances_commitment: vec![C::identity(); inner.instances.len()],
             inner,
-            E_commitment: C::identity(),
+            E_commitment: CommitmentKey::default_value(),
             u: C::ScalarExt::ONE,
         }
     }
@@ -48,6 +51,7 @@ impl<C: CurveAffine> From<&PlonkInstance<C>> for RelaxedPlonkInstance<C> {
 impl<C: CurveAffine> RelaxedPlonkInstance<C> {
     pub fn new(num_io: &[usize], num_challenges: usize, num_witness: usize) -> Self {
         Self {
+            instances_commitment: vec![CommitmentKey::default_value(); num_io.len()],
             inner: PlonkInstance {
                 W_commitments: vec![CommitmentKey::<C>::default_value(); num_witness],
                 instances: num_io
@@ -134,6 +138,7 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             },
             u,
             E_commitment: comm_E,
+            instances_commitment: todo!(),
         }
     }
 }

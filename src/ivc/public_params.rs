@@ -14,14 +14,13 @@ use crate::{
     halo2curves::CurveAffine,
     ivc::{
         self,
-        instance_computation::RandomOracleComputationInstance,
+        consistency_markers_computation::ConsistencyMarkersComputation,
         step_folding_circuit::{StepFoldingCircuit, StepInputs},
-        NUM_IO,
     },
     main_gate::MainGateConfig,
     nifs::{
         self,
-        vanilla::{GetConsistencyMarkers, VanillaFS},
+        vanilla::{GetConsistencyMarkers, VanillaFS, CONSISTENCY_MARKER_COUNT},
         FoldingScheme,
     },
     plonk::{PlonkStructure, PlonkTrace},
@@ -107,7 +106,7 @@ where
         limb_width: NonZeroUsize,
         n_limbs: NonZeroUsize,
     ) -> Result<Self, Error> {
-        let params = StepParams::new(limb_width, n_limbs, ro_constant);
+        let params = StepParams::new(limb_width, n_limbs, ro_constant, S.num_io.clone());
 
         Ok(Self {
             S,
@@ -258,44 +257,46 @@ where
         let primary_S = {
             let _primary_span = info_span!("primary").entered();
 
+            let num_io = iter::once(CONSISTENCY_MARKER_COUNT)
+                .chain(primary.step_circuit.instances().iter().map(Vec::len))
+                .collect::<Box<[_]>>();
+
             let primary_step_params =
-                StepParams::new(limb_width, limbs_count, primary.ro_constant.clone());
+                StepParams::new(limb_width, limbs_count, primary.ro_constant.clone(), num_io);
 
             let primary_sfc = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T> {
                 step_circuit: primary.step_circuit,
                 input: StepInputs::without_witness::<
                     StepFoldingCircuit<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T>,
-                >(
-                    primary.k_table_size,
-                    &iter::once(NUM_IO)
-                        .chain(primary.step_circuit.instances().iter().map(Vec::len))
-                        .collect::<Box<[_]>>(),
-                    &primary_step_params,
-                ),
+                >(primary.k_table_size, &primary_step_params),
             };
-            let primary_instances = primary_sfc.instances([C1::Scalar::ZERO; NUM_IO]);
+            let primary_initial_instances =
+                primary_sfc.instances([C1::Scalar::ZERO; CONSISTENCY_MARKER_COUNT]);
 
-            CircuitRunner::new(primary.k_table_size, primary_sfc, primary_instances)
+            CircuitRunner::new(primary.k_table_size, primary_sfc, primary_initial_instances)
                 .try_collect_plonk_structure()
         }?;
 
         let (secondary_S, secondary_initial_plonk_trace) = {
             let _secondary_span = info_span!("secondary").entered();
 
-            let secondary_initial_step_params =
-                StepParams::new(limb_width, limbs_count, secondary.ro_constant.clone());
+            let num_io = iter::once(CONSISTENCY_MARKER_COUNT)
+                .chain(secondary.step_circuit.instances().iter().map(Vec::len))
+                .collect::<Box<[_]>>();
 
-            let secondary_initial_step_input = StepInputs::without_witness::<
-                StepFoldingCircuit<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T>,
-            >(
-                secondary.k_table_size,
-                &iter::once(NUM_IO)
-                    .chain(secondary.step_circuit.instances().iter().map(Vec::len))
-                    .collect::<Box<[_]>>(),
-                &secondary_initial_step_params,
+            let secondary_initial_step_params = StepParams::new(
+                limb_width,
+                limbs_count,
+                secondary.ro_constant.clone(),
+                num_io,
             );
 
-            let secondary_initial_instance: [C2::Scalar; 2] = [
+            let secondary_initial_step_input =
+                StepInputs::without_witness::<
+                    StepFoldingCircuit<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T>,
+                >(secondary.k_table_size, &secondary_initial_step_params);
+
+            let secondary_consistency_marker: [C2::Scalar; 2] = [
                 util::fe_to_fe(
                     &secondary_initial_step_input
                         .u
@@ -303,7 +304,7 @@ where
                         .expect("For `vanilla::FoldingScheme` should always be")[0],
                 )
                 .unwrap(),
-                RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
+                ConsistencyMarkersComputation::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: secondary.ro_constant.clone(),
                     public_params_hash: &secondary_initial_step_input.public_params_hash,
                     step: 1,
@@ -323,17 +324,17 @@ where
                 input: secondary_initial_step_input,
             };
 
-            let secondary_instances = secondary_sfc.instances(secondary_initial_instance);
+            let secondary_initial_instances = secondary_sfc.instances(secondary_consistency_marker);
             let secondary_cr = CircuitRunner::new(
                 secondary.k_table_size,
                 secondary_sfc,
-                secondary_instances.clone(),
+                secondary_initial_instances.clone(),
             );
 
             let secondary_S = secondary_cr.try_collect_plonk_structure()?;
             let secondary_initial_plonk_trace = VanillaFS::generate_plonk_trace(
                 secondary.commitment_key,
-                &secondary_instances,
+                &secondary_initial_instances,
                 &secondary_cr.try_collect_witness()?,
                 &VanillaFS::setup_params(C2::identity(), secondary_S.clone())?.0,
                 &mut RP1::OffCircuit::new(primary.ro_constant.clone()),

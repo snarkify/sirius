@@ -4,7 +4,7 @@ use halo2_proofs::dev::MockProver;
 use serde::Serialize;
 use tracing::*;
 
-use super::instance_computation::RandomOracleComputationInstance;
+use super::consistency_markers_computation::ConsistencyMarkersComputation;
 pub use super::step_circuit::{self, StepCircuit, SynthesisError};
 use crate::{
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
@@ -220,7 +220,7 @@ where
                         .expect("For `vanilla::FoldingScheme` should always be")[1],
                 )
                 .unwrap(),
-                RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
+                ConsistencyMarkersComputation::<'_, A1, C2, RP1::OffCircuit> {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_2(),
                     step: 1,
@@ -303,7 +303,7 @@ where
                         .expect("For `vanilla::FoldingScheme` should always be")[1],
                 )
                 .unwrap(),
-                RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
+                ConsistencyMarkersComputation::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
                     step: 1,
@@ -425,7 +425,7 @@ where
                         .expect("For `vanilla::FoldingScheme` should always be")[1],
                 )
                 .unwrap(),
-                RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
+                ConsistencyMarkersComputation::<'_, A1, C2, RP1::OffCircuit> {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_2(),
                     step: self.step + 1,
@@ -509,7 +509,7 @@ where
                         .expect("For `vanilla::FoldingScheme` should always be")[1],
                 )
                 .unwrap(),
-                RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
+                ConsistencyMarkersComputation::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
                     step: self.step + 1,
@@ -583,7 +583,7 @@ where
     {
         let mut errors = vec![];
 
-        RandomOracleComputationInstance::<'_, A1, C2, RP1::OffCircuit> {
+        ConsistencyMarkersComputation::<'_, A1, C2, RP1::OffCircuit> {
             random_oracle_constant: pp.primary.params().ro_constant().clone(),
             public_params_hash: &pp.digest_2(),
             step: self.step,
@@ -607,7 +607,7 @@ where
             })
         });
 
-        RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
+        ConsistencyMarkersComputation::<'_, A2, C1, RP2::OffCircuit> {
             random_oracle_constant: pp.secondary.params().ro_constant().clone(),
             public_params_hash: &pp.digest_1(),
             step: self.step,
