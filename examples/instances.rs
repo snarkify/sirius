@@ -1,3 +1,6 @@
+/// This example is the debugging code for #319
+///
+/// When this task is closed, it should be an example of using public input in a step-circuit
 use std::{array, num::NonZeroUsize};
 
 use halo2_proofs::plonk::{Column, Instance};
@@ -41,15 +44,14 @@ const PRIMARY_CIRCUIT_TABLE_SIZE: usize = 17;
 const SECONDARY_COMMITMENT_KEY_SIZE: usize = 21;
 
 #[derive(Debug, Clone)]
-struct MyConfig<const N: usize> {
+struct InstancesConfig<const N: usize> {
     #[allow(dead_code)]
     instances: [Column<Instance>; N],
 }
-struct MyStepCircuit<const N: usize> {}
+struct InstancesCircuit<const N: usize> {}
 
-impl<const N: usize, const A: usize, F: PrimeField> StepCircuit<A, F> for MyStepCircuit<N> {
-    /// This is a configuration object that stores things like columns.
-    type Config = MyConfig<N>;
+impl<const N: usize, const A: usize, F: PrimeField> StepCircuit<A, F> for InstancesCircuit<N> {
+    type Config = InstancesConfig<N>;
 
     fn instances(&self) -> Vec<Vec<F>> {
         vec![vec![F::ONE]; N]
@@ -58,7 +60,7 @@ impl<const N: usize, const A: usize, F: PrimeField> StepCircuit<A, F> for MyStep
     /// Configure the step circuit. This method initializes necessary
     /// fixed columns and advice columns
     fn configure(cs: &mut ConstraintSystem<F>) -> Self::Config {
-        MyConfig {
+        InstancesConfig {
             instances: array::from_fn(|_| {
                 let c = cs.instance_column();
                 cs.enable_equality(c);
@@ -83,7 +85,7 @@ impl<const N: usize, const A: usize, F: PrimeField> StepCircuit<A, F> for MyStep
 }
 
 fn main() {
-    let sc1 = MyStepCircuit::<1> {};
+    let sc1 = InstancesCircuit::<1> {};
     let sc2 = trivial::Circuit::<A2, C2Scalar>::default();
 
     let primary_commitment_key =
