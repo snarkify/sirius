@@ -382,7 +382,7 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
 }
 
 /// Number of consistency markers in instance column
-const CONSISTENCY_MARKER_COUNT: usize = 2;
+pub const CONSISTENCY_MARKER_COUNT: usize = 2;
 
 /// As part of the vanilla folding scheme, we use the values in the zero instance of the column for
 /// consistency between folding steps
