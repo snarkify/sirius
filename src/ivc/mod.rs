@@ -2,7 +2,7 @@ pub mod step_circuit;
 
 pub mod step_folding_circuit;
 
-mod consistency_marker_computation;
+mod consistency_markers_computation;
 mod fold_relaxed_plonk_instance_chip;
 mod incrementally_verifiable_computation;
 mod public_params;

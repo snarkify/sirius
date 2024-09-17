@@ -14,13 +14,13 @@ use crate::{
     halo2curves::CurveAffine,
     ivc::{
         self,
-        consistency_marker_computation::ConsistencyMarkerComputation,
+        consistency_markers_computation::ConsistencyMarkerComputation,
         step_folding_circuit::{StepFoldingCircuit, StepInputs},
     },
     main_gate::MainGateConfig,
     nifs::{
         self,
-        vanilla::{GetConsistencyMarkers, VanillaFS, CONSISTENCY_MARKER_COUNT},
+        vanilla::{GetConsistencyMarkers, VanillaFS, CONSISTENCY_MARKERS_COUNT},
         FoldingScheme,
     },
     plonk::{PlonkStructure, PlonkTrace},
@@ -266,14 +266,14 @@ where
                     StepFoldingCircuit<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T>,
                 >(
                     primary.k_table_size,
-                    &iter::once(CONSISTENCY_MARKER_COUNT)
+                    &iter::once(CONSISTENCY_MARKERS_COUNT)
                         .chain(primary.step_circuit.instances().iter().map(Vec::len))
                         .collect::<Box<[_]>>(),
                     &primary_step_params,
                 ),
             };
             let primary_instances =
-                primary_sfc.instances([C1::Scalar::ZERO; CONSISTENCY_MARKER_COUNT]);
+                primary_sfc.instances([C1::Scalar::ZERO; CONSISTENCY_MARKERS_COUNT]);
 
             CircuitRunner::new(primary.k_table_size, primary_sfc, primary_instances)
                 .try_collect_plonk_structure()
@@ -285,7 +285,7 @@ where
             let secondary_initial_step_params =
                 StepParams::new(limb_width, limbs_count, secondary.ro_constant.clone());
 
-            let secondary_num_io = iter::once(CONSISTENCY_MARKER_COUNT)
+            let secondary_num_io = iter::once(CONSISTENCY_MARKERS_COUNT)
                 .chain(secondary.step_circuit.instances().iter().map(Vec::len))
                 .collect::<Box<[_]>>();
 

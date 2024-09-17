@@ -15,7 +15,7 @@ use crate::{
     util,
 };
 
-pub(crate) struct AssignedConsistencyMarkerComputation<
+pub(crate) struct AssignedConsistencyMarkersComputationnn<
     'l,
     RP,
     const A: usize,
@@ -34,7 +34,7 @@ pub(crate) struct AssignedConsistencyMarkerComputation<
 }
 
 impl<'l, const A: usize, const T: usize, C: CurveAffine, RO>
-    AssignedConsistencyMarkerComputation<'l, RO, A, T, C>
+    AssignedConsistencyMarkersComputationnn<'l, RO, A, T, C>
 where
     C::Base: FromUniformBytes<64> + PrimeFieldBits,
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
@@ -287,7 +287,7 @@ mod tests {
                     .assign_current_relaxed(&mut ctx)
                     .unwrap();
 
-                    AssignedConsistencyMarkerComputation::<PoseidonChip<Base, 10, 9>, 10, 10, C1> {
+                    AssignedConsistencyMarkersComputationnn::<PoseidonChip<Base, 10, 9>, 10, 10, C1> {
                         random_oracle_constant: random_oracle_constant.clone(),
                         public_params_hash: &public_params_hash,
                         step: &step,

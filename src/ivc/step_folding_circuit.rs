@@ -9,7 +9,7 @@ use itertools::Itertools;
 use serde::Serialize;
 use tracing::*;
 
-use super::consistency_marker_computation::AssignedConsistencyMarkerComputation;
+use super::consistency_markers_computation::AssignedConsistencyMarkersComputationnn;
 use crate::{
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
     halo2curves::CurveAffine,
@@ -110,7 +110,7 @@ where
     RO: ROCircuitTrait<C::Base>,
 {
     pub fn num_io(&self) -> Box<[usize]> {
-        iter::once(vanilla::CONSISTENCY_MARKER_COUNT)
+        iter::once(vanilla::CONSISTENCY_MARKERS_COUNT)
             .chain(
                 self.step_circuit_instances
                     .iter()
@@ -139,7 +139,7 @@ where
             panic!("Empty instances not expected, because consistency markers");
         };
 
-        assert_eq!(consistency_markers, &vanilla::CONSISTENCY_MARKER_COUNT);
+        assert_eq!(consistency_markers, &vanilla::CONSISTENCY_MARKERS_COUNT);
 
         Self {
             step: C::Base::ZERO,
@@ -468,7 +468,7 @@ where
                     )?;
                     ctx.next();
 
-                    let expected_X0 = AssignedConsistencyMarkerComputation::<'_, RO, ARITY, T, C> {
+                    let expected_X0 = AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
                         random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                         public_params_hash: &w.public_params_hash,
                         step: &assigned_step,
@@ -571,7 +571,7 @@ where
             .assign_region(
                 || "generate output hash",
                 |region| {
-                    AssignedConsistencyMarkerComputation::<'_, RO, ARITY, T, C> {
+                    AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
                         random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                         public_params_hash: &assigned_input_witness.public_params_hash,
                         step: &assigned_next_step,

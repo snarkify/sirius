@@ -4,7 +4,7 @@ use halo2_proofs::dev::MockProver;
 use serde::Serialize;
 use tracing::*;
 
-use super::consistency_marker_computation::ConsistencyMarkerComputation;
+use super::consistency_markers_computation::ConsistencyMarkerComputation;
 pub use super::step_circuit::{self, StepCircuit, SynthesisError};
 use crate::{
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
