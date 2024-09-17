@@ -265,6 +265,11 @@ where
             .map_err(|err| Error::from_mock_verify(err, true, 0))?;
         }
 
+        assert!(primary_instances
+            .iter()
+            .zip(pp.primary.S().num_io.iter())
+            .all(|(instance, expected_len)| { instance.len() == *expected_len }));
+
         let primary_witness = CircuitRunner::new(
             pp.primary.k_table_size(),
             primary_sfc,
@@ -351,6 +356,11 @@ where
             .verify()
             .map_err(|err| Error::from_mock_verify(err, false, 0))?;
         }
+
+        assert!(secondary_instances
+            .iter()
+            .zip(pp.secondary.S().num_io.iter())
+            .all(|(instance, expected_len)| { instance.len() == *expected_len }));
 
         let secondary_witness = CircuitRunner::new(
             pp.secondary.k_table_size(),
@@ -469,6 +479,11 @@ where
             .map_err(|err| Error::from_mock_verify(err, true, self.step))?;
         }
 
+        assert!(primary_instances
+            .iter()
+            .zip(pp.primary.S().num_io.iter())
+            .all(|(instance, expected_len)| { instance.len() == *expected_len }));
+
         let primary_witness = CircuitRunner::new(
             pp.primary.k_table_size(),
             primary_sfc,
@@ -542,22 +557,27 @@ where
             },
         };
 
-        let secondary_instance = secondary_sfc.instances(secondary_consistency_marker);
+        let secondary_instances = secondary_sfc.instances(secondary_consistency_marker);
         if self.debug_mode {
             let _s = debug_span!("debug").entered();
             MockProver::run(
                 pp.secondary.k_table_size(),
                 &secondary_sfc,
-                secondary_instance.clone(),
+                secondary_instances.clone(),
             )?
             .verify()
             .map_err(|err| Error::from_mock_verify(err, false, self.step))?;
         }
 
+        assert!(secondary_instances
+            .iter()
+            .zip(pp.secondary.S().num_io.iter())
+            .all(|(instance, expected_len)| { instance.len() == *expected_len }));
+
         let secondary_witness = CircuitRunner::new(
             pp.secondary.k_table_size(),
             secondary_sfc,
-            secondary_instance.clone(),
+            secondary_instances.clone(),
         )
         .try_collect_witness()?;
 
@@ -566,7 +586,7 @@ where
 
         self.secondary_trace = [VanillaFS::generate_plonk_trace(
             pp.secondary.ck(),
-            &secondary_instance,
+            &secondary_instances,
             &secondary_witness,
             &self.secondary_nifs_pp,
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),

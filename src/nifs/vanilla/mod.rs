@@ -194,7 +194,6 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         pp: &VanillaFSProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
-        assert!(instances.len() <= 1, "TODO #316");
         Ok(pp
             .S
             .run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)?)
@@ -344,12 +343,14 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
             .copied()
             .collect::<Vec<_>>();
 
-        let y = sparse::matrix_multiply(&S.permutation_matrix, &Z);
-        let mismatch_count = y
+        let mismatch_count = sparse::matrix_multiply(&S.permutation_matrix, &Z)
             .into_iter()
-            .zip(Z)
-            .map(|(y, z)| y - z)
-            .filter(|d| C::ScalarExt::ZERO.ne(d))
+            .zip_eq(Z)
+            .enumerate()
+            .filter_map(|(row, (y, z))| C::ScalarExt::ZERO.ne(&(y - z)).then_some(row))
+            .inspect(|row| {
+                warn!("permutation mismatch at {row}");
+            })
             .count();
 
         if mismatch_count == 0 {

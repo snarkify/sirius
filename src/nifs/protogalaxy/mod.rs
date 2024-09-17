@@ -1,8 +1,4 @@
-use std::{
-    iter,
-    marker::PhantomData,
-    ops::{Not, Sub},
-};
+use std::{iter, marker::PhantomData};
 
 use itertools::Itertools;
 use tracing::{instrument, warn};
@@ -506,16 +502,19 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
         let Z = u
             .instances
             .iter()
-            .flat_map(|instance| instance.iter())
+            .flat_map(|inst| inst.iter())
             .chain(w.W[0].iter().take((1 << S.k) * S.num_advice_columns))
             .copied()
-            .collect::<Box<[_]>>();
+            .collect::<Vec<_>>();
 
-        let y = sparse::matrix_multiply(&S.permutation_matrix, &Z[..]);
-        let mismatch_count = y
+        let mismatch_count = sparse::matrix_multiply(&S.permutation_matrix, &Z)
             .into_iter()
-            .zip(Z)
-            .filter(|(y, z)| y.sub(z).is_zero_vartime().not())
+            .zip_eq(Z)
+            .enumerate()
+            .filter_map(|(row, (y, z))| C::ScalarExt::ZERO.ne(&(y - z)).then_some(row))
+            .inspect(|row| {
+                warn!("permutation mismatch at {row}");
+            })
             .count();
 
         if mismatch_count == 0 {

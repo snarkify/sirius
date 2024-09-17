@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, iter};
 
 use halo2_proofs::plonk::{Any, Column, ConstraintSystem, Expression as PE};
 use tracing::*;
@@ -8,67 +8,6 @@ use crate::{
     plonk::permutation::Assembly,
     polynomial::{sparse::SparseMatrix, Expression},
 };
-
-// Helper function to convert cell indices (column, row) to index in Z vector
-pub(crate) fn cell_to_z_idx(column: usize, row: usize, num_rows: usize, num_io: usize) -> usize {
-    if num_io > 0 && column >= 1 {
-        num_io + (column - 1) * num_rows + row
-    } else {
-        row + column * num_rows
-    }
-}
-
-/// return the index of instance column from columns
-pub(crate) fn get_instance_column_index(columns: &[Column<Any>]) -> Option<usize> {
-    columns
-        .iter()
-        .position(|&column| *column.column_type() == Any::Instance)
-}
-
-pub fn column_index(idx: usize, columns: &[Column<Any>]) -> usize {
-    let column = columns[idx];
-    let offset = match column.column_type() {
-        Any::Instance => 0,
-        Any::Advice(_) => 1,
-        Any::Fixed => panic!(
-            "fixed column is not allowed in the copy constraint, it will break during folding"
-        ),
-    };
-    if get_instance_column_index(columns).is_some() {
-        column.index() + offset
-    } else {
-        column.index()
-    }
-}
-
-pub(crate) fn fill_sparse_matrix<F: PrimeField>(
-    mut sparse_matrix_p: SparseMatrix<F>,
-    num_advice: usize,
-    num_rows: usize,
-    num_io: usize,
-    columns: &[Column<Any>],
-) -> SparseMatrix<F> {
-    let num_columns = if num_io > 0 {
-        num_advice + 1
-    } else {
-        num_advice
-    }; // 1 is the number of instance column
-    let all_columns: HashSet<usize> = (0..num_columns).collect();
-    let set_a: HashSet<usize> = columns
-        .iter()
-        .enumerate()
-        .map(|(i, _)| column_index(i, columns))
-        .collect();
-    let columns_to_fill: HashSet<usize> = all_columns.difference(&set_a).cloned().collect();
-    for col in columns_to_fill.iter() {
-        for row in 0..num_rows {
-            let z_idx = cell_to_z_idx(*col, row, num_rows, num_io);
-            sparse_matrix_p.push((z_idx, z_idx, F::ONE));
-        }
-    }
-
-    sparse_matrix_p
-}
 
 /// compress a vector of halo2 expressions into one by random linear combine a challenge
 pub(crate) fn compress_halo2_expression<F: PrimeField>(
@@ -116,14 +55,27 @@ pub(crate) fn compress_expression<F: PrimeField>(
     }
 }
 
-/// Construct sparse matrix P of size `N*N` from copy constraints since folding will change values of
-/// advice/instance column while keep fixed column values we don't allow fixed column to be in the
-/// copy constraint here suppose we have 1 instance column, `n` advice columns and there are total of
-/// r rows. notice the instance column only contains `num_io = io` items N = num_io + r*n. Let
-/// (i_1,...,i_{io}) be all values of the instance columns and (x_1,...,x_{n*r}) be concatenate of
-/// advice columns. define vector Z = (i_1,...,i_{io}, x_1,...,x_{n*r}) This function is to find
-/// the permutation matrix P such that the copy constraints are equivalent to P * Z - Z = 0. This
-/// is invariant relation under our folding scheme
+/// Constructs a sparse permutation matrix `P` of size `N * N` from copy constraints.
+///
+/// The function accounts for the changes due to folding, which affects the values of advice/instance
+/// columns while keeping fixed column values unchanged. Consequently, fixed columns are not allowed
+/// in copy constraints.
+///
+/// Assume we have 1 instance column and `n` advice columns, with a total of `r` rows. Note that the
+/// instance column contains only `num_io` items:
+///
+/// `N = num_io + r * n`
+///
+/// Let `(i_1, ..., i_{io})` represent the values of the instance column, and
+/// `(x_1, ..., x_{n * r})` be the concatenated values of the advice columns. Define the vector:
+///
+/// `Z = (i_1, ..., i_{io}, x_1, ..., x_{n * r})`
+///
+/// The goal is to find a permutation matrix `P` such that the copy constraints satisfy:
+///
+/// `P * Z - Z = 0`
+///
+/// This relation remains invariant under the folding scheme.
 #[instrument(name = "permutation", skip_all)]
 pub(crate) fn construct_permutation_matrix<F: PrimeField>(
     k_table_size: usize,
@@ -131,47 +83,73 @@ pub(crate) fn construct_permutation_matrix<F: PrimeField>(
     cs: &ConstraintSystem<F>,
     permutation: &Assembly,
 ) -> SparseMatrix<F> {
-    assert!(num_io.len() <= 1, "TODO #316");
-    let num_io = num_io.first().copied().unwrap_or_default();
-
-    let columns = &cs.permutation.columns;
-    let instance_column_idx = get_instance_column_index(columns);
-
-    // Same as [`column_index`], but with already ready `instance_column_idx`
-    let get_column_index = |column: &Column<Any>| -> usize {
-        column.index()
-            + match column.column_type() {
-                Any::Advice(_) if instance_column_idx.is_some() => 1,
-                Any::Advice(_) | Any::Instance => 0,
-                Any::Fixed => panic!(
-                "fixed column is not allowed in the copy constraint, it will break during folding"
-            ),
-            }
-    };
+    let perm_columns = &cs.permutation.columns;
 
     let num_rows = 1 << k_table_size;
-    let mut sparse_matrix_p = Vec::new();
+    let num_advice = cs.num_advice_columns();
+
+    // Lengths of each row of the matrix
+    let rows_len = num_io
+        .iter()
+        .copied()
+        .chain(iter::repeat(num_rows).take(num_advice))
+        .collect::<Box<[_]>>();
+
+    let to_flat_column_offset = |column: Column<Any>| -> usize {
+        match column.column_type() {
+            Any::Instance => column.index(),
+            Any::Advice(_) => num_io.len() + column.index(),
+            Any::Fixed => unreachable!("'fixed column' can't be a part of permutation"),
+        }
+    };
+
+    let to_flat_index = |column: Column<Any>, row: usize| -> usize {
+        rows_len
+            .iter()
+            .take(to_flat_column_offset(column))
+            .sum::<usize>()
+            + row
+    };
+
+    let flated_rows = rows_len.iter().sum();
+    let mut columns_not_in_perm = HashSet::<usize>::from_iter(0..num_io.len() + num_advice);
+
+    let mut sparse_matrix_p = Vec::with_capacity(flated_rows);
     for (left_col, mapping_vec) in permutation.mapping.iter().enumerate() {
-        for (left_row, cycle) in mapping_vec.iter().enumerate() {
-            if left_row >= num_io && Some(left_col).eq(&instance_column_idx) {
+        let left_col = perm_columns[left_col];
+        columns_not_in_perm.remove(&to_flat_column_offset(left_col));
+
+        let instance_rows_count = match left_col.column_type() {
+            Any::Instance => num_io.get(left_col.index()),
+            _ => None,
+        };
+
+        for (left_row, (cycle_col, cycle_row)) in mapping_vec.iter().enumerate() {
+            if matches!(
+                instance_rows_count,
+                Some(count) if left_row >= *count
+            ) {
                 continue;
             }
 
-            let left_col = get_column_index(&columns[left_col]);
-            let right_col = get_column_index(&columns[cycle.0]);
+            let right_col = perm_columns[*cycle_col];
+            columns_not_in_perm.remove(&to_flat_column_offset(right_col));
 
-            let left_z_idx = cell_to_z_idx(left_col, left_row, num_rows, num_io);
-            let right_z_idx = cell_to_z_idx(right_col, cycle.1, num_rows, num_io);
+            let left_z_idx = to_flat_index(left_col, left_row);
+            let right_z_idx = to_flat_index(right_col, *cycle_row);
 
             sparse_matrix_p.push((left_z_idx, right_z_idx, F::ONE));
         }
     }
 
-    fill_sparse_matrix(
-        sparse_matrix_p,
-        cs.num_advice_columns(),
-        num_rows,
-        num_io,
-        columns,
-    )
+    columns_not_in_perm.into_iter().for_each(|column_offset| {
+        let col_offset = rows_len.iter().take(column_offset).sum::<usize>();
+
+        for row in 0..num_rows {
+            let z_idx = col_offset + row;
+            sparse_matrix_p.push((z_idx, z_idx, F::ONE));
+        }
+    });
+
+    sparse_matrix_p
 }
