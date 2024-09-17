@@ -1,9 +1,9 @@
 /// Module name acronym `StepFoldingCircuit` -> `sfc`
-use std::{fmt, num::NonZeroUsize};
+use std::{fmt, iter, num::NonZeroUsize};
 
 use halo2_proofs::{
     circuit::{floor_planner, Layouter, Value},
-    plonk::{Circuit, Column, ConstraintSystem, Instance},
+    plonk::{Circuit, Column, ConstraintSystem, Error as Halo2PlonkError, Instance},
 };
 use itertools::Itertools;
 use serde::Serialize;
@@ -20,7 +20,7 @@ use crate::{
         StepCircuit,
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
-    nifs::vanilla::accumulator::RelaxedPlonkInstance,
+    nifs::vanilla::{self, accumulator::RelaxedPlonkInstance},
     plonk::PlonkInstance,
     poseidon::ROCircuitTrait,
     table::ConstraintSystemMetainfo,
@@ -99,6 +99,8 @@ where
 
     // TODO docs
     pub cross_term_commits: Vec<C>,
+
+    pub step_circuit_instances: Vec<Vec<C::Base>>,
 }
 
 impl<'link, const ARITY: usize, C, RO> StepInputs<'link, ARITY, C, RO>
@@ -107,6 +109,16 @@ where
     C: CurveAffine,
     RO: ROCircuitTrait<C::Base>,
 {
+    pub fn num_io(&self) -> Box<[usize]> {
+        iter::once(vanilla::CONSISTENCY_MARKER_COUNT)
+            .chain(
+                self.step_circuit_instances
+                    .iter()
+                    .map(|instance| instance.len()),
+            )
+            .collect()
+    }
+
     pub fn without_witness<PairedCircuit: Circuit<C::Scalar>>(
         k_table_size: u32,
         num_io: &[usize],
@@ -131,6 +143,11 @@ where
             z_i: [C::Base::ZERO; ARITY],
             U: RelaxedPlonkInstance::new(num_io, num_challenges, round_sizes.len()),
             u: PlonkInstance::new(num_io, num_challenges, round_sizes.len()),
+            step_circuit_instances: num_io
+                .iter()
+                .skip(1)
+                .map(|len| vec![C::Base::ZERO; *len])
+                .collect(),
             cross_term_commits: vec![C::identity(); folding_degree.saturating_sub(1)],
         }
     }
@@ -143,6 +160,16 @@ pub struct StepConfig<const ARITY: usize, F: PrimeField, SP: StepCircuit<ARITY, 
     pub consistency_marker: Column<Instance>,
     pub step_config: SP::Config,
     pub main_gate_config: MainGateConfig<T>,
+    pub step_circuit_instances: Box<[Column<Instance>]>,
+}
+
+impl<const ARITY: usize, F: PrimeField, SP: StepCircuit<ARITY, F>, const T: usize>
+    StepConfig<ARITY, F, SP, T>
+{
+    /// Returns step circuit instance
+    fn get_step_circuit_instance(&self, instance_index: usize) -> Option<Column<Instance>> {
+        self.step_circuit_instances.get(instance_index).copied()
+    }
 }
 
 impl<const ARITY: usize, F: PrimeField + Clone, SP: StepCircuit<ARITY, F>, const T: usize> Clone
@@ -155,6 +182,7 @@ where
             consistency_marker: self.consistency_marker,
             step_config: self.step_config.clone(),
             main_gate_config: self.main_gate_config.clone(),
+            step_circuit_instances: self.step_circuit_instances.clone(),
         }
     }
 }
@@ -208,7 +236,7 @@ where
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
 {
     pub fn instances(&self, consistency_markers: [C::Base; 2]) -> Vec<Vec<C::Base>> {
-        let mut instances = self.step_circuit.instances();
+        let mut instances = self.input.step_circuit_instances.clone();
         instances.insert(0, consistency_markers.to_vec());
         instances
     }
@@ -251,21 +279,38 @@ where
                     self.input.u.challenges.len(),
                     self.input.u.W_commitments.len(),
                 ),
+                step_circuit_instances: self
+                    .input
+                    .step_circuit_instances
+                    .iter()
+                    .map(|instance| vec![C::Base::ZERO; instance.len()])
+                    .collect(),
             },
         }
     }
 
     fn configure(cs: &mut ConstraintSystem<C::Base>) -> Self::Config {
-        let main_gate_config = MainGate::configure(cs);
-        let step_config = <SC as StepCircuit<ARITY, C::Base>>::configure(cs);
-
         let instance = cs.instance_column();
         cs.enable_equality(instance);
+
+        let main_gate_config = MainGate::configure(cs);
+        let before = cs.num_instance_columns();
+        let step_config = <SC as StepCircuit<ARITY, C::Base>>::configure(cs);
+        let after = cs.num_instance_columns();
+
+        let step_circuit_instances = (1..=(after - before))
+            .map(|index| {
+                let mut i = instance;
+                i.index = index;
+                i
+            })
+            .collect();
 
         StepConfig {
             consistency_marker: instance,
             step_config,
             main_gate_config,
+            step_circuit_instances,
         }
     }
 
@@ -273,8 +318,17 @@ where
         &self,
         config: StepConfig<ARITY, C::Base, SC, T>,
         mut layouter: impl Layouter<C::Base>,
-    ) -> Result<(), halo2_proofs::plonk::Error> {
-        let (assigned_z_0, assigned_z_i): ([_; ARITY], [_; ARITY]) = layouter
+    ) -> Result<(), Halo2PlonkError> {
+        assert_eq!(
+            self.input.step_circuit_instances.len(),
+            config.step_circuit_instances.len()
+        );
+
+        let (assigned_z_0, assigned_z_i, assigned_step_circuit_instances): (
+            [_; ARITY],
+            [_; ARITY],
+            _,
+        ) = layouter
             .assign_region(
                 || "assign z_0 & z_i",
                 |region| {
@@ -290,13 +344,49 @@ where
                         .assign_all_advice(&mut region, || "z_i", self.input.z_i.iter().copied())
                         .map(|inp| inp.try_into().unwrap())?;
 
-                    Ok((z_0, z_i))
+                    let flat_step_circuit_instances = self
+                        .input
+                        .step_circuit_instances
+                        .iter()
+                        .enumerate()
+                        .try_fold(vec![], |mut all, (column_index, instance_column_values)| {
+                            let instance_column = assigner.assign_all_advice(
+                                &mut region,
+                                || "instance",
+                                instance_column_values.iter().cloned(),
+                            )?;
+
+                            all.extend(
+                                instance_column.into_iter().enumerate().map(
+                                    |(row_index, assigned)| (assigned, column_index, row_index),
+                                ),
+                            );
+
+                            Result::<_, Halo2PlonkError>::Ok(all)
+                        })?;
+
+                    Ok((z_0, z_i, flat_step_circuit_instances))
                 },
             )
             .map_err(|err| {
                 error!("while assign z_0 & z_i: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                Halo2PlonkError::Synthesis
             })?;
+
+        // We take the instance columns from the step circuit and place them inside the witness as
+        // well, verifying within the same step by permuting them
+        //
+        // This allows us to omit a separate check for correctness of collapsing
+        for (assigned, column_index, row_index) in assigned_step_circuit_instances {
+            layouter.constrain_instance(
+                assigned.cell(),
+                config.get_step_circuit_instance(column_index).expect(
+                    "The `StepCircuit::instances` sizes and the number of `instance`
+                        columns created inside `StepCircuit::configure` do not match",
+                ),
+                row_index,
+            )?;
+        }
 
         let chip = FoldRelaxedPlonkInstanceChip::new(
             self.input.U.clone(),
@@ -323,7 +413,7 @@ where
             )
             .map_err(|err| {
                 error!("while assigned witness: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                Halo2PlonkError::Synthesis
             })?;
 
         debug!("witness & challenge assigned");
@@ -358,7 +448,7 @@ where
             )
             .map_err(|err| {
                 error!("while assign step & next step: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                Halo2PlonkError::Synthesis
             })?;
 
         // Check X0 == input_params_hash
@@ -405,7 +495,7 @@ where
             )
             .map_err(|err| {
                 error!("while generate input hash: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                Halo2PlonkError::Synthesis
             })?;
 
         // Synthesize the circuit for the non-base case and get the new running
@@ -420,7 +510,7 @@ where
             )
             .map_err(|err| {
                 error!("while synthesize_step_non_base_case: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                Halo2PlonkError::Synthesis
             })?;
 
         let (assigned_new_U, assigned_input) = layouter
@@ -464,7 +554,7 @@ where
             )
             .map_err(|err| {
                 error!("while folding: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                Halo2PlonkError::Synthesis
             })?;
 
         let z_output = self
@@ -472,7 +562,7 @@ where
             .synthesize_step(config.step_config, &mut layouter, &assigned_input)
             .map_err(|err| {
                 error!("while synthesize_step: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                Halo2PlonkError::Synthesis
             })?;
 
         let output_hash = layouter
@@ -496,7 +586,7 @@ where
             )
             .map_err(|err| {
                 error!("while generate output hash: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                Halo2PlonkError::Synthesis
             })?;
 
         debug!("output instance 0: {:?}", output_hash);
@@ -510,7 +600,7 @@ where
             )
             .map_err(|err| {
                 error!("while check that old_X1 == new_X0: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                Halo2PlonkError::Synthesis
             })?;
 
         // Check that new_X1 == output_hash
@@ -518,7 +608,7 @@ where
             .constrain_instance(output_hash.cell(), config.consistency_marker, 1)
             .map_err(|err| {
                 error!("while check that new_X1 == output_hash: {err:?}");
-                halo2_proofs::plonk::Error::Synthesis
+                Halo2PlonkError::Synthesis
             })?;
 
         Ok(())

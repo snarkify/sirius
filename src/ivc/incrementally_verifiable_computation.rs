@@ -248,10 +248,12 @@ where
                     C2::identity();
                     pp.secondary.S().get_degree_for_folding().saturating_sub(1)
                 ],
+                step_circuit_instances: primary.instances(),
             },
         };
 
         let primary_instances = primary_sfc.instances(primary_consistency_marker);
+
         if debug_mode {
             let _s = debug_span!("debug").entered();
             MockProver::run(
@@ -334,6 +336,7 @@ where
                         .get_degree_for_folding()
                         .saturating_sub(1)
                 ],
+                step_circuit_instances: secondary.instances(),
             },
         };
 
@@ -450,6 +453,7 @@ where
                 U: self.secondary.relaxed_trace.U.clone(),
                 u: self.secondary_trace[0].u.clone(),
                 cross_term_commits: secondary_cross_term_commits,
+                step_circuit_instances: primary.instances(),
             },
         };
 
@@ -534,6 +538,7 @@ where
                 U: self.primary.relaxed_trace.U.clone(),
                 u: primary_plonk_trace[0].u.clone(),
                 cross_term_commits: primary_cross_term_commits,
+                step_circuit_instances: secondary.instances(),
             },
         };
 
