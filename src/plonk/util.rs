@@ -127,10 +127,13 @@ pub(crate) fn compress_expression<F: PrimeField>(
 #[instrument(name = "permutation", skip_all)]
 pub(crate) fn construct_permutation_matrix<F: PrimeField>(
     k_table_size: usize,
-    num_io: usize,
+    num_io: &[usize],
     cs: &ConstraintSystem<F>,
     permutation: &Assembly,
 ) -> SparseMatrix<F> {
+    assert!(num_io.len() <= 1, "TODO #316");
+    let num_io = num_io.first().copied().unwrap_or_default();
+
     let columns = &cs.permutation.columns;
     let instance_column_idx = get_instance_column_index(columns);
 

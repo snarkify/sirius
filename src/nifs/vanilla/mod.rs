@@ -194,12 +194,10 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         pp: &VanillaFSProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
-        // TODO #329 use all instances in sps
-        let instance = instances.first().cloned().unwrap_or_default();
-
+        assert!(instances.len() <= 1, "TODO #316");
         Ok(pp
             .S
-            .run_sps_protocol(ck, &instance, witness, ro_nark, pp.S.num_challenges)?)
+            .run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)?)
     }
 
     /// Generates a proof of correct folding using the NIFS protocol.
@@ -339,9 +337,9 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
         let RelaxedPlonkTrace { U, W } = acc;
 
         let Z = U
-            .instance
-            .clone()
+            .instances
             .iter()
+            .flat_map(|inst| inst.iter())
             .chain(W.W[0].iter().take((1 << S.k) * S.num_advice_columns))
             .copied()
             .collect::<Vec<_>>();
@@ -383,6 +381,9 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
     }
 }
 
+/// Number of consistency markers in instance column
+const CONSISTENCY_MARKER_COUNT: usize = 2;
+
 /// As part of the vanilla folding scheme, we use the values in the zero instance of the column for
 /// consistency between folding steps
 ///
@@ -392,21 +393,24 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
 ///     hash of the state at the end of previous folding step
 /// - X1 is a hash of the state at the end of the current folding step
 pub trait GetConsistencyMarkers<F> {
-    // TODO #329 Remove Option
-    fn get_consistency_markers(&self) -> Option<[F; 2]>;
+    fn get_consistency_markers(&self) -> Option<[F; CONSISTENCY_MARKER_COUNT]>;
 }
 
 impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for PlonkInstance<C> {
     fn get_consistency_markers(&self) -> Option<[C::ScalarExt; 2]> {
-        // TODO #329 Remove clone
-        self.instance.clone().try_into().ok()
+        match self.instances.first() {
+            Some(instance) if instance.len() == 2 => Some(instance.clone().try_into().unwrap()),
+            Some(instance) => {
+                panic!("wrong size of instances[0], can't use as consistency marker: {instance:?}")
+            }
+            None => None,
+        }
     }
 }
 
 impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for RelaxedPlonkInstance<C> {
     fn get_consistency_markers(&self) -> Option<[C::ScalarExt; 2]> {
-        // TODO #329 Remove clone
-        self.instance.clone().try_into().ok()
+        self.inner.get_consistency_markers()
     }
 }
 

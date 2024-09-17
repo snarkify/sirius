@@ -1,4 +1,4 @@
-use std::{fmt, io, marker::PhantomData, num::NonZeroUsize, ops::Deref};
+use std::{fmt, io, iter, marker::PhantomData, num::NonZeroUsize, ops::Deref};
 
 use halo2_proofs::plonk;
 use serde::Serialize;
@@ -260,11 +260,18 @@ where
 
             let primary_step_params =
                 StepParams::new(limb_width, limbs_count, primary.ro_constant.clone());
+
             let primary_sfc = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T> {
                 step_circuit: primary.step_circuit,
                 input: StepInputs::without_witness::<
                     StepFoldingCircuit<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T>,
-                >(primary.k_table_size, NUM_IO, &primary_step_params),
+                >(
+                    primary.k_table_size,
+                    &iter::once(NUM_IO)
+                        .chain(primary.step_circuit.instances().iter().map(Vec::len))
+                        .collect::<Box<[_]>>(),
+                    &primary_step_params,
+                ),
             };
             let primary_instances = primary_sfc.instances([C1::Scalar::ZERO; NUM_IO]);
 
@@ -282,7 +289,9 @@ where
                 StepFoldingCircuit<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T>,
             >(
                 secondary.k_table_size,
-                NUM_IO,
+                &iter::once(NUM_IO)
+                    .chain(secondary.step_circuit.instances().iter().map(Vec::len))
+                    .collect::<Box<[_]>>(),
                 &secondary_initial_step_params,
             );
 

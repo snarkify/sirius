@@ -496,7 +496,7 @@ mod test {
     fn get_trace(
         k_table_size: u32,
         circuit: impl Circuit<Field>,
-        instance: Vec<Field>,
+        instances: Vec<Vec<Field>>,
     ) -> (PlonkStructure<Field>, PlonkTrace<Curve>) {
         let runner = CircuitRunner::<Field, _>::new(k_table_size, circuit, vec![]);
 
@@ -510,7 +510,7 @@ mod test {
         let PlonkTrace { u, w } = S
             .run_sps_protocol(
                 &key,
-                &instance,
+                &instances,
                 &witness,
                 &mut RO::new(PoseidonSpec::new(R_F1, R_P1)),
                 S.num_challenges,
@@ -524,7 +524,7 @@ mod test {
         get_trace(
             13,
             poseidon_circuit::TestPoseidonCircuit::<_>::default(),
-            vec![Field::from(4097)],
+            vec![vec![Field::from(4097)]],
         )
     }
 

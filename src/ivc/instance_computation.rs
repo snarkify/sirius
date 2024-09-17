@@ -10,7 +10,7 @@ use crate::{
     gadgets::{ecc::AssignedPoint, nonnative::bn::big_uint::BigUint},
     halo2curves::CurveAffine,
     main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
-    nifs::vanilla::accumulator::RelaxedPlonkInstance,
+    nifs::vanilla::{accumulator::RelaxedPlonkInstance, GetConsistencyMarkers},
     poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
     util,
 };
@@ -121,7 +121,8 @@ where
             E_commitment: &self.relaxed.E_commitment,
             instance: self
                 .relaxed
-                .instance
+                .get_consistency_markers()
+                .unwrap()
                 .iter()
                 .map(|v| {
                     BigUint::from_f(
@@ -214,7 +215,7 @@ mod tests {
         let relaxed = RelaxedPlonkInstance {
             inner: PlonkInstance {
                 W_commitments: vec![CommitmentKey::<C1>::default_value(); 10],
-                instance: vec![Scalar::from_u128(0x67899); 2],
+                instances: vec![vec![Scalar::from_u128(0x67899); 2]],
                 challenges: vec![Scalar::from_u128(0x123456); 10],
             },
             E_commitment: CommitmentKey::<C1>::default_value(),
