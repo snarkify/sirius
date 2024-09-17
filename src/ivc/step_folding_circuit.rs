@@ -484,14 +484,17 @@ where
                         )?;
 
                     debug!("expected X0: {expected_X0:?}");
-                    debug!("input instance 0: {:?}", w.input_instance[0].0);
+                    debug!(
+                        "input instance 0: {:?}",
+                        w.input_consistency_markers[0].as_value
+                    );
 
                     Ok((
                         base_case_input_check,
                         MainGate::new(config.main_gate_config.clone()).is_equal_term(
                             &mut ctx,
                             &expected_X0,
-                            &w.input_instance[0].0,
+                            &w.input_consistency_markers[0].as_value,
                         )?,
                     ))
                 },
@@ -597,7 +600,9 @@ where
         // Check that old_X1 == new_X0
         layouter
             .constrain_instance(
-                assigned_input_witness.input_instance[1].0.cell(),
+                assigned_input_witness.input_consistency_markers[1]
+                    .as_value
+                    .cell(),
                 config.consistency_marker,
                 0,
             )

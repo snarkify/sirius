@@ -287,6 +287,12 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct AssignedConsistencyMarkerView<F: PrimeField> {
+    pub as_value: AssignedValue<F>,
+    pub as_bn_limbs: Vec<AssignedValue<F>>,
+}
+
 /// Holds the assigned values and points resulting from the folding process.
 #[derive(Clone)]
 pub(crate) struct AssignedWitness<C: CurveAffine> {
@@ -303,7 +309,10 @@ pub(crate) struct AssignedWitness<C: CurveAffine> {
 
     /// Vector of vectors of assigned values for each limb of the input instances.
     /// Sourced directly from [`PlonkInstance::instance`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
-    pub input_instance: Vec<(AssignedValue<C::Base>, Vec<AssignedValue<C::Base>>)>,
+    ///
+    /// The zero element is the input validator
+    /// The first element is the output validator
+    pub input_consistency_markers: [AssignedConsistencyMarkerView<C::Base>; 2],
 
     /// Vector of vectors of assigned values for each limb of the input challenges.
     /// Sourced directly from [`PlonkInstance::challenges`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
@@ -549,12 +558,12 @@ where
             .remainder)
     }
 
-    /// Fold [`RelaxedPlonkInstance::instance`] & [`PlonkInstance::instance`]
+    /// Fold consistency markers
     ///
     /// # Description
     ///
-    /// This function is responsible for combining the current `folded_instances` accumulator with
-    /// `input_instance`. This is achieved through a [`FoldRelaxedPlonkInstanceChip::fold_via_biguint`]
+    /// This function is responsible for combining the current `folded_consistency_markers` accumulator with
+    /// `input_consistency_marker`. This is achieved through a [`FoldRelaxedPlonkInstanceChip::fold_via_biguint`]
     /// fn call.
     ///
     /// ```markdown
@@ -565,14 +574,14 @@ where
     fn fold_consistency_markers(
         region: &mut RegionCtx<C::Base>,
         bn_chip: &BigUintMulModChip<C::Base>,
-        input_instances: [Vec<AssignedValue<C::Base>>; 2],
-        folded_instances: [Vec<AssignedValue<C::Base>>; 2],
+        input_consistency_marker: [Vec<AssignedValue<C::Base>>; 2],
+        folded_consistency_marker: [Vec<AssignedValue<C::Base>>; 2],
         r_as_bn: &[AssignedCell<C::Base, C::Base>],
         m_bn: &BigUint<C::Base>,
         limb_width: NonZeroUsize,
     ) -> Result<[Vec<AssignedCell<C::Base, C::Base>>; 2], Error> {
-        let [input_X0, input_X1] = input_instances;
-        let [folded_X0, folded_X1] = folded_instances;
+        let [input_X0, input_X1] = input_consistency_marker;
+        let [folded_X0, folded_X1] = folded_consistency_marker;
 
         let new_folded_X0 = Self::fold_via_biguint(
             region, bn_chip, &input_X0, folded_X0, m_bn, r_as_bn, limb_width,
@@ -680,9 +689,9 @@ where
         let [new_folded_X0, new_folded_X1] = Self::fold_consistency_markers(
             region,
             &self.bn_chip,
-            w.input_instance
+            w.input_consistency_markers
                 .iter()
-                .map(|instance| instance.1.clone())
+                .map(|instance| instance.as_bn_limbs.clone())
                 .collect::<Vec<_>>()
                 .try_into()
                 .unwrap(),
@@ -889,16 +898,23 @@ where
             .map(|com| assign_and_absorb_point!(com))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let assigned_input_instance = input_plonk
+        let assigned_consistency_markers = input_plonk
             .get_consistency_markers()
             .unwrap()
             .iter()
             .enumerate()
             .map(|(index, instance)| {
                 let annot = format!("instance {index} value");
-                assign_and_absorb_diff_field_as_bn!(instance, || annot.clone())
+                assign_and_absorb_diff_field_as_bn!(instance, || annot.clone()).map(
+                    |(as_value, as_limbs)| AssignedConsistencyMarkerView {
+                        as_value,
+                        as_bn_limbs: as_limbs,
+                    },
+                )
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .expect("from array to array");
 
         let assigned_challanges_instance = input_plonk
             .challenges
@@ -926,7 +942,7 @@ where
                 assigned_relaxed,
                 input_challenges: assigned_challanges_instance,
                 input_W_commitments: assigned_instance_W_commitment_coordinates,
-                input_instance: assigned_input_instance,
+                input_consistency_markers: assigned_consistency_markers,
                 cross_terms_commits: assigned_cross_term_commits,
             },
             r,
