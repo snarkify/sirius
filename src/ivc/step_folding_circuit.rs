@@ -468,19 +468,20 @@ where
                     )?;
                     ctx.next();
 
-                    let expected_X0 = AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
-                        random_oracle_constant: self.input.step_pp.ro_constant.clone(),
-                        public_params_hash: &w.public_params_hash,
-                        step: &assigned_step,
-                        z_0: &assigned_z_0,
-                        z_i: &assigned_z_i,
-                        relaxed: &w.assigned_relaxed,
-                    }
-                    .generate_with_inspect(
-                        &mut ctx,
-                        config.main_gate_config.clone(),
-                        |buf| debug!("expected X0 {buf:?}"),
-                    )?;
+                    let expected_X0 =
+                        AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
+                            random_oracle_constant: self.input.step_pp.ro_constant.clone(),
+                            public_params_hash: &w.public_params_hash,
+                            step: &assigned_step,
+                            z_0: &assigned_z_0,
+                            z_i: &assigned_z_i,
+                            relaxed: &w.assigned_relaxed,
+                        }
+                        .generate_with_inspect(
+                            &mut ctx,
+                            config.main_gate_config.clone(),
+                            |buf| debug!("expected X0 {buf:?}"),
+                        )?;
 
                     debug!("expected X0: {expected_X0:?}");
                     debug!("input instance 0: {:?}", w.input_instance[0].0);

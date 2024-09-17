@@ -247,62 +247,68 @@ mod tests {
             advice: vec![vec![Base::ZERO.into(); 1 << K_TABLE_SIZE]; cs.num_advice_columns()],
         };
 
-        let on_circuit_hash = SingleChipLayouter::<'_, Base, _>::new(&mut td, vec![])
-            .unwrap()
-            .assign_region(
-                || "test",
-                |region| {
-                    let mut ctx = RegionCtx::new(region, 0);
+        let on_circuit_hash =
+            SingleChipLayouter::<'_, Base, _>::new(&mut td, vec![])
+                .unwrap()
+                .assign_region(
+                    || "test",
+                    |region| {
+                        let mut ctx = RegionCtx::new(region, 0);
 
-                    let mut advice_columns_assigner = config.advice_cycle_assigner();
+                        let mut advice_columns_assigner = config.advice_cycle_assigner();
 
-                    let public_params_hash = assign_next_advice_from_point(
-                        &mut advice_columns_assigner,
-                        &mut ctx,
-                        &public_params_hash,
-                        || "public_params",
-                    )
-                    .unwrap();
-
-                    let step = advice_columns_assigner
-                        .assign_next_advice(&mut ctx, || "step", Base::from_u128(step as u128))
+                        let public_params_hash = assign_next_advice_from_point(
+                            &mut advice_columns_assigner,
+                            &mut ctx,
+                            &public_params_hash,
+                            || "public_params",
+                        )
                         .unwrap();
 
-                    let assigned_z_0 = advice_columns_assigner
-                        .assign_all_advice(&mut ctx, || "z0", z_0.iter().copied())
-                        .map(|inp| inp.try_into().unwrap())
+                        let step = advice_columns_assigner
+                            .assign_next_advice(&mut ctx, || "step", Base::from_u128(step as u128))
+                            .unwrap();
+
+                        let assigned_z_0 = advice_columns_assigner
+                            .assign_all_advice(&mut ctx, || "z0", z_0.iter().copied())
+                            .map(|inp| inp.try_into().unwrap())
+                            .unwrap();
+
+                        let assigned_z_i = advice_columns_assigner
+                            .assign_all_advice(&mut ctx, || "zi", z_i.iter().copied())
+                            .map(|inp| inp.try_into().unwrap())
+                            .unwrap();
+
+                        let assigned_relaxed = FoldRelaxedPlonkInstanceChip::new(
+                            relaxed.clone(),
+                            NonZeroUsize::new(10).unwrap(),
+                            NonZeroUsize::new(10).unwrap(),
+                            config.clone(),
+                        )
+                        .assign_current_relaxed(&mut ctx)
                         .unwrap();
 
-                    let assigned_z_i = advice_columns_assigner
-                        .assign_all_advice(&mut ctx, || "zi", z_i.iter().copied())
-                        .map(|inp| inp.try_into().unwrap())
-                        .unwrap();
-
-                    let assigned_relaxed = FoldRelaxedPlonkInstanceChip::new(
-                        relaxed.clone(),
-                        NonZeroUsize::new(10).unwrap(),
-                        NonZeroUsize::new(10).unwrap(),
-                        config.clone(),
-                    )
-                    .assign_current_relaxed(&mut ctx)
-                    .unwrap();
-
-                    AssignedConsistencyMarkersComputationnn::<PoseidonChip<Base, 10, 9>, 10, 10, C1> {
-                        random_oracle_constant: random_oracle_constant.clone(),
-                        public_params_hash: &public_params_hash,
-                        step: &step,
-                        z_0: &assigned_z_0,
-                        z_i: &assigned_z_i,
-                        relaxed: &assigned_relaxed,
-                    }
-                    .generate(&mut ctx, config.clone())
-                },
-            )
-            .unwrap()
-            .value()
-            .unwrap()
-            .copied()
-            .unwrap();
+                        AssignedConsistencyMarkersComputationnn::<
+                            PoseidonChip<Base, 10, 9>,
+                            10,
+                            10,
+                            C1,
+                        > {
+                            random_oracle_constant: random_oracle_constant.clone(),
+                            public_params_hash: &public_params_hash,
+                            step: &step,
+                            z_0: &assigned_z_0,
+                            z_i: &assigned_z_i,
+                            relaxed: &assigned_relaxed,
+                        }
+                        .generate(&mut ctx, config.clone())
+                    },
+                )
+                .unwrap()
+                .value()
+                .unwrap()
+                .copied()
+                .unwrap();
 
         assert_eq!(on_circuit_hash, off_circuit_hash);
     }
