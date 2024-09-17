@@ -14,7 +14,7 @@ use crate::{
     halo2curves::CurveAffine,
     ivc::{
         self,
-        instance_computation::RandomOracleComputationInstance,
+        consistency_marker_computation::ConsistencyMarkerComputation,
         step_folding_circuit::{StepFoldingCircuit, StepInputs},
     },
     main_gate::MainGateConfig,
@@ -305,7 +305,7 @@ where
                         .expect("For `vanilla::FoldingScheme` should always be")[0],
                 )
                 .unwrap(),
-                RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
+                ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: secondary.ro_constant.clone(),
                     public_params_hash: &secondary_initial_step_input.public_params_hash,
                     step: 1,

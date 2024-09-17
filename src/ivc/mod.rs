@@ -2,9 +2,9 @@ pub mod step_circuit;
 
 pub mod step_folding_circuit;
 
+mod consistency_marker_computation;
 mod fold_relaxed_plonk_instance_chip;
 mod incrementally_verifiable_computation;
-mod instance_computation;
 mod public_params;
 
 pub use halo2_proofs::circuit::SimpleFloorPlanner;
