@@ -73,6 +73,21 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
     }
 }
 
+impl<F: PrimeField + PrimeFieldBits> PoseidonChip<F, 5, 4>
+where
+    F: FromUniformBytes<64>,
+{
+    pub fn new_default(config: MainGateConfig<5>) -> Self {
+        let main_gate: MainGate<F, 5> = MainGate::new(config);
+
+        Self {
+            main_gate,
+            spec: Spec::default(),
+            buf: Vec::new(),
+        }
+    }
+}
+
 impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> PoseidonChip<F, T, RATE> {
     pub fn new(config: MainGateConfig<T>, spec: Spec<F, T, RATE>) -> Self {
         let main_gate: MainGate<F, T> = MainGate::new(config);

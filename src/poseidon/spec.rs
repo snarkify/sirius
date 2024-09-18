@@ -16,6 +16,18 @@ where
     }
 }
 
+pub const R_F: usize = 10;
+pub const R_P: usize = 10;
+
+impl<F: PrimeField> Default for Spec<F, 5, 4>
+where
+    F: FromUniformBytes<64>,
+{
+    fn default() -> Self {
+        Self::new(R_F, R_P)
+    }
+}
+
 impl<F: PrimeField, const T: usize, const RATE: usize> ops::Deref for Spec<F, T, RATE> {
     type Target = poseidon::Spec<F, T, RATE>;
     fn deref(&self) -> &Self::Target {

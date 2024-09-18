@@ -1,7 +1,10 @@
-use std::{marker::PhantomData, num::NonZeroUsize};
+use std::{iter, marker::PhantomData, num::NonZeroUsize};
 
 use count_to_non_zero::CountToNonZeroExt;
-use halo2_proofs::arithmetic::CurveAffine;
+use halo2_proofs::{
+    arithmetic::CurveAffine,
+    halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
+};
 use itertools::Itertools;
 use some_to_err::ErrOr;
 use tracing::*;
@@ -171,7 +174,11 @@ pub enum Error {
     Commitment(#[from] commitment::Error),
 }
 
-impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
+impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C>
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C::ScalarExt: PrimeFieldBits + FromUniformBytes<64>,
+{
     type Error = Error;
     type ProverParam = VanillaFSProverParam<C>;
     type VerifierParam = C;
@@ -275,7 +282,11 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     }
 }
 
-impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
+impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C>
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C::ScalarExt: PrimeFieldBits + FromUniformBytes<64>,
+{
     type VerifyError = plonk::Error;
 
     fn is_sat_accumulation(
@@ -335,15 +346,30 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
     ) -> Result<(), Self::VerifyError> {
         let RelaxedPlonkTrace { U, W } = acc;
 
+        let witness_len = (1 << S.k) * S.num_advice_columns;
         let Z = U
-            .instances
+            .get_consistency_markers()
+            .unwrap()
             .iter()
-            .flat_map(|inst| inst.iter())
-            .chain(W.W[0].iter().take((1 << S.k) * S.num_advice_columns))
             .copied()
-            .collect::<Vec<_>>();
+            .chain(
+                // Fill instance columns with zeros to make the matrix size converge
+                S.num_io
+                    .iter()
+                    .skip(1) // skip consistency markers
+                    .flat_map(|len| iter::repeat(C::ScalarExt::ZERO).take(*len)),
+            )
+            .chain(W.W[0].iter().take(witness_len).copied())
+            .collect::<Box<[C::ScalarExt]>>();
 
-        let mismatch_count = sparse::matrix_multiply(&S.permutation_matrix, &Z)
+        info!("start rm copy constraint of step circuit instances");
+        let matrix_without_step_circuit_instances = S
+            .permutation_data()
+            .clone()
+            .rm_copy_constraints(1..S.num_instances())
+            .matrix::<C::ScalarExt>(S.k, &S.num_io, S.num_advice_columns);
+
+        let mismatch_count = sparse::matrix_multiply(&matrix_without_step_circuit_instances, &Z)
             .into_iter()
             .zip_eq(Z)
             .enumerate()
@@ -394,6 +420,7 @@ pub const CONSISTENCY_MARKERS_COUNT: usize = 2;
 ///     hash of the state at the end of previous folding step
 /// - X1 is a hash of the state at the end of the current folding step
 pub trait GetConsistencyMarkers<F> {
+    /// Returns markers that allow you to provalidate the input and output of each folding step
     fn get_consistency_markers(&self) -> Option<[F; CONSISTENCY_MARKERS_COUNT]>;
 }
 
@@ -411,7 +438,22 @@ impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for PlonkInstance<C> {
 
 impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for RelaxedPlonkInstance<C> {
     fn get_consistency_markers(&self) -> Option<[C::ScalarExt; 2]> {
-        self.inner.get_consistency_markers()
+        Some(self.consistency_markers)
+    }
+}
+
+/// TODO #316
+pub trait GetStepCircuitInstances<F: PrimeField>: GetConsistencyMarkers<F> {
+    /// Returns markers that allow you to provalidate the input and output of each folding step
+    fn get_step_circuit_instances(&self) -> &[Vec<F>];
+}
+
+impl<C: CurveAffine> GetStepCircuitInstances<C::ScalarExt> for PlonkInstance<C> {
+    fn get_step_circuit_instances(&self) -> &[Vec<C::ScalarExt>] {
+        match self.instances.as_slice() {
+            [] => &[],
+            [_first, rest @ ..] => rest,
+        }
     }
 }
 

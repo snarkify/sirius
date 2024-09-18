@@ -4,8 +4,7 @@ use tracing::*;
 use super::{circuit_data::CircuitData, ConstraintSystemMetainfo, WitnessCollector};
 use crate::{
     ff::PrimeField,
-    plonk::{self, PlonkStructure},
-    polynomial::sparse::SparseMatrix,
+    plonk::{self, permutation::PermutataionData, PlonkStructure},
     util::batch_invert_assigned,
 };
 
@@ -47,9 +46,9 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
 
         debug!("start preprocessing");
         let PreprocessingData {
-            permutation_matrix,
             fixed_columns,
             selectors,
+            permutation,
         } = self.try_collect_preprocessing()?;
         debug!("preprocessing is ready");
 
@@ -63,8 +62,8 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
             round_sizes,
             custom_gates_lookup_compressed,
             gates,
-            permutation_matrix,
             lookup_arguments: plonk::lookup::Arguments::compress_from(&self.cs),
+            permutation,
         })
     }
 
@@ -99,12 +98,10 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
         )?;
 
         Ok(PreprocessingData {
-            permutation_matrix: plonk::util::construct_permutation_matrix(
-                self.k as usize,
-                &self.instances.iter().map(|i| i.len()).collect::<Box<[_]>>(),
-                &self.cs,
-                &circuit_data.permutation,
-            ),
+            permutation: PermutataionData {
+                perm_assembly: circuit_data.permutation,
+                columns: self.cs.permutation().get_columns().into_boxed_slice(),
+            },
             fixed_columns: batch_invert_assigned(&circuit_data.fixed),
             selectors: circuit_data.selector,
         })
@@ -112,7 +109,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
 }
 
 struct PreprocessingData<F: PrimeField> {
-    pub(crate) permutation_matrix: SparseMatrix<F>,
-    pub(crate) fixed_columns: Vec<Vec<F>>,
-    pub(crate) selectors: Vec<Vec<bool>>,
+    pub permutation: PermutataionData,
+    pub fixed_columns: Vec<Vec<F>>,
+    pub selectors: Vec<Vec<bool>>,
 }

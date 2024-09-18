@@ -9,7 +9,7 @@ use itertools::Itertools;
 use serde::Serialize;
 use tracing::*;
 
-use super::consistency_markers_computation::AssignedConsistencyMarkersComputationnn;
+use super::consistency_markers_computation::AssignedConsistencyMarkersComputation;
 use crate::{
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
     halo2curves::CurveAffine,
@@ -106,6 +106,7 @@ where
 impl<'link, const ARITY: usize, C, RO> StepInputs<'link, ARITY, C, RO>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C::ScalarExt: PrimeFieldBits + FromUniformBytes<64>,
     C: CurveAffine,
     RO: ROCircuitTrait<C::Base>,
 {
@@ -147,7 +148,7 @@ where
             public_params_hash: C::identity(),
             z_0: [C::Base::ZERO; ARITY],
             z_i: [C::Base::ZERO; ARITY],
-            U: RelaxedPlonkInstance::new(num_io, num_challenges, round_sizes.len()),
+            U: RelaxedPlonkInstance::new(num_challenges, round_sizes.len()),
             u: PlonkInstance::new(num_io, num_challenges, round_sizes.len()),
             step_circuit_instances: step_circuit_instances
                 .iter()
@@ -275,7 +276,7 @@ where
                 z_i: [C::Base::ZERO; ARITY],
                 cross_term_commits: vec![C::identity(); self.input.cross_term_commits.len()],
                 U: RelaxedPlonkInstance::new(
-                    instances_len,
+                    //instances_len,
                     self.input.U.challenges.len(),
                     self.input.U.W_commitments.len(),
                 ),
@@ -335,7 +336,7 @@ where
             _,
         ) = layouter
             .assign_region(
-                || "assign z_0 & z_i",
+                || "assign z_0 & z_i & sc_instances",
                 |region| {
                     let mut region = RegionCtx::new(region, 0);
 
@@ -367,6 +368,11 @@ where
 
                             Result::<_, Halo2PlonkError>::Ok(all)
                         })?;
+
+                    debug!(
+                        "flated sc-instances len is {}",
+                        flat_step_circuit_instances.len()
+                    );
 
                     Ok((z_0, z_i, flat_step_circuit_instances))
                 },
@@ -457,7 +463,7 @@ where
         // Check X0 == input_params_hash
         let (base_case_input_check, non_base_case_input_check) = layouter
             .assign_region(
-                || "generate input hash",
+                || "generate_consistency_marker_X0",
                 |region| {
                     let mut ctx = RegionCtx::new(region, 0);
 
@@ -469,7 +475,7 @@ where
                     ctx.next();
 
                     let expected_X0 =
-                        AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
+                        AssignedConsistencyMarkersComputation::<'_, RO, ARITY, T, C> {
                             random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                             public_params_hash: &w.public_params_hash,
                             step: &assigned_step,
@@ -480,10 +486,10 @@ where
                         .generate_with_inspect(
                             &mut ctx,
                             config.main_gate_config.clone(),
-                            |buf| debug!("expected X0 {buf:?}"),
+                            |buf| debug!("expected consistency marker X0 buf: {buf:?}"),
                         )?;
 
-                    debug!("expected X0: {expected_X0:?}");
+                    debug!("expected consistency marker X0: {expected_X0:?}");
                     debug!(
                         "input instance 0: {:?}",
                         w.input_consistency_markers[0].as_value
@@ -571,11 +577,11 @@ where
                 Halo2PlonkError::Synthesis
             })?;
 
-        let output_hash = layouter
+        let consistency_marker_X1 = layouter
             .assign_region(
-                || "generate output hash",
+                || "generate consistency marker X1",
                 |region| {
-                    AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
+                    AssignedConsistencyMarkersComputation::<'_, RO, ARITY, T, C> {
                         random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                         public_params_hash: &assigned_input_witness.public_params_hash,
                         step: &assigned_next_step,
@@ -586,7 +592,7 @@ where
                     .generate_with_inspect(
                         &mut RegionCtx::new(region, 0),
                         config.main_gate_config.clone(),
-                        |buf| debug!("new X0 {buf:?}"),
+                        |buf| debug!("consistency marker X1 buf: {buf:?}"),
                     )
                 },
             )
@@ -595,7 +601,7 @@ where
                 Halo2PlonkError::Synthesis
             })?;
 
-        debug!("output instance 0: {:?}", output_hash);
+        debug!("consistency marker X1: {:?}", consistency_marker_X1);
 
         // Check that old_X1 == new_X0
         layouter
@@ -613,7 +619,7 @@ where
 
         // Check that new_X1 == output_hash
         layouter
-            .constrain_instance(output_hash.cell(), config.consistency_marker, 1)
+            .constrain_instance(consistency_marker_X1.cell(), config.consistency_marker, 1)
             .map_err(|err| {
                 error!("while check that new_X1 == output_hash: {err:?}");
                 Halo2PlonkError::Synthesis

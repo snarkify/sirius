@@ -72,7 +72,7 @@ fn prepare_trace<C, F1, F2, CT>(
 >
 where
     C: CurveAffine<ScalarExt = F1, Base = F2>,
-    F1: PrimeField,
+    F1: PrimeFieldBits + FromUniformBytes<64>,
     F2: PrimeFieldBits + FromUniformBytes<64>,
     CT: Circuit<F1>,
 {
@@ -147,7 +147,7 @@ fn fold_instances<C, F1, F2>(
 ) -> Result<(), Error<C>>
 where
     C: CurveAffine<ScalarExt = F1, Base = F2>,
-    F1: PrimeField,
+    F1: PrimeFieldBits + FromUniformBytes<64>,
     F2: PrimeFieldBits + FromUniformBytes<64>,
 {
     const T: usize = 3;
@@ -156,7 +156,11 @@ where
     const R_P: usize = 3;
 
     let mut f_tr = RelaxedPlonkTrace {
-        U: RelaxedPlonkInstance::new(&S.num_io, S.num_challenges, S.round_sizes.len()),
+        U: RelaxedPlonkInstance::new(
+            //&S.num_io,
+            S.num_challenges,
+            S.round_sizes.len(),
+        ),
         W: RelaxedPlonkWitness::new(S.k, &S.round_sizes),
     };
 

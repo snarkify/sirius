@@ -1,5 +1,6 @@
-use std::{array, num::NonZeroUsize};
+use std::{array, io, num::NonZeroUsize, path::Path};
 
+use halo2_proofs::halo2curves::CurveAffine;
 use sirius::{
     commitment::CommitmentKey,
     ivc::{step_circuit::trivial, IVC},
@@ -32,8 +33,31 @@ const PRIMARY_CIRCUIT_TABLE_SIZE: usize = 17;
 const SECONDARY_COMMITMENT_KEY_SIZE: usize = 21;
 
 use sirius::prelude::bn256::{new_default_pp, C1Affine, C1Scalar, C2Affine, C2Scalar};
+use tracing::info;
+use tracing_subscriber::{filter::LevelFilter, EnvFilter};
+
+pub fn get_or_create_commitment_key<C: CurveAffine>(
+    k: usize,
+    label: &'static str,
+) -> io::Result<CommitmentKey<C>> {
+    /// Relative directory where the generated `CommitmentKey` stored
+    const CACHE_FOLDER: &str = ".cache/examples";
+
+    // Safety: Safe if you have not manually modified the generated files in [`CACHE_FOLDER`]
+    unsafe { CommitmentKey::load_or_setup_cache(Path::new(CACHE_FOLDER), label, k) }
+}
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::DEBUG.into())
+                .from_env_lossy(),
+        )
+        .init();
+
+    info!("start");
+
     let sc1 = trivial::Circuit::<A1, C1Scalar>::default();
     let sc2 = trivial::Circuit::<A2, C2Scalar>::default();
 

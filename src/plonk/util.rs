@@ -1,6 +1,6 @@
 use std::{collections::HashSet, iter};
 
-use halo2_proofs::plonk::{Any, Column, ConstraintSystem, Expression as PE};
+use halo2_proofs::plonk::{Any, Column, Expression as PE};
 use tracing::*;
 
 use crate::{
@@ -80,13 +80,12 @@ pub(crate) fn compress_expression<F: PrimeField>(
 pub(crate) fn construct_permutation_matrix<F: PrimeField>(
     k_table_size: usize,
     num_io: &[usize],
-    cs: &ConstraintSystem<F>,
+    num_advice_columns: usize,
+    perm_columns: &[Column<Any>],
     permutation: &Assembly,
 ) -> SparseMatrix<F> {
-    let perm_columns = &cs.permutation.columns;
-
     let num_rows = 1 << k_table_size;
-    let num_advice = cs.num_advice_columns();
+    let num_advice = num_advice_columns;
 
     // Lengths of each row of the matrix
     let rows_len = num_io

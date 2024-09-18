@@ -107,6 +107,8 @@ where
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
     SC1: StepCircuit<A1, C1::Scalar>,
     SC2: StepCircuit<A2, C2::Scalar>,
+    C1::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C2::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
     primary: StepCircuitContext<A1, C1, SC1>,
     secondary: StepCircuitContext<A2, C2, SC2>,
@@ -211,7 +213,8 @@ where
 
         // Prepare primary constraint system for folding
         let primary_consistency_marker = {
-            let _s = info_span!("generate_instance").entered();
+            let _s = info_span!("generate_consistency_markers").entered();
+
             [
                 util::fe_to_fe(
                     &secondary_pre_round_plonk_trace
@@ -234,6 +237,8 @@ where
             ]
         };
 
+        debug!("Primary consistency markers: {primary_consistency_marker:?}");
+
         let primary_sfc = StepFoldingCircuit::<'_, A1, C2, SC1, RP1::OnCircuit, T> {
             step_circuit: primary,
             input: StepInputs::<'_, A1, C2, RP1::OnCircuit> {
@@ -255,7 +260,7 @@ where
         let primary_instances = primary_sfc.instances(primary_consistency_marker);
 
         if debug_mode {
-            let _s = debug_span!("debug").entered();
+            let _s = debug_span!("mock").entered();
             MockProver::run(
                 pp.primary.k_table_size(),
                 &primary_sfc,
@@ -323,6 +328,8 @@ where
                 .generate_with_inspect(|buf| debug!("secondary X1 zero-step: {buf:?}")),
             ]
         };
+
+        debug!("Secondary consistency marker: {secondary_consistency_marker:?}");
 
         let secondary_sfc = StepFoldingCircuit::<'_, A2, C1, SC2, RP2::OnCircuit, T> {
             step_circuit: secondary,

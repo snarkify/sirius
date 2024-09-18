@@ -152,13 +152,22 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct PoseidonHash<F: PrimeField, const T: usize, const RATE: usize>
+pub struct PoseidonHash<F: PrimeField, const T: usize = 5, const RATE: usize = 4>
 where
     F: PrimeFieldBits + FromUniformBytes<64>,
 {
     spec: Spec<F, T, RATE>,
     state: State<F, T, RATE>,
     buf: Vec<F>,
+}
+
+impl<F: PrimeField> Default for PoseidonHash<F, 5, 4>
+where
+    F: PrimeFieldBits + FromUniformBytes<64>,
+{
+    fn default() -> Self {
+        Self::new(Spec::default())
+    }
 }
 
 impl<F: PrimeField, const T: usize, const RATE: usize> PoseidonHash<F, T, RATE>

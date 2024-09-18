@@ -19,6 +19,7 @@ use serde::Serialize;
 use some_to_err::*;
 use tracing::{debug, error, info, info_span, instrument, warn};
 
+use self::permutation::PermutataionData;
 use crate::{
     commitment::CommitmentKey,
     concat_vec,
@@ -156,7 +157,7 @@ pub struct PlonkStructure<F: PrimeField> {
     #[serde(skip_serializing)]
     pub(crate) gates: Vec<Expression<F>>,
 
-    pub(crate) permutation_matrix: SparseMatrix<F>,
+    pub(crate) permutation: plonk::permutation::PermutataionData,
     pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
 }
 
@@ -287,6 +288,10 @@ impl<F: PrimeField> PlonkStructure<F> {
     /// each lookup argument will add 5 variables (l,t,m,h,g)
     pub fn num_fold_vars(&self) -> usize {
         self.num_advice_columns + 5 * self.num_lookups()
+    }
+
+    pub fn num_instances(&self) -> usize {
+        self.num_io.len()
     }
 
     pub fn num_lookups(&self) -> usize {
@@ -655,6 +660,23 @@ impl<F: PrimeField> PlonkStructure<F> {
                 W: vec![W1, W2, W3],
             },
         })
+    }
+
+    pub fn rows_lens(&self) -> Box<[usize]> {
+        self.num_io
+            .iter()
+            .copied()
+            .chain(iter::repeat(1 << self.k).take(self.num_advice_columns))
+            .collect::<Box<[_]>>()
+    }
+
+    pub fn permutation_matrix(&self) -> SparseMatrix<F> {
+        self.permutation
+            .matrix(self.k, &self.num_io, self.num_advice_columns)
+    }
+
+    pub(crate) fn permutation_data(&self) -> &PermutataionData {
+        &self.permutation
     }
 }
 
