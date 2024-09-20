@@ -1,4 +1,4 @@
-/// Module name acronym `instance_computation` -> `icomp`
+/// Module name acronym `consistency_marker_computation` -> `consistency_comp`
 use std::num::NonZeroUsize;
 
 use serde::Serialize;
@@ -15,7 +15,7 @@ use crate::{
     util,
 };
 
-pub(crate) struct AssignedRandomOracleComputationInstance<
+pub(crate) struct AssignedConsistencyMarkersComputationnn<
     'l,
     RP,
     const A: usize,
@@ -34,7 +34,7 @@ pub(crate) struct AssignedRandomOracleComputationInstance<
 }
 
 impl<'l, const A: usize, const T: usize, C: CurveAffine, RO>
-    AssignedRandomOracleComputationInstance<'l, RO, A, T, C>
+    AssignedConsistencyMarkersComputationnn<'l, RO, A, T, C>
 where
     C::Base: FromUniformBytes<64> + PrimeFieldBits,
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
@@ -65,7 +65,7 @@ where
     }
 }
 
-pub(crate) struct RandomOracleComputationInstance<'l, const A: usize, C, RP>
+pub(crate) struct ConsistencyMarkerComputation<'l, const A: usize, C, RP>
 where
     RP: ROTrait<C::Base>,
     C: CurveAffine + Serialize,
@@ -80,7 +80,7 @@ where
     pub limbs_count: NonZeroUsize,
 }
 
-impl<'l, C, RP, const A: usize> RandomOracleComputationInstance<'l, A, C, RP>
+impl<'l, C, RP, const A: usize> ConsistencyMarkerComputation<'l, A, C, RP>
 where
     RP: ROTrait<C::Base>,
     C: CurveAffine + Serialize,
@@ -222,7 +222,7 @@ mod tests {
             u: Scalar::from_u128(u128::MAX),
         };
 
-        let off_circuit_hash: Base = RandomOracleComputationInstance::<
+        let off_circuit_hash: Base = ConsistencyMarkerComputation::<
             '_,
             10,
             C1,
@@ -287,7 +287,7 @@ mod tests {
                     .assign_current_relaxed(&mut ctx)
                     .unwrap();
 
-                    AssignedRandomOracleComputationInstance::<
+                    AssignedConsistencyMarkersComputationnn::<
                             PoseidonChip<Base, 10, 9>,
                             10,
                             10,

@@ -9,7 +9,7 @@ use itertools::Itertools;
 use serde::Serialize;
 use tracing::*;
 
-use super::instance_computation::AssignedRandomOracleComputationInstance;
+use super::consistency_markers_computation::AssignedConsistencyMarkersComputationnn;
 use crate::{
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
     halo2curves::CurveAffine,
@@ -110,7 +110,7 @@ where
     RO: ROCircuitTrait<C::Base>,
 {
     pub fn num_io(&self) -> Box<[usize]> {
-        iter::once(vanilla::CONSISTENCY_MARKER_COUNT)
+        iter::once(vanilla::CONSISTENCY_MARKERS_COUNT)
             .chain(
                 self.step_circuit_instances
                     .iter()
@@ -139,7 +139,7 @@ where
             panic!("Empty instances not expected, because consistency markers");
         };
 
-        assert_eq!(consistency_markers, &vanilla::CONSISTENCY_MARKER_COUNT);
+        assert_eq!(consistency_markers, &vanilla::CONSISTENCY_MARKERS_COUNT);
 
         Self {
             step: C::Base::ZERO,
@@ -469,7 +469,7 @@ where
                     ctx.next();
 
                     let expected_X0 =
-                        AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
+                        AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
                             random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                             public_params_hash: &w.public_params_hash,
                             step: &assigned_step,
@@ -484,14 +484,17 @@ where
                         )?;
 
                     debug!("expected X0: {expected_X0:?}");
-                    debug!("input instance 0: {:?}", w.input_instance[0].0);
+                    debug!(
+                        "input instance 0: {:?}",
+                        w.input_consistency_markers[0].as_value
+                    );
 
                     Ok((
                         base_case_input_check,
                         MainGate::new(config.main_gate_config.clone()).is_equal_term(
                             &mut ctx,
                             &expected_X0,
-                            &w.input_instance[0].0,
+                            &w.input_consistency_markers[0].as_value,
                         )?,
                     ))
                 },
@@ -572,7 +575,7 @@ where
             .assign_region(
                 || "generate output hash",
                 |region| {
-                    AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
+                    AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
                         random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                         public_params_hash: &assigned_input_witness.public_params_hash,
                         step: &assigned_next_step,
@@ -597,7 +600,9 @@ where
         // Check that old_X1 == new_X0
         layouter
             .constrain_instance(
-                assigned_input_witness.input_instance[1].0.cell(),
+                assigned_input_witness.input_consistency_markers[1]
+                    .as_value
+                    .cell(),
                 config.consistency_marker,
                 0,
             )

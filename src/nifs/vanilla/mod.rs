@@ -383,7 +383,7 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
 }
 
 /// Number of consistency markers in instance column
-pub const CONSISTENCY_MARKER_COUNT: usize = 2;
+pub const CONSISTENCY_MARKERS_COUNT: usize = 2;
 
 /// As part of the vanilla folding scheme, we use the values in the zero instance of the column for
 /// consistency between folding steps
@@ -394,7 +394,7 @@ pub const CONSISTENCY_MARKER_COUNT: usize = 2;
 ///     hash of the state at the end of previous folding step
 /// - X1 is a hash of the state at the end of the current folding step
 pub trait GetConsistencyMarkers<F> {
-    fn get_consistency_markers(&self) -> Option<[F; CONSISTENCY_MARKER_COUNT]>;
+    fn get_consistency_markers(&self) -> Option<[F; CONSISTENCY_MARKERS_COUNT]>;
 }
 
 impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for PlonkInstance<C> {
