@@ -14,14 +14,13 @@ use crate::{
     halo2curves::CurveAffine,
     ivc::{
         self,
-        instance_computation::RandomOracleComputationInstance,
+        consistency_markers_computation::ConsistencyMarkerComputation,
         step_folding_circuit::{StepFoldingCircuit, StepInputs},
-        NUM_IO,
     },
     main_gate::MainGateConfig,
     nifs::{
         self,
-        vanilla::{GetConsistencyMarkers, VanillaFS},
+        vanilla::{GetConsistencyMarkers, VanillaFS, CONSISTENCY_MARKERS_COUNT},
         FoldingScheme,
     },
     plonk::{PlonkStructure, PlonkTrace},
@@ -267,13 +266,14 @@ where
                     StepFoldingCircuit<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T>,
                 >(
                     primary.k_table_size,
-                    &iter::once(NUM_IO)
+                    &iter::once(CONSISTENCY_MARKERS_COUNT)
                         .chain(primary.step_circuit.instances().iter().map(Vec::len))
                         .collect::<Box<[_]>>(),
                     &primary_step_params,
                 ),
             };
-            let primary_instances = primary_sfc.instances([C1::Scalar::ZERO; NUM_IO]);
+            let primary_instances =
+                primary_sfc.instances([C1::Scalar::ZERO; CONSISTENCY_MARKERS_COUNT]);
 
             CircuitRunner::new(primary.k_table_size, primary_sfc, primary_instances)
                 .try_collect_plonk_structure()
@@ -285,13 +285,15 @@ where
             let secondary_initial_step_params =
                 StepParams::new(limb_width, limbs_count, secondary.ro_constant.clone());
 
+            let secondary_num_io = iter::once(CONSISTENCY_MARKERS_COUNT)
+                .chain(secondary.step_circuit.instances().iter().map(Vec::len))
+                .collect::<Box<[_]>>();
+
             let secondary_initial_step_input = StepInputs::without_witness::<
                 StepFoldingCircuit<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T>,
             >(
                 secondary.k_table_size,
-                &iter::once(NUM_IO)
-                    .chain(secondary.step_circuit.instances().iter().map(Vec::len))
-                    .collect::<Box<[_]>>(),
+                &secondary_num_io,
                 &secondary_initial_step_params,
             );
 
@@ -303,7 +305,7 @@ where
                         .expect("For `vanilla::FoldingScheme` should always be")[0],
                 )
                 .unwrap(),
-                RandomOracleComputationInstance::<'_, A2, C1, RP2::OffCircuit> {
+                ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: secondary.ro_constant.clone(),
                     public_params_hash: &secondary_initial_step_input.public_params_hash,
                     step: 1,

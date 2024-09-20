@@ -9,7 +9,7 @@ use itertools::Itertools;
 use serde::Serialize;
 use tracing::*;
 
-use super::instance_computation::AssignedRandomOracleComputationInstance;
+use super::consistency_markers_computation::AssignedConsistencyMarkersComputationnn;
 use crate::{
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
     halo2curves::CurveAffine,
@@ -110,7 +110,7 @@ where
     RO: ROCircuitTrait<C::Base>,
 {
     pub fn num_io(&self) -> Box<[usize]> {
-        iter::once(vanilla::CONSISTENCY_MARKER_COUNT)
+        iter::once(vanilla::CONSISTENCY_MARKERS_COUNT)
             .chain(
                 self.step_circuit_instances
                     .iter()
@@ -135,6 +135,12 @@ where
             ..
         } = ConstraintSystemMetainfo::build(k_table_size as usize, &cs);
 
+        let Some((consistency_markers, step_circuit_instances)) = num_io.split_first() else {
+            panic!("Empty instances not expected, because consistency markers");
+        };
+
+        assert_eq!(consistency_markers, &vanilla::CONSISTENCY_MARKERS_COUNT);
+
         Self {
             step: C::Base::ZERO,
             step_pp,
@@ -143,9 +149,8 @@ where
             z_i: [C::Base::ZERO; ARITY],
             U: RelaxedPlonkInstance::new(num_io, num_challenges, round_sizes.len()),
             u: PlonkInstance::new(num_io, num_challenges, round_sizes.len()),
-            step_circuit_instances: num_io
+            step_circuit_instances: step_circuit_instances
                 .iter()
-                .skip(1)
                 .map(|len| vec![C::Base::ZERO; *len])
                 .collect(),
             cross_term_commits: vec![C::identity(); folding_degree.saturating_sub(1)],
@@ -290,8 +295,8 @@ where
     }
 
     fn configure(cs: &mut ConstraintSystem<C::Base>) -> Self::Config {
-        let instance = cs.instance_column();
-        cs.enable_equality(instance);
+        let consistency_markers = cs.instance_column();
+        cs.enable_equality(consistency_markers);
 
         let main_gate_config = MainGate::configure(cs);
         let before = cs.num_instance_columns();
@@ -300,14 +305,14 @@ where
 
         let step_circuit_instances = (1..=(after - before))
             .map(|index| {
-                let mut i = instance;
+                let mut i = consistency_markers;
                 i.index = index;
                 i
             })
             .collect();
 
         StepConfig {
-            consistency_marker: instance,
+            consistency_marker: consistency_markers,
             step_config,
             main_gate_config,
             step_circuit_instances,
@@ -350,11 +355,9 @@ where
                         .iter()
                         .enumerate()
                         .try_fold(vec![], |mut all, (column_index, instance_column_values)| {
-                            let instance_column = assigner.assign_all_advice(
-                                &mut region,
-                                || "instance",
-                                instance_column_values.iter().cloned(),
-                            )?;
+                            let value = instance_column_values.iter().cloned();
+                            let instance_column =
+                                assigner.assign_all_advice(&mut region, || "instance", value)?;
 
                             all.extend(
                                 instance_column.into_iter().enumerate().map(
@@ -466,7 +469,7 @@ where
                     ctx.next();
 
                     let expected_X0 =
-                        AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
+                        AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
                             random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                             public_params_hash: &w.public_params_hash,
                             step: &assigned_step,
@@ -481,14 +484,17 @@ where
                         )?;
 
                     debug!("expected X0: {expected_X0:?}");
-                    debug!("input instance 0: {:?}", w.input_instance[0].0);
+                    debug!(
+                        "input instance 0: {:?}",
+                        w.input_consistency_markers[0].as_value
+                    );
 
                     Ok((
                         base_case_input_check,
                         MainGate::new(config.main_gate_config.clone()).is_equal_term(
                             &mut ctx,
                             &expected_X0,
-                            &w.input_instance[0].0,
+                            &w.input_consistency_markers[0].as_value,
                         )?,
                     ))
                 },
@@ -569,7 +575,7 @@ where
             .assign_region(
                 || "generate output hash",
                 |region| {
-                    AssignedRandomOracleComputationInstance::<'_, RO, ARITY, T, C> {
+                    AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
                         random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                         public_params_hash: &assigned_input_witness.public_params_hash,
                         step: &assigned_next_step,
@@ -594,7 +600,9 @@ where
         // Check that old_X1 == new_X0
         layouter
             .constrain_instance(
-                assigned_input_witness.input_instance[1].0.cell(),
+                assigned_input_witness.input_consistency_markers[1]
+                    .as_value
+                    .cell(),
                 config.consistency_marker,
                 0,
             )

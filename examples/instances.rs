@@ -1,9 +1,12 @@
 /// This example is the debugging code for #319
 ///
 /// When this task is closed, it should be an example of using public input in a step-circuit
-use std::{array, num::NonZeroUsize};
+use std::{array, fs, io, num::NonZeroUsize, path::Path};
 
-use halo2_proofs::plonk::{Column, Instance};
+use halo2_proofs::{
+    halo2curves::CurveAffine,
+    plonk::{Column, Instance},
+};
 use sirius::{
     ivc::{
         step_circuit::{trivial, AssignedCell, ConstraintSystem, Layouter},
@@ -14,9 +17,13 @@ use sirius::{
         CommitmentKey, PrimeField, StepCircuit, IVC,
     },
 };
+use tracing::debug;
+use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
+
+const INSTANCES_LEN: usize = 2;
 
 /// Number of folding steps
-const FOLD_STEP_COUNT: usize = 5;
+const FOLD_STEP_COUNT: usize = 1;
 
 /// Arity : Input/output size per fold-step for primary step-circuit
 const A1: usize = 5;
@@ -84,15 +91,47 @@ impl<const N: usize, const A: usize, F: PrimeField> StepCircuit<A, F> for Instan
     }
 }
 
+fn get_or_create_commitment_key<C: CurveAffine>(
+    k: usize,
+    label: &'static str,
+) -> io::Result<CommitmentKey<C>> {
+    const FOLDER: &str = ".cache/examples";
+
+    let file_path = Path::new(FOLDER).join(label).join(format!("{k}.bin"));
+
+    if file_path.exists() {
+        debug!("{file_path:?} exists, load key");
+        unsafe { CommitmentKey::load_from_file(&file_path, k) }
+    } else {
+        debug!("{file_path:?} not exists, start generate");
+        let key = CommitmentKey::setup(k, label.as_bytes());
+        fs::create_dir_all(file_path.parent().unwrap())?;
+        unsafe {
+            key.save_to_file(&file_path)?;
+        }
+        Ok(key)
+    }
+}
+
 fn main() {
-    let sc1 = InstancesCircuit::<1> {};
+    tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .init();
+
+    let sc1 = InstancesCircuit::<INSTANCES_LEN> {};
     let sc2 = trivial::Circuit::<A2, C2Scalar>::default();
 
     let primary_commitment_key =
-        CommitmentKey::<C1Affine>::setup(PRIMARY_COMMITMENT_KEY_SIZE, b"bn256");
+        get_or_create_commitment_key::<C1Affine>(PRIMARY_COMMITMENT_KEY_SIZE, "bn256").unwrap();
 
     let secondary_commitment_key =
-        CommitmentKey::<C2Affine>::setup(SECONDARY_COMMITMENT_KEY_SIZE, b"grumpkin");
+        get_or_create_commitment_key::<C2Affine>(SECONDARY_COMMITMENT_KEY_SIZE, "grumpkin")
+            .unwrap();
 
     let pp = new_default_pp::<A1, _, A2, _>(
         SECONDARY_CIRCUIT_TABLE_SIZE as u32,
@@ -112,4 +151,6 @@ fn main() {
         NonZeroUsize::new(FOLD_STEP_COUNT).unwrap(),
     )
     .unwrap();
+
+    println!("success");
 }

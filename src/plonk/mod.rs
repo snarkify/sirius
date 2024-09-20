@@ -164,7 +164,6 @@ pub struct PlonkStructure<F: PrimeField> {
 pub struct PlonkInstance<C: CurveAffine> {
     /// `W_commitments = round_sizes.len()`, see [`PlonkStructure::round_sizes`]
     pub(crate) W_commitments: Vec<C>,
-    /// inst = [X0, X1]
     pub(crate) instances: Vec<Vec<C::ScalarExt>>,
     /// challenges generated in special soundness protocol
     /// we will have 0 ~ 3 challenges depending on different cases:

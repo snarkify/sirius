@@ -194,7 +194,6 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         pp: &VanillaFSProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
-        assert!(instances.len() <= 1, "TODO #316");
         Ok(pp
             .S
             .run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)?)
@@ -344,12 +343,14 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
             .copied()
             .collect::<Vec<_>>();
 
-        let y = sparse::matrix_multiply(&S.permutation_matrix, &Z);
-        let mismatch_count = y
+        let mismatch_count = sparse::matrix_multiply(&S.permutation_matrix, &Z)
             .into_iter()
-            .zip(Z)
-            .map(|(y, z)| y - z)
-            .filter(|d| C::ScalarExt::ZERO.ne(d))
+            .zip_eq(Z)
+            .enumerate()
+            .filter_map(|(row, (y, z))| C::ScalarExt::ZERO.ne(&(y - z)).then_some(row))
+            .inspect(|row| {
+                warn!("permutation mismatch at {row}");
+            })
             .count();
 
         if mismatch_count == 0 {
@@ -382,7 +383,7 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
 }
 
 /// Number of consistency markers in instance column
-pub const CONSISTENCY_MARKER_COUNT: usize = 2;
+pub const CONSISTENCY_MARKERS_COUNT: usize = 2;
 
 /// As part of the vanilla folding scheme, we use the values in the zero instance of the column for
 /// consistency between folding steps
@@ -393,7 +394,7 @@ pub const CONSISTENCY_MARKER_COUNT: usize = 2;
 ///     hash of the state at the end of previous folding step
 /// - X1 is a hash of the state at the end of the current folding step
 pub trait GetConsistencyMarkers<F> {
-    fn get_consistency_markers(&self) -> Option<[F; CONSISTENCY_MARKER_COUNT]>;
+    fn get_consistency_markers(&self) -> Option<[F; CONSISTENCY_MARKERS_COUNT]>;
 }
 
 impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for PlonkInstance<C> {
