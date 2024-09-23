@@ -183,6 +183,12 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
         pp_digest: C,
         S: PlonkStructure<C::ScalarExt>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
+        assert_eq!(
+            S.num_io.as_ref(),
+            &[2],
+            "TODO Until #316 is done completely"
+        );
+
         Ok((VanillaFSProverParam { S, pp_digest }, pp_digest))
     }
 
@@ -336,9 +342,9 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
         let RelaxedPlonkTrace { U, W } = acc;
 
         let Z = U
-            .instances
+            .instances()
             .iter()
-            .flat_map(|inst| inst.iter())
+            .flat_map(|i| i.iter())
             .chain(W.W[0].iter().take((1 << S.k) * S.num_advice_columns))
             .copied()
             .collect::<Vec<_>>();
@@ -411,7 +417,7 @@ impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for PlonkInstance<C> {
 
 impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for RelaxedPlonkInstance<C> {
     fn get_consistency_markers(&self) -> Option<[C::ScalarExt; 2]> {
-        self.inner.get_consistency_markers()
+        Some(self.consistency_markers)
     }
 }
 
