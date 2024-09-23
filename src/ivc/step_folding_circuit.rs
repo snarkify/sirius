@@ -9,7 +9,7 @@ use itertools::Itertools;
 use serde::Serialize;
 use tracing::*;
 
-use super::consistency_markers_computation::AssignedConsistencyMarkersComputationnn;
+use super::consistency_markers_computation::AssignedConsistencyMarkersComputation;
 use crate::{
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
     halo2curves::CurveAffine,
@@ -469,7 +469,7 @@ where
                     ctx.next();
 
                     let expected_X0 =
-                        AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
+                        AssignedConsistencyMarkersComputation::<'_, RO, ARITY, T, C> {
                             random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                             public_params_hash: &w.public_params_hash,
                             step: &assigned_step,
@@ -575,7 +575,7 @@ where
             .assign_region(
                 || "generate output hash",
                 |region| {
-                    AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
+                    AssignedConsistencyMarkersComputation::<'_, RO, ARITY, T, C> {
                         random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                         public_params_hash: &assigned_input_witness.public_params_hash,
                         step: &assigned_next_step,
