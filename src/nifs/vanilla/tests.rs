@@ -250,12 +250,10 @@ fn zero_round_test() -> Result<(), Error<G1Affine>> {
     let inputs1 = (1..10).map(Fr::from).collect();
     let inputs2 = (2..11).map(Fr::from).collect();
     let circuit1 = RandomLinearCombinationCircuit::new(inputs1, Fr::from_u128(2));
-    let output1 = Fr::from_u128(4097);
-    let public_inputs1 = vec![output1];
+    let public_inputs1 = vec![Fr::from_u128(4097), Fr::ZERO];
 
     let circuit2 = RandomLinearCombinationCircuit::new(inputs2, Fr::from_u128(3));
-    let output2 = Fr::from_u128(93494);
-    let public_inputs2 = vec![output2];
+    let public_inputs2 = vec![Fr::from_u128(93494), Fr::ZERO];
 
     let (ck, S, pair1, pair2) = prepare_trace(
         K,
@@ -280,7 +278,7 @@ fn one_round_test() -> Result<(), Error<G1Affine>> {
         b: Fr::from(seq[1]),
         num: SIZE,
     };
-    let public_inputs1 = vec![Fr::from(seq[SIZE - 1])];
+    let public_inputs1 = vec![Fr::from(seq[SIZE - 1]), Fr::ZERO];
 
     // circuit 2
     let seq = get_fibo_seq(2, 3, SIZE);
@@ -289,7 +287,7 @@ fn one_round_test() -> Result<(), Error<G1Affine>> {
         b: Fr::from(seq[1]),
         num: SIZE,
     };
-    let public_inputs2 = vec![Fr::from(seq[SIZE - 1])];
+    let public_inputs2 = vec![Fr::from(seq[SIZE - 1]), Fr::ZERO];
 
     let (ck, S, pair1, pair2) = prepare_trace(
         K,

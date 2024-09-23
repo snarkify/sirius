@@ -9,6 +9,8 @@ use halo2_proofs::{
 use crate::{ff::PrimeField, halo2curves::group::ff::FromUniformBytes};
 
 pub(crate) mod random_linear_combination_circuit {
+    use std::array;
+
     use super::*;
     use crate::main_gate::{MainGate, MainGateConfig, RegionCtx};
 
@@ -17,7 +19,7 @@ pub(crate) mod random_linear_combination_circuit {
     #[derive(Clone, Debug)]
     pub struct TestCircuitConfig {
         pconfig: MainGateConfig<T>,
-        instance: Column<Instance>,
+        instance: [Column<Instance>; 2],
     }
 
     pub struct RandomLinearCombinationCircuit<F: PrimeField> {
@@ -43,8 +45,12 @@ pub(crate) mod random_linear_combination_circuit {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            let instance = meta.instance_column();
-            meta.enable_equality(instance);
+            let instance = array::from_fn(|_| meta.instance_column());
+
+            instance.iter().for_each(|inst| {
+                meta.enable_equality(*inst);
+            });
+
             Self::Config {
                 pconfig: MainGate::configure(meta),
                 instance,
@@ -64,7 +70,8 @@ pub(crate) mod random_linear_combination_circuit {
                     pchip.random_linear_combination(ctx, self.inputs.clone(), self.r)
                 },
             )?;
-            layouter.constrain_instance(output.cell(), config.instance, 0)?;
+            layouter.constrain_instance(output.cell(), config.instance[0], 0)?;
+
             Ok(())
         }
     }
@@ -73,6 +80,8 @@ pub(crate) mod random_linear_combination_circuit {
 // test multiple gates without lookup
 // test example adapted from https://github.com/icemelon/halo2-tutorial
 pub(crate) mod fibo_circuit {
+    use std::array;
+
     use super::*;
 
     #[derive(Clone)]
@@ -83,7 +92,7 @@ pub(crate) mod fibo_circuit {
         a: Column<Advice>,
         b: Column<Advice>,
         selector: Selector,
-        instance: Column<Instance>,
+        instance: [Column<Instance>; 2],
     }
 
     struct FiboChip<F: PrimeField> {
@@ -103,13 +112,15 @@ pub(crate) mod fibo_circuit {
             meta: &mut ConstraintSystem<F>,
             advice: [Column<Advice>; 2],
             selector: Selector,
-            instance: Column<Instance>,
+            instance: [Column<Instance>; 2],
         ) -> FiboConfig {
             let a = advice[0];
             let b = advice[1];
 
             meta.enable_equality(b);
-            meta.enable_equality(instance);
+            instance.iter().for_each(|inst| {
+                meta.enable_equality(*inst);
+            });
 
             meta.create_gate("fibo-block", |meta| {
                 let s = meta.query_selector(selector);
@@ -175,7 +186,7 @@ pub(crate) mod fibo_circuit {
             num: Number<F>,
             row: usize,
         ) -> Result<(), plonk::Error> {
-            layouter.constrain_instance(num.0.cell(), self.config.instance, row)
+            layouter.constrain_instance(num.0.cell(), self.config.instance[0], row)
         }
     }
 
@@ -197,7 +208,7 @@ pub(crate) mod fibo_circuit {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let advice = [meta.advice_column(), meta.advice_column()];
             let selector = meta.selector();
-            let instance = meta.instance_column();
+            let instance = array::from_fn(|_| meta.instance_column());
             FiboChip::configure(meta, advice, selector, instance)
         }
 
@@ -228,6 +239,8 @@ pub(crate) mod fibo_circuit {
 // test vector lookup
 // test example adapted from https://github.com/icemelon/halo2-tutorial
 pub(crate) mod fibo_circuit_with_lookup {
+    use std::array;
+
     use halo2_proofs::{circuit::Chip, plonk::TableColumn};
     use num_bigint::BigUint as BigUintRaw;
 
@@ -248,6 +261,7 @@ pub(crate) mod fibo_circuit_with_lookup {
         s_add: Selector,
         s_xor: Selector,
         xor_table: [TableColumn; 3],
+        instances: [Column<Instance>; 2],
     }
 
     pub struct FiboChip<F: PrimeField> {
@@ -321,6 +335,7 @@ pub(crate) mod fibo_circuit_with_lookup {
                 s_add,
                 s_xor,
                 xor_table,
+                instances: array::from_fn(|_| meta.instance_column()),
             }
         }
 
