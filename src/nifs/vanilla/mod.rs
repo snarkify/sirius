@@ -373,9 +373,12 @@ where
             .into_iter()
             .zip_eq(Z)
             .enumerate()
-            .filter_map(|(row, (y, z))| C::ScalarExt::ZERO.ne(&(y - z)).then_some(row))
-            .inspect(|row| {
-                warn!("permutation mismatch at {row}");
+            .filter_map(|(row, (y, z))| {
+                let diff = y - z;
+                C::ScalarExt::ZERO.ne(&diff).then(|| {
+                    warn!("permutation mismatch at {row} with {diff:?}");
+                    Some(row)
+                })
             })
             .count();
 

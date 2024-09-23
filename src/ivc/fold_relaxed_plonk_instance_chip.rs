@@ -50,6 +50,7 @@ use itertools::Itertools;
 use num_traits::Num;
 use tracing::*;
 
+use super::instances_accumulator_computation;
 use crate::{
     constants::NUM_CHALLENGE_BITS,
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
@@ -67,7 +68,7 @@ use crate::{
     },
     nifs::vanilla::{accumulator::RelaxedPlonkInstance, GetConsistencyMarkers},
     plonk::PlonkInstance,
-    poseidon::{poseidon_circuit::PoseidonChip, ROCircuitTrait, Spec},
+    poseidon::ROCircuitTrait,
     util::{self, CellsValuesView},
 };
 
@@ -634,13 +635,14 @@ where
         input_instances: &[AssignedValue<C::Base>],
         folded_instances: &AssignedValue<C::Base>,
     ) -> Result<AssignedValue<C::Base>, Error> {
-        Ok(PoseidonChip::<C::Base, 5, 4>::new(
-            config.into_smaller_size().expect("T should be >= 5"),
-            Spec::default(),
+        Ok(
+            instances_accumulator_computation::fold_assign_step_circuit_instances_hash_accumulator(
+                ctx,
+                config.into_smaller_size().unwrap(),
+                input_instances,
+                folded_instances,
+            )?,
         )
-        .absorb_base(folded_instances.into())
-        .absorb_iter(input_instances.iter())
-        .squeeze(ctx)?)
     }
 
     /// Fold [`RelaxedPlonkInstance::challenges`] & [`PlonkInstance::challenges`]
@@ -1139,6 +1141,14 @@ mod tests {
         (witness, config)
     }
 
+    fn plonk_instance<C: CurveAffine>() -> PlonkInstance<C> {
+        PlonkInstance {
+            W_commitments: vec![],
+            instances: vec![vec![C::ScalarExt::ZERO, C::ScalarExt::ZERO]],
+            challenges: vec![],
+        }
+    }
+
     fn random_curve_vec(mut rnd: impl Rng) -> Vec<C1> {
         iter::repeat_with(|| C1::random(&mut rnd))
             .take(NUM_WITNESS)
@@ -1336,7 +1346,7 @@ mod tests {
             plonk = plonk.fold(
                 &PlonkInstance {
                     W_commitments: input_W.clone(),
-                    instances: vec![vec![]],
+                    instances: vec![vec![ScalarExt::ZERO, ScalarExt::ZERO]],
                     challenges: vec![],
                 },
                 &[],
@@ -1433,15 +1443,7 @@ mod tests {
 
             assert_eq!(plonk.E_commitment, folded_E);
 
-            plonk = plonk.fold(
-                &PlonkInstance {
-                    W_commitments: vec![],
-                    instances: vec![vec![]],
-                    challenges: vec![],
-                },
-                &cross_term_commits,
-                &r,
-            );
+            plonk = plonk.fold(&plonk_instance(), &cross_term_commits, &r);
 
             let off_circuit_E_coordinates = plonk.E_commitment.coordinates().unwrap();
             let off_circuit_E_x = *off_circuit_E_coordinates.x();
@@ -1715,7 +1717,7 @@ mod tests {
             relaxed_plonk = relaxed_plonk.fold(
                 &PlonkInstance {
                     W_commitments: vec![],
-                    instances: vec![vec![]],
+                    instances: vec![vec![ScalarExt::ZERO, ScalarExt::ZERO]],
                     challenges: input_challenges.to_vec(),
                 },
                 &[],

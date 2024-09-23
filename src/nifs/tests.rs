@@ -45,10 +45,10 @@ pub(crate) mod random_linear_combination_circuit {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            let instance = array::from_fn(|_| meta.instance_column());
-
-            instance.iter().for_each(|inst| {
-                meta.enable_equality(*inst);
+            let instance = array::from_fn(|_| {
+                let i = meta.instance_column();
+                meta.enable_equality(i);
+                i
             });
 
             Self::Config {

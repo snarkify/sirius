@@ -8,12 +8,12 @@ use itertools::Itertools;
 use rayon::prelude::*;
 use tracing::{debug, instrument, warn};
 
-use super::{GetConsistencyMarkers, CONSISTENCY_MARKERS_COUNT};
+use super::CONSISTENCY_MARKERS_COUNT;
 use crate::{
     commitment::CommitmentKey,
     ff::{Field, PrimeField},
     ivc::instances_accumulator_computation,
-    nifs::vanilla::GetStepCircuitInstances,
+    nifs::vanilla::{GetConsistencyMarkers, GetStepCircuitInstances},
     plonk::{self, GetChallenges, GetWitness, PlonkInstance, PlonkTrace, PlonkWitness},
     poseidon::{AbsorbInRO, ROTrait},
     util,
@@ -45,7 +45,7 @@ where
     C::ScalarExt: PrimeFieldBits + FromUniformBytes<64>,
 {
     pub fn from_regular(inner: PlonkInstance<C>) -> Self {
-        let consistency_markers = inner.get_consistency_markers().expect("TODO #316");
+        let consistency_markers = inner.get_consistency_markers().unwrap();
         let W_commitments = inner.W_commitments.clone();
 
         RelaxedPlonkInstance {
@@ -54,10 +54,11 @@ where
             W_commitments,
             consistency_markers,
             instances_hash_accumulator:
-                instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator(
-                    &C::ScalarExt::ZERO,
-                    inner.get_step_circuit_instances(),
-                ),
+                instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator::<
+                    C::Scalar,
+                    C::Base,
+                >(&C::Scalar::ZERO, inner.get_step_circuit_instances()),
+
             challenges: inner.challenges,
         }
     }
@@ -76,10 +77,10 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             E_commitment: CommitmentKey::<C>::default_value(),
             u: Self::DEFAULT_u,
             instances_hash_accumulator:
-                instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator(
-                    &C::ScalarExt::ZERO,
-                    &[],
-                ),
+                instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator::<
+                    C::Scalar,
+                    C::Base,
+                >(&C::ScalarExt::ZERO, &[]),
         }
     }
 
@@ -150,9 +151,12 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             .fold(self.E_commitment, |acc, x| (acc + x).into());
 
         let instances_hash_accumulator =
-            instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator(
+            instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator::<
+                C::ScalarExt,
+                C::Base,
+            >(
                 &self.instances_hash_accumulator,
-                &U2.instances,
+                U2.get_step_circuit_instances(),
             );
 
         RelaxedPlonkInstance {
@@ -161,7 +165,7 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             u,
             E_commitment: comm_E,
             consistency_markers,
-            instances_hash_accumulator: util::fe_to_fe(&instances_hash_accumulator).unwrap(),
+            instances_hash_accumulator,
         }
     }
 }
