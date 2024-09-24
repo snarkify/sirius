@@ -349,7 +349,7 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
             .copied()
             .collect::<Vec<_>>();
 
-        let mismatch_count = sparse::matrix_multiply(&S.permutation_matrix, &Z)
+        let mismatch_count = sparse::matrix_multiply(&S.permutation_matrix(), &Z)
             .into_iter()
             .zip_eq(Z)
             .enumerate()

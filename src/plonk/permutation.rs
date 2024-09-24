@@ -1,7 +1,13 @@
 //! Adapted from halo2/halo2_proofs/src/plonk/permutation/keygen.rs
-use halo2_proofs::plonk::permutation::Argument;
-use halo2_proofs::plonk::{Any, Column, Error};
+use halo2_proofs::{
+    halo2curves::ff::PrimeField,
+    plonk::{permutation::Argument, Any, Column, ConstraintSystem, Error},
+};
+use serde::{Serialize, Serializer};
 use tracing::*;
+
+use super::util;
+use crate::polynomial::sparse::SparseMatrix;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Assembly {
@@ -92,5 +98,78 @@ impl Assembly {
         self.mapping[right_column][right_row] = tmp;
 
         Ok(())
+    }
+}
+
+#[derive(Clone, PartialEq, Default)]
+pub(crate) struct PermutationData {
+    columns: Box<[Column<Any>]>,
+    mapping: Box<[Vec<(usize, usize)>]>,
+}
+
+impl PermutationData {
+    pub fn new<F: PrimeField>(cs: &ConstraintSystem<F>, perm_assembly: &Assembly) -> Self {
+        Self {
+            columns: cs.permutation().get_columns().into_boxed_slice(),
+            mapping: perm_assembly.mapping.clone().into_boxed_slice(),
+        }
+    }
+
+    pub fn matrix<F: PrimeField>(
+        &self,
+        k_table_size: usize,
+        num_io: &[usize],
+        num_advice_columns: usize,
+    ) -> SparseMatrix<F> {
+        util::construct_permutation_matrix(
+            k_table_size,
+            num_io,
+            &self.columns,
+            num_advice_columns,
+            &self.mapping,
+        )
+    }
+}
+
+impl Serialize for PermutationData {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut state = serializer.serialize_struct("Assembly", 4)?;
+
+        #[derive(Serialize)]
+        struct ColumnWrapper {
+            index: usize,
+            column_type: u16,
+        }
+
+        impl From<Column<Any>> for ColumnWrapper {
+            fn from(value: Column<Any>) -> Self {
+                Self {
+                    index: value.index(),
+                    column_type: match value.column_type() {
+                        Any::Instance => 0,
+                        Any::Fixed => 1,
+                        Any::Advice(advice) => 2 + advice.phase() as u16,
+                    },
+                }
+            }
+        }
+
+        state.serialize_field(
+            "columns",
+            &self
+                .columns
+                .iter()
+                .cloned()
+                .map(ColumnWrapper::from)
+                .collect::<Box<[_]>>(),
+        )?;
+        state.serialize_field("perm_assembly", &self.mapping)?;
+
+        state.end()
     }
 }

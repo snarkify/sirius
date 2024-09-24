@@ -19,6 +19,7 @@ use serde::Serialize;
 use some_to_err::*;
 use tracing::{debug, error, info, info_span, instrument, warn};
 
+use self::permutation::PermutationData;
 use crate::{
     commitment::CommitmentKey,
     concat_vec,
@@ -156,7 +157,7 @@ pub struct PlonkStructure<F: PrimeField> {
     #[serde(skip_serializing)]
     pub(crate) gates: Vec<Expression<F>>,
 
-    pub(crate) permutation_matrix: SparseMatrix<F>,
+    pub(crate) permutation_data: PermutationData,
     pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
 }
 
@@ -655,6 +656,11 @@ impl<F: PrimeField> PlonkStructure<F> {
                 W: vec![W1, W2, W3],
             },
         })
+    }
+
+    pub fn permutation_matrix(&self) -> SparseMatrix<F> {
+        self.permutation_data
+            .matrix(self.k, &self.num_io, self.num_advice_columns)
     }
 }
 
