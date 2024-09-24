@@ -20,7 +20,7 @@ use sirius::{
 use tracing::debug;
 use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
 
-const INSTANCES_LEN: usize = 2;
+const INSTANCES_LEN: usize = 1;
 
 /// Number of folding steps
 const FOLD_STEP_COUNT: usize = 1;

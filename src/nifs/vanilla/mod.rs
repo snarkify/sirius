@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
 use count_to_non_zero::CountToNonZeroExt;
-use halo2_proofs::arithmetic::CurveAffine;
+use halo2_proofs::{arithmetic::CurveAffine, halo2curves::ff::PrimeField};
 use itertools::Itertools;
 use some_to_err::ErrOr;
 use tracing::*;
@@ -18,7 +18,10 @@ use crate::{
         eval::{GetDataForEval, PlonkEvalDomain},
         PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness,
     },
-    polynomial::{graph_evaluator::GraphEvaluator, sparse},
+    polynomial::{
+        graph_evaluator::GraphEvaluator,
+        sparse::{self, SparseMatrix},
+    },
     poseidon::ROTrait,
     sps::SpecialSoundnessVerifier,
 };
@@ -339,25 +342,57 @@ impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
         S: &PlonkStructure<C::ScalarExt>,
         acc: &<Self as FoldingScheme<C>>::Accumulator,
     ) -> Result<(), Self::VerifyError> {
+        /// Under this collapsing scheme, `instance` columns other than consistency markers are not
+        /// foldeded, but accumulated using hash. Therefore, they need to be cut out for
+        /// `is_sat_permutation`.
+        ///
+        /// To account for these permutations in the `Relaxed` version, we add them to StepFoldingCircuit
+        /// as a copy constraint with private input (witness)
+        fn permutation_data_without_step_circuit_instances<F: PrimeField>(
+            S: &PlonkStructure<F>,
+        ) -> SparseMatrix<F> {
+            S.permutation_data
+                .clone()
+                .rm_copy_constraints(1..S.num_io.len())
+                .matrix(S.k, &S.num_io, S.num_advice_columns)
+        }
+
+        /// While checking permutations, we need to line up all instance columns one after the other, but
+        /// since we cut out all instance columns except the null column (consistency_marker) for the
+        /// `Relaxed*` version we need to augment them based on [`PlonkStructure::num_io`].
+        fn iter_flat_instances_with_padding<'b, C: CurveAffine>(
+            U: &'b RelaxedPlonkInstance<C>,
+            S: &'b PlonkStructure<C::ScalarExt>,
+        ) -> impl 'b + Iterator<Item = C::ScalarExt> {
+            U.consistency_markers.iter().copied().chain(
+                S.num_io
+                    .iter()
+                    .skip(1)
+                    .flat_map(|len| std::iter::repeat(C::ScalarExt::ZERO).take(*len)),
+            )
+        }
+
         let RelaxedPlonkTrace { U, W } = acc;
 
-        let Z = U
-            .instances()
-            .iter()
-            .flat_map(|i| i.iter())
-            .chain(W.W[0].iter().take((1 << S.k) * S.num_advice_columns))
-            .copied()
+        let Z = iter_flat_instances_with_padding(U, S)
+            .chain(
+                W.W[0]
+                    .iter()
+                    .take((1 << S.k) * S.num_advice_columns)
+                    .copied(),
+            )
             .collect::<Vec<_>>();
 
-        let mismatch_count = sparse::matrix_multiply(&S.permutation_matrix(), &Z)
-            .into_iter()
-            .zip_eq(Z)
-            .enumerate()
-            .filter_map(|(row, (y, z))| C::ScalarExt::ZERO.ne(&(y - z)).then_some(row))
-            .inspect(|row| {
-                warn!("permutation mismatch at {row}");
-            })
-            .count();
+        let mismatch_count =
+            sparse::matrix_multiply(&permutation_data_without_step_circuit_instances(S), &Z)
+                .into_iter()
+                .zip_eq(Z)
+                .enumerate()
+                .filter_map(|(row, (y, z))| C::ScalarExt::ZERO.ne(&(y - z)).then_some(row))
+                .inspect(|row| {
+                    warn!("permutation mismatch at {row}");
+                })
+                .count();
 
         if mismatch_count == 0 {
             Ok(())

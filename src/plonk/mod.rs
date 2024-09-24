@@ -133,6 +133,7 @@ impl<F: PrimeField> CompressedGates<F> {
 pub struct PlonkStructure<F: PrimeField> {
     /// k is a parameter such that 2^k is the total number of rows
     pub(crate) k: usize,
+    /// Instance columns lengths
     pub(crate) num_io: Box<[usize]>,
     pub(crate) selectors: Vec<Vec<bool>>,
     pub(crate) fixed_columns: Vec<Vec<F>>,
