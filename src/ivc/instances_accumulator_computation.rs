@@ -1,3 +1,4 @@
+/// Module name acronym `instances_accumulator_computation` -> `inst_acc_comp`
 use std::{iter, num::NonZeroUsize};
 
 use halo2_proofs::{
@@ -14,10 +15,16 @@ use crate::{
     util,
 };
 
+/// Default value for use in [`Spec`] in this module
 pub const T: usize = 5;
+
+/// Default value for use in [`Spec`] in this module
 pub const RATE: usize = T - 1;
 
+/// Default value for use in [`Spec`] in this module
 pub const R_F: usize = 10;
+
+/// Default value for use in [`Spec`] in this module
 pub const R_P: usize = 10;
 
 fn default_spec<F: FromUniformBytes<64>>() -> Spec<F, T, RATE> {
@@ -33,6 +40,9 @@ where
     F1: PrimeFieldBits + FromUniformBytes<64>,
     F2: PrimeFieldBits + FromUniformBytes<64>,
 {
+    let num_bits = NonZeroUsize::new(<F1 as PrimeField>::NUM_BITS as usize)
+        .expect("unattainably: num_bits can't be zero");
+
     let hash_in_f1: F2 = PoseidonHash::<F2, T, RATE>::new(default_spec())
         .absorb_field_iter(
             iter::once(instances_hash_accumulator)
@@ -40,10 +50,7 @@ where
                 .map(|i| util::fe_to_fe(i).unwrap()),
         )
         .inspect(|buf| debug!("off-circuit buf of instances: {buf:?}"))
-        .output::<F2>(
-            NonZeroUsize::new(<F1 as PrimeField>::NUM_BITS as usize)
-                .expect("unattainably: num_bits can't be zero"),
-        );
+        .output::<F2>(num_bits);
 
     util::fe_to_fe(&hash_in_f1).unwrap()
 }
