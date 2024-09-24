@@ -1,11 +1,10 @@
 use std::{collections::HashSet, iter};
 
-use halo2_proofs::plonk::{Any, Column, ConstraintSystem, Expression as PE};
+use halo2_proofs::plonk::{Any, Column, Expression as PE};
 use tracing::*;
 
 use crate::{
     ff::PrimeField,
-    plonk::permutation::Assembly,
     polynomial::{sparse::SparseMatrix, Expression},
 };
 
@@ -80,13 +79,11 @@ pub(crate) fn compress_expression<F: PrimeField>(
 pub(crate) fn construct_permutation_matrix<F: PrimeField>(
     k_table_size: usize,
     num_io: &[usize],
-    cs: &ConstraintSystem<F>,
-    permutation: &Assembly,
+    perm_columns: &[Column<Any>],
+    num_advice: usize,
+    permutation_mapping: &[Vec<(usize, usize)>],
 ) -> SparseMatrix<F> {
-    let perm_columns = &cs.permutation.columns;
-
     let num_rows = 1 << k_table_size;
-    let num_advice = cs.num_advice_columns();
 
     // Lengths of each row of the matrix
     let rows_len = num_io
@@ -115,7 +112,7 @@ pub(crate) fn construct_permutation_matrix<F: PrimeField>(
     let mut columns_not_in_perm = HashSet::<usize>::from_iter(0..num_io.len() + num_advice);
 
     let mut sparse_matrix_p = Vec::with_capacity(flated_rows);
-    for (left_col, mapping_vec) in permutation.mapping.iter().enumerate() {
+    for (left_col, mapping_vec) in permutation_mapping.iter().enumerate() {
         let left_col = perm_columns[left_col];
         columns_not_in_perm.remove(&to_flat_column_offset(left_col));
 
