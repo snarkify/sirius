@@ -157,43 +157,59 @@ impl PermutationData {
         mut self,
         instance_columns_to_remove: impl Iterator<Item = usize>,
     ) -> Self {
-        let instance_columns = self
-            .columns
-            .iter()
-            .filter(|column| column.column_type().eq(&Any::Instance))
-            .map(|column| column.index())
-            .collect::<Box<[_]>>();
+        let is_in_remove_set = {
+            let instance_columns = self
+                .columns
+                .iter()
+                .filter(|column| column.column_type().eq(&Any::Instance))
+                .map(|column| column.index())
+                .collect::<Box<[_]>>();
+            debug!("instance_columns {instance_columns:?}");
 
-        let mut columns_to_remove_set = instance_columns_to_remove
-            .filter(|index| instance_columns.binary_search(index).is_ok())
-            .collect::<Box<[_]>>();
+            let mut columns_to_remove_set = instance_columns_to_remove
+                .filter(|index| instance_columns.binary_search(index).is_ok())
+                .collect::<Box<[_]>>();
 
-        columns_to_remove_set.sort();
+            debug!("columns_to_remove_set {columns_to_remove_set:?}");
+
+            columns_to_remove_set.sort();
+
+            move |column: &Column<Any>| columns_to_remove_set.binary_search(&column.index()).is_ok()
+        };
 
         for (column_index, column) in self.columns.iter().enumerate() {
-            if columns_to_remove_set.binary_search(&column.index()).is_ok() {
-                debug!("completely clearing all permutations for column {column:?}");
+            debug!("check column {column:?}");
+
+            if is_in_remove_set(column) {
+                debug!("completely clearing all permutations for column: {column:?}");
                 for (row_index, mapping_cell) in self.mapping[column_index].iter_mut().enumerate() {
                     *mapping_cell = (column_index, row_index);
                 }
             } else {
+                debug!("start check permutations for column: {column:?}");
                 let row_count = self.mapping[column_index].len();
 
                 for row_index in 0..row_count {
                     let (mut next_i, mut next_j) = self.mapping[column_index][row_index];
 
                     let start = (column_index, row_index);
-                    while (next_i, next_j) != start
-                        && columns_to_remove_set
-                            .binary_search(&self.columns[next_i].index())
-                            .is_ok()
-                    {
+                    while (next_i, next_j) != start && is_in_remove_set(&self.columns[next_i]) {
+                        debug!(
+                            "{start:?}: finding tail without target-columns: {:?}",
+                            (next_i, next_j)
+                        );
+
                         (next_i, next_j) = if (next_i, next_j) == self.mapping[next_i][next_j] {
                             start
                         } else {
                             self.mapping[next_i][next_j]
                         };
                     }
+
+                    debug!(
+                        "mapping for [{column_index}][{row_index}] is {:?}",
+                        (next_i, next_j)
+                    );
 
                     self.mapping[column_index][row_index] = (next_i, next_j);
                 }
@@ -244,5 +260,92 @@ impl Serialize for PermutationData {
         state.serialize_field("perm_assembly", &self.mapping)?;
 
         state.end()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        mem::{self, MaybeUninit},
+        ptr,
+    };
+
+    use halo2_proofs::plonk::{Advice, ColumnType};
+
+    use super::*;
+
+    // Bypass the lack of a constructor for `Column`
+    fn column<C: ColumnType>(index: usize, column_type: C) -> Column<C> {
+        // Safety: just direct write to private field
+        unsafe {
+            // Allocate uninitialized memory for Column<C>
+            let mut column_uninit: MaybeUninit<Column<C>> = MaybeUninit::uninit();
+            let column_ptr = column_uninit.as_mut_ptr();
+
+            // Manually write the `index` to its field
+            // Note: This is safe since `index` is a public field
+            ptr::write(&mut (*column_ptr).index as *mut usize, index);
+
+            // To get the base pointer, cast to a pointer to the type containing the private fields
+            // Then adjust the alignment by adding the size of the first `index` field (of type `usize`)
+            let column_base_ptr = column_ptr as *mut u8;
+            let column_type_offset = mem::size_of::<usize>();
+            let column_type_ptr = column_base_ptr.add(column_type_offset) as *mut C;
+
+            // Manually write the `column_type` to its field
+            ptr::write(column_type_ptr, column_type);
+
+            column_uninit.assume_init()
+        }
+    }
+
+    #[test]
+    fn column_hack() {
+        let advice_col = column(0, Any::Advice(Advice::default()));
+
+        assert_eq!(advice_col.index(), 0);
+        assert_eq!(advice_col.column_type(), &Any::Advice(Advice::default()));
+
+        let instance_col = column(0, Any::Instance);
+        assert_eq!(instance_col.index(), 0);
+        assert_eq!(instance_col.column_type(), &Any::Instance);
+
+        let fixed_col = column(0, Any::Fixed);
+        assert_eq!(fixed_col.index(), 0);
+        assert_eq!(fixed_col.column_type(), &Any::Fixed);
+    }
+
+    #[tracing_test::traced_test]
+    #[test]
+    fn remove_copy_constraint() {
+        let mut assembly = Assembly::new(
+            10,
+            &Argument {
+                columns: (0..10)
+                    .map(|index| column(index, Any::Instance))
+                    .chain((10..20).map(|index| column(index, Any::Advice(Advice::default()))))
+                    .collect(),
+            },
+        );
+
+        assembly
+            .copy(column(0, Any::Instance), 0, column(1, Any::Instance), 0)
+            .unwrap();
+
+        assembly
+            .copy(
+                column(1, Any::Instance),
+                0,
+                column(10, Any::Advice(Advice::default())),
+                0,
+            )
+            .unwrap();
+
+        let perm_data = PermutationData {
+            columns: assembly.columns.clone().into_boxed_slice(),
+            mapping: assembly.mapping.clone().into_boxed_slice(),
+        };
+
+        perm_data.rm_copy_constraints(1..=2);
     }
 }

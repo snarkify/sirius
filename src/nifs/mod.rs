@@ -13,7 +13,7 @@ use rayon::prelude::*;
 
 use crate::{
     commitment::{self, CommitmentKey},
-    plonk::{eval::Error as EvalError, PlonkInstance, PlonkStructure, PlonkTrace},
+    plonk::{eval::Error as EvalError, PlonkStructure},
     poseidon::ROTrait,
     sps::Error as SpsError,
 };
@@ -30,6 +30,11 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
 
     /// Metadata for verifier including hash of public params
     type VerifierParam;
+
+    /// TODO #316
+    type Trace;
+
+    type Instance;
 
     /// Accumulator contains AccumulatorInstance and the corresponding Witness (e.g. [`RelaxedPlonkWitness`])
     type Accumulator;
@@ -51,7 +56,7 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
         witness: &[Vec<C::ScalarExt>],
         pp: &Self::ProverParam,
         ro_nark: &mut impl ROTrait<C::Base>,
-    ) -> Result<PlonkTrace<C>, Self::Error>;
+    ) -> Result<Self::Trace, Self::Error>;
 
     /// Perform the folding operation as a prover.
     fn prove(
@@ -59,7 +64,7 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
         pp: &Self::ProverParam,
         ro_acc: &mut impl ROTrait<C::Base>,
         accumulator: Self::Accumulator,
-        incoming: &[PlonkTrace<C>; L],
+        incoming: &[Self::Trace; L],
     ) -> Result<(Self::Accumulator, Self::Proof), Self::Error>;
 
     /// Perform the folding operation as a verifier.
@@ -68,7 +73,7 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
         ro_nark: &mut impl ROTrait<C::Base>,
         ro_acc: &mut impl ROTrait<C::Base>,
         accumulator: &Self::AccumulatorInstance,
-        incoming: &[PlonkInstance<C>; L],
+        incoming: &[Self::Instance; L],
         proof: &Self::Proof,
     ) -> Result<Self::AccumulatorInstance, Self::Error>;
 }

@@ -20,10 +20,13 @@ use crate::{
     main_gate::MainGateConfig,
     nifs::{
         self,
-        vanilla::{GetConsistencyMarkers, VanillaFS, CONSISTENCY_MARKERS_COUNT},
+        vanilla::{
+            accumulator::FoldablePlonkTrace, GetConsistencyMarkers, VanillaFS,
+            CONSISTENCY_MARKERS_COUNT,
+        },
         FoldingScheme,
     },
-    plonk::{PlonkStructure, PlonkTrace},
+    plonk::PlonkStructure,
     poseidon::{random_oracle::ROTrait, ROPair},
     table::CircuitRunner,
     util,
@@ -147,7 +150,7 @@ pub struct PublicParams<
     _p: PhantomData<(SC1, SC2)>,
 
     #[serde(skip_serializing)]
-    secondary_initial_plonk_trace: PlonkTrace<C2>,
+    secondary_initial_plonk_trace: FoldablePlonkTrace<C2>,
 
     #[serde(skip_serializing)]
     digest_1: C1,
@@ -298,13 +301,8 @@ where
             );
 
             let secondary_initial_instance: [C2::Scalar; 2] = [
-                util::fe_to_fe(
-                    &secondary_initial_step_input
-                        .u
-                        .get_consistency_markers()
-                        .expect("For `vanilla::FoldingScheme` should always be")[0],
-                )
-                .unwrap(),
+                util::fe_to_fe(&secondary_initial_step_input.u.get_consistency_markers()[0])
+                    .unwrap(),
                 ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: secondary.ro_constant.clone(),
                     public_params_hash: &secondary_initial_step_input.public_params_hash,
@@ -378,7 +376,7 @@ where
         Ok(self_)
     }
 
-    pub fn secondary_initial_plonk_trace(&self) -> &PlonkTrace<C2> {
+    pub fn secondary_initial_plonk_trace(&self) -> &FoldablePlonkTrace<C2> {
         &self.secondary_initial_plonk_trace
     }
 

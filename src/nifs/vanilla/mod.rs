@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, num::NonZeroUsize};
+use std::{iter, marker::PhantomData, num::NonZeroUsize};
 
 use count_to_non_zero::CountToNonZeroExt;
 use halo2_proofs::{
@@ -9,6 +9,7 @@ use itertools::Itertools;
 use some_to_err::ErrOr;
 use tracing::*;
 
+use self::accumulator::{FoldablePlonkInstance, FoldablePlonkTrace};
 use super::*;
 use crate::{
     commitment::CommitmentKey,
@@ -19,7 +20,7 @@ use crate::{
     plonk::{
         self,
         eval::{GetDataForEval, PlonkEvalDomain},
-        PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness,
+        PlonkInstance, PlonkStructure, PlonkWitness,
     },
     polynomial::{
         graph_evaluator::GraphEvaluator,
@@ -178,6 +179,8 @@ pub enum Error {
     Plonk(#[from] Halo2Error),
     #[error(transparent)]
     Commitment(#[from] commitment::Error),
+    #[error("In the traces that are folded by this scheme the first column with two elements is expected")]
+    NoConsistencyMarkers,
 }
 
 impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C>
@@ -189,18 +192,14 @@ where
     type VerifierParam = C;
     type Accumulator = RelaxedPlonkTrace<C>;
     type AccumulatorInstance = RelaxedPlonkInstance<C>;
+    type Trace = FoldablePlonkTrace<C>;
+    type Instance = FoldablePlonkInstance<C>;
     type Proof = CrossTermCommits<C>;
 
     fn setup_params(
         pp_digest: C,
         S: PlonkStructure<C::ScalarExt>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
-        assert_eq!(
-            S.num_io.as_ref(),
-            &[2],
-            "TODO Until #316 is done completely"
-        );
-
         Ok((VanillaFSProverParam { S, pp_digest }, pp_digest))
     }
 
@@ -211,10 +210,10 @@ where
         witness: &[Vec<C::ScalarExt>],
         pp: &VanillaFSProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
-    ) -> Result<PlonkTrace<C>, Error> {
-        Ok(pp
-            .S
-            .run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)?)
+    ) -> Result<FoldablePlonkTrace<C>, Error> {
+        pp.S.run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)
+            .map(FoldablePlonkTrace::new)?
+            .ok_or(Error::NoConsistencyMarkers)
     }
 
     /// Generates a proof of correct folding using the NIFS protocol.
@@ -238,7 +237,7 @@ where
         pp: &Self::ProverParam,
         ro_acc: &mut impl ROTrait<C::Base>,
         accumulator: Self::Accumulator,
-        incoming: &[PlonkTrace<C>; 1],
+        incoming: &[FoldablePlonkTrace<C>; 1],
     ) -> Result<(Self::Accumulator, Self::Proof), Error> {
         let incoming = &incoming[0];
 
@@ -280,7 +279,7 @@ where
         ro_nark: &mut impl ROTrait<C::Base>,
         ro_acc: &mut impl ROTrait<C::Base>,
         U1: &Self::AccumulatorInstance,
-        U2: &[PlonkInstance<C>; 1],
+        U2: &[FoldablePlonkInstance<C>; 1],
         cross_term_commits: &CrossTermCommits<C>,
     ) -> Result<Self::AccumulatorInstance, Error> {
         let U2 = &U2[0];
@@ -380,7 +379,7 @@ where
                 S.num_io
                     .iter()
                     .skip(1)
-                    .flat_map(|len| std::iter::repeat(C::ScalarExt::ZERO).take(*len)),
+                    .flat_map(|len| iter::repeat(C::ScalarExt::ZERO).take(*len)),
             )
         }
 
@@ -400,9 +399,15 @@ where
                 .into_iter()
                 .zip_eq(Z)
                 .enumerate()
-                .filter_map(|(row, (y, z))| C::ScalarExt::ZERO.ne(&(y - z)).then_some(row))
-                .inspect(|row| {
-                    warn!("permutation mismatch at {row}");
+                .filter(|(row, (y, z))| {
+                    let diff = *y - *z;
+
+                    if diff.is_zero().into() {
+                        false
+                    } else {
+                        warn!("permutation mismatch at {row} with diff {diff:?}");
+                        true
+                    }
                 })
                 .count();
 
@@ -447,24 +452,21 @@ pub const CONSISTENCY_MARKERS_COUNT: usize = 2;
 ///     hash of the state at the end of previous folding step
 /// - X1 is a hash of the state at the end of the current folding step
 pub trait GetConsistencyMarkers<F> {
-    fn get_consistency_markers(&self) -> Option<[F; CONSISTENCY_MARKERS_COUNT]>;
+    fn get_consistency_markers(&self) -> [F; CONSISTENCY_MARKERS_COUNT];
 }
 
-impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for PlonkInstance<C> {
-    fn get_consistency_markers(&self) -> Option<[C::ScalarExt; 2]> {
+impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for FoldablePlonkInstance<C> {
+    fn get_consistency_markers(&self) -> [C::ScalarExt; 2] {
         match self.instances.first() {
-            Some(instance) if instance.len() == 2 => Some(instance.clone().try_into().unwrap()),
-            Some(instance) => {
-                panic!("wrong size of instances[0], can't use as consistency marker: {instance:?}")
-            }
-            None => None,
+            Some(instance) if instance.len() == 2 => instance.clone().try_into().unwrap(),
+            _ => unreachable!("folded plonk instancce always have markers"),
         }
     }
 }
 
 impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for RelaxedPlonkInstance<C> {
-    fn get_consistency_markers(&self) -> Option<[C::ScalarExt; 2]> {
-        Some(self.consistency_markers)
+    fn get_consistency_markers(&self) -> [C::ScalarExt; 2] {
+        self.consistency_markers
     }
 }
 

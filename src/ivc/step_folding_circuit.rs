@@ -20,7 +20,10 @@ use crate::{
         StepCircuit,
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
-    nifs::vanilla::{self, accumulator::RelaxedPlonkInstance},
+    nifs::vanilla::{
+        self,
+        accumulator::{FoldablePlonkInstance, RelaxedPlonkInstance},
+    },
     plonk::PlonkInstance,
     poseidon::ROCircuitTrait,
     table::ConstraintSystemMetainfo,
@@ -95,7 +98,7 @@ where
     pub U: RelaxedPlonkInstance<C>,
 
     // TODO docs
-    pub u: PlonkInstance<C>,
+    pub u: FoldablePlonkInstance<C>,
 
     // TODO docs
     pub cross_term_commits: Vec<C>,
@@ -147,9 +150,13 @@ where
             public_params_hash: C::identity(),
             z_0: [C::Base::ZERO; ARITY],
             z_i: [C::Base::ZERO; ARITY],
-            U: RelaxedPlonkInstance::try_new(num_io, num_challenges, round_sizes.len())
-                .expect("TODO #316"),
-            u: PlonkInstance::new(num_io, num_challenges, round_sizes.len()),
+            U: RelaxedPlonkInstance::new(num_challenges, round_sizes.len()),
+            u: FoldablePlonkInstance::new(PlonkInstance::new(
+                num_io,
+                num_challenges,
+                round_sizes.len(),
+            ))
+            .expect("you can't use plonk instance without consistency markers"),
             step_circuit_instances: step_circuit_instances
                 .iter()
                 .map(|len| vec![C::Base::ZERO; *len])
@@ -275,17 +282,16 @@ where
                 z_0: [C::Base::ZERO; ARITY],
                 z_i: [C::Base::ZERO; ARITY],
                 cross_term_commits: vec![C::identity(); self.input.cross_term_commits.len()],
-                U: RelaxedPlonkInstance::try_new(
-                    instances_len,
+                U: RelaxedPlonkInstance::new(
                     self.input.U.challenges.len(),
                     self.input.U.W_commitments.len(),
-                )
-                .expect("TODO #316"),
-                u: PlonkInstance::new(
+                ),
+                u: FoldablePlonkInstance::new(PlonkInstance::new(
                     instances_len,
                     self.input.u.challenges.len(),
                     self.input.u.W_commitments.len(),
-                ),
+                ))
+                .expect("you can't use plonk instance without consistency markers"),
                 step_circuit_instances: self
                     .input
                     .step_circuit_instances
