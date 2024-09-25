@@ -203,6 +203,7 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
     }
 }
 impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
+    #[cfg(test)]
     fn to_relaxed_plonk_instance(
         &self,
         limb_width: NonZeroUsize,
@@ -260,26 +261,20 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             };
 
         Ok(Some(RelaxedPlonkInstance {
-            inner: PlonkInstance {
-                W_commitments: unwrap_result_option!(folded_W
-                    .iter()
-                    .map(AssignedPoint::to_curve)
-                    .collect()),
-                instances: vec![[
-                    folded_X0,
-                    folded_X1
-                ].map(|X| {
-                    util::fe_to_fe_safe(
-                        &X.into_f().expect("since biguint calculations are modulo the scalar field, any result must fit")
-                    ) .expect("fields same bytes len")
-                }).to_vec()
-                ],
-                challenges: folded_challenges
-                    .iter()
-                    .flat_map(|c| to_diff_bn(c))
-                    .collect::<Result<Vec<_>, _>>()?,
-            },
-
+            W_commitments: unwrap_result_option!(folded_W
+                .iter()
+                .map(AssignedPoint::to_curve)
+                .collect()),
+            consistency_markers: [folded_X0, folded_X1].map(|X| {
+                util::fe_to_fe_safe(&X.into_f().expect(
+                    "since biguint calculations are modulo the scalar field, any result must fit",
+                ))
+                .expect("fields same bytes len")
+            }),
+            challenges: folded_challenges
+                .iter()
+                .flat_map(|c| to_diff_bn(c))
+                .collect::<Result<Vec<_>, _>>()?,
             E_commitment: unwrap_result_option!(folded_E.to_curve()),
             u: util::fe_to_fe_safe(&unwrap_result_option!(folded_u.value().unwrap().copied()))
                 .expect("fields same bytes len"),
@@ -1040,7 +1035,7 @@ mod tests {
         constants::MAX_BITS,
         ff::Field,
         halo2curves::{bn256::G1Affine as C1, CurveAffine},
-        nifs::vanilla::VanillaFS,
+        nifs::vanilla::{VanillaFS, CONSISTENCY_MARKERS_COUNT},
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
         table::WitnessCollector,
     };
@@ -1050,7 +1045,7 @@ mod tests {
 
     const T: usize = 6;
     const NUM_WITNESS: usize = 5;
-    const NUM_INSTANCES: usize = 2;
+    const NUM_INSTANCES: usize = CONSISTENCY_MARKERS_COUNT;
     const NUM_CHALLENGES: usize = 5;
     /// When the number of fold rounds increases, `K` must be increased too
     /// as the number of required rows in the table grows.
@@ -1145,7 +1140,8 @@ mod tests {
     fn generate_challenge() {
         let mut rnd = rand::thread_rng();
 
-        let relaxed = RelaxedPlonkInstance::from(generate_random_plonk_instance(&mut rnd));
+        let relaxed =
+            RelaxedPlonkInstance::try_from(generate_random_plonk_instance(&mut rnd)).unwrap();
 
         let (mut ws, config) = get_witness_collector();
 
@@ -1232,7 +1228,7 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut plonk = RelaxedPlonkInstance::<C1>::new(&[0], 0, NUM_WITNESS);
+        let mut plonk = RelaxedPlonkInstance::<C1>::try_new(&[2], 0, NUM_WITNESS).unwrap();
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
             let input_W = random_curve_vec(&mut rnd);
@@ -1265,7 +1261,7 @@ mod tests {
             plonk = plonk.fold(
                 &PlonkInstance {
                     W_commitments: input_W.clone(),
-                    instances: vec![vec![]],
+                    instances: vec![vec![ScalarExt::ONE, ScalarExt::ONE]],
                     challenges: vec![],
                 },
                 &[],
@@ -1309,10 +1305,10 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut plonk = RelaxedPlonkInstance::<C1>::new(&[0], 0, 0);
+        let mut plonk = RelaxedPlonkInstance::<C1>::try_new(&[2], 0, 0).unwrap();
 
         let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new(
-            RelaxedPlonkInstance::new(&[0], 0, 0),
+            RelaxedPlonkInstance::try_new(&[2], 0, 0).unwrap(),
             LIMB_WIDTH,
             LIMBS_COUNT,
             config.clone(),
@@ -1359,7 +1355,7 @@ mod tests {
             plonk = plonk.fold(
                 &PlonkInstance {
                     W_commitments: vec![],
-                    instances: vec![vec![]],
+                    instances: vec![vec![ScalarExt::ONE, ScalarExt::ONE]],
                     challenges: vec![],
                 },
                 &cross_term_commits,
@@ -1393,7 +1389,7 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(&[2], 0, 0);
+        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::try_new(&[2], 0, 0).unwrap();
 
         let bn_chip = BigUintMulModChip::<Base>::new(
             config
@@ -1539,7 +1535,8 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(&[0], NUM_CHALLENGES, 0);
+        let mut relaxed_plonk =
+            RelaxedPlonkInstance::<C1>::try_new(&[2], NUM_CHALLENGES, 0).unwrap();
 
         let bn_chip = BigUintMulModChip::<Base>::new(
             config
@@ -1631,7 +1628,7 @@ mod tests {
             relaxed_plonk = relaxed_plonk.fold(
                 &PlonkInstance {
                     W_commitments: vec![],
-                    instances: vec![vec![]],
+                    instances: vec![vec![ScalarExt::ONE, ScalarExt::ONE]],
                     challenges: input_challenges.to_vec(),
                 },
                 &[],
@@ -1682,7 +1679,8 @@ mod tests {
 
         let spec = Spec::<Base, T, { T - 1 }>::new(10, 10);
 
-        let mut relaxed = RelaxedPlonkInstance::new(&[NUM_INSTANCES], NUM_CHALLENGES, NUM_WITNESS);
+        let mut relaxed =
+            RelaxedPlonkInstance::try_new(&[NUM_INSTANCES], NUM_CHALLENGES, NUM_WITNESS).unwrap();
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
             let input_plonk = generate_random_plonk_instance(&mut rnd);

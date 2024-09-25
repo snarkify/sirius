@@ -45,6 +45,7 @@ pub(crate) mod random_linear_combination_circuit {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let instance = meta.instance_column();
             meta.enable_equality(instance);
+
             Self::Config {
                 pconfig: MainGate::configure(meta),
                 instance,
@@ -198,6 +199,7 @@ pub(crate) mod fibo_circuit {
             let advice = [meta.advice_column(), meta.advice_column()];
             let selector = meta.selector();
             let instance = meta.instance_column();
+
             FiboChip::configure(meta, advice, selector, instance)
         }
 
@@ -243,21 +245,22 @@ pub(crate) mod fibo_circuit_with_lookup {
     struct Number<F: PrimeField>(AssignedCell<F, F>);
 
     #[derive(Debug, Clone)]
-    pub struct FiboConfig {
+    pub struct FiboConfigWithLookup {
         advice: [Column<Advice>; 3],
         s_add: Selector,
         s_xor: Selector,
         xor_table: [TableColumn; 3],
+        pub instance: Column<Instance>,
     }
 
     pub struct FiboChip<F: PrimeField> {
-        pub config: FiboConfig,
+        pub config: FiboConfigWithLookup,
         _marker: PhantomData<F>,
     }
 
     // ANCHOR: chip-impl
     impl<F: PrimeField> Chip<F> for FiboChip<F> {
-        type Config = FiboConfig;
+        type Config = FiboConfigWithLookup;
         type Loaded = ();
 
         fn config(&self) -> &Self::Config {
@@ -271,7 +274,7 @@ pub(crate) mod fibo_circuit_with_lookup {
     // ANCHOR_END: chip-impl
 
     impl<F: PrimeField> FiboChip<F> {
-        fn construct(config: FiboConfig) -> Self {
+        fn construct(config: FiboConfigWithLookup) -> Self {
             Self {
                 config,
                 _marker: PhantomData,
@@ -282,7 +285,7 @@ pub(crate) mod fibo_circuit_with_lookup {
             meta: &mut ConstraintSystem<F>,
             advice: [Column<Advice>; 3],
             selector: [Selector; 2],
-        ) -> FiboConfig {
+        ) -> FiboConfigWithLookup {
             let s_add = selector[0];
             let s_xor = selector[1];
 
@@ -316,11 +319,15 @@ pub(crate) mod fibo_circuit_with_lookup {
                 vec![s_add * (lhs + rhs - out)]
             });
 
-            FiboConfig {
+            let instance = meta.instance_column();
+            meta.enable_equality(instance);
+
+            FiboConfigWithLookup {
                 advice,
                 s_add,
                 s_xor,
                 xor_table,
+                instance,
             }
         }
 
@@ -450,7 +457,7 @@ pub(crate) mod fibo_circuit_with_lookup {
     }
 
     impl<F: PrimeField> Circuit<F> for FiboCircuitWithLookup<F> {
-        type Config = FiboConfig;
+        type Config = FiboConfigWithLookup;
         type FloorPlanner = SimpleFloorPlanner;
 
         fn without_witnesses(&self) -> Self {
@@ -475,6 +482,7 @@ pub(crate) mod fibo_circuit_with_lookup {
             let chip = FiboChip::construct(config);
             let (mut a, mut b, mut c) =
                 chip.load_private(layouter.namespace(|| "first row"), self.a, self.b, self.c)?;
+
             for _ in 3..self.num {
                 let xor = chip.xor(layouter.namespace(|| "xor"), &b, &c)?;
                 let new_c = chip.add(layouter.namespace(|| "add"), &a, &xor)?;

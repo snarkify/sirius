@@ -5,6 +5,7 @@ use itertools::Itertools;
 use rayon::prelude::*;
 use tracing::{debug, instrument, warn};
 
+use super::GetConsistencyMarkers;
 use crate::{
     commitment::CommitmentKey,
     ff::{Field, PrimeField},
@@ -17,48 +18,54 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RelaxedPlonkInstance<C: CurveAffine> {
-    pub(crate) inner: PlonkInstance<C>,
+    /// `W_commitments = round_sizes.len()`, see [`PlonkStructure::round_sizes`]
+    pub(crate) W_commitments: Vec<C>,
+    pub(crate) consistency_markers: [C::ScalarExt; 2],
+    /// challenges generated in special soundness protocol
+    /// we will have 0 ~ 3 challenges depending on different cases:
+    /// name them as r1, r2, r3.
+    /// r1: compress vector lookup, e.g. (a_1, a_2, a_3) -> a_1 + r1*a_2 + r1^2*a_3
+    /// r2: challenge to calculate h and g in log-derivative relation
+    /// r3: combine all custom gates (P_i) and lookup relations (L_i), e.g.:
+    /// (P_1, P_2, L_1, L_2) -> P_1 + r3*P_2 + r3^2*L_1 + r3^3*L_2
+    pub(crate) challenges: Vec<C::ScalarExt>,
     pub(crate) E_commitment: C,
     /// homogenous variable u
     pub(crate) u: C::ScalarExt,
 }
-impl<C: CurveAffine> ops::Deref for RelaxedPlonkInstance<C> {
-    type Target = PlonkInstance<C>;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
 
-impl<C: CurveAffine> From<PlonkInstance<C>> for RelaxedPlonkInstance<C> {
-    fn from(inner: PlonkInstance<C>) -> Self {
-        RelaxedPlonkInstance {
-            inner,
+impl<C: CurveAffine> TryFrom<PlonkInstance<C>> for RelaxedPlonkInstance<C> {
+    type Error = PlonkInstance<C>;
+
+    fn try_from(inner: PlonkInstance<C>) -> Result<Self, Self::Error> {
+        let Some(consistency_markers) = inner.get_consistency_markers() else {
+            return Err(inner);
+        };
+
+        Ok(RelaxedPlonkInstance {
             E_commitment: C::identity(),
             u: C::ScalarExt::ONE,
-        }
-    }
-}
-
-impl<C: CurveAffine> From<&PlonkInstance<C>> for RelaxedPlonkInstance<C> {
-    fn from(input: &PlonkInstance<C>) -> Self {
-        Self::from(input.clone())
+            W_commitments: inner.W_commitments,
+            consistency_markers,
+            challenges: inner.challenges,
+        })
     }
 }
 
 impl<C: CurveAffine> RelaxedPlonkInstance<C> {
-    pub fn new(num_io: &[usize], num_challenges: usize, num_witness: usize) -> Self {
-        Self {
-            inner: PlonkInstance {
-                W_commitments: vec![CommitmentKey::<C>::default_value(); num_witness],
-                instances: num_io
-                    .iter()
-                    .map(|len| vec![C::ScalarExt::ZERO; *len])
-                    .collect(),
-                challenges: vec![C::ScalarExt::ZERO; num_challenges],
+    pub fn try_new(num_io: &[usize], num_challenges: usize, num_witness: usize) -> Option<Self> {
+        Some(Self {
+            consistency_markers: match num_io.first() {
+                Some(2) => [C::ScalarExt::ZERO, C::ScalarExt::ZERO],
+                Some(_) | None => {
+                    return None;
+                }
             },
+            W_commitments: vec![CommitmentKey::<C>::default_value(); num_witness],
+            challenges: vec![C::ScalarExt::ZERO; num_challenges],
             E_commitment: CommitmentKey::<C>::default_value(),
             u: Self::DEFAULT_u,
-        }
+        })
     }
 
     // In order not to confuse `U` & `u`, which means different things in Sirius, non upper
@@ -98,18 +105,16 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             })
             .collect::<Vec<C>>();
 
-        let instance = self
-            .instances
+        assert_eq!(U2.instances.len(), 1, "TODO #316");
+        assert_eq!(U2.instances[0].len(), 2, "TODO #316");
+        let consistency_markers = self
+            .consistency_markers
             .iter()
-            .zip_eq(&U2.instances)
-            .map(|(s_instance, U2_instance)| {
-                s_instance
-                    .iter()
-                    .zip_eq(U2_instance)
-                    .map(|(a, b)| *a + *r * b)
-                    .collect()
-            })
-            .collect::<Vec<Vec<C::ScalarExt>>>();
+            .zip_eq(&U2.get_consistency_markers().expect("TODO #316"))
+            .map(|(a, b)| *a + *r * b)
+            .collect::<Vec<C::ScalarExt>>()
+            .try_into()
+            .unwrap();
 
         let challenges = self
             .challenges
@@ -127,14 +132,16 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             .fold(self.E_commitment, |acc, x| (acc + x).into());
 
         RelaxedPlonkInstance {
-            inner: PlonkInstance {
-                W_commitments,
-                instances: instance,
-                challenges,
-            },
+            W_commitments,
+            challenges,
             u,
+            consistency_markers,
             E_commitment: comm_E,
         }
+    }
+
+    pub fn instances(&self) -> Vec<Vec<C::ScalarExt>> {
+        vec![self.consistency_markers.to_vec()]
     }
 }
 
@@ -171,7 +178,7 @@ pub struct RelaxedPlonkTrace<C: CurveAffine> {
 impl<C: CurveAffine> RelaxedPlonkTrace<C> {
     pub fn from_regular(tr: PlonkTrace<C>, k_table_size: usize) -> RelaxedPlonkTrace<C> {
         RelaxedPlonkTrace {
-            U: RelaxedPlonkInstance::from(tr.u),
+            U: RelaxedPlonkInstance::try_from(tr.u).expect("TODO #316"),
             W: RelaxedPlonkWitness::from_regular(tr.w, k_table_size),
         }
     }
@@ -182,7 +189,8 @@ pub type RelaxedPlonkTraceArgs = plonk::PlonkTraceArgs;
 impl<C: CurveAffine> RelaxedPlonkTrace<C> {
     pub fn new(args: RelaxedPlonkTraceArgs) -> Self {
         Self {
-            U: RelaxedPlonkInstance::new(&args.num_io, args.num_challenges, args.num_witness),
+            U: RelaxedPlonkInstance::try_new(&args.num_io, args.num_challenges, args.num_witness)
+                .expect("TODO #316"),
             W: RelaxedPlonkWitness::new(args.k_table_size, &args.round_sizes),
         }
     }
@@ -220,19 +228,22 @@ impl<C: CurveAffine> GetChallenges<C::ScalarExt> for RelaxedPlonkTrace<C> {
 
 impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
-        ro.absorb_point_iter(self.W_commitments.iter())
-            .absorb_point(&self.E_commitment)
+        let Self {
+            W_commitments,
+            consistency_markers,
+            challenges,
+            E_commitment,
+            u,
+        } = self;
+        ro.absorb_point_iter(W_commitments.iter())
+            .absorb_point(E_commitment)
             .absorb_field_iter(
-                self.instances
+                consistency_markers
                     .iter()
-                    .flat_map(|inst| inst.iter().map(|val| util::fe_to_fe(val).unwrap())),
-            )
-            .absorb_field_iter(
-                self.challenges
-                    .iter()
-                    .map(|cha| util::fe_to_fe(cha).unwrap()),
-            )
-            .absorb_field(util::fe_to_fe(&self.u).unwrap());
+                    .chain(challenges.iter())
+                    .chain(iter::once(u))
+                    .map(|m| util::fe_to_fe(m).unwrap()),
+            );
     }
 }
 

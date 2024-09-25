@@ -9,7 +9,7 @@ use itertools::Itertools;
 use serde::Serialize;
 use tracing::*;
 
-use super::consistency_markers_computation::AssignedConsistencyMarkersComputationnn;
+use super::consistency_markers_computation::AssignedConsistencyMarkersComputation;
 use crate::{
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
     halo2curves::CurveAffine,
@@ -147,7 +147,8 @@ where
             public_params_hash: C::identity(),
             z_0: [C::Base::ZERO; ARITY],
             z_i: [C::Base::ZERO; ARITY],
-            U: RelaxedPlonkInstance::new(num_io, num_challenges, round_sizes.len()),
+            U: RelaxedPlonkInstance::try_new(num_io, num_challenges, round_sizes.len())
+                .expect("TODO #316"),
             u: PlonkInstance::new(num_io, num_challenges, round_sizes.len()),
             step_circuit_instances: step_circuit_instances
                 .iter()
@@ -274,11 +275,12 @@ where
                 z_0: [C::Base::ZERO; ARITY],
                 z_i: [C::Base::ZERO; ARITY],
                 cross_term_commits: vec![C::identity(); self.input.cross_term_commits.len()],
-                U: RelaxedPlonkInstance::new(
+                U: RelaxedPlonkInstance::try_new(
                     instances_len,
                     self.input.U.challenges.len(),
                     self.input.U.W_commitments.len(),
-                ),
+                )
+                .expect("TODO #316"),
                 u: PlonkInstance::new(
                     instances_len,
                     self.input.u.challenges.len(),
@@ -469,7 +471,7 @@ where
                     ctx.next();
 
                     let expected_X0 =
-                        AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
+                        AssignedConsistencyMarkersComputation::<'_, RO, ARITY, T, C> {
                             random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                             public_params_hash: &w.public_params_hash,
                             step: &assigned_step,
@@ -575,7 +577,7 @@ where
             .assign_region(
                 || "generate output hash",
                 |region| {
-                    AssignedConsistencyMarkersComputationnn::<'_, RO, ARITY, T, C> {
+                    AssignedConsistencyMarkersComputation::<'_, RO, ARITY, T, C> {
                         random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                         public_params_hash: &assigned_input_witness.public_params_hash,
                         step: &assigned_next_step,

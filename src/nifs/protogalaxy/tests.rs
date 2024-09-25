@@ -269,7 +269,7 @@ fn fibo_lookup() {
                     c: Scalar::from(seq1[2]),
                     num: SIZE,
                 },
-                vec![],
+                vec![Scalar::ONE],
             ),
             (
                 FiboCircuitWithLookup {
@@ -278,7 +278,7 @@ fn fibo_lookup() {
                     c: Scalar::from(seq2[2]),
                     num: SIZE,
                 },
-                vec![],
+                vec![Scalar::ONE],
             ),
             (
                 FiboCircuitWithLookup {
@@ -287,7 +287,7 @@ fn fibo_lookup() {
                     c: Scalar::from(seq3[2]),
                     num: SIZE,
                 },
-                vec![],
+                vec![Scalar::ONE],
             ),
         ],
     )
