@@ -1,7 +1,10 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
 use count_to_non_zero::CountToNonZeroExt;
-use halo2_proofs::{arithmetic::CurveAffine, halo2curves::ff::PrimeField};
+use halo2_proofs::{
+    arithmetic::CurveAffine,
+    halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
+};
 use itertools::Itertools;
 use some_to_err::ErrOr;
 use tracing::*;
@@ -61,7 +64,10 @@ pub struct VanillaFSProverParam<C: CurveAffine> {
     pp_digest: C,
 }
 
-impl<C: CurveAffine> VanillaFS<C> {
+impl<C: CurveAffine> VanillaFS<C>
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+{
     /// Commits to the cross terms between two Plonk instance-witness pairs.
     ///
     /// This method calculates the cross terms and their commitments, which
@@ -174,7 +180,10 @@ pub enum Error {
     Commitment(#[from] commitment::Error),
 }
 
-impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
+impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C>
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+{
     type Error = Error;
     type ProverParam = VanillaFSProverParam<C>;
     type VerifierParam = C;
@@ -284,7 +293,10 @@ impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C> {
     }
 }
 
-impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C> {
+impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C>
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+{
     type VerifyError = plonk::Error;
 
     fn is_sat_accumulation(
@@ -453,6 +465,16 @@ impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for PlonkInstance<C> {
 impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for RelaxedPlonkInstance<C> {
     fn get_consistency_markers(&self) -> Option<[C::ScalarExt; 2]> {
         Some(self.consistency_markers)
+    }
+}
+
+pub trait GetStepCircuitInstances<F> {
+    fn get_step_circuit_instances(&self) -> &[Vec<F>];
+}
+
+impl<C: CurveAffine> GetStepCircuitInstances<C::ScalarExt> for PlonkInstance<C> {
+    fn get_step_circuit_instances(&self) -> &[Vec<C::ScalarExt>] {
+        &self.instances[1..]
     }
 }
 
