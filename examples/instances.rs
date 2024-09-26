@@ -20,7 +20,7 @@ use sirius::{
 use tracing::debug;
 use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
 
-const INSTANCES_LEN: usize = 1;
+const INSTANCES_LEN: usize = 2;
 
 /// Number of folding steps
 const FOLD_STEP_COUNT: usize = 1;
@@ -61,7 +61,7 @@ impl<const N: usize, const A: usize, F: PrimeField> StepCircuit<A, F> for Instan
     type Config = InstancesConfig<N>;
 
     fn instances(&self) -> Vec<Vec<F>> {
-        vec![vec![F::ONE]; N]
+        vec![vec![F::ONE + F::ONE]; N]
     }
 
     /// Configure the step circuit. This method initializes necessary

@@ -313,6 +313,9 @@ where
 
         let step_circuit_instances = (1..=(after - before))
             .map(|index| {
+                // Because `Column` type doesn't have a constructor, we use a small hack - reuse
+                // `consistency_markers`
+
                 let mut i = consistency_markers;
                 i.index = index;
                 i
@@ -327,6 +330,7 @@ where
         }
     }
 
+    #[instrument(skip_all)]
     fn synthesize(
         &self,
         config: StepConfig<ARITY, C::Base, SC, T>,
@@ -344,7 +348,10 @@ where
         ) = layouter
             .assign_region(
                 || "assign z_0 & z_i",
-                |region| {
+                |mut region| {
+                    let _s = debug_span!("assign z_0 & z_i").entered();
+
+                    config.main_gate_config.name_columns(&mut region);
                     let mut region = RegionCtx::new(region, 0);
 
                     let mut assigner = config.main_gate_config.advice_cycle_assigner();
@@ -363,9 +370,12 @@ where
                         .iter()
                         .enumerate()
                         .try_fold(vec![], |mut all, (column_index, instance_column_values)| {
-                            let value = instance_column_values.iter().cloned();
-                            let instance_column =
-                                assigner.assign_all_advice(&mut region, || "instance", value)?;
+                            let column_values = instance_column_values.iter().cloned();
+                            let instance_column = assigner.assign_all_advice(
+                                &mut region,
+                                || "step circuit instance[]",
+                                column_values,
+                            )?;
 
                             all.extend(
                                 instance_column.into_iter().enumerate().map(
@@ -409,7 +419,10 @@ where
         let (w, r) = layouter
             .assign_region(
                 || "assign witness",
-                |region| {
+                |mut region| {
+                    let _s = debug_span!("assign_witness").entered();
+                    config.main_gate_config.name_columns(&mut region);
+
                     Ok(chip.assign_witness_with_challenge(
                         &mut RegionCtx::new(region, 0),
                         &self.input.public_params_hash,
@@ -435,7 +448,10 @@ where
         let (assigned_step, assigned_next_step) = layouter
             .assign_region(
                 || "generate steps",
-                |region| {
+                |mut region| {
+                    let _s = debug_span!("generate steps").entered();
+                    config.main_gate_config.name_columns(&mut region);
+
                     let mut ctx = RegionCtx::new(region, 0);
 
                     ctx.assign_fixed(|| "1", config.main_gate_config.rc, C::Base::ONE)?;
@@ -466,7 +482,10 @@ where
         let (base_case_input_check, non_base_case_input_check) = layouter
             .assign_region(
                 || "generate input hash",
-                |region| {
+                |mut region| {
+                    let _s = debug_span!("generate input hash").entered();
+                    config.main_gate_config.name_columns(&mut region);
+
                     let mut ctx = RegionCtx::new(region, 0);
 
                     let base_case_input_check = ctx.assign_advice(
@@ -520,7 +539,10 @@ where
         } = layouter
             .assign_region(
                 || "synthesize_step_non_base_case",
-                |region| Ok(chip.fold(&mut RegionCtx::new(region, 0), w.clone(), r.clone())?),
+                |region| {
+                    let _s = debug_span!("synthesize_step_non_base_case").entered();
+                    Ok(chip.fold(&mut RegionCtx::new(region, 0), w.clone(), r.clone())?)
+                },
             )
             .map_err(|err| {
                 error!("while synthesize_step_non_base_case: {err:?}");
@@ -531,6 +553,8 @@ where
             .assign_region(
                 || "make folding",
                 |region| {
+                    let _s = debug_span!("make folding").entered();
+
                     let mut region = RegionCtx::new(region, 0);
                     let gate = MainGate::new(config.main_gate_config.clone());
 
@@ -583,6 +607,8 @@ where
             .assign_region(
                 || "generate output hash",
                 |region| {
+                    let _s = debug_span!("generate output hash").entered();
+
                     AssignedConsistencyMarkersComputation::<'_, RO, ARITY, T, C> {
                         random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                         public_params_hash: &assigned_input_witness.public_params_hash,

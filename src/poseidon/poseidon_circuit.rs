@@ -4,6 +4,7 @@ use halo2_proofs::{
     circuit::{AssignedCell, Chip, Value},
     plonk::Error,
 };
+use itertools::Itertools;
 use poseidon::{self};
 use tracing::*;
 
@@ -58,6 +59,7 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
         self
     }
 
+    #[instrument(skip_all)]
     fn squeeze_n_bits(
         &mut self,
         ctx: &mut RegionCtx<'_, F>,
@@ -378,7 +380,10 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
         self
     }
 
+    #[instrument(skip_all)]
     pub fn squeeze(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedValue<F>, Error> {
+        warn!("{}", ctx.offset);
+
         //let buf = mem::take(&mut self.buf);
         let buf = self.buf.clone();
         if let Some(buf) = buf
@@ -397,7 +402,7 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
             .config()
             .state
             .into_iter()
-            .zip(state0.into_iter().map(Value::known))
+            .zip_eq(state0.into_iter().map(Value::known))
             .map(|(state_column, state0_value)| {
                 ctx.assign_advice(|| "initial state", state_column, state0_value)
             })
@@ -413,6 +418,7 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
             state = self.permutation(ctx, Vec::new(), &state)?;
         }
 
+        warn!("{}", ctx.offset);
         Ok(state[1].clone())
     }
 }

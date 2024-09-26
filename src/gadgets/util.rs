@@ -2,6 +2,7 @@ use halo2_proofs::{
     circuit::{Chip, Value},
     plonk::Error,
 };
+use tracing::*;
 
 use crate::{
     ff::PrimeField,
@@ -19,6 +20,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         Ok(out)
     }
 
+    #[instrument(skip_all)]
     pub fn assign_bit(
         &self,
         ctx: &mut RegionCtx<'_, F>,

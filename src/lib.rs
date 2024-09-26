@@ -62,8 +62,8 @@ pub mod prelude {
     /// Safety: because 10 != 0
     pub const DEFAULT_LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
 
-    pub const DEFAULT_STEP_FOLDING_CIRCUIT_SIZE: usize = 5;
-    pub const DEFAULT_RANDOM_ORACLE_SIZE: usize = 5;
+    pub const DEFAULT_STEP_FOLDING_CIRCUIT_SIZE: usize = 10;
+    pub const DEFAULT_RANDOM_ORACLE_SIZE: usize = 10;
     pub const DEFAULT_RANDOM_ORACLE_RATE: usize = DEFAULT_RANDOM_ORACLE_SIZE - 1;
 
     /// Create constants for random oracle, with R_F & R_P as defaults

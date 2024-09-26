@@ -1,12 +1,13 @@
 //! Adapted from halo2/halo2_proofs/src/plonk/permutation/keygen.rs
+use std::{cmp::Ordering, collections::HashSet, iter};
+
 use halo2_proofs::{
     halo2curves::ff::PrimeField,
-    plonk::{permutation::Argument, Any, Column, ConstraintSystem, Error},
+    plonk::{permutation::Argument, Any, Column, Error},
 };
 use serde::{Serialize, Serializer};
 use tracing::*;
 
-use super::util;
 use crate::polynomial::sparse::SparseMatrix;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,11 +33,23 @@ impl Assembly {
             columns.push((0..n).map(|j| (i, j)).collect());
         }
 
+        let mut columns_list = p.columns.clone();
+        columns_list.sort_by(|lhs, rhs| match (lhs.column_type(), rhs.column_type()) {
+            (Any::Instance, Any::Instance)
+            | (Any::Advice(_), Any::Advice(_))
+            | (Any::Fixed, Any::Fixed) => lhs.index().cmp(&rhs.index()),
+
+            (Any::Instance, _) => Ordering::Greater,
+            (Any::Advice(_), Any::Instance) => Ordering::Less,
+            (Any::Advice(_), Any::Fixed) => Ordering::Greater,
+            (Any::Fixed, _) => Ordering::Less,
+        });
+
         // Before any equality constraints are applied, every cell in the permutation is
         // in a 1-cycle; therefore mapping and aux are identical, because every cell is
         // its own distinguished element.
         Assembly {
-            columns: p.columns.clone(),
+            columns: columns_list,
             mapping: columns.clone(),
             aux: columns,
             sizes: vec![vec![1usize; n]; p.columns.len()],
@@ -107,21 +120,23 @@ pub(crate) struct PermutationData {
     mapping: Box<[Vec<(usize, usize)>]>,
 }
 
-impl PermutationData {
-    pub fn new<F: PrimeField>(cs: &ConstraintSystem<F>, perm_assembly: &Assembly) -> Self {
-        Self {
-            columns: cs.permutation().get_columns().into_boxed_slice(),
-            mapping: perm_assembly.mapping.clone().into_boxed_slice(),
+impl From<&Assembly> for PermutationData {
+    fn from(assembly: &Assembly) -> Self {
+        PermutationData {
+            columns: assembly.columns.clone().into_boxed_slice(),
+            mapping: assembly.mapping.clone().into_boxed_slice(),
         }
     }
+}
 
+impl PermutationData {
     pub fn matrix<F: PrimeField>(
         &self,
         k_table_size: usize,
         num_io: &[usize],
         num_advice_columns: usize,
     ) -> SparseMatrix<F> {
-        util::construct_permutation_matrix(
+        construct_permutation_matrix(
             k_table_size,
             num_io,
             &self.columns,
@@ -181,10 +196,7 @@ impl PermutationData {
             debug!("check column {column:?}");
 
             if is_in_remove_set(column) {
-                debug!("completely clearing all permutations for column: {column:?}");
-                for (row_index, mapping_cell) in self.mapping[column_index].iter_mut().enumerate() {
-                    *mapping_cell = (column_index, row_index);
-                }
+                continue;
             } else {
                 debug!("start check permutations for column: {column:?}");
                 let row_count = self.mapping[column_index].len();
@@ -212,6 +224,17 @@ impl PermutationData {
                     );
 
                     self.mapping[column_index][row_index] = (next_i, next_j);
+                }
+            }
+        }
+
+        for (column_index, column) in self.columns.iter().enumerate() {
+            debug!("check column {column:?}");
+
+            if is_in_remove_set(column) {
+                debug!("completely clearing all permutations for column: {column:?}");
+                for (row_index, mapping_cell) in self.mapping[column_index].iter_mut().enumerate() {
+                    *mapping_cell = (column_index, row_index);
                 }
             }
         }
@@ -263,16 +286,121 @@ impl Serialize for PermutationData {
     }
 }
 
+/// Constructs a sparse permutation matrix `P` of size `N * N` from copy constraints.
+///
+/// The function accounts for the changes due to folding, which affects the values of advice/instance
+/// columns while keeping fixed column values unchanged. Consequently, fixed columns are not allowed
+/// in copy constraints.
+///
+/// Assume we have 1 instance column and `n` advice columns, with a total of `r` rows. Note that the
+/// instance column contains only `num_io` items:
+///
+/// `N = num_io + r * n`
+///
+/// Let `(i_1, ..., i_{io})` represent the values of the instance column, and
+/// `(x_1, ..., x_{n * r})` be the concatenated values of the advice columns. Define the vector:
+///
+/// `Z = (i_1, ..., i_{io}, x_1, ..., x_{n * r})`
+///
+/// The goal is to find a permutation matrix `P` such that the copy constraints satisfy:
+///
+/// `P * Z - Z = 0`
+///
+/// This relation remains invariant under the folding scheme.
+#[instrument(name = "permutation", skip_all)]
+pub(crate) fn construct_permutation_matrix<F: PrimeField>(
+    k_table_size: usize,
+    num_io: &[usize],
+    perm_columns: &[Column<Any>],
+    num_advice: usize,
+    permutation_mapping: &[Vec<(usize, usize)>],
+) -> SparseMatrix<F> {
+    let num_rows = 1 << k_table_size;
+
+    // Lengths of each row of the matrix
+    let rows_len = num_io
+        .iter()
+        .copied()
+        .chain(iter::repeat(num_rows).take(num_advice))
+        .collect::<Box<[_]>>();
+
+    let to_flat_column_offset = |column: Column<Any>| -> usize {
+        match column.column_type() {
+            Any::Instance => column.index(),
+            Any::Advice(_) => num_io.len() + column.index(),
+            Any::Fixed => unreachable!("'fixed column' can't be a part of permutation"),
+        }
+    };
+
+    let to_flat_index = |column: Column<Any>, row: usize| -> usize {
+        rows_len
+            .iter()
+            .take(to_flat_column_offset(column))
+            .sum::<usize>()
+            + row
+    };
+
+    let flated_rows = rows_len.iter().sum();
+    let mut columns_not_in_perm = HashSet::<usize>::from_iter(0..num_io.len() + num_advice);
+
+    let mut sparse_matrix_p = Vec::with_capacity(flated_rows);
+    for (left_col, mapping_vec) in permutation_mapping.iter().enumerate() {
+        let left_col = perm_columns[left_col];
+        columns_not_in_perm.remove(&to_flat_column_offset(left_col));
+
+        let instance_rows_count = match left_col.column_type() {
+            Any::Instance => num_io.get(left_col.index()),
+            _ => None,
+        };
+
+        for (left_row, (cycle_col, cycle_row)) in mapping_vec.iter().enumerate() {
+            if matches!(
+                instance_rows_count,
+                Some(count) if left_row >= *count
+            ) {
+                continue;
+            }
+
+            let right_col = perm_columns[*cycle_col];
+            columns_not_in_perm.remove(&to_flat_column_offset(right_col));
+
+            let left_z_idx = to_flat_index(left_col, left_row);
+            let right_z_idx = to_flat_index(right_col, *cycle_row);
+
+            sparse_matrix_p.push((left_z_idx, right_z_idx, F::ONE));
+        }
+    }
+
+    columns_not_in_perm.into_iter().for_each(|column_offset| {
+        let col_offset = rows_len.iter().take(column_offset).sum::<usize>();
+
+        for row in 0..num_rows {
+            let z_idx = col_offset + row;
+            sparse_matrix_p.push((z_idx, z_idx, F::ONE));
+        }
+    });
+
+    sparse_matrix_p
+}
+
 #[cfg(test)]
 mod test {
     use std::{
+        iter,
         mem::{self, MaybeUninit},
         ptr,
     };
 
-    use halo2_proofs::plonk::{Advice, ColumnType};
+    use halo2_proofs::{
+        arithmetic::Field,
+        halo2curves::pasta::Fq,
+        plonk::{Advice, ColumnType},
+    };
+    use itertools::Itertools;
+    use tracing::*;
 
     use super::*;
+    use crate::polynomial::sparse;
 
     // Bypass the lack of a constructor for `Column`
     fn column<C: ColumnType>(index: usize, column_type: C) -> Column<C> {
@@ -315,37 +443,190 @@ mod test {
         assert_eq!(fixed_col.column_type(), &Any::Fixed);
     }
 
+    const K_TABLE_SIZE: u32 = 3;
+    const NUM_ROWS: usize = 8;
+    const NUM_INSTANCES: usize = 10;
+    const NUM_ADVICES: usize = 10;
+
+    fn to_flat_column_offset(column: Column<Any>) -> usize {
+        match column.column_type() {
+            Any::Instance => column.index(),
+            Any::Advice(_) => NUM_INSTANCES + column.index(),
+            Any::Fixed => unreachable!("'fixed column' can't be a part of permutation"),
+        }
+    }
+
+    fn to_flat_index(column: Column<Any>, row: usize, rows_len: &[usize]) -> usize {
+        rows_len
+            .iter()
+            .take(to_flat_column_offset(column))
+            .sum::<usize>()
+            + row
+    }
+
+    fn check(permutation_data: &PermutationData, vec_Z: &[Fq]) -> bool {
+        sparse::matrix_multiply(
+            &permutation_data.matrix(
+                K_TABLE_SIZE as usize,
+                &iter::repeat(NUM_ROWS).take(NUM_INSTANCES).collect_vec(),
+                NUM_ADVICES,
+            ),
+            vec_Z,
+        )
+        .into_iter()
+        .zip_eq(vec_Z)
+        .enumerate()
+        .map(|(index, (y, z))| {
+            let diff = y - z;
+
+            warn!("mismatch at {index} with: {y:?} - {z:?} = {diff:?}");
+
+            diff
+        })
+        .all(|f| f.is_zero_vartime())
+    }
+
+    fn random_Z() -> Vec<Fq> {
+        let mut rng = rand::thread_rng();
+
+        iter::repeat_with(|| Fq::random(&mut rng))
+            .take((NUM_INSTANCES + NUM_ADVICES) * NUM_ROWS)
+            .collect_vec()
+    }
+
     #[tracing_test::traced_test]
     #[test]
     fn remove_copy_constraint() {
         let mut assembly = Assembly::new(
-            10,
+            NUM_ROWS,
             &Argument {
-                columns: (0..10)
+                columns: (0..NUM_INSTANCES)
                     .map(|index| column(index, Any::Instance))
-                    .chain((10..20).map(|index| column(index, Any::Advice(Advice::default()))))
+                    .chain(
+                        (0..NUM_ADVICES).map(|index| column(index, Any::Advice(Advice::default()))),
+                    )
                     .collect(),
             },
         );
+
+        let rows_len = iter::repeat(NUM_ROWS)
+            .take(NUM_INSTANCES + NUM_ADVICES)
+            .collect_vec();
 
         assembly
             .copy(column(0, Any::Instance), 0, column(1, Any::Instance), 0)
             .unwrap();
 
+        let mut vec_Z = random_Z();
+
+        assert!(
+            !check(&((&assembly).into()), &vec_Z),
+            "should fail: because value is random"
+        );
+
+        vec_Z[to_flat_index(column(0, Any::Instance), 0, &rows_len)] = Fq::ONE;
+        vec_Z[to_flat_index(column(1, Any::Instance), 0, &rows_len)] = Fq::ONE;
+
+        assert!(
+            check(&((&assembly).into()), &vec_Z),
+            "should pass, because value is equal"
+        );
+
+        // 0,0 -> 1,0 -> 2,0
         assembly
-            .copy(
-                column(1, Any::Instance),
-                0,
-                column(10, Any::Advice(Advice::default())),
-                0,
-            )
+            .copy(column(1, Any::Instance), 0, column(2, Any::Instance), 0)
             .unwrap();
 
-        let perm_data = PermutationData {
-            columns: assembly.columns.clone().into_boxed_slice(),
-            mapping: assembly.mapping.clone().into_boxed_slice(),
-        };
+        // m[2,0] != ONE
+        assert!(
+            !check(&((&assembly).into()), &vec_Z),
+            "should fail, because new copy-constraint not work"
+        );
 
-        perm_data.rm_copy_constraints(1..=2);
+        let perm_data = PermutationData::from(&assembly).rm_copy_constraints(1..=1);
+
+        // still m[2,0] != ONE
+        assert!(
+            !check(&perm_data, &vec_Z),
+            "should fail: because even without first instance-column second columns is not equal"
+        );
+
+        vec_Z[to_flat_index(column(0, Any::Instance), 0, &rows_len)] = Fq::from_u128(10);
+        vec_Z[to_flat_index(column(2, Any::Instance), 0, &rows_len)] = Fq::from_u128(10);
+
+        assert!(
+            check(&perm_data, &vec_Z),
+            "should work: new copy constraint is work"
+        );
+    }
+
+    #[tracing_test::traced_test]
+    #[test]
+    fn long_cycle() {
+        let mut assembly = Assembly::new(
+            NUM_ROWS,
+            &Argument {
+                columns: (0..NUM_INSTANCES)
+                    .map(|index| column(index, Any::Instance))
+                    .chain(
+                        (0..NUM_ADVICES).map(|index| column(index, Any::Advice(Advice::default()))),
+                    )
+                    .collect(),
+            },
+        );
+
+        let rows_len = iter::repeat(NUM_ROWS)
+            .take(NUM_INSTANCES + NUM_ADVICES)
+            .collect_vec();
+
+        const CELLS: [(usize, usize); 9] = [
+            (0, 0),
+            (1, 0),
+            (1, 1),
+            (1, 2),
+            (2, 0),
+            (2, 1),
+            (3, 0),
+            (3, 1),
+            (4, 0),
+        ];
+
+        for ((lhs_col, lhs_row), (rhs_col, rhs_row)) in CELLS.iter().tuple_windows() {
+            assembly
+                .copy(
+                    column(*lhs_col, Any::Instance),
+                    *lhs_row,
+                    column(*rhs_col, Any::Instance),
+                    *rhs_row,
+                )
+                .unwrap();
+        }
+
+        let mut vec_Z = random_Z();
+
+        assert!(
+            !check(&((&assembly).into()), &vec_Z),
+            "should fail: because value is random"
+        );
+
+        for (col, row) in CELLS {
+            vec_Z[to_flat_index(column(col, Any::Instance), row, &rows_len)] = Fq::ONE;
+        }
+
+        assert!(
+            check(&((&assembly).into()), &vec_Z),
+            "should pass, because value is equal"
+        );
+
+        let perm_data = PermutationData::from(&assembly).rm_copy_constraints(1..=3);
+
+        let mut vec_Z = random_Z();
+        vec_Z[to_flat_index(column(0, Any::Instance), 0, &rows_len)] = Fq::from_u128(10);
+        vec_Z[to_flat_index(column(4, Any::Instance), 0, &rows_len)] = Fq::from_u128(10);
+
+        assert!(
+            check(&perm_data, &vec_Z),
+            "should work: new copy constraint is work"
+        );
     }
 }

@@ -6,6 +6,7 @@ use halo2_proofs::{
     poly::Rotation,
 };
 use itertools::Itertools;
+use tracing::*;
 
 use crate::{
     ff::{PrimeField, PrimeFieldBits},
@@ -727,22 +728,33 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
     }
 }
 
-impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
+impl<F: PartialEq + PrimeFieldBits, const T: usize> MainGate<F, T> {
+    #[instrument(skip_all)]
     pub fn assign_bits(
         &self,
         ctx: &mut RegionCtx<'_, F>,
         bits: &[bool],
     ) -> Result<Vec<AssignedValue<F>>, Error> {
-        bits.iter()
+        debug!("START {}", ctx.offset);
+
+        let bits = bits
+            .iter()
             .map(|bit| self.assign_bit(ctx, Value::known(if *bit { F::ONE } else { F::ZERO })))
-            .collect()
+            .collect();
+
+        debug!("END {}", ctx.offset);
+
+        bits
     }
 
+    #[instrument(skip_all)]
     pub fn le_bits_to_num(
         &self,
         ctx: &mut RegionCtx<'_, F>,
         bits: &[AssignedValue<F>],
     ) -> Result<AssignedValue<F>, Error> {
+        debug!("MARK {}-{}", bits.len(), ctx.offset);
+
         bits.iter()
             .zip(util::get_power_of_two_iter::<F>())
             .chunks(T)
@@ -752,7 +764,7 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
                 |acc, chunk| {
                     let mut acc_value = acc.value().copied();
 
-                    let (bits, shifts) = chunk
+                    let (bits, shifts): (Vec<WrapValue<F>>, Vec<_>) = chunk
                         .map(|(bit, shift)| {
                             acc_value = acc_value + (Value::known(shift) * bit.value());
                             (bit.into(), shift)
@@ -769,6 +781,7 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
             )
     }
 
+    #[instrument(skip_all)]
     pub fn le_num_to_bits(
         &self,
         ctx: &mut RegionCtx<'_, F>,
@@ -786,6 +799,7 @@ impl<F: PrimeFieldBits, const T: usize> MainGate<F, T> {
         normalize_trailing_zeros(&mut bits, bit_len);
 
         let bits = self.assign_bits(ctx, &bits)?;
+
         let num = self.le_bits_to_num(ctx, &bits)?;
 
         assert_eq!(num.value().unwrap(), input.value().unwrap());

@@ -2,6 +2,7 @@
 use std::num::NonZeroUsize;
 
 use serde::Serialize;
+use tracing::*;
 
 use super::fold_relaxed_plonk_instance_chip::AssignedRelaxedPlonkInstance;
 use crate::{
@@ -53,6 +54,8 @@ where
             .absorb_iter(self.relaxed.iter_wrap_values())
             .inspect(inspect)
             .squeeze_n_bits(ctx, NUM_CHALLENGE_BITS)?;
+
+        debug!("offset after squeeze: {}", ctx.offset);
 
         MainGate::new(config.clone()).le_bits_to_num(ctx, &bits)
     }

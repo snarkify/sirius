@@ -379,7 +379,8 @@ where
                 S.num_io
                     .iter()
                     .skip(1)
-                    .flat_map(|len| iter::repeat(C::ScalarExt::ZERO).take(*len)),
+                    // Use 0xfffffff only for easy debug
+                    .flat_map(|len| iter::repeat(C::ScalarExt::from_u128(0xfffffff)).take(*len)),
             )
         }
 
@@ -405,7 +406,7 @@ where
                     if diff.is_zero().into() {
                         false
                     } else {
-                        warn!("permutation mismatch at {row} with diff {diff:?}");
+                        warn!("permutation mismatch at {row} with: {y:?} - {z:?} = {diff:?}");
                         true
                     }
                 })

@@ -1006,7 +1006,6 @@ where
             .collect::<Result<Vec<_>, _>>()?;
 
         region.next();
-
         let r = ro_circuit.squeeze_n_bits(region, NUM_CHALLENGE_BITS)?;
         region.next();
 
@@ -1207,9 +1206,20 @@ mod tests {
             W_commitments: iter::repeat_with(|| C1::random(&mut rnd))
                 .take(NUM_WITNESS)
                 .collect(),
-            instances: vec![iter::repeat_with(|| ScalarExt::random(&mut rnd))
-                .take(NUM_INSTANCES)
-                .collect()],
+            instances: iter::once(
+                iter::repeat_with(|| ScalarExt::random(&mut rnd))
+                    .take(NUM_INSTANCES)
+                    .collect_vec(),
+            )
+            .chain(
+                iter::repeat_with(|| ScalarExt::random(&mut rnd))
+                    .chunks(10)
+                    .into_iter()
+                    .take(10)
+                    .map(|ch| ch.into_iter().collect_vec())
+                    .collect_vec(),
+            )
+            .collect_vec(),
             challenges: iter::repeat_with(|| ScalarExt::random(&mut rnd))
                 .take(NUM_CHALLENGES)
                 .collect(),
@@ -1222,8 +1232,7 @@ mod tests {
     fn generate_challenge() {
         let mut rnd = rand::thread_rng();
 
-        let relaxed =
-            RelaxedPlonkInstance::from(generate_random_plonk_instance(&mut rnd));
+        let relaxed = RelaxedPlonkInstance::from(generate_random_plonk_instance(&mut rnd));
 
         let (mut ws, config) = get_witness_collector();
 
@@ -1618,8 +1627,7 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut relaxed_plonk =
-            RelaxedPlonkInstance::<C1>::new(NUM_CHALLENGES, 0);
+        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(NUM_CHALLENGES, 0);
 
         let bn_chip = BigUintMulModChip::<Base>::new(
             config
@@ -1713,7 +1721,8 @@ mod tests {
                     W_commitments: vec![],
                     instances: vec![vec![ScalarExt::ONE, ScalarExt::ONE]],
                     challenges: input_challenges.to_vec(),
-                }).unwrap(),
+                })
+                .unwrap(),
                 &[],
                 &r,
             );
@@ -1762,8 +1771,7 @@ mod tests {
 
         let spec = Spec::<Base, T, { T - 1 }>::new(10, 10);
 
-        let mut relaxed =
-            RelaxedPlonkInstance::new(NUM_CHALLENGES, NUM_WITNESS);
+        let mut relaxed = RelaxedPlonkInstance::new(NUM_CHALLENGES, NUM_WITNESS);
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
             let input_plonk = generate_random_plonk_instance(&mut rnd);

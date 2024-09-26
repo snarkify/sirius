@@ -11,7 +11,7 @@ use crate::{
     ff::PrimeField,
     halo2_proofs::arithmetic::{self, CurveAffine, Field},
     nifs::protogalaxy::poly::PolyContext,
-    plonk::{self, PlonkStructure, PlonkTrace, PlonkWitness, PlonkInstance},
+    plonk::{self, PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness},
     polynomial::{lagrange, sparse, univariate::UnivariatePoly},
     poseidon::AbsorbInRO,
     sps::{self, SpecialSoundnessVerifier},
