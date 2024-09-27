@@ -33,12 +33,12 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         } = self.config();
 
         // s0*s1 - out = 0
-        let s0 = ctx.assign_advice(|| "is_inf", state[0], a)?;
-        let s1 = ctx.assign_advice(|| "is_inf", state[1], a)?;
-        ctx.assign_fixed(|| "q_m", q_m[0], F::ONE)?;
+        let s0 = ctx.assign_advice(|| "bit", state[0], a)?;
+        let s1 = ctx.assign_advice(|| "bit", state[1], a)?;
+        ctx.assign_fixed(|| "one", q_m[0], F::ONE)?;
 
-        ctx.assign_fixed(|| "q_o", *q_o, -F::ONE)?;
-        let out = ctx.assign_advice(|| "is_inf", *out, a)?;
+        ctx.assign_fixed(|| "minus one", *q_o, -F::ONE)?;
+        let out = ctx.assign_advice(|| "bit", *out, a)?;
 
         ctx.constrain_equal(s0.cell(), out.cell())?;
         ctx.constrain_equal(s1.cell(), out.cell())?;
