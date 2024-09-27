@@ -60,7 +60,7 @@ where
 {
     fn from(inner: FoldablePlonkInstance<C>) -> Self {
         let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator::<C>(
+            instances_accumulator_computation::fold_sc_instances_accumulator::<C>(
                 &C::ScalarExt::ZERO,
                 inner.get_step_circuit_instances(),
             );
@@ -135,10 +135,7 @@ where
 {
     pub fn new(num_challenges: usize, num_witness: usize) -> Self {
         let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator::<C>(
-                &C::ScalarExt::ZERO,
-                &[],
-            );
+            instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>();
 
         Self {
             consistency_markers: [C::ScalarExt::ZERO, C::ScalarExt::ZERO],
@@ -217,7 +214,7 @@ where
             .fold(self.E_commitment, |acc, x| (acc + x).into());
 
         let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator::<C>(
+            instances_accumulator_computation::fold_sc_instances_accumulator::<C>(
                 &self.step_circuit_instances_hash_accumulator,
                 U2.get_step_circuit_instances(),
             );
@@ -406,4 +403,21 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
             E,
         }
     }
+}
+
+fn fold_step_circuit_instances_hash_accumulator_collection<C: CurveAffine>(
+    step_circuit_instances_collection: &[Vec<Vec<C::ScalarExt>>],
+) -> C::ScalarExt
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+{
+    step_circuit_instances_collection.iter().fold(
+        instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
+        |acc, sc_instances| {
+            instances_accumulator_computation::fold_sc_instances_accumulator::<C>(
+                &acc,
+                sc_instances,
+            )
+        },
+    )
 }

@@ -20,10 +20,10 @@ use sirius::{
 use tracing::debug;
 use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
 
-const INSTANCES_LEN: usize = 20;
+const INSTANCES_LEN: usize = A1;
 
 /// Number of folding steps
-const FOLD_STEP_COUNT: usize = 1;
+const FOLD_STEP_COUNT: usize = 2;
 
 /// Arity : Input/output size per fold-step for primary step-circuit
 const A1: usize = 5;
@@ -57,11 +57,11 @@ struct InstancesConfig<const N: usize> {
 }
 struct InstancesCircuit<const N: usize> {}
 
-impl<const N: usize, const A: usize, F: PrimeField> StepCircuit<A, F> for InstancesCircuit<N> {
-    type Config = InstancesConfig<N>;
+impl<const A: usize, F: PrimeField> StepCircuit<A, F> for InstancesCircuit<A> {
+    type Config = InstancesConfig<A>;
 
     fn instances(&self) -> Vec<Vec<F>> {
-        vec![vec![F::ONE + F::ONE]; N]
+        (0..A).map(|val| vec![F::from_u128(val as u128)]).collect()
     }
 
     /// Configure the step circuit. This method initializes necessary
@@ -83,10 +83,14 @@ impl<const N: usize, const A: usize, F: PrimeField> StepCircuit<A, F> for Instan
     /// Return `z_out` result
     fn synthesize_step(
         &self,
-        _config: Self::Config,
-        _layouter: &mut impl Layouter<F>,
+        config: Self::Config,
+        layouter: &mut impl Layouter<F>,
         z_i: &[AssignedCell<F, F>; A],
     ) -> Result<[AssignedCell<F, F>; A], SynthesisError> {
+        for (input, instance) in z_i.iter().zip(config.instances) {
+            layouter.constrain_instance(input.cell(), instance, 0)?;
+        }
+
         Ok(z_i.clone())
     }
 }

@@ -20,6 +20,8 @@ pub enum SynthesisError {
     FoldError(#[from] fold_relaxed_plonk_instance_chip::Error),
 }
 
+pub type Instances<F> = Vec<Vec<F>>;
+
 /// The `StepCircuit` trait represents a step in incremental computation in
 /// Incrementally Verifiable Computation (IVC).
 ///
@@ -65,7 +67,7 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
     ///
     /// The dimensionality of the output vector must match how many instance columns you created
     /// during the [`StepCircuit::configure`] call.
-    fn instances(&self) -> Vec<Vec<F>> {
+    fn instances(&self) -> Instances<F> {
         vec![]
     }
 

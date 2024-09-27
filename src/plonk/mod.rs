@@ -162,11 +162,13 @@ pub struct PlonkStructure<F: PrimeField> {
     pub(crate) lookup_arguments: Option<lookup::Arguments<F>>,
 }
 
+pub type Instances<F> = Vec<Vec<F>>;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlonkInstance<C: CurveAffine> {
     /// `W_commitments = round_sizes.len()`, see [`PlonkStructure::round_sizes`]
     pub(crate) W_commitments: Vec<C>,
-    pub(crate) instances: Vec<Vec<C::ScalarExt>>,
+    pub(crate) instances: Instances<C::ScalarExt>,
     /// challenges generated in special soundness protocol
     /// we will have 0 ~ 3 challenges depending on different cases:
     /// name them as r1, r2, r3.

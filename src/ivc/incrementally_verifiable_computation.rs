@@ -38,6 +38,7 @@ where
     relaxed_trace: RelaxedPlonkTrace<C>,
     z_0: [C::Scalar; ARITY],
     z_i: [C::Scalar; ARITY],
+
     _p: PhantomData<SC>,
 }
 

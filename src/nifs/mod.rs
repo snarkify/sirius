@@ -13,7 +13,7 @@ use rayon::prelude::*;
 
 use crate::{
     commitment::{self, CommitmentKey},
-    plonk::{eval::Error as EvalError, PlonkStructure},
+    plonk::{eval::Error as EvalError, Instances, PlonkStructure},
     poseidon::ROTrait,
     sps::Error as SpsError,
 };
