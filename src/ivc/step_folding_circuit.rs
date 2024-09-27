@@ -106,6 +106,27 @@ where
     pub step_circuit_instances: Vec<Vec<C::Base>>,
 }
 
+impl<'link, const ARITY: usize, C: fmt::Debug, RO> fmt::Debug for StepInputs<'link, ARITY, C, RO>
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C: CurveAffine,
+    RO: ROCircuitTrait<C::Base>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StepInputs")
+            .field("step", &self.step)
+            .field("step_pp", &self.step_pp)
+            .field("public_params_hash", &self.public_params_hash)
+            .field("z_0", &self.z_0)
+            .field("z_i", &self.z_i)
+            .field("U", &self.U)
+            .field("u", &self.u)
+            .field("cross_term_commits", &self.cross_term_commits)
+            .field("step_circuit_instances", &self.step_circuit_instances)
+            .finish()
+    }
+}
+
 impl<'link, const ARITY: usize, C, RO> StepInputs<'link, ARITY, C, RO>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
@@ -124,7 +145,8 @@ where
 
     pub fn without_witness<PairedCircuit: Circuit<C::Scalar>>(
         k_table_size: u32,
-        num_io: &[usize],
+        native_num_io: &[usize],
+        paired_num_io: &[usize],
         step_pp: &'link StepParams<C::Base, RO>,
     ) -> Self {
         let mut cs = ConstraintSystem::<C::Scalar>::default();
@@ -138,7 +160,8 @@ where
             ..
         } = ConstraintSystemMetainfo::build(k_table_size as usize, &cs);
 
-        let Some((consistency_markers, step_circuit_instances)) = num_io.split_first() else {
+        let Some((consistency_markers, step_circuit_instances)) = native_num_io.split_first()
+        else {
             panic!("Empty instances not expected, because consistency markers");
         };
 
@@ -152,7 +175,7 @@ where
             z_i: [C::Base::ZERO; ARITY],
             U: RelaxedPlonkInstance::new(num_challenges, round_sizes.len()),
             u: FoldablePlonkInstance::new(PlonkInstance::new(
-                num_io,
+                paired_num_io,
                 num_challenges,
                 round_sizes.len(),
             ))
@@ -268,11 +291,16 @@ where
     type FloorPlanner = floor_planner::V1;
 
     fn without_witnesses(&self) -> Self {
-        let instances_len = &self
-            .instances([C::Base::ZERO, C::Base::ZERO])
-            .iter()
-            .map(|ins| ins.len())
-            .collect::<Box<[_]>>();
+        let mut u = self.input.u.clone();
+        u.W_commitments.iter_mut().for_each(|v| *v = C::identity());
+        u.instances
+            .iter_mut()
+            .flat_map(|ins| ins.iter_mut())
+            .for_each(|v| *v = C::ScalarExt::ZERO);
+        u.challenges
+            .iter_mut()
+            .for_each(|v| *v = C::ScalarExt::ZERO);
+
         Self {
             step_circuit: self.step_circuit,
             input: StepInputs {
@@ -286,12 +314,7 @@ where
                     self.input.U.challenges.len(),
                     self.input.U.W_commitments.len(),
                 ),
-                u: FoldablePlonkInstance::new(PlonkInstance::new(
-                    instances_len,
-                    self.input.u.challenges.len(),
-                    self.input.u.W_commitments.len(),
-                ))
-                .expect("you can't use plonk instance without consistency markers"),
+                u,
                 step_circuit_instances: self
                     .input
                     .step_circuit_instances

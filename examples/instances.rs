@@ -20,7 +20,7 @@ use sirius::{
 use tracing::debug;
 use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
 
-const INSTANCES_LEN: usize = 2;
+const INSTANCES_LEN: usize = 20;
 
 /// Number of folding steps
 const FOLD_STEP_COUNT: usize = 1;
@@ -121,6 +121,7 @@ fn main() {
                 .with_default_directive(LevelFilter::INFO.into())
                 .from_env_lossy(),
         )
+        .with_ansi(false)
         .init();
 
     let sc1 = InstancesCircuit::<INSTANCES_LEN> {};

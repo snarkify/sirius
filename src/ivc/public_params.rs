@@ -257,6 +257,14 @@ where
         limb_width: NonZeroUsize,
         limbs_count: NonZeroUsize,
     ) -> Result<Self, Error> {
+        let primary_num_io = iter::once(CONSISTENCY_MARKERS_COUNT)
+            .chain(primary.step_circuit.instances().iter().map(Vec::len))
+            .collect::<Box<[_]>>();
+
+        let secondary_num_io = iter::once(CONSISTENCY_MARKERS_COUNT)
+            .chain(secondary.step_circuit.instances().iter().map(Vec::len))
+            .collect::<Box<[_]>>();
+
         let primary_S = {
             let _primary_span = info_span!("primary").entered();
 
@@ -269,9 +277,8 @@ where
                     StepFoldingCircuit<'_, A2, C1, SC2, RP2::OnCircuit, MAIN_GATE_T>,
                 >(
                     primary.k_table_size,
-                    &iter::once(CONSISTENCY_MARKERS_COUNT)
-                        .chain(primary.step_circuit.instances().iter().map(Vec::len))
-                        .collect::<Box<[_]>>(),
+                    &primary_num_io,
+                    &secondary_num_io,
                     &primary_step_params,
                 ),
             };
@@ -288,19 +295,16 @@ where
             let secondary_initial_step_params =
                 StepParams::new(limb_width, limbs_count, secondary.ro_constant.clone());
 
-            let secondary_num_io = iter::once(CONSISTENCY_MARKERS_COUNT)
-                .chain(secondary.step_circuit.instances().iter().map(Vec::len))
-                .collect::<Box<[_]>>();
-
             let secondary_initial_step_input = StepInputs::without_witness::<
                 StepFoldingCircuit<'_, A1, C2, SC1, RP1::OnCircuit, MAIN_GATE_T>,
             >(
                 secondary.k_table_size,
                 &secondary_num_io,
+                &primary_num_io,
                 &secondary_initial_step_params,
             );
 
-            let secondary_initial_instance: [C2::Scalar; 2] = [
+            let secondary_consistenty_markers: [C2::Scalar; 2] = [
                 util::fe_to_fe(&secondary_initial_step_input.u.get_consistency_markers()[0])
                     .unwrap(),
                 ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
@@ -323,7 +327,7 @@ where
                 input: secondary_initial_step_input,
             };
 
-            let secondary_instances = secondary_sfc.instances(secondary_initial_instance);
+            let secondary_instances = secondary_sfc.instances(secondary_consistenty_markers);
             let secondary_cr = CircuitRunner::new(
                 secondary.k_table_size,
                 secondary_sfc,

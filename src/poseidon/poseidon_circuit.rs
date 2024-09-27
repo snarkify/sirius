@@ -382,8 +382,6 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
 
     #[instrument(skip_all)]
     pub fn squeeze(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedValue<F>, Error> {
-        warn!("{}", ctx.offset);
-
         //let buf = mem::take(&mut self.buf);
         let buf = self.buf.clone();
         if let Some(buf) = buf
@@ -418,7 +416,6 @@ impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> Poseidon
             state = self.permutation(ctx, Vec::new(), &state)?;
         }
 
-        warn!("{}", ctx.offset);
         Ok(state[1].clone())
     }
 }

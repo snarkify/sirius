@@ -753,8 +753,6 @@ impl<F: PartialEq + PrimeFieldBits, const T: usize> MainGate<F, T> {
         ctx: &mut RegionCtx<'_, F>,
         bits: &[AssignedValue<F>],
     ) -> Result<AssignedValue<F>, Error> {
-        debug!("MARK {}-{}", bits.len(), ctx.offset);
-
         bits.iter()
             .zip(util::get_power_of_two_iter::<F>())
             .chunks(T)
