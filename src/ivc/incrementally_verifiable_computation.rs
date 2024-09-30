@@ -107,6 +107,8 @@ where
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
     SC1: StepCircuit<A1, C1::Scalar>,
     SC2: StepCircuit<A2, C2::Scalar>,
+    C1::Scalar: PrimeFieldBits + FromUniformBytes<64>,
+    C2::Scalar: PrimeFieldBits + FromUniformBytes<64>,
 {
     primary: StepCircuitContext<A1, C1, SC1>,
     secondary: StepCircuitContext<A2, C2, SC2>,
