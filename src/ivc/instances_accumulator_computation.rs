@@ -2,7 +2,10 @@
 use std::{iter, num::NonZeroUsize};
 
 use halo2_proofs::{
-    halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
+    halo2curves::{
+        ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
+        CurveAffine,
+    },
     plonk::Error as Halo2PlonkError,
 };
 use tracing::{debug, instrument};
@@ -32,27 +35,26 @@ fn default_spec<F: FromUniformBytes<64>>() -> Spec<F, T, RATE> {
 }
 
 #[instrument(skip_all)]
-pub fn fold_step_circuit_instances_hash_accumulator<F1, F2>(
-    instances_hash_accumulator: &F1,
-    instances: &[Vec<F1>],
-) -> F1
+pub fn fold_step_circuit_instances_hash_accumulator<C: CurveAffine>(
+    instances_hash_accumulator: &C::ScalarExt,
+    instances: &[Vec<C::ScalarExt>],
+) -> C::ScalarExt
 where
-    F1: PrimeFieldBits + FromUniformBytes<64>,
-    F2: PrimeFieldBits + FromUniformBytes<64>,
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    let num_bits = NonZeroUsize::new(<F1 as PrimeField>::NUM_BITS as usize)
+    let num_bits = NonZeroUsize::new(<C::Base as PrimeField>::NUM_BITS as usize)
         .expect("unattainably: num_bits can't be zero");
 
-    let hash_in_f1: F2 = PoseidonHash::<F2, T, RATE>::new(default_spec())
+    let hash_in_base: C::Base = PoseidonHash::<C::Base, T, RATE>::new(default_spec())
         .absorb_field_iter(
             iter::once(instances_hash_accumulator)
                 .chain(instances.iter().flat_map(|instance| instance.iter()))
                 .map(|i| util::fe_to_fe(i).unwrap()),
         )
         .inspect(|buf| debug!("off-circuit buf of instances: {buf:?}"))
-        .output::<F2>(num_bits);
+        .output::<C::Base>(num_bits);
 
-    util::fe_to_fe(&hash_in_f1).unwrap()
+    util::fe_to_fe(&hash_in_base).unwrap()
 }
 
 #[instrument(skip_all)]
@@ -211,8 +213,7 @@ mod tests {
         let mut rand = rand::thread_rng();
         let [acc, i1, i2, i3] = array::from_fn(|_| Scalar::random(&mut rand));
 
-        let expected =
-            fold_step_circuit_instances_hash_accumulator::<Scalar, Base>(&acc, &[vec![i1, i2, i3]]);
+        let expected = fold_step_circuit_instances_hash_accumulator::<C>(&acc, &[vec![i1, i2, i3]]);
 
         MockProver::run(
             10,

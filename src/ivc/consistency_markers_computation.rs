@@ -10,7 +10,7 @@ use crate::{
     gadgets::{ecc::AssignedPoint, nonnative::bn::big_uint::BigUint},
     halo2curves::CurveAffine,
     main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
-    nifs::vanilla::{accumulator::RelaxedPlonkInstance, GetConsistencyMarkers},
+    nifs::vanilla::accumulator::RelaxedPlonkInstance,
     poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
     util,
 };
@@ -89,9 +89,10 @@ where
         pub struct RelaxedPlonkInstanceBigUintView<'l, C: CurveAffine> {
             pub(crate) W_commitments: &'l Vec<C>,
             pub(crate) E_commitment: &'l C,
-            pub(crate) instance: Vec<BigUint<C::Base>>,
+            pub(crate) consistency_markers: Vec<BigUint<C::Base>>,
             pub(crate) challenges: Vec<BigUint<C::Base>>,
             pub(crate) u: &'l C::ScalarExt,
+            pub(crate) step_circuit_instances_hash_accumulator: &'l C::ScalarExt,
         }
 
         impl<'l, C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO>
@@ -101,7 +102,7 @@ where
                 ro.absorb_point_iter(self.W_commitments.iter())
                     .absorb_point(self.E_commitment)
                     .absorb_field_iter(
-                        self.instance
+                        self.consistency_markers
                             .iter()
                             .flat_map(|bn| bn.limbs().iter())
                             .copied(),
@@ -112,17 +113,26 @@ where
                             .flat_map(|bn| bn.limbs().iter())
                             .copied(),
                     )
-                    .absorb_field(util::fe_to_fe(self.u).unwrap());
+                    .absorb_field(util::fe_to_fe(self.u).unwrap())
+                    .absorb_field(
+                        util::fe_to_fe(self.step_circuit_instances_hash_accumulator).unwrap(),
+                    );
             }
         }
 
+        let RelaxedPlonkInstance {
+            W_commitments,
+            consistency_markers,
+            challenges,
+            E_commitment,
+            u,
+            step_circuit_instances_hash_accumulator,
+        } = &self.relaxed;
+
         let relaxed = RelaxedPlonkInstanceBigUintView {
-            W_commitments: &self.relaxed.W_commitments,
-            E_commitment: &self.relaxed.E_commitment,
-            instance: self
-                .relaxed
-                .get_consistency_markers()
-                .unwrap()
+            W_commitments,
+            E_commitment,
+            consistency_markers: consistency_markers
                 .iter()
                 .map(|v| {
                     BigUint::from_f(
@@ -133,9 +143,7 @@ where
                     .unwrap()
                 })
                 .collect(),
-            challenges: self
-                .relaxed
-                .challenges
+            challenges: challenges
                 .iter()
                 .map(|v| {
                     BigUint::from_f(
@@ -146,7 +154,8 @@ where
                     .unwrap()
                 })
                 .collect(),
-            u: &self.relaxed.u,
+            step_circuit_instances_hash_accumulator,
+            u,
         };
 
         util::fe_to_fe(
@@ -217,6 +226,7 @@ mod tests {
             challenges: vec![Scalar::from_u128(0x123456); 10],
             E_commitment: CommitmentKey::<C1>::default_value(),
             u: Scalar::from_u128(u128::MAX),
+            step_circuit_instances_hash_accumulator: Scalar::from_u128(0xaaaaaaaaaaaaa),
         };
 
         let off_circuit_hash: Base = ConsistencyMarkerComputation::<
