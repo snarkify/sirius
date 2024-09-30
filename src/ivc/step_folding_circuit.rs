@@ -20,7 +20,10 @@ use crate::{
         StepCircuit,
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
-    nifs::vanilla::{self, accumulator::RelaxedPlonkInstance},
+    nifs::vanilla::{
+        self,
+        accumulator::{FoldablePlonkInstance, RelaxedPlonkInstance},
+    },
     plonk::PlonkInstance,
     poseidon::ROCircuitTrait,
     table::ConstraintSystemMetainfo,
@@ -95,12 +98,33 @@ where
     pub U: RelaxedPlonkInstance<C>,
 
     // TODO docs
-    pub u: PlonkInstance<C>,
+    pub u: FoldablePlonkInstance<C>,
 
     // TODO docs
     pub cross_term_commits: Vec<C>,
 
     pub step_circuit_instances: Vec<Vec<C::Base>>,
+}
+
+impl<'link, const ARITY: usize, C: fmt::Debug, RO> fmt::Debug for StepInputs<'link, ARITY, C, RO>
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C: CurveAffine,
+    RO: ROCircuitTrait<C::Base>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StepInputs")
+            .field("step", &self.step)
+            .field("step_pp", &self.step_pp)
+            .field("public_params_hash", &self.public_params_hash)
+            .field("z_0", &self.z_0)
+            .field("z_i", &self.z_i)
+            .field("U", &self.U)
+            .field("u", &self.u)
+            .field("cross_term_commits", &self.cross_term_commits)
+            .field("step_circuit_instances", &self.step_circuit_instances)
+            .finish()
+    }
 }
 
 impl<'link, const ARITY: usize, C, RO> StepInputs<'link, ARITY, C, RO>
@@ -121,7 +145,8 @@ where
 
     pub fn without_witness<PairedCircuit: Circuit<C::Scalar>>(
         k_table_size: u32,
-        num_io: &[usize],
+        native_num_io: &[usize],
+        paired_num_io: &[usize],
         step_pp: &'link StepParams<C::Base, RO>,
     ) -> Self {
         let mut cs = ConstraintSystem::<C::Scalar>::default();
@@ -135,7 +160,8 @@ where
             ..
         } = ConstraintSystemMetainfo::build(k_table_size as usize, &cs);
 
-        let Some((consistency_markers, step_circuit_instances)) = num_io.split_first() else {
+        let Some((consistency_markers, step_circuit_instances)) = native_num_io.split_first()
+        else {
             panic!("Empty instances not expected, because consistency markers");
         };
 
@@ -147,9 +173,13 @@ where
             public_params_hash: C::identity(),
             z_0: [C::Base::ZERO; ARITY],
             z_i: [C::Base::ZERO; ARITY],
-            U: RelaxedPlonkInstance::try_new(num_io, num_challenges, round_sizes.len())
-                .expect("TODO #316"),
-            u: PlonkInstance::new(num_io, num_challenges, round_sizes.len()),
+            U: RelaxedPlonkInstance::new(num_challenges, round_sizes.len()),
+            u: FoldablePlonkInstance::new(PlonkInstance::new(
+                paired_num_io,
+                num_challenges,
+                round_sizes.len(),
+            ))
+            .expect("you can't use plonk instance without consistency markers"),
             step_circuit_instances: step_circuit_instances
                 .iter()
                 .map(|len| vec![C::Base::ZERO; *len])
@@ -261,11 +291,16 @@ where
     type FloorPlanner = floor_planner::V1;
 
     fn without_witnesses(&self) -> Self {
-        let instances_len = &self
-            .instances([C::Base::ZERO, C::Base::ZERO])
-            .iter()
-            .map(|ins| ins.len())
-            .collect::<Box<[_]>>();
+        let mut u = self.input.u.clone();
+        u.W_commitments.iter_mut().for_each(|v| *v = C::identity());
+        u.instances
+            .iter_mut()
+            .flat_map(|ins| ins.iter_mut())
+            .for_each(|v| *v = C::ScalarExt::ZERO);
+        u.challenges
+            .iter_mut()
+            .for_each(|v| *v = C::ScalarExt::ZERO);
+
         Self {
             step_circuit: self.step_circuit,
             input: StepInputs {
@@ -275,17 +310,11 @@ where
                 z_0: [C::Base::ZERO; ARITY],
                 z_i: [C::Base::ZERO; ARITY],
                 cross_term_commits: vec![C::identity(); self.input.cross_term_commits.len()],
-                U: RelaxedPlonkInstance::try_new(
-                    instances_len,
+                U: RelaxedPlonkInstance::new(
                     self.input.U.challenges.len(),
                     self.input.U.W_commitments.len(),
-                )
-                .expect("TODO #316"),
-                u: PlonkInstance::new(
-                    instances_len,
-                    self.input.u.challenges.len(),
-                    self.input.u.W_commitments.len(),
                 ),
+                u,
                 step_circuit_instances: self
                     .input
                     .step_circuit_instances
@@ -307,6 +336,9 @@ where
 
         let step_circuit_instances = (1..=(after - before))
             .map(|index| {
+                // Because `Column` type doesn't have a constructor, we use a small hack - reuse
+                // `consistency_markers`
+
                 let mut i = consistency_markers;
                 i.index = index;
                 i
@@ -321,6 +353,7 @@ where
         }
     }
 
+    #[instrument(skip_all)]
     fn synthesize(
         &self,
         config: StepConfig<ARITY, C::Base, SC, T>,
@@ -338,7 +371,10 @@ where
         ) = layouter
             .assign_region(
                 || "assign z_0 & z_i",
-                |region| {
+                |mut region| {
+                    let _s = debug_span!("assign z_0 & z_i").entered();
+
+                    config.main_gate_config.name_columns(&mut region);
                     let mut region = RegionCtx::new(region, 0);
 
                     let mut assigner = config.main_gate_config.advice_cycle_assigner();
@@ -357,9 +393,12 @@ where
                         .iter()
                         .enumerate()
                         .try_fold(vec![], |mut all, (column_index, instance_column_values)| {
-                            let value = instance_column_values.iter().cloned();
-                            let instance_column =
-                                assigner.assign_all_advice(&mut region, || "instance", value)?;
+                            let column_values = instance_column_values.iter().cloned();
+                            let instance_column = assigner.assign_all_advice(
+                                &mut region,
+                                || "step circuit instance[]",
+                                column_values,
+                            )?;
 
                             all.extend(
                                 instance_column.into_iter().enumerate().map(
@@ -403,7 +442,10 @@ where
         let (w, r) = layouter
             .assign_region(
                 || "assign witness",
-                |region| {
+                |mut region| {
+                    let _s = debug_span!("assign_witness").entered();
+                    config.main_gate_config.name_columns(&mut region);
+
                     Ok(chip.assign_witness_with_challenge(
                         &mut RegionCtx::new(region, 0),
                         &self.input.public_params_hash,
@@ -429,7 +471,10 @@ where
         let (assigned_step, assigned_next_step) = layouter
             .assign_region(
                 || "generate steps",
-                |region| {
+                |mut region| {
+                    let _s = debug_span!("generate steps").entered();
+                    config.main_gate_config.name_columns(&mut region);
+
                     let mut ctx = RegionCtx::new(region, 0);
 
                     ctx.assign_fixed(|| "1", config.main_gate_config.rc, C::Base::ONE)?;
@@ -460,7 +505,10 @@ where
         let (base_case_input_check, non_base_case_input_check) = layouter
             .assign_region(
                 || "generate input hash",
-                |region| {
+                |mut region| {
+                    let _s = debug_span!("generate input hash").entered();
+                    config.main_gate_config.name_columns(&mut region);
+
                     let mut ctx = RegionCtx::new(region, 0);
 
                     let base_case_input_check = ctx.assign_advice(
@@ -514,7 +562,10 @@ where
         } = layouter
             .assign_region(
                 || "synthesize_step_non_base_case",
-                |region| Ok(chip.fold(&mut RegionCtx::new(region, 0), w.clone(), r.clone())?),
+                |region| {
+                    let _s = debug_span!("synthesize_step_non_base_case").entered();
+                    Ok(chip.fold(&mut RegionCtx::new(region, 0), w.clone(), r.clone())?)
+                },
             )
             .map_err(|err| {
                 error!("while synthesize_step_non_base_case: {err:?}");
@@ -525,6 +576,8 @@ where
             .assign_region(
                 || "make folding",
                 |region| {
+                    let _s = debug_span!("make folding").entered();
+
                     let mut region = RegionCtx::new(region, 0);
                     let gate = MainGate::new(config.main_gate_config.clone());
 
@@ -577,6 +630,8 @@ where
             .assign_region(
                 || "generate output hash",
                 |region| {
+                    let _s = debug_span!("generate output hash").entered();
+
                     AssignedConsistencyMarkersComputation::<'_, RO, ARITY, T, C> {
                         random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                         public_params_hash: &assigned_input_witness.public_params_hash,

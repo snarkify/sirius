@@ -1,4 +1,7 @@
-use std::{iter, ops};
+use std::{
+    iter,
+    ops::{self, Deref, DerefMut},
+};
 
 use halo2_proofs::{
     arithmetic::{best_multiexp, CurveAffine},
@@ -24,47 +27,59 @@ use crate::{
 pub struct RelaxedPlonkInstance<C: CurveAffine> {
     /// `W_commitments = round_sizes.len()`, see [`PlonkStructure::round_sizes`]
     pub(crate) W_commitments: Vec<C>,
+    /// First instance column [`crate::ivc::step_folding_circuit::StepFoldingCircuit`] reserved for
+    /// markers
+    ///
+    /// These are the two values that allow for proof of acceptance
+    /// The null is a hash of all input parameters per folding step
+    /// The first one is a hash of all output parameters for each folding step
     pub(crate) consistency_markers: [C::ScalarExt; 2],
-    /// challenges generated in special soundness protocol
+    /// Challenges generated in special soundness protocol (sps)
     /// we will have 0 ~ 3 challenges depending on different cases:
-    /// name them as r1, r2, r3.
-    /// r1: compress vector lookup, e.g. (a_1, a_2, a_3) -> a_1 + r1*a_2 + r1^2*a_3
-    /// r2: challenge to calculate h and g in log-derivative relation
-    /// r3: combine all custom gates (P_i) and lookup relations (L_i), e.g.:
+    /// name them as r1, r2, r3:
+    ///
+    /// - r1: compress vector lookup, e.g. (a_1, a_2, a_3) -> a_1 + r1*a_2 + r1^2*a_3
+    /// - r2: challenge to calculate h and g in log-derivative relation
+    /// - r3: combine all custom gates (P_i) and lookup relations (L_i), e.g.:
+    ///
     /// (P_1, P_2, L_1, L_2) -> P_1 + r3*P_2 + r3^2*L_1 + r3^3*L_2
     pub(crate) challenges: Vec<C::ScalarExt>,
     pub(crate) E_commitment: C,
     /// homogenous variable u
     pub(crate) u: C::ScalarExt,
-    /// TODO #316
+    /// This is a hash-based accumulator for step circuit instance columns
+    ///
+    /// Unlike consistency markers, instance columns belonging to the step circuit itself are not
+    /// folded, but are accumulated using the hash function.
     pub(crate) step_circuit_instances_hash_accumulator: C::ScalarExt,
 }
 
-impl<C: CurveAffine> TryFrom<PlonkInstance<C>> for RelaxedPlonkInstance<C>
+impl<C: CurveAffine> From<FoldablePlonkInstance<C>> for RelaxedPlonkInstance<C>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    type Error = PlonkInstance<C>;
-
-    fn try_from(inner: PlonkInstance<C>) -> Result<Self, Self::Error> {
-        let Some(consistency_markers) = inner.get_consistency_markers() else {
-            return Err(inner);
-        };
-
+    fn from(inner: FoldablePlonkInstance<C>) -> Self {
         let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator::<C>(
+            instances_accumulator_computation::fold_sc_instances_accumulator::<C>(
                 &C::ScalarExt::ZERO,
                 inner.get_step_circuit_instances(),
             );
 
-        Ok(RelaxedPlonkInstance {
+        let consistency_markers = inner.get_consistency_markers();
+        let FoldablePlonkInstance(PlonkInstance {
+            W_commitments,
+            challenges,
+            instances: _,
+        }) = inner;
+
+        RelaxedPlonkInstance {
+            consistency_markers,
             E_commitment: C::identity(),
             u: C::ScalarExt::ONE,
-            W_commitments: inner.W_commitments,
-            consistency_markers,
             step_circuit_instances_hash_accumulator,
-            challenges: inner.challenges,
-        })
+            W_commitments,
+            challenges,
+        }
     }
 }
 
@@ -72,26 +87,18 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    pub fn try_new(num_io: &[usize], num_challenges: usize, num_witness: usize) -> Option<Self> {
+    pub fn new(num_challenges: usize, num_witness: usize) -> Self {
         let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator::<C>(
-                &C::ScalarExt::ZERO,
-                &[],
-            );
+            instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>();
 
-        Some(Self {
-            consistency_markers: match num_io.first() {
-                Some(2) => [C::ScalarExt::ZERO, C::ScalarExt::ZERO],
-                Some(_) | None => {
-                    return None;
-                }
-            },
+        Self {
+            consistency_markers: [C::ScalarExt::ZERO, C::ScalarExt::ZERO],
             W_commitments: vec![CommitmentKey::<C>::default_value(); num_witness],
             challenges: vec![C::ScalarExt::ZERO; num_challenges],
             E_commitment: CommitmentKey::<C>::default_value(),
             u: Self::DEFAULT_u,
             step_circuit_instances_hash_accumulator,
-        })
+        }
     }
 
     // In order not to confuse `U` & `u`, which means different things in Sirius, non upper
@@ -115,7 +122,12 @@ where
     /// The folded `RelaxedPlonkInstance` after combining the instances and commitments.
     /// for detail of how fold works, please refer to: [nifs](https://hackmd.io/d7syox5tTeaxkepc9nLvHw?view#31-NIFS)
     #[instrument(name = "fold_plonk_instance", skip_all)]
-    pub fn fold(&self, U2: &PlonkInstance<C>, cross_term_commits: &[C], r: &C::ScalarExt) -> Self {
+    pub fn fold(
+        &self,
+        U2: &FoldablePlonkInstance<C>,
+        cross_term_commits: &[C],
+        r: &C::ScalarExt,
+    ) -> Self {
         let W_commitments = self
             .W_commitments
             .iter()
@@ -131,12 +143,10 @@ where
             })
             .collect::<Vec<C>>();
 
-        assert_eq!(U2.instances.len(), 1, "TODO #316");
-        assert_eq!(U2.instances[0].len(), 2, "TODO #316");
         let consistency_markers = self
             .consistency_markers
             .iter()
-            .zip_eq(&U2.get_consistency_markers().expect("TODO #316"))
+            .zip_eq(&U2.get_consistency_markers())
             .map(|(a, b)| *a + *r * b)
             .collect::<Vec<C::ScalarExt>>()
             .try_into()
@@ -158,7 +168,7 @@ where
             .fold(self.E_commitment, |acc, x| (acc + x).into());
 
         let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator::<C>(
+            instances_accumulator_computation::fold_sc_instances_accumulator::<C>(
                 &self.step_circuit_instances_hash_accumulator,
                 U2.get_step_circuit_instances(),
             );
@@ -178,29 +188,6 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct RelaxedPlonkWitness<F: PrimeField> {
-    /// each vector element in W is a vector folded from an old [`RelaxedPlonkWitness.W`] and [`PlonkWitness.W`]
-    pub(crate) inner: PlonkWitness<F>,
-    pub(crate) E: Box<[F]>,
-}
-
-impl<F: PrimeField> ops::Deref for RelaxedPlonkWitness<F> {
-    type Target = PlonkWitness<F>;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<F: PrimeField> RelaxedPlonkWitness<F> {
-    fn from_regular(inner: PlonkWitness<F>, k_table_size: usize) -> Self {
-        Self {
-            inner,
-            E: vec![F::ZERO; 1 << k_table_size].into_boxed_slice(),
-        }
-    }
-}
-
 // TODO #31 docs
 #[derive(Debug, Clone)]
 pub struct RelaxedPlonkTrace<C: CurveAffine> {
@@ -209,12 +196,12 @@ pub struct RelaxedPlonkTrace<C: CurveAffine> {
 }
 
 impl<C: CurveAffine> RelaxedPlonkTrace<C> {
-    pub fn from_regular(tr: PlonkTrace<C>, k_table_size: usize) -> RelaxedPlonkTrace<C>
+    pub fn from_regular(tr: FoldablePlonkTrace<C>, k_table_size: usize) -> RelaxedPlonkTrace<C>
     where
         C::Base: PrimeFieldBits + FromUniformBytes<64>,
     {
         RelaxedPlonkTrace {
-            U: RelaxedPlonkInstance::try_from(tr.u).expect("TODO #316"),
+            U: RelaxedPlonkInstance::from(tr.u),
             W: RelaxedPlonkWitness::from_regular(tr.w, k_table_size),
         }
     }
@@ -228,8 +215,7 @@ where
 {
     pub fn new(args: RelaxedPlonkTraceArgs) -> Self {
         Self {
-            U: RelaxedPlonkInstance::try_new(&args.num_io, args.num_challenges, args.num_witness)
-                .expect("TODO #316"),
+            U: RelaxedPlonkInstance::new(args.num_challenges, args.num_witness),
             W: RelaxedPlonkWitness::new(args.k_table_size, &args.round_sizes),
         }
     }
@@ -346,6 +332,116 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
         RelaxedPlonkWitness {
             inner: PlonkWitness { W },
             E,
+        }
+    }
+}
+
+fn fold_step_circuit_instances_hash_accumulator_collection<C: CurveAffine>(
+    step_circuit_instances_collection: &[Vec<Vec<C::ScalarExt>>],
+) -> C::ScalarExt
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+{
+    step_circuit_instances_collection.iter().fold(
+        instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
+        |acc, sc_instances| {
+            instances_accumulator_computation::fold_sc_instances_accumulator::<C>(
+                &acc,
+                sc_instances,
+            )
+        },
+    )
+}
+
+/// A newtype wrapper around `PlonkInstance` ensuring that the first instance
+/// column has exactly two elements.
+///
+/// # Consistency Markers
+/// - Ensures that `instances.first().len() == 2` for `PlonkInstance`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FoldablePlonkInstance<C: CurveAffine>(PlonkInstance<C>);
+
+impl<C: CurveAffine> FoldablePlonkInstance<C> {
+    /// Creates a new `FoldablePlonkInstance` from a `PlonkInstance`.
+    ///
+    /// # Consistency Markers
+    /// - Ensures that `instances.first().len() == 2` for `FoldablePlonkInstance`.
+    pub fn new(pl: PlonkInstance<C>) -> Option<Self> {
+        matches!(pl.instances.first(), Some(instance) if instance.len() == 2).then_some(Self(pl))
+    }
+}
+
+impl<C: CurveAffine> Deref for FoldablePlonkInstance<C> {
+    type Target = PlonkInstance<C>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<C: CurveAffine> DerefMut for FoldablePlonkInstance<C> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// A structure representing a foldable PLONK trace containing an instance
+/// and witness.
+///
+/// # Consistency Markers
+/// - Contains a `FoldablePlonkInstance` and a `PlonkWitness`.
+#[derive(Debug, Clone)]
+pub struct FoldablePlonkTrace<C: CurveAffine> {
+    /// The foldable PLONK instance, ensuring the first instance column has exactly two elements.
+    ///
+    /// # Consistency Markers
+    /// - Holds a `FoldablePlonkInstance` to enforce first-instance column length.
+    pub u: FoldablePlonkInstance<C>,
+    pub w: PlonkWitness<C::Scalar>,
+}
+
+impl<C: CurveAffine> From<FoldablePlonkTrace<C>> for PlonkTrace<C> {
+    /// Converts a `FoldablePlonkTrace` into a `PlonkTrace`.
+    fn from(value: FoldablePlonkTrace<C>) -> Self {
+        PlonkTrace {
+            u: value.u.0,
+            w: value.w,
+        }
+    }
+}
+
+impl<C: CurveAffine> FoldablePlonkTrace<C> {
+    /// Creates a new `FoldablePlonkTrace` from a `PlonkTrace`.
+    ///
+    /// # Consistency Markers
+    /// - Ensures the input `PlonkTrace` satisfies the requirements for a `FoldablePlonkTrace`.
+    pub fn new(pl: PlonkTrace<C>) -> Option<Self> {
+        Some(Self {
+            u: FoldablePlonkInstance::new(pl.u)?,
+            w: pl.w,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RelaxedPlonkWitness<F: PrimeField> {
+    /// each vector element in W is a vector folded from an old [`RelaxedPlonkWitness.W`] and [`PlonkWitness.W`]
+    pub(crate) inner: PlonkWitness<F>,
+    pub(crate) E: Box<[F]>,
+}
+
+impl<F: PrimeField> ops::Deref for RelaxedPlonkWitness<F> {
+    type Target = PlonkWitness<F>;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<F: PrimeField> RelaxedPlonkWitness<F> {
+    fn from_regular(inner: PlonkWitness<F>, k_table_size: usize) -> Self {
+        Self {
+            inner,
+            E: vec![F::ZERO; 1 << k_table_size].into_boxed_slice(),
         }
     }
 }

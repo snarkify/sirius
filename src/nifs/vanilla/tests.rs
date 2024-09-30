@@ -17,7 +17,7 @@ use crate::{
             VanillaFS,
         },
     },
-    plonk::{PlonkStructure, PlonkTrace},
+    plonk::PlonkStructure,
     table::CircuitRunner,
     util::create_ro,
 };
@@ -65,8 +65,8 @@ fn prepare_trace<C, F1, F2, CT>(
     (
         CommitmentKey<C>,
         PlonkStructure<F1>,
-        PlonkTrace<C>,
-        PlonkTrace<C>,
+        FoldablePlonkTrace<C>,
+        FoldablePlonkTrace<C>,
     ),
     Error<C>,
 >
@@ -141,8 +141,8 @@ where
 fn fold_instances<C, F1, F2>(
     ck: &CommitmentKey<C>,
     S: &PlonkStructure<F1>,
-    pair1: PlonkTrace<C>,
-    pair2: PlonkTrace<C>,
+    pair1: FoldablePlonkTrace<C>,
+    pair2: FoldablePlonkTrace<C>,
     pp_digest: C,
 ) -> Result<(), Error<C>>
 where
@@ -156,7 +156,7 @@ where
     const R_P: usize = 3;
 
     let mut f_tr = RelaxedPlonkTrace {
-        U: RelaxedPlonkInstance::try_new(&S.num_io, S.num_challenges, S.round_sizes.len()).unwrap(),
+        U: RelaxedPlonkInstance::new(S.num_challenges, S.round_sizes.len()),
         W: RelaxedPlonkWitness::new(S.k, &S.round_sizes),
     };
 

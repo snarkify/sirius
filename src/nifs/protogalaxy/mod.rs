@@ -11,7 +11,7 @@ use crate::{
     ff::PrimeField,
     halo2_proofs::arithmetic::{self, CurveAffine, Field},
     nifs::protogalaxy::poly::PolyContext,
-    plonk::{self, PlonkStructure, PlonkTrace, PlonkWitness},
+    plonk::{self, PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness},
     polynomial::{lagrange, sparse, univariate::UnivariatePoly},
     poseidon::AbsorbInRO,
     sps::{self, SpecialSoundnessVerifier},
@@ -222,6 +222,8 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
     type Error = Error;
     type ProverParam = ProverParam<C>;
     type VerifierParam = VerifierParam<C>;
+    type Trace = PlonkTrace<C>;
+    type Instance = PlonkInstance<C>;
     type Accumulator = Accumulator<C>;
     type AccumulatorInstance = AccumulatorInstance<C>;
     type Proof = ProtoGalaxyProof<C::ScalarExt>;
@@ -240,8 +242,6 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         pp: &Self::ProverParam,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
-        assert!(instances.len() <= 1, "TODO #316");
-
         Ok(pp
             .S
             .run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)?)
