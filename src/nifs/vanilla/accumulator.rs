@@ -1,14 +1,18 @@
 use std::{iter, ops};
 
-use halo2_proofs::arithmetic::{best_multiexp, CurveAffine};
+use halo2_proofs::{
+    arithmetic::{best_multiexp, CurveAffine},
+    halo2curves::ff::{FromUniformBytes, PrimeFieldBits},
+};
 use itertools::Itertools;
 use rayon::prelude::*;
 use tracing::{debug, instrument, warn};
 
-use super::GetConsistencyMarkers;
+use super::{GetConsistencyMarkers, GetStepCircuitInstances};
 use crate::{
     commitment::CommitmentKey,
     ff::{Field, PrimeField},
+    ivc::instances_accumulator_computation,
     plonk::{
         self, GetChallenges, GetWitness, PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness,
     },
@@ -32,9 +36,14 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
     pub(crate) E_commitment: C,
     /// homogenous variable u
     pub(crate) u: C::ScalarExt,
+    /// TODO #316
+    pub(crate) step_circuit_instances_hash_accumulator: C::ScalarExt,
 }
 
-impl<C: CurveAffine> TryFrom<PlonkInstance<C>> for RelaxedPlonkInstance<C> {
+impl<C: CurveAffine> TryFrom<PlonkInstance<C>> for RelaxedPlonkInstance<C>
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+{
     type Error = PlonkInstance<C>;
 
     fn try_from(inner: PlonkInstance<C>) -> Result<Self, Self::Error> {
@@ -42,18 +51,34 @@ impl<C: CurveAffine> TryFrom<PlonkInstance<C>> for RelaxedPlonkInstance<C> {
             return Err(inner);
         };
 
+        let step_circuit_instances_hash_accumulator =
+            instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator::<C>(
+                &C::ScalarExt::ZERO,
+                inner.get_step_circuit_instances(),
+            );
+
         Ok(RelaxedPlonkInstance {
             E_commitment: C::identity(),
             u: C::ScalarExt::ONE,
             W_commitments: inner.W_commitments,
             consistency_markers,
+            step_circuit_instances_hash_accumulator,
             challenges: inner.challenges,
         })
     }
 }
 
-impl<C: CurveAffine> RelaxedPlonkInstance<C> {
+impl<C: CurveAffine> RelaxedPlonkInstance<C>
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+{
     pub fn try_new(num_io: &[usize], num_challenges: usize, num_witness: usize) -> Option<Self> {
+        let step_circuit_instances_hash_accumulator =
+            instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator::<C>(
+                &C::ScalarExt::ZERO,
+                &[],
+            );
+
         Some(Self {
             consistency_markers: match num_io.first() {
                 Some(2) => [C::ScalarExt::ZERO, C::ScalarExt::ZERO],
@@ -65,6 +90,7 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             challenges: vec![C::ScalarExt::ZERO; num_challenges],
             E_commitment: CommitmentKey::<C>::default_value(),
             u: Self::DEFAULT_u,
+            step_circuit_instances_hash_accumulator,
         })
     }
 
@@ -131,12 +157,19 @@ impl<C: CurveAffine> RelaxedPlonkInstance<C> {
             .map(|(tk, power_of_r)| best_multiexp(&[power_of_r], &[*tk]).into())
             .fold(self.E_commitment, |acc, x| (acc + x).into());
 
+        let step_circuit_instances_hash_accumulator =
+            instances_accumulator_computation::fold_step_circuit_instances_hash_accumulator::<C>(
+                &self.step_circuit_instances_hash_accumulator,
+                U2.get_step_circuit_instances(),
+            );
+
         RelaxedPlonkInstance {
             W_commitments,
             challenges,
             u,
             consistency_markers,
             E_commitment: comm_E,
+            step_circuit_instances_hash_accumulator,
         }
     }
 
@@ -176,7 +209,10 @@ pub struct RelaxedPlonkTrace<C: CurveAffine> {
 }
 
 impl<C: CurveAffine> RelaxedPlonkTrace<C> {
-    pub fn from_regular(tr: PlonkTrace<C>, k_table_size: usize) -> RelaxedPlonkTrace<C> {
+    pub fn from_regular(tr: PlonkTrace<C>, k_table_size: usize) -> RelaxedPlonkTrace<C>
+    where
+        C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    {
         RelaxedPlonkTrace {
             U: RelaxedPlonkInstance::try_from(tr.u).expect("TODO #316"),
             W: RelaxedPlonkWitness::from_regular(tr.w, k_table_size),
@@ -186,7 +222,10 @@ impl<C: CurveAffine> RelaxedPlonkTrace<C> {
 
 pub type RelaxedPlonkTraceArgs = plonk::PlonkTraceArgs;
 
-impl<C: CurveAffine> RelaxedPlonkTrace<C> {
+impl<C: CurveAffine> RelaxedPlonkTrace<C>
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+{
     pub fn new(args: RelaxedPlonkTraceArgs) -> Self {
         Self {
             U: RelaxedPlonkInstance::try_new(&args.num_io, args.num_challenges, args.num_witness)
@@ -196,7 +235,10 @@ impl<C: CurveAffine> RelaxedPlonkTrace<C> {
     }
 }
 
-impl<C: CurveAffine> From<&PlonkStructure<C::ScalarExt>> for RelaxedPlonkTrace<C> {
+impl<C: CurveAffine> From<&PlonkStructure<C::ScalarExt>> for RelaxedPlonkTrace<C>
+where
+    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+{
     fn from(value: &PlonkStructure<C::ScalarExt>) -> Self {
         Self::new(RelaxedPlonkTraceArgs::from(value))
     }
@@ -234,7 +276,9 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPl
             challenges,
             E_commitment,
             u,
+            step_circuit_instances_hash_accumulator,
         } = self;
+
         ro.absorb_point_iter(W_commitments.iter())
             .absorb_point(E_commitment)
             .absorb_field_iter(
@@ -242,6 +286,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPl
                     .iter()
                     .chain(challenges.iter())
                     .chain(iter::once(u))
+                    .chain(iter::once(step_circuit_instances_hash_accumulator))
                     .map(|m| util::fe_to_fe(m).unwrap()),
             );
     }
