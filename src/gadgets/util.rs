@@ -5,7 +5,7 @@ use halo2_proofs::{
 
 use crate::{
     ff::PrimeField,
-    main_gate::{AssignedValue, MainGate, RegionCtx},
+    main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx},
 };
 
 impl<F: PrimeField, const T: usize> MainGate<F, T> {
@@ -24,15 +24,25 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         ctx: &mut RegionCtx<'_, F>,
         a: Value<F>,
     ) -> Result<AssignedValue<F>, Error> {
+        let MainGateConfig {
+            state,
+            q_m,
+            q_o,
+            out,
+            ..
+        } = self.config();
+
         // s0*s1 - out = 0
-        let s0 = ctx.assign_advice(|| "is_inf", self.config().state[0], a)?;
-        let s1 = ctx.assign_advice(|| "is_inf", self.config().state[0], a)?;
-        let out = ctx.assign_advice(|| "is_inf", self.config().out, a)?;
+        let s0 = ctx.assign_advice(|| "bit", state[0], a)?;
+        let s1 = ctx.assign_advice(|| "bit", state[1], a)?;
+        ctx.assign_fixed(|| "one", q_m[0], F::ONE)?;
+
+        ctx.assign_fixed(|| "minus one", *q_o, -F::ONE)?;
+        let out = ctx.assign_advice(|| "bit", *out, a)?;
+
         ctx.constrain_equal(s0.cell(), out.cell())?;
         ctx.constrain_equal(s1.cell(), out.cell())?;
 
-        ctx.assign_fixed(|| "q_m", self.config().q_m[0], F::ONE)?;
-        ctx.assign_fixed(|| "q_o", self.config().q_m[0], -F::ONE)?;
         ctx.next();
         Ok(out)
     }
