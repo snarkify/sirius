@@ -40,11 +40,11 @@ pub fn get_initial_sc_instances_accumulator<C: CurveAffine>() -> C::ScalarExt
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    fold_sc_instances_accumulator::<C>(&C::ScalarExt::ZERO, &[])
+    absorb_in_sc_instances_accumulator::<C>(&C::ScalarExt::ZERO, &[])
 }
 
 #[instrument(skip_all)]
-pub fn fold_sc_instances_accumulator<C: CurveAffine>(
+pub fn absorb_in_sc_instances_accumulator<C: CurveAffine>(
     instances_hash_accumulator: &C::ScalarExt,
     instances: &[Vec<C::ScalarExt>],
 ) -> C::ScalarExt
@@ -67,7 +67,7 @@ where
 }
 
 #[instrument(skip_all)]
-pub fn fold_assign_sc_instances_accumulator<F>(
+pub fn absorb_in_assign_sc_instances_accumulator<F>(
     ctx: &mut RegionCtx<'_, F>,
     config: MainGateConfig<T>,
     folded_instances: &AssignedValue<F>,
@@ -194,7 +194,7 @@ mod tests {
             let new_instances_hash_accumulator = layouter.assign_region(
                 || "fold",
                 |region| {
-                    fold_assign_sc_instances_accumulator(
+                    absorb_in_assign_sc_instances_accumulator(
                         &mut RegionCtx::new(region, 0),
                         config.main_gate_config.clone(),
                         &instances_hash_accumulator,
@@ -222,7 +222,7 @@ mod tests {
         let mut rand = rand::thread_rng();
         let [acc, i1, i2, i3] = array::from_fn(|_| Scalar::random(&mut rand));
 
-        let expected = fold_sc_instances_accumulator::<C>(&acc, &[vec![i1, i2, i3]]);
+        let expected = absorb_in_sc_instances_accumulator::<C>(&acc, &[vec![i1, i2, i3]]);
 
         MockProver::run(
             10,

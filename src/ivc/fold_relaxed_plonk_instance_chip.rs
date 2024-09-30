@@ -642,7 +642,7 @@ where
         folded_instances: &AssignedValue<C::Base>,
     ) -> Result<AssignedValue<C::Base>, Error> {
         Ok(
-            instances_accumulator_computation::fold_assign_sc_instances_accumulator(
+            instances_accumulator_computation::absorb_in_assign_sc_instances_accumulator(
                 ctx,
                 config.into_smaller_size().unwrap(),
                 folded_instances,
