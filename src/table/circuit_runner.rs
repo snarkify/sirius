@@ -98,7 +98,7 @@ impl<F: PrimeField, CT: Circuit<F>> CircuitRunner<F, CT> {
         )?;
 
         Ok(PreprocessingData {
-            permutation_data: PermutationData::new(&self.cs, &circuit_data.permutation),
+            permutation_data: PermutationData::from(&circuit_data.permutation),
             fixed_columns: batch_invert_assigned(&circuit_data.fixed),
             selectors: circuit_data.selector,
         })
