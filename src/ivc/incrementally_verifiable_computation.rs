@@ -17,10 +17,13 @@ use crate::{
     main_gate::MainGateConfig,
     nifs::{
         self,
-        vanilla::{accumulator::RelaxedPlonkTrace, GetConsistencyMarkers, VanillaFS},
+        vanilla::{
+            accumulator::{FoldablePlonkTrace, RelaxedPlonkTrace},
+            GetConsistencyMarkers, VanillaFS,
+        },
         FoldingScheme, IsSatAccumulator,
     },
-    plonk::{self, PlonkTrace},
+    plonk,
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
     table::CircuitRunner,
@@ -35,6 +38,7 @@ where
     relaxed_trace: RelaxedPlonkTrace<C>,
     z_0: [C::Scalar; ARITY],
     z_i: [C::Scalar; ARITY],
+
     _p: PhantomData<SC>,
 }
 
@@ -114,9 +118,9 @@ where
     secondary: StepCircuitContext<A2, C2, SC2>,
 
     step: usize,
-    secondary_nifs_pp: <nifs::vanilla::VanillaFS<C2> as FoldingScheme<C2>>::ProverParam,
-    primary_nifs_pp: <nifs::vanilla::VanillaFS<C1> as FoldingScheme<C1>>::ProverParam,
-    secondary_trace: [PlonkTrace<C2>; 1],
+    secondary_nifs_pp: <VanillaFS<C2> as FoldingScheme<C2>>::ProverParam,
+    primary_nifs_pp: <VanillaFS<C1> as FoldingScheme<C1>>::ProverParam,
+    secondary_trace: [FoldablePlonkTrace<C2>; 1],
 
     debug_mode: bool,
 }
@@ -215,13 +219,8 @@ where
         let primary_consistency_marker = {
             let _s = info_span!("generate_instance").entered();
             [
-                util::fe_to_fe(
-                    &secondary_pre_round_plonk_trace
-                        .u
-                        .get_consistency_markers()
-                        .expect("For `vanilla::FoldingScheme` should always be")[1],
-                )
-                .unwrap(),
+                util::fe_to_fe(&secondary_pre_round_plonk_trace.u.get_consistency_markers()[1])
+                    .unwrap(),
                 ConsistencyMarkerComputation::<'_, A1, C2, RP1::OffCircuit> {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_2(),
@@ -305,13 +304,7 @@ where
         let secondary_consistency_marker = {
             let _s = info_span!("generate_instance");
             [
-                util::fe_to_fe(
-                    &primary_plonk_trace
-                        .u
-                        .get_consistency_markers()
-                        .expect("For `vanilla::FoldingScheme` should always be")[1],
-                )
-                .unwrap(),
+                util::fe_to_fe(&primary_plonk_trace.u.get_consistency_markers()[1]).unwrap(),
                 ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
@@ -417,7 +410,7 @@ where
         let primary_span = info_span!("primary").entered();
         debug!("start fold step with folding 'secondary' by 'primary'");
 
-        let (secondary_new_trace, secondary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
+        let (secondary_new_trace, secondary_cross_term_commits) = VanillaFS::prove(
             pp.secondary.ck(),
             &self.secondary_nifs_pp,
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
@@ -433,13 +426,7 @@ where
         let primary_consistency_marker = {
             let _s = info_span!("generate_instance").entered();
             [
-                util::fe_to_fe(
-                    &self.secondary_trace[0]
-                        .u
-                        .get_consistency_markers()
-                        .expect("For `vanilla::FoldingScheme` should always be")[1],
-                )
-                .unwrap(),
+                util::fe_to_fe(&self.secondary_trace[0].u.get_consistency_markers()[1]).unwrap(),
                 ConsistencyMarkerComputation::<'_, A1, C2, RP1::OffCircuit> {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_2(),
@@ -523,13 +510,7 @@ where
         let secondary_consistency_marker = {
             let _s = info_span!("generate_instance");
             [
-                util::fe_to_fe(
-                    &primary_plonk_trace[0]
-                        .u
-                        .get_consistency_markers()
-                        .expect("For `vanilla::FoldingScheme` should always be")[1],
-                )
-                .unwrap(),
+                util::fe_to_fe(&primary_plonk_trace[0].u.get_consistency_markers()[1]).unwrap(),
                 ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
@@ -623,10 +604,7 @@ where
         .generate_with_inspect::<C2::Scalar>(|buf| {
             debug!("primary X0 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&self.secondary_trace[0]
-            .u
-            .get_consistency_markers()
-            .expect("For `vanilla::FoldingScheme` should always be")[0])
+        .ne(&self.secondary_trace[0].u.get_consistency_markers()[0])
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 0,
@@ -647,13 +625,7 @@ where
         .generate_with_inspect::<C1::Scalar>(|buf| {
             debug!("primary X1 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&util::fe_to_fe(
-            &self.secondary_trace[0]
-                .u
-                .get_consistency_markers()
-                .expect("For `vanilla::FoldingScheme` should always be")[1],
-        )
-        .unwrap())
+        .ne(&util::fe_to_fe(&self.secondary_trace[0].u.get_consistency_markers()[1]).unwrap())
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 1,

@@ -67,9 +67,9 @@ use crate::{
         WrapValue,
     },
     nifs::vanilla::{
-        accumulator::RelaxedPlonkInstance, GetConsistencyMarkers, GetStepCircuitInstances,
+        accumulator::{FoldablePlonkInstance, RelaxedPlonkInstance},
+        GetConsistencyMarkers, GetStepCircuitInstances,
     },
-    plonk::PlonkInstance,
     poseidon::ROCircuitTrait,
     util::{self, CellsValuesView},
 };
@@ -106,10 +106,11 @@ pub(crate) struct AssignedRelaxedPlonkInstance<C: CurveAffine> {
     pub folded_challenges: Vec<Vec<AssignedValue<C::Base>>>,
 
     /// Vector of assigned values for each limb of the folded big number X0 & X1.
-    /// Derived from [`FoldRelaxedPlonkInstanceChip::X0`]
+    /// Derived from [`FoldRelaxedPlonkInstanceChip::consistency_markers`]
     pub folded_consistency_markers: [Vec<AssignedValue<C::Base>>; 2],
 
-    /// TODO #316
+    /// Assigned value of the step circuit instances hash accumulator
+    /// Derived from [`FoldRelaxedPlonkInstanceChip::step_circuit_instances_hash_accumulator`]
     pub folded_step_circuit_instances_hash_accumulator: AssignedValue<C::Base>,
 }
 
@@ -641,7 +642,7 @@ where
         folded_instances: &AssignedValue<C::Base>,
     ) -> Result<AssignedValue<C::Base>, Error> {
         Ok(
-            instances_accumulator_computation::fold_assign_step_circuit_instances_hash_accumulator(
+            instances_accumulator_computation::fold_assign_sc_instances_accumulator(
                 ctx,
                 config.into_smaller_size().unwrap(),
                 folded_instances,
@@ -827,7 +828,7 @@ where
             .collect::<Result<Vec<_>, _>>()?;
         let assigned_E = assign_point!(&self.relaxed.E_commitment)?;
 
-        let [X0, X1] = self.relaxed.get_consistency_markers().unwrap();
+        let [X0, X1] = self.relaxed.get_consistency_markers();
         let assigned_X0 = assign_diff_field_as_bn!(&X0, || "X0")?;
         let assigned_X1 = assign_diff_field_as_bn!(&X1, || "X1")?;
 
@@ -863,7 +864,7 @@ where
         &self,
         region: &mut RegionCtx<C::Base>,
         public_params_hash: &C,
-        input_plonk: &PlonkInstance<C>,
+        input_plonk: &FoldablePlonkInstance<C>,
         cross_term_commits: &[C],
         mut ro_circuit: impl ROCircuitTrait<C::Base>,
     ) -> Result<(AssignedWitness<C>, Vec<AssignedBit<C::Base>>), Error> {
@@ -925,7 +926,7 @@ where
             .collect::<Result<Vec<_>, _>>()?;
         let assigned_E = assign_and_absorb_point!(&self.relaxed.E_commitment)?;
 
-        let [X0, X1] = self.relaxed.get_consistency_markers().unwrap();
+        let [X0, X1] = self.relaxed.get_consistency_markers();
         let assigned_X0 = assign_and_absorb_diff_field_as_bn!(&X0, || "X0")?.1;
         let assigned_X1 = assign_and_absorb_diff_field_as_bn!(&X1, || "X1")?.1;
 
@@ -963,7 +964,6 @@ where
 
         let assigned_consistency_markers = input_plonk
             .get_consistency_markers()
-            .unwrap()
             .iter()
             .enumerate()
             .map(|(index, instance)| {
@@ -1006,7 +1006,6 @@ where
             .collect::<Result<Vec<_>, _>>()?;
 
         region.next();
-
         let r = ro_circuit.squeeze_n_bits(region, NUM_CHALLENGE_BITS)?;
         region.next();
 
@@ -1116,6 +1115,7 @@ mod tests {
         ff::Field,
         halo2curves::{bn256::G1Affine as C1, CurveAffine},
         nifs::vanilla::{VanillaFS, CONSISTENCY_MARKERS_COUNT},
+        plonk::PlonkInstance,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
         table::WitnessCollector,
     };
@@ -1199,20 +1199,32 @@ mod tests {
         }
     }
 
-    fn generate_random_plonk_instance(mut rnd: &mut ThreadRng) -> PlonkInstance<C1> {
+    fn generate_random_plonk_instance(mut rnd: &mut ThreadRng) -> FoldablePlonkInstance<C1> {
         // 'allow' is necessary, because otherwise the closure captures rnd and we have to copy it
         #[allow(clippy::needless_borrows_for_generic_args)]
-        PlonkInstance {
+        FoldablePlonkInstance::new(PlonkInstance {
             W_commitments: iter::repeat_with(|| C1::random(&mut rnd))
                 .take(NUM_WITNESS)
                 .collect(),
-            instances: vec![iter::repeat_with(|| ScalarExt::random(&mut rnd))
-                .take(NUM_INSTANCES)
-                .collect()],
+            instances: iter::once(
+                iter::repeat_with(|| ScalarExt::random(&mut rnd))
+                    .take(NUM_INSTANCES)
+                    .collect_vec(),
+            )
+            .chain(
+                iter::repeat_with(|| ScalarExt::random(&mut rnd))
+                    .chunks(10)
+                    .into_iter()
+                    .take(10)
+                    .map(|ch| ch.into_iter().collect_vec())
+                    .collect_vec(),
+            )
+            .collect_vec(),
             challenges: iter::repeat_with(|| ScalarExt::random(&mut rnd))
                 .take(NUM_CHALLENGES)
                 .collect(),
-        }
+        })
+        .unwrap()
     }
 
     #[traced_test]
@@ -1220,8 +1232,7 @@ mod tests {
     fn generate_challenge() {
         let mut rnd = rand::thread_rng();
 
-        let relaxed =
-            RelaxedPlonkInstance::try_from(generate_random_plonk_instance(&mut rnd)).unwrap();
+        let relaxed = RelaxedPlonkInstance::from(generate_random_plonk_instance(&mut rnd));
 
         let (mut ws, config) = get_witness_collector();
 
@@ -1308,7 +1319,7 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut plonk = RelaxedPlonkInstance::<C1>::try_new(&[2], 0, NUM_WITNESS).unwrap();
+        let mut plonk = RelaxedPlonkInstance::<C1>::new(0, NUM_WITNESS);
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
             let input_W = random_curve_vec(&mut rnd);
@@ -1339,11 +1350,12 @@ mod tests {
             assert_eq!(plonk.W_commitments, folded_W);
 
             plonk = plonk.fold(
-                &PlonkInstance {
+                &FoldablePlonkInstance::new(PlonkInstance {
                     W_commitments: input_W.clone(),
                     instances: vec![vec![ScalarExt::ZERO, ScalarExt::ZERO]],
                     challenges: vec![],
-                },
+                })
+                .unwrap(),
                 &[],
                 &r,
             );
@@ -1385,10 +1397,10 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut plonk = RelaxedPlonkInstance::<C1>::try_new(&[2], 0, 0).unwrap();
+        let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0);
 
         let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new(
-            RelaxedPlonkInstance::try_new(&[2], 0, 0).unwrap(),
+            RelaxedPlonkInstance::new(0, 0),
             LIMB_WIDTH,
             LIMBS_COUNT,
             config.clone(),
@@ -1433,11 +1445,12 @@ mod tests {
             assert_eq!(plonk.E_commitment, folded_E);
 
             plonk = plonk.fold(
-                &PlonkInstance {
+                &FoldablePlonkInstance::new(PlonkInstance {
                     W_commitments: vec![],
                     instances: vec![vec![ScalarExt::ONE, ScalarExt::ONE]],
                     challenges: vec![],
-                },
+                })
+                .unwrap(),
                 &cross_term_commits,
                 &r,
             );
@@ -1469,7 +1482,7 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::try_new(&[2], 0, 0).unwrap();
+        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(0, 0);
 
         let bn_chip = BigUintMulModChip::<Base>::new(
             config
@@ -1520,7 +1533,6 @@ mod tests {
 
                     let assigned_consistency_markers = relaxed_plonk
                         .get_consistency_markers()
-                        .unwrap()
                         .iter()
                         .map(|instance| {
                             assign_scalar_as_bn!(&mut ctx, instance, "folded instance".to_owned())
@@ -1563,18 +1575,18 @@ mod tests {
             );
 
             relaxed_plonk = relaxed_plonk.fold(
-                &PlonkInstance {
+                &FoldablePlonkInstance::new(PlonkInstance {
                     W_commitments: vec![],
                     instances: vec![consistency_marker.to_vec()],
                     challenges: vec![],
-                },
+                })
+                .unwrap(),
                 &[],
                 &r,
             );
 
             let off_circuit_instances = relaxed_plonk
                 .get_consistency_markers()
-                .unwrap()
                 .iter()
                 .map(|instance| {
                     BigUint::from_f(
@@ -1615,8 +1627,7 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut relaxed_plonk =
-            RelaxedPlonkInstance::<C1>::try_new(&[2], NUM_CHALLENGES, 0).unwrap();
+        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(NUM_CHALLENGES, 0);
 
         let bn_chip = BigUintMulModChip::<Base>::new(
             config
@@ -1706,11 +1717,12 @@ mod tests {
             );
 
             relaxed_plonk = relaxed_plonk.fold(
-                &PlonkInstance {
+                &FoldablePlonkInstance::new(PlonkInstance {
                     W_commitments: vec![],
                     instances: vec![vec![ScalarExt::ONE, ScalarExt::ONE]],
                     challenges: input_challenges.to_vec(),
-                },
+                })
+                .unwrap(),
                 &[],
                 &r,
             );
@@ -1759,8 +1771,7 @@ mod tests {
 
         let spec = Spec::<Base, T, { T - 1 }>::new(10, 10);
 
-        let mut relaxed =
-            RelaxedPlonkInstance::try_new(&[NUM_INSTANCES], NUM_CHALLENGES, NUM_WITNESS).unwrap();
+        let mut relaxed = RelaxedPlonkInstance::new(NUM_CHALLENGES, NUM_WITNESS);
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
             let input_plonk = generate_random_plonk_instance(&mut rnd);
