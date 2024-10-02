@@ -305,6 +305,8 @@ pub enum VerifyError {
     ECommitmentMismatch,
     #[error("Permutation check fail: mismatch_count {mismatch_count}")]
     PermCheckFail { mismatch_count: usize },
+    #[error("Instance mismatch")]
+    InstanceMismatch,
 }
 
 impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C>
@@ -473,7 +475,7 @@ where
         if calculated == acc.U.step_circuit_instances_hash_accumulator {
             Ok(())
         } else {
-            todo!()
+            Err(VerifyError::InstanceMismatch)
         }
     }
 }

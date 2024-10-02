@@ -580,6 +580,8 @@ where
             &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
         )?];
 
+        self.primary.pub_instances.push(primary_instances);
+        self.secondary.pub_instances.push(secondary_instances);
         self.step += 1;
 
         Ok(())
