@@ -54,12 +54,8 @@ pub enum Error {
     Eval(#[from] EvalError),
     #[error("(Relaxed) plonk relation not satisfied: commitment mismatch")]
     CommitmentMismatch { mismatch_count: NonZeroUsize },
-    #[error("(Relaxed) plonk relation not satisfied: commitment of E")]
-    ECommitmentMismatch,
     #[error("log derivative relation not satisfied")]
     LogDerivativeNotSat,
-    #[error("Permutation check fail: mismatch_count {mismatch_count}")]
-    PermCheckFail { mismatch_count: usize },
     #[error("(Relaxed) plonk relation not satisfied: mismatch_count {mismatch_count}, total_row {total_row}")]
     EvaluationMismatch {
         mismatch_count: NonZeroUsize,

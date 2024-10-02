@@ -146,7 +146,13 @@ impl<C: Circuit<Scalar>> Mock<C> {
         )
         .expect("`protogalaxy::prove` failed");
 
-        ProtoGalaxy::is_sat(&self.ck, &self.S, &accumulator_from_prove)
+        let instances = self
+            .circuits_ctx
+            .iter()
+            .map(|ctx| ctx.instances.clone())
+            .collect::<Box<[_]>>();
+
+        ProtoGalaxy::is_sat(&self.ck, &self.S, &accumulator_from_prove, &instances)
             .expect("The accumulator after calling `prove` is not satisfactory");
 
         let accumulator_from_verify = ProtoGalaxy::verify(

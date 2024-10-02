@@ -1,6 +1,4 @@
-/// This example is the debugging code for #319
-///
-/// When this task is closed, it should be an example of using public input in a step-circuit
+/// This example is the demo for pub instances accumulation
 use std::{array, fs, io, num::NonZeroUsize, path::Path};
 
 use halo2_proofs::{

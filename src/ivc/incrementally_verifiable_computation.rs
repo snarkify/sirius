@@ -19,16 +19,17 @@ use crate::{
         self,
         vanilla::{
             accumulator::{FoldablePlonkTrace, RelaxedPlonkTrace},
-            GetConsistencyMarkers, VanillaFS,
+            GetConsistencyMarkers, VanillaFS, VerifyError,
         },
         FoldingScheme, IsSatAccumulator,
     },
-    plonk,
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
     table::CircuitRunner,
     util,
 };
+
+pub type Instances<F> = Vec<Vec<F>>;
 
 // TODO #31 docs
 struct StepCircuitContext<const ARITY: usize, C, SC>
@@ -38,6 +39,8 @@ where
     relaxed_trace: RelaxedPlonkTrace<C>,
     z_0: [C::Scalar; ARITY],
     z_i: [C::Scalar; ARITY],
+
+    pub_instances: Vec<Instances<C::Scalar>>,
 
     _p: PhantomData<SC>,
 }
@@ -90,7 +93,7 @@ pub enum VerificationError {
     InstanceNotMatch { index: usize, is_primary: bool },
     #[error("TODO")]
     NotSat {
-        err: plonk::Error,
+        err: VerifyError,
         is_primary: bool,
         is_relaxed: bool,
     },
@@ -385,12 +388,14 @@ where
                 z_0: primary_z_0,
                 z_i: primary_z_output,
                 relaxed_trace: primary_relaxed_trace,
+                pub_instances: vec![primary_instances],
                 _p: PhantomData,
             },
             secondary: StepCircuitContext {
                 z_0: secondary_z_0,
                 z_i: secondary_z_output,
                 relaxed_trace: secondary_relaxed_trace,
+                pub_instances: vec![secondary_instances],
                 _p: PhantomData,
             },
         })
@@ -633,9 +638,12 @@ where
             });
         });
 
-        if let Err(err) =
-            VanillaFS::is_sat(pp.primary.ck(), pp.primary.S(), &self.primary.relaxed_trace)
-        {
+        if let Err(err) = VanillaFS::is_sat(
+            pp.primary.ck(),
+            pp.primary.S(),
+            &self.primary.relaxed_trace,
+            &self.primary.pub_instances,
+        ) {
             errors.extend(err.into_iter().map(|err| VerificationError::NotSat {
                 err,
                 is_primary: true,
@@ -647,6 +655,7 @@ where
             pp.secondary.ck(),
             pp.secondary.S(),
             &self.secondary.relaxed_trace,
+            &self.secondary.pub_instances,
         ) {
             errors.extend(err.into_iter().map(|err| VerificationError::NotSat {
                 err,
@@ -662,7 +671,7 @@ where
             &self.secondary_trace[0].w,
         ) {
             errors.push(VerificationError::NotSat {
-                err,
+                err: err.into(),
                 is_primary: false,
                 is_relaxed: false,
             })

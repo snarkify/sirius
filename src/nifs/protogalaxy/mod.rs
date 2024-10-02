@@ -439,7 +439,7 @@ pub enum VerifyError<F: PrimeField> {
     #[error("Expected `e` {expected_e:?}, but evaluated is {evaluated_e:?}")]
     MismatchE { expected_e: F, evaluated_e: F },
     #[error("Permutation check failed")]
-    Perm(plonk::Error),
+    PermCheckFailed { mismatch_count: usize },
     #[error("Commitment of")]
     WitnessCommitmentMismatch(Box<[usize]>),
 }
@@ -520,9 +520,7 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
         if mismatch_count == 0 {
             Ok(())
         } else {
-            Err(Self::VerifyError::Perm(plonk::Error::PermCheckFail {
-                mismatch_count,
-            }))
+            Err(Self::VerifyError::PermCheckFailed { mismatch_count })
         }
     }
 
@@ -548,6 +546,13 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
         } else {
             Err(VerifyError::WitnessCommitmentMismatch(errors))
         }
+    }
+
+    fn is_sat_pub_instances(
+        _acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+        _pub_instances: &[Vec<Vec<<C as CurveAffine>::ScalarExt>>],
+    ) -> Result<(), Self::VerifyError> {
+        Ok(())
     }
 }
 

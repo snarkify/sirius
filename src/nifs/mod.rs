@@ -114,6 +114,15 @@ pub trait VerifyAccumulation<C: CurveAffine, const L: usize = 1>: FoldingScheme<
         ck: &CommitmentKey<C>,
         acc: &<Self as FoldingScheme<C, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError>;
+
+    /// Checks that the accumulator for instance columns (public input) is correct
+    ///
+    /// This method ensure that the instance accumulator in `acc` really contains these public
+    /// inputs
+    fn is_sat_pub_instances(
+        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+        pub_instances: &[Vec<Vec<C::ScalarExt>>],
+    ) -> Result<(), Self::VerifyError>;
 }
 
 /// Trait defining a complete satisfaction check for accumulators
@@ -130,6 +139,7 @@ pub trait IsSatAccumulator<C: CurveAffine, const L: usize = 1>: VerifyAccumulati
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
         acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+        pub_instances: &[Vec<Vec<C::ScalarExt>>],
     ) -> Result<(), Vec<Self::VerifyError>> {
         let mut errors = vec![];
 
@@ -142,6 +152,10 @@ pub trait IsSatAccumulator<C: CurveAffine, const L: usize = 1>: VerifyAccumulati
         }
 
         if let Err(err) = Self::is_sat_witness_commit(ck, acc) {
+            errors.push(err);
+        }
+
+        if let Err(err) = Self::is_sat_pub_instances(acc, pub_instances) {
             errors.push(err);
         }
 

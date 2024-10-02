@@ -30,7 +30,7 @@ enum Error<C: CurveAffine> {
     Plonk(#[from] plonk::Error),
     #[error("while verify: {errors:?}")]
     Verify {
-        errors: Vec<(&'static str, crate::plonk::Error)>,
+        errors: Vec<(&'static str, vanilla::VerifyError)>,
     },
     #[error("not equal: {from_verify:?} != {from_prove:?}")]
     VerifyProveNotMatch {
@@ -106,13 +106,13 @@ where
     let mut errors = Vec::new();
 
     if let Err(err) = S.is_sat(&ck, &mut ro_nark_decider, &pair1.u, &pair1.w) {
-        errors.push(("is_sat_pair1", err));
+        errors.push(("is_sat_pair1", err.into()));
     }
     if let Err(err) = VanillaFS::is_sat_permutation(&S, &pair1_relaxed) {
         errors.push(("is_sat_perm_pair1", err));
     }
     if let Err(err) = S.is_sat(&ck, &mut ro_nark_decider, &pair2.u, &pair2.w) {
-        errors.push(("is_sat_pair2", err));
+        errors.push(("is_sat_pair2", err.into()));
     }
     if let Err(err) = VanillaFS::is_sat_permutation(&S, &pair2_relaxed) {
         errors.push(("is_sat_perm_pair2", err));
@@ -160,6 +160,8 @@ where
         W: RelaxedPlonkWitness::new(S.k, &S.round_sizes),
     };
 
+    let all_instances = [pair1.u.instances.clone(), pair2.u.instances.clone()];
+
     let mut ro_nark_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_acc_prover = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_acc_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
@@ -185,7 +187,7 @@ where
 
     let mut errors = Vec::new();
 
-    if let Err(err) = VanillaFS::is_sat(ck, S, &f_tr) {
+    if let Err(err) = VanillaFS::is_sat(ck, S, &f_tr, &all_instances[0..=0]) {
         errors.extend(err.into_iter().map(|err| ("f_tr", err)));
     }
 
@@ -220,7 +222,7 @@ where
     f_tr.U = U_from_verify;
     f_tr.W = _W;
 
-    if let Err(err) = VanillaFS::is_sat(ck, S, &f_tr) {
+    if let Err(err) = VanillaFS::is_sat(ck, S, &f_tr, &all_instances) {
         errors.extend(err.into_iter().map(|err| ("f_tr", err)));
     }
 
