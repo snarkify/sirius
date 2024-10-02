@@ -20,10 +20,10 @@ use sirius::{
 use tracing::debug;
 use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
 
-const INSTANCES_LEN: usize = 1;
+const INSTANCES_LEN: usize = A1;
 
 /// Number of folding steps
-const FOLD_STEP_COUNT: usize = 1;
+const FOLD_STEP_COUNT: usize = 2;
 
 /// Arity : Input/output size per fold-step for primary step-circuit
 const A1: usize = 5;
@@ -55,13 +55,15 @@ struct InstancesConfig<const N: usize> {
     #[allow(dead_code)]
     instances: [Column<Instance>; N],
 }
-struct InstancesCircuit<const N: usize> {}
+struct InstancesCircuit<const N: usize, const FAIL: bool = false> {}
 
-impl<const N: usize, const A: usize, F: PrimeField> StepCircuit<A, F> for InstancesCircuit<N> {
-    type Config = InstancesConfig<N>;
+impl<const A: usize, F: PrimeField, const FAIL: bool> StepCircuit<A, F>
+    for InstancesCircuit<A, FAIL>
+{
+    type Config = InstancesConfig<A>;
 
     fn instances(&self) -> Vec<Vec<F>> {
-        vec![vec![F::ONE]; N]
+        (0..A).map(|val| vec![F::from_u128(val as u128)]).collect()
     }
 
     /// Configure the step circuit. This method initializes necessary
@@ -83,11 +85,23 @@ impl<const N: usize, const A: usize, F: PrimeField> StepCircuit<A, F> for Instan
     /// Return `z_out` result
     fn synthesize_step(
         &self,
-        _config: Self::Config,
-        _layouter: &mut impl Layouter<F>,
+        config: Self::Config,
+        layouter: &mut impl Layouter<F>,
         z_i: &[AssignedCell<F, F>; A],
     ) -> Result<[AssignedCell<F, F>; A], SynthesisError> {
-        Ok(z_i.clone())
+        for (input, instance) in z_i.iter().zip(config.instances) {
+            layouter.constrain_instance(input.cell(), instance, 0)?;
+        }
+
+        let mut z_o = z_i.clone();
+
+        // If `FAIL` is set, we will reverse the input and thus the check will break already at step 1
+        // with public input
+        if FAIL {
+            z_o.reverse();
+        }
+
+        Ok(z_o)
     }
 }
 
@@ -121,6 +135,7 @@ fn main() {
                 .with_default_directive(LevelFilter::INFO.into())
                 .from_env_lossy(),
         )
+        .with_ansi(false)
         .init();
 
     let sc1 = InstancesCircuit::<INSTANCES_LEN> {};

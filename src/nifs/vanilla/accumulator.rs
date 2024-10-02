@@ -60,7 +60,7 @@ where
 {
     fn from(inner: FoldablePlonkInstance<C>) -> Self {
         let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::fold_sc_instances_accumulator::<C>(
+            instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
                 &C::ScalarExt::ZERO,
                 inner.get_step_circuit_instances(),
             );
@@ -168,7 +168,7 @@ where
             .fold(self.E_commitment, |acc, x| (acc + x).into());
 
         let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::fold_sc_instances_accumulator::<C>(
+            instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
                 &self.step_circuit_instances_hash_accumulator,
                 U2.get_step_circuit_instances(),
             );
@@ -345,7 +345,7 @@ where
     step_circuit_instances_collection.iter().fold(
         instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
         |acc, sc_instances| {
-            instances_accumulator_computation::fold_sc_instances_accumulator::<C>(
+            instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
                 &acc,
                 sc_instances,
             )
