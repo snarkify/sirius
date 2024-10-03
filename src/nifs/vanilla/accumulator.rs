@@ -336,23 +336,6 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
     }
 }
 
-fn fold_step_circuit_instances_hash_accumulator_collection<C: CurveAffine>(
-    step_circuit_instances_collection: &[Vec<Vec<C::ScalarExt>>],
-) -> C::ScalarExt
-where
-    C::Base: PrimeFieldBits + FromUniformBytes<64>,
-{
-    step_circuit_instances_collection.iter().fold(
-        instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
-        |acc, sc_instances| {
-            instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
-                &acc,
-                sc_instances,
-            )
-        },
-    )
-}
-
 /// A newtype wrapper around `PlonkInstance` ensuring that the first instance
 /// column has exactly two elements.
 ///

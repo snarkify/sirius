@@ -16,7 +16,7 @@ use crate::{
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
     ff::Field,
-    ivc::instances_accumulator_computation,
+    ivc::{instances_accumulator_computation, Instances},
     nifs::vanilla::accumulator::{RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness},
     plonk::{
         self,
@@ -461,22 +461,20 @@ where
         acc: &<Self as FoldingScheme<C, 1>>::Accumulator,
         pub_instances: &[Vec<Vec<<C as CurveAffine>::ScalarExt>>],
     ) -> Result<(), Self::VerifyError> {
-        let calculated = pub_instances.iter().fold(
-            instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
-            |acc, instances| {
-                instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
-                    &acc,
-                    &instances[1..], // take only step circuit instances, not take consistency
-                                     // markers (first instance column with two elements)
-                )
-            },
-        );
-
-        if calculated == acc.U.step_circuit_instances_hash_accumulator {
-            Ok(())
-        } else {
-            Err(VerifyError::InstanceMismatch)
-        }
+        pub_instances
+            .iter()
+            .fold(
+                instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
+                |acc, instances| {
+                    instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
+                        &acc,
+                        instances.get_step_circuit_instances(),
+                    )
+                },
+            )
+            .ne(&acc.U.step_circuit_instances_hash_accumulator)
+            .then_some(VerifyError::InstanceMismatch)
+            .err_or(())
     }
 }
 
@@ -517,6 +515,12 @@ pub trait GetStepCircuitInstances<F> {
 impl<C: CurveAffine> GetStepCircuitInstances<C::ScalarExt> for PlonkInstance<C> {
     fn get_step_circuit_instances(&self) -> &[Vec<C::ScalarExt>] {
         &self.instances[1..]
+    }
+}
+
+impl<F: PrimeField> GetStepCircuitInstances<F> for Instances<F> {
+    fn get_step_circuit_instances(&self) -> &[Vec<F>] {
+        &self[1..]
     }
 }
 
