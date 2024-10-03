@@ -16,6 +16,7 @@ use crate::{
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
     ff::Field,
+    ivc::{instances_accumulator_computation, Instances},
     nifs::vanilla::accumulator::{RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness},
     plonk::{
         self,
@@ -292,11 +293,27 @@ where
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum VerifyError {
+    #[error(transparent)]
+    Plonk(#[from] plonk::Error),
+    #[error(transparent)]
+    Eval(#[from] plonk::eval::Error),
+    #[error("Manually accumulation instance columns does not return same as stored")]
+    InstancesHashMismatch,
+    #[error("(Relaxed) plonk relation not satisfied: commitment of E")]
+    ECommitmentMismatch,
+    #[error("Permutation check fail: mismatch_count {mismatch_count}")]
+    PermCheckFail { mismatch_count: usize },
+    #[error("Instance mismatch")]
+    InstanceMismatch,
+}
+
 impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    type VerifyError = plonk::Error;
+    type VerifyError = VerifyError;
 
     fn is_sat_accumulation(
         S: &PlonkStructure<C::ScalarExt>,
@@ -335,7 +352,7 @@ where
                 |mismatch_count, is_missed| Ok(mismatch_count + is_missed),
             )
             .map(|mismatch_count| {
-                Some(Self::VerifyError::EvaluationMismatch {
+                Some(plonk::Error::EvaluationMismatch {
                     mismatch_count: NonZeroUsize::new(mismatch_count)?,
                     total_row,
                 })
@@ -343,7 +360,7 @@ where
             .err_or(())?;
 
         if !S.is_sat_log_derivative(&W.W) {
-            return Err(Self::VerifyError::LogDerivativeNotSat);
+            return Err(plonk::Error::LogDerivativeNotSat.into());
         }
 
         Ok(())
@@ -430,7 +447,7 @@ where
             .zip_eq(W.W.iter())
             .filter_map(|(Ci, Wi)| ck.commit(Wi).unwrap().ne(Ci).then_some(()))
             .count_to_non_zero()
-            .map(|mismatch_count| Self::VerifyError::CommitmentMismatch { mismatch_count })
+            .map(|mismatch_count| plonk::Error::CommitmentMismatch { mismatch_count })
             .err_or(())?;
 
         if ck.commit(&W.E).unwrap().ne(&U.E_commitment) {
@@ -438,6 +455,26 @@ where
         }
 
         Ok(())
+    }
+
+    fn is_sat_pub_instances(
+        acc: &<Self as FoldingScheme<C, 1>>::Accumulator,
+        pub_instances: &[Vec<Vec<<C as CurveAffine>::ScalarExt>>],
+    ) -> Result<(), Self::VerifyError> {
+        pub_instances
+            .iter()
+            .fold(
+                instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
+                |acc, instances| {
+                    instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
+                        &acc,
+                        instances.get_step_circuit_instances(),
+                    )
+                },
+            )
+            .ne(&acc.U.step_circuit_instances_hash_accumulator)
+            .then_some(VerifyError::InstanceMismatch)
+            .err_or(())
     }
 }
 
@@ -478,6 +515,12 @@ pub trait GetStepCircuitInstances<F> {
 impl<C: CurveAffine> GetStepCircuitInstances<C::ScalarExt> for PlonkInstance<C> {
     fn get_step_circuit_instances(&self) -> &[Vec<C::ScalarExt>] {
         &self.instances[1..]
+    }
+}
+
+impl<F: PrimeField> GetStepCircuitInstances<F> for Instances<F> {
+    fn get_step_circuit_instances(&self) -> &[Vec<F>] {
+        &self[1..]
     }
 }
 

@@ -19,16 +19,17 @@ use crate::{
         self,
         vanilla::{
             accumulator::{FoldablePlonkTrace, RelaxedPlonkTrace},
-            GetConsistencyMarkers, VanillaFS,
+            GetConsistencyMarkers, VanillaFS, VerifyError,
         },
         FoldingScheme, IsSatAccumulator,
     },
-    plonk,
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
     table::CircuitRunner,
     util,
 };
+
+pub type Instances<F> = Vec<Vec<F>>;
 
 // TODO #31 docs
 struct StepCircuitContext<const ARITY: usize, C, SC>
@@ -38,6 +39,11 @@ where
     relaxed_trace: RelaxedPlonkTrace<C>,
     z_0: [C::Scalar; ARITY],
     z_i: [C::Scalar; ARITY],
+
+    /// Public input (instance) from each step
+    ///
+    /// For further checking of hash-accumulator correctness, we save each instance
+    pub_instances: Vec<Instances<C::Scalar>>,
 
     _p: PhantomData<SC>,
 }
@@ -90,7 +96,7 @@ pub enum VerificationError {
     InstanceNotMatch { index: usize, is_primary: bool },
     #[error("TODO")]
     NotSat {
-        err: plonk::Error,
+        err: VerifyError,
         is_primary: bool,
         is_relaxed: bool,
     },
@@ -385,12 +391,14 @@ where
                 z_0: primary_z_0,
                 z_i: primary_z_output,
                 relaxed_trace: primary_relaxed_trace,
+                pub_instances: vec![],
                 _p: PhantomData,
             },
             secondary: StepCircuitContext {
                 z_0: secondary_z_0,
                 z_i: secondary_z_output,
                 relaxed_trace: secondary_relaxed_trace,
+                pub_instances: vec![],
                 _p: PhantomData,
             },
         })
@@ -417,6 +425,9 @@ where
             self.secondary.relaxed_trace.clone(),
             &self.secondary_trace,
         )?;
+        self.secondary
+            .pub_instances
+            .push(self.secondary_trace[0].u.instances.clone());
 
         debug!("prepare primary td");
 
@@ -498,6 +509,9 @@ where
             self.primary.relaxed_trace.clone(),
             &primary_plonk_trace,
         )?;
+        self.primary
+            .pub_instances
+            .push(primary_plonk_trace[0].u.instances.clone());
 
         primary_span.exit();
         let _secondary_span = info_span!("secondary").entered();
@@ -580,7 +594,7 @@ where
         Ok(())
     }
 
-    #[instrument(name = "ivc_vefify", skip_all)]
+    #[instrument(name = "ivc_verify", skip_all)]
     pub fn verify<const T: usize, RP1, RP2>(
         &mut self,
         pp: &PublicParams<'_, A1, A2, T, C1, C2, SC1, SC2, RP1, RP2>,
@@ -633,9 +647,12 @@ where
             });
         });
 
-        if let Err(err) =
-            VanillaFS::is_sat(pp.primary.ck(), pp.primary.S(), &self.primary.relaxed_trace)
-        {
+        if let Err(err) = VanillaFS::is_sat(
+            pp.primary.ck(),
+            pp.primary.S(),
+            &self.primary.relaxed_trace,
+            &self.primary.pub_instances,
+        ) {
             errors.extend(err.into_iter().map(|err| VerificationError::NotSat {
                 err,
                 is_primary: true,
@@ -647,6 +664,7 @@ where
             pp.secondary.ck(),
             pp.secondary.S(),
             &self.secondary.relaxed_trace,
+            &self.secondary.pub_instances,
         ) {
             errors.extend(err.into_iter().map(|err| VerificationError::NotSat {
                 err,
@@ -662,7 +680,7 @@ where
             &self.secondary_trace[0].w,
         ) {
             errors.push(VerificationError::NotSat {
-                err,
+                err: err.into(),
                 is_primary: false,
                 is_relaxed: false,
             })
