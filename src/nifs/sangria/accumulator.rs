@@ -20,7 +20,7 @@ use crate::{
         self, GetChallenges, GetWitness, PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness,
     },
     poseidon::{AbsorbInRO, ROTrait},
-    util,
+    util::ScalarToBase,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -273,7 +273,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPl
                     .chain(challenges.iter())
                     .chain(iter::once(u))
                     .chain(iter::once(step_circuit_instances_hash_accumulator))
-                    .map(|m| util::fe_to_fe(m).unwrap()),
+                    .map(|m| C::scalar_to_base(m).unwrap()),
             );
     }
 }

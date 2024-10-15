@@ -1,7 +1,10 @@
 use std::{fmt, iter, num::NonZeroUsize};
 
 use halo2_proofs::{
-    halo2curves::ff::{FromUniformBytes, PrimeFieldBits},
+    halo2curves::{
+        ff::{FromUniformBytes, PrimeFieldBits},
+        CurveAffine,
+    },
     plonk::Assigned,
 };
 use itertools::Itertools;
@@ -83,6 +86,24 @@ pub fn fe_to_big<F: PrimeField>(fe: &F) -> BigUint {
 
 pub fn fe_to_fe<F1: PrimeField, F2: PrimeField>(fe: &F1) -> Option<F2> {
     fe_from_big(fe_to_big(fe) % modulus::<F2>())
+}
+
+pub trait ScalarToBase: CurveAffine {
+    fn scalar_to_base(input: &Self::Scalar) -> Option<Self::Base>;
+}
+impl<C: CurveAffine> ScalarToBase for C {
+    fn scalar_to_base(input: &C::Scalar) -> Option<C::Base> {
+        fe_to_fe(input)
+    }
+}
+
+pub trait BaseToScalar: CurveAffine {
+    fn base_to_scalar(input: &Self::Base) -> Option<Self::Scalar>;
+}
+impl<C: CurveAffine> BaseToScalar for C {
+    fn base_to_scalar(input: &Self::Base) -> Option<Self::Scalar> {
+        fe_to_fe(input)
+    }
 }
 
 pub fn fe_to_fe_safe<F1: PrimeField, F2: PrimeField>(fe: &F1) -> Option<F2> {

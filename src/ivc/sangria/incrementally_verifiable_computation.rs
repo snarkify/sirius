@@ -26,7 +26,7 @@ use crate::{
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
     table::CircuitRunner,
-    util,
+    util::ScalarToBase,
 };
 
 pub type Instances<F> = Vec<Vec<F>>;
@@ -225,7 +225,7 @@ where
         let primary_consistency_marker = {
             let _s = info_span!("generate_instance").entered();
             [
-                util::fe_to_fe(&secondary_pre_round_plonk_trace.u.get_consistency_markers()[1])
+                C2::scalar_to_base(&secondary_pre_round_plonk_trace.u.get_consistency_markers()[1])
                     .unwrap(),
                 ConsistencyMarkerComputation::<'_, A1, C2, RP1::OffCircuit> {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
@@ -310,7 +310,7 @@ where
         let secondary_consistency_marker = {
             let _s = info_span!("generate_instance");
             [
-                util::fe_to_fe(&primary_plonk_trace.u.get_consistency_markers()[1]).unwrap(),
+                C1::scalar_to_base(&primary_plonk_trace.u.get_consistency_markers()[1]).unwrap(),
                 ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
@@ -437,7 +437,8 @@ where
         let primary_consistency_marker = {
             let _s = info_span!("generate_instance").entered();
             [
-                util::fe_to_fe(&self.secondary_trace[0].u.get_consistency_markers()[1]).unwrap(),
+                C2::scalar_to_base(&self.secondary_trace[0].u.get_consistency_markers()[1])
+                    .unwrap(),
                 ConsistencyMarkerComputation::<'_, A1, C2, RP1::OffCircuit> {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_2(),
@@ -524,7 +525,7 @@ where
         let secondary_consistency_marker = {
             let _s = info_span!("generate_instance");
             [
-                util::fe_to_fe(&primary_plonk_trace[0].u.get_consistency_markers()[1]).unwrap(),
+                C1::scalar_to_base(&primary_plonk_trace[0].u.get_consistency_markers()[1]).unwrap(),
                 ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
@@ -639,7 +640,7 @@ where
         .generate_with_inspect::<C1::Scalar>(|buf| {
             debug!("primary X1 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&util::fe_to_fe(&self.secondary_trace[0].u.get_consistency_markers()[1]).unwrap())
+        .ne(&C2::scalar_to_base(&self.secondary_trace[0].u.get_consistency_markers()[1]).unwrap())
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 1,

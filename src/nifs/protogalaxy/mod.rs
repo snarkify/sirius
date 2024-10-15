@@ -15,7 +15,7 @@ use crate::{
     polynomial::{lagrange, sparse, univariate::UnivariatePoly},
     poseidon::AbsorbInRO,
     sps::{self, SpecialSoundnessVerifier},
-    util,
+    util::ScalarToBase,
 };
 
 mod accumulator;
@@ -301,11 +301,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         )?;
 
         let alpha = ro_acc
-            .absorb_field_iter(
-                poly_F
-                    .iter()
-                    .map(|v| util::fe_to_fe::<C::ScalarExt, C::Base>(v).unwrap()),
-            )
+            .absorb_field_iter(poly_F.iter().map(|v| C::scalar_to_base(v).unwrap()))
             .squeeze::<C>(NUM_CHALLENGE_BITS);
 
         let betas_stroke = poly::PolyChallenges {
@@ -325,7 +321,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         )?;
 
         let gamma = ro_acc
-            .absorb_field_iter(poly_K.iter().map(|v| util::fe_to_fe(v).unwrap()))
+            .absorb_field_iter(poly_K.iter().map(|v| C::scalar_to_base(v).unwrap()))
             .squeeze::<C>(NUM_CHALLENGE_BITS);
 
         let polys_L_in_gamma =
@@ -400,12 +396,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
 
         let delta = Self::generate_challenge(&vp.pp_digest, ro_acc, accumulator, incoming.iter());
         let alpha = ro_acc
-            .absorb_field_iter(
-                proof
-                    .poly_F
-                    .iter()
-                    .map(|v| util::fe_to_fe::<C::ScalarExt, C::Base>(v).unwrap()),
-            )
+            .absorb_field_iter(proof.poly_F.iter().map(|v| C::scalar_to_base(v).unwrap()))
             .squeeze::<C>(NUM_CHALLENGE_BITS);
 
         let betas_stroke = poly::PolyChallenges {
@@ -417,7 +408,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         .collect::<Box<[_]>>();
 
         let gamma = ro_acc
-            .absorb_field_iter(proof.poly_K.iter().map(|v| util::fe_to_fe(v).unwrap()))
+            .absorb_field_iter(proof.poly_K.iter().map(|v| C::scalar_to_base(v).unwrap()))
             .squeeze::<C>(NUM_CHALLENGE_BITS);
 
         Ok(AccumulatorInstance {
