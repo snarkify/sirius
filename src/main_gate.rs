@@ -385,6 +385,7 @@ macro_rules! create_column_cycle {
         $trait_name:ident,
         $column_type:ty,
         $assign_next_fn_name:ident,
+        $assign_point_fn_name:ident,
         $assign_next_collection_fn_name:ident,
         $region_assign_fn:ident,
         $value_wrapper:expr
@@ -408,6 +409,13 @@ macro_rules! create_column_cycle {
                 annotation: impl Clone + Fn() -> AR,
                 values: impl Iterator<Item = F>,
             ) -> Result<Vec<AssignedCell<F, F>>, halo2_proofs::plonk::Error>;
+
+            fn $assign_point_fn_name<C: CurveAffine, AR: Into<String>>(
+                &mut self,
+                region: &mut RegionCtx<'_, C::Base>,
+                annotation: impl Fn() -> AR,
+                point: &C,
+            ) -> Result<AssignedPoint<C>, halo2_proofs::plonk::Error>;
         }
 
         impl<'a, I, F> $trait_name<F> for $struct_name<'a, I>
@@ -443,6 +451,29 @@ macro_rules! create_column_cycle {
                     .map(|val| self.$assign_next_fn_name(region, annotation.clone(), val))
                     .collect()
             }
+
+            fn $assign_point_fn_name<C: CurveAffine, AR: Into<String>>(
+                &mut self,
+                region: &mut RegionCtx<'_, C::Base>,
+                annotation: impl Fn() -> AR,
+                point: &C,
+            ) -> Result<AssignedPoint<C>, halo2_proofs::plonk::Error> {
+                let annotation = annotation().into();
+                let coordinates = point.coordinates().unwrap();
+
+                Ok(AssignedPoint {
+                    x: self.$assign_next_fn_name(
+                        region,
+                        || format!("{}.x", annotation),
+                        *coordinates.x(),
+                    )?,
+                    y: self.$assign_next_fn_name(
+                        region,
+                        || format!("{}.y", annotation),
+                        *coordinates.y(),
+                    )?,
+                })
+            }
         }
     };
 }
@@ -452,6 +483,7 @@ create_column_cycle!(
     FixedCyclicAssignor,
     Fixed,
     assign_next_fixed,
+    assign_next_fixed_point,
     assign_all_fixed,
     assign_fixed,
     |value| value
@@ -462,6 +494,7 @@ create_column_cycle!(
     AdviceCyclicAssignor,
     Advice,
     assign_next_advice,
+    assign_next_advice_point,
     assign_all_advice,
     assign_advice,
     |value| Value::known(value)
