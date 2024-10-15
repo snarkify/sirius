@@ -199,7 +199,7 @@ pub struct ProverParam<C: CurveAffine> {
 
 pub struct VerifierParam<C: CurveAffine> {
     /// Digest of public parameter of IVC circuit
-    pp_digest: C,
+    pub(crate) pp_digest: C,
 }
 
 pub struct Proof<F: PrimeField> {
