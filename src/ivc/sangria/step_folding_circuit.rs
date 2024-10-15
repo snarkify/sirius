@@ -9,18 +9,18 @@ use itertools::Itertools;
 use serde::Serialize;
 use tracing::*;
 
-use super::consistency_markers_computation::AssignedConsistencyMarkersComputation;
 use crate::{
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
     halo2curves::CurveAffine,
     ivc::{
+        consistency_markers_computation::AssignedConsistencyMarkersComputation,
         fold_relaxed_plonk_instance_chip::{
             AssignedRelaxedPlonkInstance, FoldRelaxedPlonkInstanceChip, FoldResult,
         },
         StepCircuit,
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
-    nifs::vanilla::{
+    nifs::sangria::{
         self,
         accumulator::{FoldablePlonkInstance, RelaxedPlonkInstance},
     },
@@ -134,7 +134,7 @@ where
     RO: ROCircuitTrait<C::Base>,
 {
     pub fn num_io(&self) -> Box<[usize]> {
-        iter::once(vanilla::CONSISTENCY_MARKERS_COUNT)
+        iter::once(sangria::CONSISTENCY_MARKERS_COUNT)
             .chain(
                 self.step_circuit_instances
                     .iter()
@@ -165,7 +165,7 @@ where
             panic!("Empty instances not expected, because consistency markers");
         };
 
-        assert_eq!(consistency_markers, &vanilla::CONSISTENCY_MARKERS_COUNT);
+        assert_eq!(consistency_markers, &sangria::CONSISTENCY_MARKERS_COUNT);
 
         Self {
             step: C::Base::ZERO,

@@ -10,7 +10,7 @@ use crate::{
     gadgets::{ecc::AssignedPoint, nonnative::bn::big_uint::BigUint},
     halo2curves::CurveAffine,
     main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
-    nifs::vanilla::accumulator::RelaxedPlonkInstance,
+    nifs::sangria::accumulator::RelaxedPlonkInstance,
     poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
     util,
 };

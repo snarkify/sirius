@@ -17,7 +17,7 @@ use crate::{
     constants::NUM_CHALLENGE_BITS,
     ff::Field,
     ivc::{instances_accumulator_computation, Instances},
-    nifs::vanilla::accumulator::{RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness},
+    nifs::sangria::accumulator::{RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness},
     plonk::{
         self,
         eval::{GetDataForEval, PlonkEvalDomain},

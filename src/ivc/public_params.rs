@@ -20,7 +20,7 @@ use crate::{
     main_gate::MainGateConfig,
     nifs::{
         self,
-        vanilla::{
+        sangria::{
             accumulator::FoldablePlonkTrace, GetConsistencyMarkers, VanillaFS,
             CONSISTENCY_MARKERS_COUNT,
         },
@@ -39,7 +39,7 @@ pub enum Error {
     #[error("Error while calculate digest of pp")]
     WhileDigest(#[from] io::Error),
     #[error("While calculate intiail plonk relaxed trace of secondary circuit: {0:?}")]
-    WhileGeneratePlonkTrace(#[from] nifs::vanilla::Error),
+    WhileGeneratePlonkTrace(#[from] nifs::sangria::Error),
     #[error("While calculate intiail plonk relaxed trace of secondary circuit, error was occured in `process_step`: {0:?}")]
     WhileProcessStep(#[from] ivc::step_circuit::SynthesisError),
 }
