@@ -61,7 +61,7 @@ use crate::{
             big_uint_mul_mod_chip::{self, BigUintMulModChip, OverflowingBigUint},
         },
     },
-    halo2curves::{Coordinates, CurveAffine},
+    halo2curves::CurveAffine,
     main_gate::{
         AdviceCyclicAssignor, AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx,
         WrapValue,
@@ -791,9 +791,11 @@ where
 
         macro_rules! assign_point {
             ($input:expr) => {{
-                assign_next_advice_from_point(&mut advice_columns_assigner, region, $input, || {
-                    stringify!($input)
-                })
+                advice_columns_assigner.assign_next_advice_point(
+                    region,
+                    || stringify!($input),
+                    $input,
+                )
             }};
         }
 
@@ -872,11 +874,10 @@ where
 
         macro_rules! assign_and_absorb_point {
             ($input:expr) => {{
-                let output = assign_next_advice_from_point(
-                    &mut advice_columns_assigner,
+                let output = advice_columns_assigner.assign_next_advice_point(
                     region,
-                    $input,
                     || stringify!($input),
+                    $input,
                 )?;
 
                 ro_circuit.absorb_point([
@@ -1059,24 +1060,6 @@ fn scalar_module_as_limbs<C: CurveAffine>(
     Ok(scalar_module_as_bn::<C>(limb_width, limbs_count)?
         .limbs()
         .to_vec())
-}
-
-pub(crate) fn assign_next_advice_from_point<C: CurveAffine, AR: Into<String>>(
-    assignor: &mut impl AdviceCyclicAssignor<C::Base>,
-    region: &mut RegionCtx<C::Base>,
-    input: &C,
-    annotation: impl Fn() -> AR,
-) -> Result<AssignedPoint<C>, Error> {
-    let coordinates: Coordinates<C> =
-        Option::from(input.coordinates()).ok_or(Error::CantBuildCoordinates {
-            variable_name: annotation().into(),
-            variable_str: format!("{:?}", input),
-        })?;
-
-    Ok(AssignedPoint::<C> {
-        x: assignor.assign_next_advice(region, &annotation, *coordinates.x())?,
-        y: assignor.assign_next_advice(region, &annotation, *coordinates.y())?,
-    })
 }
 
 fn assign_next_advice_from_diff_field<C: CurveAffine, AR: Into<String>>(

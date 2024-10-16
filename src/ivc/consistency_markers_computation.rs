@@ -202,9 +202,7 @@ mod tests {
     use super::*;
     use crate::{
         commitment::CommitmentKey,
-        ivc::fold_relaxed_plonk_instance_chip::{
-            assign_next_advice_from_point, FoldRelaxedPlonkInstanceChip,
-        },
+        ivc::fold_relaxed_plonk_instance_chip::FoldRelaxedPlonkInstanceChip,
         main_gate::AdviceCyclicAssignor,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, Spec},
         table::WitnessCollector,
@@ -263,13 +261,9 @@ mod tests {
 
                     let mut advice_columns_assigner = config.advice_cycle_assigner();
 
-                    let public_params_hash = assign_next_advice_from_point(
-                        &mut advice_columns_assigner,
-                        &mut ctx,
-                        &public_params_hash,
-                        || "public_params",
-                    )
-                    .unwrap();
+                    let public_params_hash = advice_columns_assigner
+                        .assign_next_advice_point(&mut ctx, || "public_params", &public_params_hash)
+                        .unwrap();
 
                     let step = advice_columns_assigner
                         .assign_next_advice(&mut ctx, || "step", Base::from_u128(step as u128))
