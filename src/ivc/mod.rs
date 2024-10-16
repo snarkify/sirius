@@ -1,10 +1,11 @@
 pub mod step_circuit;
 
-pub mod step_folding_circuit;
+pub mod sangria;
+pub use sangria::{
+    fold_relaxed_plonk_instance_chip, incrementally_verifiable_computation, step_folding_circuit,
+};
 
 mod consistency_markers_computation;
-mod fold_relaxed_plonk_instance_chip;
-mod incrementally_verifiable_computation;
 pub mod instances_accumulator_computation;
 mod public_params;
 

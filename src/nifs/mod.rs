@@ -19,7 +19,7 @@ use crate::{
 };
 
 pub mod protogalaxy;
-pub mod vanilla;
+pub mod sangria;
 
 /// Trait representing the NIFS folding scheme.
 pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {

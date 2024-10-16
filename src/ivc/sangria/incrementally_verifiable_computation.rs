@@ -4,20 +4,20 @@ use halo2_proofs::dev::MockProver;
 use serde::Serialize;
 use tracing::*;
 
-use super::consistency_markers_computation::ConsistencyMarkerComputation;
-pub use super::step_circuit::{self, StepCircuit, SynthesisError};
+pub use super::super::step_circuit::{self, StepCircuit, SynthesisError};
 use crate::{
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
     group::prime::PrimeCurveAffine,
     halo2curves::CurveAffine,
     ivc::{
+        consistency_markers_computation::ConsistencyMarkerComputation,
         public_params::PublicParams,
         step_folding_circuit::{StepFoldingCircuit, StepInputs},
     },
     main_gate::MainGateConfig,
     nifs::{
         self,
-        vanilla::{
+        sangria::{
             accumulator::{FoldablePlonkTrace, RelaxedPlonkTrace},
             GetConsistencyMarkers, VanillaFS, VerifyError,
         },
@@ -66,7 +66,7 @@ pub enum Error {
     #[error("TODO")]
     Sps(#[from] sps::Error),
     #[error("TODO")]
-    NIFS(#[from] nifs::vanilla::Error),
+    NIFS(#[from] nifs::sangria::Error),
     #[error("TODO")]
     VerifyFailed(Vec<VerificationError>),
 }
@@ -502,7 +502,7 @@ where
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
         )?];
 
-        let (primary_new_trace, primary_cross_term_commits) = nifs::vanilla::VanillaFS::prove(
+        let (primary_new_trace, primary_cross_term_commits) = nifs::sangria::VanillaFS::prove(
             pp.primary.ck(),
             &self.primary_nifs_pp,
             &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),

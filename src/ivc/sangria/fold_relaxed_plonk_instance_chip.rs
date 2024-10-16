@@ -50,7 +50,7 @@ use itertools::Itertools;
 use num_traits::Num;
 use tracing::*;
 
-use super::instances_accumulator_computation;
+use super::super::instances_accumulator_computation;
 use crate::{
     constants::NUM_CHALLENGE_BITS,
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
@@ -66,7 +66,7 @@ use crate::{
         AdviceCyclicAssignor, AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx,
         WrapValue,
     },
-    nifs::vanilla::{
+    nifs::sangria::{
         accumulator::{FoldablePlonkInstance, RelaxedPlonkInstance},
         GetConsistencyMarkers, GetStepCircuitInstances,
     },
@@ -1094,8 +1094,8 @@ fn assign_next_advice_from_diff_field<C: CurveAffine, AR: Into<String>>(
 }
 
 pub struct FoldResult<C: CurveAffine> {
-    pub assigned_input: AssignedWitness<C>,
-    pub assigned_result_of_fold: AssignedRelaxedPlonkInstance<C>,
+    pub(crate) assigned_input: AssignedWitness<C>,
+    pub(crate) assigned_result_of_fold: AssignedRelaxedPlonkInstance<C>,
 }
 
 #[cfg(test)]
@@ -1114,7 +1114,7 @@ mod tests {
         constants::MAX_BITS,
         ff::Field,
         halo2curves::{bn256::G1Affine as C1, CurveAffine},
-        nifs::vanilla::{VanillaFS, CONSISTENCY_MARKERS_COUNT},
+        nifs::sangria::{VanillaFS, CONSISTENCY_MARKERS_COUNT},
         plonk::PlonkInstance,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
         table::WitnessCollector,

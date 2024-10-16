@@ -12,7 +12,7 @@ use crate::{
     },
     nifs::{
         self,
-        vanilla::{
+        sangria::{
             accumulator::{RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness},
             VanillaFS,
         },
@@ -25,12 +25,12 @@ use crate::{
 #[derive(thiserror::Error, Debug)]
 enum Error<C: CurveAffine> {
     #[error(transparent)]
-    Nifs(#[from] nifs::vanilla::Error),
+    Nifs(#[from] nifs::sangria::Error),
     #[error(transparent)]
     Plonk(#[from] plonk::Error),
     #[error("while verify: {errors:?}")]
     Verify {
-        errors: Vec<(&'static str, vanilla::VerifyError)>,
+        errors: Vec<(&'static str, sangria::VerifyError)>,
     },
     #[error("not equal: {from_verify:?} != {from_prove:?}")]
     VerifyProveNotMatch {
