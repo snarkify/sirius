@@ -38,7 +38,7 @@ use crate::{
     },
     poseidon::{AbsorbInRO, ROTrait},
     sps::{Error as SpsError, SpecialSoundnessVerifier},
-    util::{concatenate_with_padding, fe_to_fe},
+    util::{concatenate_with_padding, ScalarToBase},
 };
 
 pub mod eval;
@@ -269,9 +269,13 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for PlonkInst
             .absorb_field_iter(
                 self.instances
                     .iter()
-                    .flat_map(|inst| inst.iter().map(|i| fe_to_fe(i).unwrap())),
+                    .flat_map(|inst| inst.iter().map(|i| C::scalar_to_base(i).unwrap())),
             )
-            .absorb_field_iter(self.challenges.iter().map(|cha| fe_to_fe(cha).unwrap()));
+            .absorb_field_iter(
+                self.challenges
+                    .iter()
+                    .map(|cha| C::scalar_to_base(cha).unwrap()),
+            );
     }
 }
 
@@ -482,7 +486,7 @@ impl<F: PrimeField> PlonkStructure<F> {
                 instances
                     .iter()
                     .flat_map(|instance| instance.iter())
-                    .map(|val| fe_to_fe(val).unwrap()),
+                    .map(|val| C::scalar_to_base(val).unwrap()),
             )
             .absorb_point_iter(plonk_instance.W_commitments.iter());
 
@@ -541,7 +545,7 @@ impl<F: PrimeField> PlonkStructure<F> {
                 instances
                     .iter()
                     .flat_map(|inst| inst.iter())
-                    .map(|val| fe_to_fe(val).unwrap()),
+                    .map(|val| C::scalar_to_base(val).unwrap()),
             )
             .absorb_point(&C1)
             .squeeze::<C>(NUM_CHALLENGE_BITS);
@@ -589,7 +593,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             instances
                 .iter()
                 .flat_map(|i| i.iter())
-                .map(|inst| fe_to_fe(inst).unwrap()),
+                .map(|inst| C::scalar_to_base(inst).unwrap()),
         );
 
         let k_power_of_2 = 1 << self.k;

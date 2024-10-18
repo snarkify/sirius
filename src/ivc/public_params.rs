@@ -29,7 +29,7 @@ use crate::{
     plonk::PlonkStructure,
     poseidon::{random_oracle::ROTrait, ROPair},
     table::CircuitRunner,
-    util,
+    util::ScalarToBase,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -305,7 +305,7 @@ where
             );
 
             let secondary_consistenty_markers: [C2::Scalar; 2] = [
-                util::fe_to_fe(&secondary_initial_step_input.u.get_consistency_markers()[0])
+                C1::scalar_to_base(&secondary_initial_step_input.u.get_consistency_markers()[0])
                     .unwrap(),
                 ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
                     random_oracle_constant: secondary.ro_constant.clone(),

@@ -396,7 +396,7 @@ mod tests {
         ff::Field,
         halo2curves::pasta::{pallas, EqAffine, Fp, Fq},
         run_mock_prover_test,
-        util::fe_to_fe_safe,
+        util::ScalarToBase,
     };
 
     #[derive(Clone, Debug)]
@@ -582,7 +582,7 @@ mod tests {
                         ctx.next();
                         ecc_chip.add(ctx, &a, &b)
                     } else {
-                        let lambda: C::Base = fe_to_fe_safe(&self.lambda).unwrap();
+                        let lambda: C::Base = C::scalar_to_base(&self.lambda).unwrap();
                         let bit_len =
                             NonZeroUsize::new(lambda.to_le_bits().len()).expect("Non Zero");
                         let lambda = ctx.assign_advice(

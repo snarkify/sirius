@@ -12,7 +12,7 @@ use crate::{
     main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
     nifs::sangria::accumulator::RelaxedPlonkInstance,
     poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
-    util,
+    util::{self, ScalarToBase},
 };
 
 pub(crate) struct AssignedConsistencyMarkersComputation<
@@ -113,9 +113,9 @@ where
                             .flat_map(|bn| bn.limbs().iter())
                             .copied(),
                     )
-                    .absorb_field(util::fe_to_fe(self.u).unwrap())
+                    .absorb_field(C::scalar_to_base(self.u).unwrap())
                     .absorb_field(
-                        util::fe_to_fe(self.step_circuit_instances_hash_accumulator).unwrap(),
+                        C::scalar_to_base(self.step_circuit_instances_hash_accumulator).unwrap(),
                     );
             }
         }
@@ -136,7 +136,7 @@ where
                 .iter()
                 .map(|v| {
                     BigUint::from_f(
-                        &util::fe_to_fe(v).unwrap(),
+                        &C::scalar_to_base(v).unwrap(),
                         self.limb_width,
                         self.limbs_count,
                     )
@@ -147,7 +147,7 @@ where
                 .iter()
                 .map(|v| {
                     BigUint::from_f(
-                        &util::fe_to_fe(v).unwrap(),
+                        &C::scalar_to_base(v).unwrap(),
                         self.limb_width,
                         self.limbs_count,
                     )

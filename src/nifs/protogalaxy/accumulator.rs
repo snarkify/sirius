@@ -5,7 +5,7 @@ use crate::{
     halo2curves::CurveAffine,
     plonk::{self, PlonkInstance, PlonkTrace, PlonkWitness},
     poseidon::{AbsorbInRO, ROTrait},
-    util,
+    util::ScalarToBase,
 };
 
 /// Represents an accumulator for folding multiple instances into a single instance,
@@ -33,7 +33,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for Accumulat
             self.betas
                 .iter()
                 .chain(iter::once(&self.e))
-                .map(|b| util::fe_to_fe::<C::ScalarExt, C::Base>(b).unwrap()),
+                .map(|b| C::scalar_to_base(b).unwrap()),
         );
     }
 }
@@ -96,7 +96,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for Accumulat
             self.betas
                 .iter()
                 .chain(iter::once(&self.e))
-                .map(|b| util::fe_to_fe::<C::ScalarExt, C::Base>(b).unwrap()),
+                .map(|b| C::scalar_to_base(b).unwrap()),
         );
     }
 }

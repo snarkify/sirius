@@ -1101,6 +1101,7 @@ mod tests {
         plonk::PlonkInstance,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
         table::WitnessCollector,
+        util::ScalarToBase,
     };
 
     type Base = <C1 as CurveAffine>::Base;
@@ -1318,7 +1319,7 @@ mod tests {
                     let assigned_r = ctx.assign_advice(
                         || "r",
                         config.state[0],
-                        Value::known(util::fe_to_fe(&r).unwrap()),
+                        Value::known(C1::scalar_to_base(&r).unwrap()),
                     )?;
 
                     let r = gate.le_num_to_bits(&mut ctx, assigned_r, MAX_BITS)?;
@@ -1404,7 +1405,7 @@ mod tests {
                     let assigned_r = ctx.assign_advice(
                         || "r",
                         config.state[0],
-                        Value::known(util::fe_to_fe(&r).unwrap()),
+                        Value::known(C1::scalar_to_base(&r).unwrap()),
                     )?;
 
                     let r =
@@ -1511,7 +1512,7 @@ mod tests {
                     }
 
                     let assigned_r = advice_columns_assigner
-                        .assign_next_advice(&mut ctx, || "r", util::fe_to_fe(&r).unwrap())
+                        .assign_next_advice(&mut ctx, || "r", C1::scalar_to_base(&r).unwrap())
                         .unwrap();
 
                     let assigned_consistency_markers = relaxed_plonk
@@ -1659,7 +1660,7 @@ mod tests {
                     }
 
                     let assigned_r = advice_columns_assigner
-                        .assign_next_advice(&mut ctx, || "r", util::fe_to_fe(&r).unwrap())
+                        .assign_next_advice(&mut ctx, || "r", C1::scalar_to_base(&r).unwrap())
                         .unwrap();
 
                     let assigned_fold_challenges = relaxed_plonk
@@ -1715,7 +1716,7 @@ mod tests {
                 .iter()
                 .map(|instance| {
                     BigUint::from_f(
-                        &util::fe_to_fe_safe::<ScalarExt, Base>(instance).unwrap(),
+                        &C1::scalar_to_base(instance).unwrap(),
                         LIMB_WIDTH,
                         LIMBS_COUNT,
                     )

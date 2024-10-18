@@ -5,7 +5,7 @@ use crate::{
     constants::NUM_CHALLENGE_BITS,
     plonk::{eval::Error as EvalError, PlonkInstance},
     poseidon::ROTrait,
-    util::fe_to_fe,
+    util::ScalarToBase,
 };
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -45,7 +45,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> SpecialSoundnessVerifier<C, RO> for P
             self.instances
                 .iter()
                 .flat_map(|inst| inst.iter())
-                .map(|val| fe_to_fe(val).unwrap()),
+                .map(|val| C::scalar_to_base(val).unwrap()),
         );
 
         for i in 0..num_challenges {

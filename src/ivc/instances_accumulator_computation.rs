@@ -16,7 +16,7 @@ use crate::{
     poseidon::{
         poseidon_circuit::PoseidonChip, random_oracle::ROCircuitTrait, PoseidonHash, ROTrait, Spec,
     },
-    util,
+    util::{BaseToScalar, ScalarToBase},
 };
 
 /// Default value for use in [`Spec`] in this module
@@ -58,12 +58,12 @@ where
         .absorb_field_iter(
             iter::once(instances_hash_accumulator)
                 .chain(instances.iter().flat_map(|instance| instance.iter()))
-                .map(|i| util::fe_to_fe(i).unwrap()),
+                .map(|i| C::scalar_to_base(i).unwrap()),
         )
         .inspect(|buf| debug!("off-circuit buf of instances: {buf:?}"))
         .output::<C::Base>(num_bits);
 
-    util::fe_to_fe(&hash_in_base).unwrap()
+    C::base_to_scalar(&hash_in_base).unwrap()
 }
 
 #[instrument(skip_all)]
@@ -96,7 +96,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::main_gate::{AdviceCyclicAssignor, MainGate};
+    use crate::{
+        main_gate::{AdviceCyclicAssignor, MainGate},
+        util,
+    };
 
     #[derive(Debug, Clone)]
     struct ConsistencyCheckCircuit<F: PrimeField> {
@@ -227,7 +230,7 @@ mod tests {
         MockProver::run(
             10,
             &ConsistencyCheckCircuit::<Base>::new(acc, &[vec![i1, i2, i3]]),
-            vec![vec![util::fe_to_fe(&expected).unwrap()]],
+            vec![vec![C::scalar_to_base(&expected).unwrap()]],
         )
         .unwrap()
         .verify()
