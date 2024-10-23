@@ -3,7 +3,6 @@ use std::{iter, marker::PhantomData};
 use itertools::Itertools;
 use tracing::{instrument, warn};
 
-use self::accumulator::AccumulatorInstance;
 use super::*;
 use crate::{
     commitment::CommitmentKey,
@@ -21,7 +20,7 @@ use crate::{
 mod accumulator;
 pub(crate) mod poly;
 
-pub use accumulator::{Accumulator, AccumulatorArgs};
+pub use accumulator::{Accumulator, AccumulatorArgs, AccumulatorInstance};
 
 /// ProtoGalaxy: Non-Interactive Folding Scheme that implements the main protocol defined in the
 /// paper [protogalaxy.pdf](https://eprint.iacr.org/2023/1106).
@@ -200,10 +199,10 @@ pub struct ProverParam<C: CurveAffine> {
 
 pub struct VerifierParam<C: CurveAffine> {
     /// Digest of public parameter of IVC circuit
-    pp_digest: C,
+    pub(crate) pp_digest: C,
 }
 
-pub struct ProtoGalaxyProof<F: PrimeField> {
+pub struct Proof<F: PrimeField> {
     pub poly_F: UnivariatePoly<F>,
     pub poly_K: UnivariatePoly<F>,
 }
@@ -226,7 +225,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
     type Instance = PlonkInstance<C>;
     type Accumulator = Accumulator<C>;
     type AccumulatorInstance = AccumulatorInstance<C>;
-    type Proof = ProtoGalaxyProof<C::ScalarExt>;
+    type Proof = Proof<C::ScalarExt>;
 
     fn setup_params(
         pp_digest: C,
@@ -352,7 +351,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
                     ),
                 },
             },
-            ProtoGalaxyProof { poly_F, poly_K },
+            Proof { poly_F, poly_K },
         ))
     }
 

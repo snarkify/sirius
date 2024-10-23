@@ -5,6 +5,8 @@ pub use sangria::{
     fold_relaxed_plonk_instance_chip, incrementally_verifiable_computation, step_folding_circuit,
 };
 
+pub mod protogalaxy;
+
 mod consistency_markers_computation;
 pub mod instances_accumulator_computation;
 mod public_params;

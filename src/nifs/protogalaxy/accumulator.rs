@@ -56,15 +56,15 @@ impl<C: CurveAffine> Accumulator<C> {
 pub struct AccumulatorInstance<C: CurveAffine> {
     /// `φ`: Represents the combined state of all instances. It is a summary that captures the
     /// essential data and relationships from the instances being merged.
-    pub(super) ins: PlonkInstance<C>,
+    pub(crate) ins: PlonkInstance<C>,
 
     /// `β`: A random value used in the folding process. It helps ensure the unique
     /// and secure combination of instances, preventing manipulation.
-    pub(super) betas: Box<[C::ScalarExt]>,
+    pub(crate) betas: Box<[C::ScalarExt]>,
 
     /// `e`: an accumulated value that encapsulates the result of the folding operation. it serves
     /// as a concise representation of the correctness and properties of the folded instances.
-    pub(super) e: C::ScalarExt,
+    pub(crate) e: C::ScalarExt,
 }
 
 impl<C: CurveAffine> AccumulatorInstance<C> {
