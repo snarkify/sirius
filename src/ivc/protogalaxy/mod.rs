@@ -1,4 +1,6 @@
 mod verify_chip {
+    use std::iter;
+
     use halo2_proofs::{
         halo2curves::{
             ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
@@ -9,9 +11,10 @@ mod verify_chip {
 
     use crate::{
         gadgets::ecc::AssignedPoint,
-        main_gate::{AdviceCyclicAssignor, AssignedValue, MainGateConfig, RegionCtx},
+        main_gate::{AdviceCyclicAssignor, AssignedValue, MainGateConfig, RegionCtx, WrapValue},
         nifs::protogalaxy,
         plonk::PlonkInstance,
+        polynomial::univariate::UnivariatePoly,
         poseidon::ROCircuitTrait,
         util::ScalarToBase,
     };
@@ -23,6 +26,9 @@ mod verify_chip {
             annotation: &'static str,
             err: Halo2PlonkError,
         },
+
+        #[error("Error while squeeze challenges: {err:?}")]
+        Squeeze { err: Halo2PlonkError },
     }
 
     /// Assigned version of [`crate::plonk::PlonkInstance`]
@@ -86,6 +92,28 @@ mod verify_chip {
                 challenges: challenges.map_err(map_err)?,
             })
         }
+
+        pub fn iter_wrap_value(&self) -> impl '_ + Iterator<Item = WrapValue<C::Base>> {
+            let Self {
+                W_commitments,
+                instances,
+                challenges,
+            } = self;
+
+            W_commitments
+                .iter()
+                .flat_map(|W_commitment| WrapValue::from_assigned_point(W_commitment).into_iter())
+                .chain(instances.iter().flat_map(|instance| {
+                    instance
+                        .iter()
+                        .map(|value| WrapValue::Assigned(value.clone()))
+                }))
+                .chain(
+                    challenges
+                        .iter()
+                        .map(|challenge| WrapValue::Assigned(challenge.clone())),
+                )
+        }
     }
 
     /// Assigned version of [`crate::nifs::protogalaxy::accumulator::AccumulatorInstance`]
@@ -134,11 +162,50 @@ mod verify_chip {
 
             Ok(Self { ins, betas, e })
         }
+
+        pub fn iter_wrap_value(&self) -> impl '_ + Iterator<Item = WrapValue<C::Base>> {
+            let Self { ins, betas, e } = self;
+
+            ins.iter_wrap_value()
+                .chain(betas.iter().map(|beta| WrapValue::Assigned(beta.clone())))
+                .chain(iter::once(WrapValue::Assigned(e.clone())))
+        }
     }
 
+    /// Assigned version of [`crate::polynomial::univariate::UnivariatePoly`]
+    pub struct AssignedUnivariatePoly<F: PrimeField>(Box<[AssignedValue<F>]>);
+
+    impl<F: PrimeField> AssignedUnivariatePoly<F> {
+        pub fn assign<const T: usize>(
+            region: &mut RegionCtx<F>,
+            main_gate_config: MainGateConfig<T>,
+            annotation: &'static str,
+            poly: &UnivariatePoly<F>,
+        ) -> Result<Self, Error> {
+            let up = AssignedUnivariatePoly(
+                main_gate_config
+                    .advice_cycle_assigner()
+                    .assign_all_advice(region, || annotation, poly.iter().copied())
+                    .map_err(|err| Error::Assign { annotation, err })?
+                    .into_boxed_slice(),
+            );
+
+            region.next();
+
+            Ok(up)
+        }
+
+        pub fn iter_wrap_value(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
+            self.0
+                .iter()
+                .map(|coeff| WrapValue::Assigned(coeff.clone()))
+        }
+    }
+
+    /// Assigned version of [`crate::nifs::protogalaxy::Proof]
     pub struct AssignedProof<F: PrimeField> {
-        poly_F: Box<[AssignedValue<F>]>,
-        poly_K: Box<[AssignedValue<F>]>,
+        poly_F: AssignedUnivariatePoly<F>,
+        poly_K: AssignedUnivariatePoly<F>,
     }
 
     impl<F: PrimeField> AssignedProof<F> {
@@ -149,27 +216,24 @@ mod verify_chip {
         ) -> Result<Self, Error> {
             let protogalaxy::Proof { poly_K, poly_F } = proof;
 
-            let mut assigner = main_gate_config.advice_cycle_assigner();
-
             Ok(Self {
-                poly_F: assigner
-                    .assign_all_advice(region, || "poly_F", poly_F.iter().copied())
-                    .map_err(|err| Error::Assign {
-                        annotation: "proof::poly_F",
-                        err,
-                    })?
-                    .into_boxed_slice(),
-                poly_K: assigner
-                    .assign_all_advice(region, || "poly_K", poly_K.iter().copied())
-                    .map_err(|err| Error::Assign {
-                        annotation: "proof::poly_k",
-                        err,
-                    })?
-                    .into_boxed_slice(),
+                poly_F: AssignedUnivariatePoly::assign::<T>(
+                    region,
+                    main_gate_config.clone(),
+                    "poly_F",
+                    &poly_F,
+                )?,
+                poly_K: AssignedUnivariatePoly::assign::<T>(
+                    region,
+                    main_gate_config.clone(),
+                    "poly_K",
+                    &poly_K,
+                )?,
             })
         }
     }
 
+    /// Assigned version of [`crate::nifs::protogalaxy::VerifierParam`]
     pub struct AssignedVerifierParam<C: CurveAffine> {
         pp_digest: AssignedPoint<C>,
     }
@@ -194,18 +258,159 @@ mod verify_chip {
         }
     }
 
+    /// Assigned version of [`crate::nifs::protogalaxy::Challenges`]
+    struct AssignedChallanges<C: CurveAffine> {
+        delta: AssignedValue<C::Base>,
+        alpha: AssignedValue<C::Base>,
+        gamma: AssignedValue<C::Base>,
+    }
+
+    impl<C: CurveAffine> AssignedChallanges<C> {
+        fn generate(
+            region: &mut RegionCtx<C::Base>,
+            mut ro_circuit: impl ROCircuitTrait<C::Base>,
+            vp: AssignedVerifierParam<C>,
+            accumulator: AssignedAccumulatorInstance<C>,
+            incoming: &[AssignedPlonkInstance<C>],
+            proof: AssignedProof<C::Base>,
+        ) -> Result<AssignedChallanges<C>, Halo2PlonkError>
+        where
+            C::Base: FromUniformBytes<64> + PrimeFieldBits,
+            C::ScalarExt: FromUniformBytes<64> + PrimeFieldBits,
+        {
+            let delta = ro_circuit
+                .absorb_point(WrapValue::from_assigned_point(&vp.pp_digest))
+                .absorb_iter(accumulator.iter_wrap_value())
+                .absorb_iter(incoming.iter().flat_map(|tr| tr.iter_wrap_value()))
+                .squeeze(region)?;
+
+            let alpha = ro_circuit
+                .absorb_iter(proof.poly_F.iter_wrap_value())
+                .squeeze(region)?;
+
+            let gamma = ro_circuit
+                .absorb_iter(proof.poly_K.iter_wrap_value())
+                .squeeze(region)?;
+
+            Ok(AssignedChallanges {
+                delta,
+                alpha,
+                gamma,
+            })
+        }
+    }
+
     /// Assigned version of `fn verify` logic from [`crate::nifs::protogalaxy::ProtoGalaxy`].
+    ///
+    /// # Algorithm
+    ///
+    /// The logic of the proof generation follows several key steps:
+    ///
+    /// 1. **Generate Delta:**
+    ///     - **RO Seeds**: includes all input parameters except `ck`
+    ///     - `delta = ro_acc.squeeze()`
+    ///
+    /// 2. **Generate Alpha:**
+    ///     - **RO Update**: absorb `proof.poly_F`
+    ///     - `alpha = ro_acc.squeeze()`
+    ///
+    /// 3. **Update Beta* Values:**
+    ///     - `beta*[i] = beta[i] + alpha * delta[i]`
+    ///
+    /// 4. **Generate Gamma:**
+    ///     - **RO Update**: Absorb `proof.poly_K`
+    ///     - `gamma = ro_acc.squeeze()`
+    ///
+    /// 5. **Fold the Instance:**
+    ///     - [`ProtoGalaxy::fold_instance`]
     pub fn verify<C: CurveAffine, const L: usize>(
-        _region: &mut RegionCtx<C::Base>,
-        _ro_circuit: impl ROCircuitTrait<C::ScalarExt>,
-        _vp: protogalaxy::VerifierParam<C>,
-        _accumulator: AssignedAccumulatorInstance<C>,
-        _incoming: &[AssignedPlonkInstance<C>],
-        _proof: AssignedProof<C::ScalarExt>,
+        region: &mut RegionCtx<C::Base>,
+        ro_circuit: impl ROCircuitTrait<C::Base>,
+        vp: AssignedVerifierParam<C>,
+        accumulator: AssignedAccumulatorInstance<C>,
+        incoming: &[AssignedPlonkInstance<C>],
+        proof: AssignedProof<C::Base>,
     ) -> Result<AssignedAccumulatorInstance<C>, Error>
     where
+        C::Base: FromUniformBytes<64> + PrimeFieldBits,
         C::ScalarExt: FromUniformBytes<64> + PrimeFieldBits,
     {
+        let AssignedChallanges {
+            delta: _,
+            alpha: _,
+            gamma: _,
+        } = AssignedChallanges::generate(region, ro_circuit, vp, accumulator, incoming, proof)
+            .map_err(|err| Error::Squeeze { err })?;
+
         todo!()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use halo2_proofs::halo2curves::{bn256::G1Affine, group::prime::PrimeCurveAffine};
+
+        use super::*;
+        use crate::{
+            nifs::{
+                self,
+                protogalaxy::{AccumulatorArgs, VerifierParam},
+            },
+            poseidon::{PoseidonHash, ROTrait, Spec},
+        };
+
+        type C = G1Affine;
+
+        struct Mock {
+            params: VerifierParam<C>,
+            spec: Spec<<C as CurveAffine>::Base, 5, 4>,
+            acc: nifs::protogalaxy::Accumulator<C>,
+            proof: nifs::protogalaxy::Proof<<C as CurveAffine>::ScalarExt>,
+        }
+
+        impl Mock {
+            fn new() -> Self {
+                let params = VerifierParam::<C> {
+                    pp_digest: C::identity(),
+                };
+
+                let spec = Spec::<<C as CurveAffine>::Base, 5, 4>::new(10, 10);
+
+                let acc = nifs::protogalaxy::Accumulator::<C>::new(
+                    AccumulatorArgs {
+                        num_io: Box::new([]),
+                        num_challenges: 0,
+                        num_witness: 0,
+                        k_table_size: 0,
+                        round_sizes: Box::new([]),
+                    },
+                    10,
+                );
+
+                let proof = nifs::protogalaxy::Proof {
+                    poly_F: UnivariatePoly::<<C as CurveAffine>::ScalarExt>::new_zeroed(10),
+                    poly_K: UnivariatePoly::new_zeroed(10),
+                };
+
+                Self {
+                    params,
+                    spec,
+                    acc,
+                    proof,
+                }
+            }
+        }
+
+        #[test]
+        fn challanges() {
+            let m = Mock::new();
+
+            let _challenges = nifs::protogalaxy::Challenges::generate(
+                &m.params,
+                &mut PoseidonHash::new(m.spec),
+                &m.acc,
+                iter::empty::<&PlonkInstance<C>>(),
+                &m.proof,
+            );
+        }
     }
 }

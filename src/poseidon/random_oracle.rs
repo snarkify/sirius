@@ -4,7 +4,7 @@ use halo2_proofs::{arithmetic::CurveAffine, plonk::Error};
 
 use crate::{
     ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
-    main_gate::{AssignedBit, RegionCtx, WrapValue},
+    main_gate::{AssignedBit, AssignedValue, RegionCtx, WrapValue},
 };
 
 /// A helper trait to obsorb different objects into RO
@@ -119,6 +119,9 @@ pub trait ROCircuitTrait<F: PrimeFieldBits + FromUniformBytes<64>> {
         ctx: &mut RegionCtx<'_, F>,
         num_bits: NonZeroUsize,
     ) -> Result<Vec<AssignedBit<F>>, Error>;
+
+    /// Returns a challenge of `num_bits` by hashing the internal state
+    fn squeeze(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedValue<F>, Error>;
 }
 
 /// Random Oracle is represented as a pair of on-circuit & off-circuit types,

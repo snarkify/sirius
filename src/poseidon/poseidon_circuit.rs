@@ -71,6 +71,10 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>, const T: usize, const RATE: usize
             Ok(res)
         }
     }
+
+    fn squeeze(&mut self, ctx: &mut RegionCtx<'_, F>) -> Result<AssignedValue<F>, Error> {
+        self.squeeze(ctx)
+    }
 }
 
 impl<F: PrimeField + PrimeFieldBits, const T: usize, const RATE: usize> PoseidonChip<F, T, RATE> {
