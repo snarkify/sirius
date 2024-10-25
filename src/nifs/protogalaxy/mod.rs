@@ -37,21 +37,58 @@ pub struct ProtoGalaxy<C: CurveAffine, const L: usize> {
     _marker: PhantomData<C>,
 }
 
-impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
+pub(crate) struct Challenges<F: PrimeField> {
+    pub delta: F,
+    pub alpha: F,
+    pub gamma: F,
+}
+
+impl<F: PrimeField> Challenges<F> {
     #[instrument(skip_all)]
-    pub(crate) fn generate_challenge<'i, RO: ROTrait<C::Base>>(
-        pp_digest: &C,
+    pub(crate) fn generate_one<'i, RO: ROTrait<C::Base>, C: CurveAffine<Base = F>>(
+        params: &impl AbsorbInRO<C::Base, RO>,
         ro_acc: &mut RO,
         accumulator: &impl AbsorbInRO<C::Base, RO>,
         instances: impl Iterator<Item = &'i PlonkInstance<C>>,
     ) -> <C as CurveAffine>::ScalarExt {
         ro_acc
-            .absorb_point(pp_digest)
+            .absorb(params)
             .absorb(accumulator)
             .absorb_iter(instances)
             .squeeze::<C>(NUM_CHALLENGE_BITS)
     }
 
+    #[instrument(skip_all)]
+    pub(crate) fn generate<'i, RO: ROTrait<C::Base>, C: CurveAffine<Base = F>>(
+        params: &impl AbsorbInRO<C::Base, RO>,
+        ro_acc: &mut RO,
+        accumulator: &impl AbsorbInRO<C::Base, RO>,
+        instances: impl Iterator<Item = &'i PlonkInstance<C>>,
+        proof: &Proof<C::ScalarExt>,
+    ) -> Challenges<<C as CurveAffine>::ScalarExt> {
+        Challenges {
+            delta: Self::generate_one(params, ro_acc, accumulator, instances),
+            alpha: ro_acc
+                .absorb_field_iter(
+                    proof
+                        .poly_F
+                        .iter()
+                        .map(|coeff| C::scalar_to_base(coeff).unwrap()),
+                )
+                .squeeze::<C>(NUM_CHALLENGE_BITS),
+            gamma: ro_acc
+                .absorb_field_iter(
+                    proof
+                        .poly_K
+                        .iter()
+                        .map(|coeff| C::scalar_to_base(coeff).unwrap()),
+                )
+                .squeeze::<C>(NUM_CHALLENGE_BITS),
+        }
+    }
+}
+
+impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     fn get_count_of_valuation(S: &PlonkStructure<C::ScalarExt>) -> usize {
         let count_of_rows = 2usize.pow(S.k as u32);
         let count_of_gates = S.gates.len();
@@ -66,7 +103,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     ) -> Accumulator<C> {
         let mut accumulator = Accumulator::new(args, Self::get_count_of_valuation(&params.S));
 
-        let beta = Self::generate_challenge(&params.pp_digest, ro_acc, &accumulator, iter::empty());
+        let beta = Challenges::generate_one::<_, C>(params, ro_acc, &accumulator, iter::empty());
 
         accumulator
             .betas
@@ -197,9 +234,21 @@ pub struct ProverParam<C: CurveAffine> {
     pp_digest: C,
 }
 
+impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for ProverParam<C> {
+    fn absorb_into(&self, ro: &mut RO) {
+        ro.absorb_point(&self.pp_digest);
+    }
+}
+
 pub struct VerifierParam<C: CurveAffine> {
     /// Digest of public parameter of IVC circuit
     pub(crate) pp_digest: C,
+}
+
+impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for VerifierParam<C> {
+    fn absorb_into(&self, ro: &mut RO) {
+        ro.absorb_point(&self.pp_digest);
+    }
 }
 
 pub struct Proof<F: PrimeField> {
@@ -285,8 +334,8 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
     ) -> Result<(Self::Accumulator, Self::Proof), Error> {
         let ctx = PolyContext::new(&pp.S, incoming);
 
-        let delta = Self::generate_challenge(
-            &pp.pp_digest,
+        let delta = Challenges::generate_one::<_, C>(
+            pp,
             ro_acc,
             &accumulator,
             incoming.iter().map(|t| &t.u),
@@ -393,10 +442,11 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
 
         Self::verify_sps(incoming.iter(), ro_nark)?;
 
-        let delta = Self::generate_challenge(&vp.pp_digest, ro_acc, accumulator, incoming.iter());
-        let alpha = ro_acc
-            .absorb_field_iter(proof.poly_F.iter().map(|v| C::scalar_to_base(v).unwrap()))
-            .squeeze::<C>(NUM_CHALLENGE_BITS);
+        let Challenges {
+            delta,
+            alpha,
+            gamma,
+        } = Challenges::generate::<_, C>(vp, ro_acc, accumulator, incoming.iter(), proof);
 
         let betas_stroke = poly::PolyChallenges {
             betas: accumulator.betas.clone(),
@@ -405,10 +455,6 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         }
         .iter_beta_stroke()
         .collect::<Box<[_]>>();
-
-        let gamma = ro_acc
-            .absorb_field_iter(proof.poly_K.iter().map(|v| C::scalar_to_base(v).unwrap()))
-            .squeeze::<C>(NUM_CHALLENGE_BITS);
 
         Ok(AccumulatorInstance {
             betas: betas_stroke,
