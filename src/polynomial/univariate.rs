@@ -6,7 +6,7 @@ use std::{
 
 use halo2_proofs::halo2curves::ff::{PrimeField, WithSmallOrderMulGroup};
 
-use crate::{ff::Field, fft};
+use crate::{ff::Field, fft, util};
 
 /// Represents a univariate polynomial
 ///
@@ -153,6 +153,14 @@ impl<F: PrimeField> UnivariatePoly<F> {
     pub fn ifft(mut input: Box<[F]>) -> Self {
         fft::ifft(&mut input);
         Self(input)
+    }
+
+    pub fn fe_to_fe<F2: PrimeField>(&self) -> Option<UnivariatePoly<F2>> {
+        self.0
+            .iter()
+            .map(|coeff| util::fe_to_fe(coeff))
+            .collect::<Option<Box<[_]>>>()
+            .map(UnivariatePoly)
     }
 }
 
