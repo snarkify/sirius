@@ -167,10 +167,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
 
         let accumulator_inst_from_prove = AccumulatorInstance::from(accumulator_from_prove);
 
-        assert_eq!(
-            accumulator_inst_from_prove,
-            accumulator_from_verify,
-        );
+        assert_eq!(accumulator_inst_from_prove, accumulator_from_verify,);
     }
 }
 

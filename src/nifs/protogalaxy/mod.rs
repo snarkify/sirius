@@ -6,7 +6,7 @@ use tracing::{debug, instrument, warn};
 use super::*;
 use crate::{
     commitment::CommitmentKey,
-    constants::{MAX_BITS, NUM_CHALLENGE_BITS},
+    constants::MAX_BITS,
     ff::PrimeField,
     halo2_proofs::arithmetic::{self, CurveAffine, Field},
     nifs::protogalaxy::poly::PolyContext,
@@ -358,7 +358,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
 
         let alpha = ro_acc
             .absorb_field_iter(poly_F.iter().map(|v| C::scalar_to_base(v).unwrap()))
-            .squeeze::<C>(NUM_CHALLENGE_BITS);
+            .squeeze::<C>(MAX_BITS);
 
         let betas_stroke = poly::PolyChallenges {
             betas: accumulator.betas.clone(),
@@ -378,7 +378,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
 
         let gamma = ro_acc
             .absorb_field_iter(poly_K.iter().map(|v| C::scalar_to_base(v).unwrap()))
-            .squeeze::<C>(NUM_CHALLENGE_BITS);
+            .squeeze::<C>(MAX_BITS);
 
         debug!(
             "
