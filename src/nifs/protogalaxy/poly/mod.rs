@@ -352,18 +352,20 @@ pub(crate) fn compute_G<F: PrimeField>(
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct PolyChallenges<F> {
     pub(crate) betas: Box<[F]>,
     pub(crate) alpha: F,
     pub(crate) delta: F,
 }
 
+#[derive(Clone)]
 pub(crate) struct BetaStrokeIter<F> {
     cha: PolyChallenges<F>,
     beta_index: usize,
 }
 
-impl<F: PrimeField> PolyChallenges<F> {
+impl<F> PolyChallenges<F> {
     pub(crate) fn iter_beta_stroke(self) -> BetaStrokeIter<F> {
         BetaStrokeIter {
             cha: self,

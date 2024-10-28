@@ -2,18 +2,22 @@ mod verify_chip {
     use std::iter;
 
     use halo2_proofs::{
+        circuit::AssignedCell,
         halo2curves::{
             ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
             CurveAffine,
         },
         plonk::Error as Halo2PlonkError,
     };
+    use itertools::Itertools;
     use tracing::*;
 
     use crate::{
         gadgets::ecc::AssignedPoint,
-        main_gate::{AdviceCyclicAssignor, AssignedValue, MainGateConfig, RegionCtx, WrapValue},
-        nifs::protogalaxy,
+        main_gate::{
+            AdviceCyclicAssignor, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue,
+        },
+        nifs::protogalaxy::{self, poly::PolyChallenges},
         plonk::PlonkInstance,
         polynomial::univariate::UnivariatePoly,
         poseidon::ROCircuitTrait,
@@ -30,6 +34,12 @@ mod verify_chip {
 
         #[error("Error while squeeze challenges: {err:?}")]
         Squeeze { err: Halo2PlonkError },
+
+        #[error("Error while calculate deltas: {err:?}")]
+        Deltas { err: Halo2PlonkError },
+
+        #[error("Error while calculate beta stoke: {err:?}")]
+        BetasStroke { err: Halo2PlonkError },
     }
 
     /// Assigned version of [`crate::plonk::PlonkInstance`]
@@ -281,7 +291,7 @@ mod verify_chip {
             region: &mut RegionCtx<C::Base>,
             mut ro_circuit: impl ROCircuitTrait<C::Base>,
             vp: AssignedVerifierParam<C>,
-            accumulator: AssignedAccumulatorInstance<C>,
+            accumulator: &AssignedAccumulatorInstance<C>,
             incoming: &[AssignedPlonkInstance<C>],
             proof: AssignedProof<C::Base>,
         ) -> Result<AssignedChallanges<F>, Halo2PlonkError>
@@ -311,6 +321,50 @@ mod verify_chip {
         }
     }
 
+    /// Calculate v, v^2, v^4, v^8 ...
+    fn calculate_exponentiation_sequence<F: PrimeField, const T: usize>(
+        region: &mut RegionCtx<F>,
+        main_gate: &MainGate<F, T>,
+        value: AssignedCell<F, F>,
+        len: usize,
+    ) -> Result<Box<[AssignedCell<F, F>]>, Halo2PlonkError> {
+        iter::successors(
+            Some(Ok(value)),
+            |prev| -> Option<Result<AssignedCell<F, F>, Halo2PlonkError>> {
+                let prev = match prev {
+                    Ok(val) => val,
+                    Err(_err) => {
+                        return None;
+                    }
+                };
+
+                Some(main_gate.add(region, prev, prev))
+            },
+        )
+        .take(len)
+        .collect::<Result<Box<[_]>, Halo2PlonkError>>()
+    }
+
+    fn calculate_betas_stroke<C: CurveAffine, const T: usize>(
+        region: &mut RegionCtx<C::Base>,
+        main_gate: &MainGate<C::Base, T>,
+        cha: PolyChallenges<AssignedCell<C::Base, C::Base>>,
+    ) -> Result<Box<[AssignedCell<C::Base, C::Base>]>, Error> {
+        let deltas =
+            calculate_exponentiation_sequence(region, main_gate, cha.delta, cha.betas.len())
+                .map_err(|err| Error::Deltas { err })?;
+
+        cha.betas
+            .iter()
+            .zip_eq(deltas)
+            .map(|(beta, delta)| {
+                let alpha_mul_delta = main_gate.mul(region, &cha.alpha, &delta)?;
+                main_gate.add(region, beta, &alpha_mul_delta)
+            })
+            .collect::<Result<Box<[_]>, Halo2PlonkError>>()
+            .map_err(|err| Error::BetasStroke { err })
+    }
+
     /// Assigned version of `fn verify` logic from [`crate::nifs::protogalaxy::ProtoGalaxy`].
     ///
     /// # Algorithm
@@ -334,8 +388,9 @@ mod verify_chip {
     ///
     /// 5. **Fold the Instance:**
     ///     - [`ProtoGalaxy::fold_instance`]
-    pub fn verify<C: CurveAffine, const L: usize>(
+    pub fn verify<C: CurveAffine, const L: usize, const T: usize>(
         region: &mut RegionCtx<C::Base>,
+        main_gate_config: MainGateConfig<T>,
         ro_circuit: impl ROCircuitTrait<C::Base>,
         vp: AssignedVerifierParam<C>,
         accumulator: AssignedAccumulatorInstance<C>,
@@ -347,18 +402,29 @@ mod verify_chip {
         C::ScalarExt: FromUniformBytes<64> + PrimeFieldBits,
     {
         let AssignedChallanges {
-            delta: _,
-            alpha: _,
+            delta,
+            alpha,
             gamma: _,
-        } = AssignedChallanges::generate(region, ro_circuit, vp, accumulator, incoming, proof)
+        } = AssignedChallanges::generate(region, ro_circuit, vp, &accumulator, incoming, proof)
             .map_err(|err| Error::Squeeze { err })?;
+
+        let main_gate = MainGate::new(main_gate_config);
+
+        let _betas_stroke = calculate_betas_stroke::<C, T>(
+            region,
+            &main_gate,
+            PolyChallenges {
+                betas: accumulator.betas.clone(),
+                alpha,
+                delta,
+            },
+        )?;
 
         todo!()
     }
 
     #[cfg(test)]
     mod tests {
-
         use halo2_proofs::{
             arithmetic::Field,
             circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter},
@@ -494,7 +560,7 @@ mod verify_chip {
                             &mut region,
                             PoseidonChip::new(config.clone(), spec.clone()),
                             params,
-                            acc,
+                            &acc,
                             &[],
                             proof,
                         )
@@ -519,6 +585,67 @@ mod verify_chip {
                 Some(&crate::util::fe_to_fe(&off_circuit_challenges.gamma).unwrap()),
                 "gamma(3) on-circuit vs off-circuit",
             );
+        }
+
+        #[traced_test]
+        #[test]
+        fn betas_stroke() {
+            let mut rnd = rand::thread_rng();
+            let mut rnd = iter::repeat_with(|| Base::random(&mut rnd));
+
+            let cha = PolyChallenges {
+                alpha: rnd.next().unwrap(),
+                delta: rnd.next().unwrap(),
+                betas: rnd.take(10).collect(),
+            };
+
+            fn assign_poly_challenges<F: PrimeField, const T: usize>(
+                region: &mut RegionCtx<F>,
+                main_gate_config: MainGateConfig<T>,
+                cha: &PolyChallenges<F>,
+            ) -> Result<PolyChallenges<AssignedCell<F, F>>, Halo2PlonkError> {
+                let mut assigner = main_gate_config.advice_cycle_assigner();
+
+                let PolyChallenges {
+                    betas,
+                    alpha,
+                    delta,
+                } = cha;
+
+                Ok(PolyChallenges {
+                    betas: assigner
+                        .assign_all_advice(region, || "betas", betas.iter().copied())?
+                        .into_boxed_slice(),
+                    alpha: assigner.assign_next_advice(region, || "alpha", *alpha)?,
+                    delta: assigner.assign_next_advice(region, || "delta", *delta)?,
+                })
+            }
+
+            let off_circuit_beta_strokes = cha.clone().iter_beta_stroke().collect::<Box<[_]>>();
+
+            let (mut wc, main_gate_config) = get_witness_collector();
+
+            let mut layouter = SingleChipLayouter::new(&mut wc, vec![]).unwrap();
+
+            let on_circuit_beta_strokes = layouter
+                .assign_region(
+                    || "betas_stroke",
+                    move |region| {
+                        let mut region = RegionCtx::new(region, 0);
+                        let cha =
+                            assign_poly_challenges(&mut region, main_gate_config.clone(), &cha)
+                                .unwrap();
+                        let main_gate = MainGate::<Base, T>::new(main_gate_config.clone());
+
+                        Ok(calculate_betas_stroke::<C1, T>(&mut region, &main_gate, cha).unwrap())
+                    },
+                )
+                .unwrap()
+                .iter()
+                .map(|cell| *cell.value().unwrap().unwrap())
+                .collect::<Box<[_]>>();
+
+            assert_eq!(off_circuit_beta_strokes, on_circuit_beta_strokes);
         }
     }
 }
