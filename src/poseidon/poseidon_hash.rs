@@ -1,4 +1,4 @@
-use std::{iter, mem, num::NonZeroUsize};
+use std::{iter, num::NonZeroUsize};
 
 use halo2_proofs::{arithmetic::CurveAffine, halo2curves::ff::PrimeFieldBits};
 use poseidon::{self, SparseMDSMatrix};
@@ -180,7 +180,8 @@ where
     }
 
     pub fn output<F1: PrimeField>(&mut self, num_bits: NonZeroUsize) -> F1 {
-        let buf = mem::take(&mut self.buf);
+        let buf = self.buf.clone();
+
         debug!("Off circuit input of hash: {buf:?}");
 
         let exact = buf.len() % RATE == 0;
@@ -193,6 +194,8 @@ where
         }
 
         let output = self.state.inner[1];
+        self.state = State::new(poseidon::State::default().words());
+
         let mut bits = fe_to_bits_le(&output);
         if bits.len() < num_bits.get() {
             bits.resize(num_bits.get(), false);
