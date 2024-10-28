@@ -1,12 +1,12 @@
 use std::{iter, marker::PhantomData};
 
 use itertools::Itertools;
-use tracing::{instrument, warn};
+use tracing::{debug, instrument, warn};
 
 use super::*;
 use crate::{
     commitment::CommitmentKey,
-    constants::NUM_CHALLENGE_BITS,
+    constants::{MAX_BITS, NUM_CHALLENGE_BITS},
     ff::PrimeField,
     halo2_proofs::arithmetic::{self, CurveAffine, Field},
     nifs::protogalaxy::poly::PolyContext,
@@ -55,10 +55,10 @@ impl<F: PrimeField> Challenges<F> {
             .absorb(params)
             .absorb(accumulator)
             .absorb_iter(instances)
-            .squeeze::<C>(NUM_CHALLENGE_BITS)
+            .squeeze::<C>(MAX_BITS)
     }
 
-    #[instrument(skip_all)]
+    #[instrument(skip_all, name = "off_circuit_generate")]
     pub(crate) fn generate<'i, RO: ROTrait<C::Base>, C: CurveAffine<Base = F>>(
         params: &impl AbsorbInRO<C::Base, RO>,
         ro_acc: &mut RO,
@@ -66,6 +66,12 @@ impl<F: PrimeField> Challenges<F> {
         instances: impl Iterator<Item = &'i PlonkInstance<C>>,
         proof: &Proof<C::ScalarExt>,
     ) -> Challenges<<C as CurveAffine>::ScalarExt> {
+        debug!(
+            "poly F len is {}, poly K len is {}",
+            proof.poly_F.len(),
+            proof.poly_K.len()
+        );
+
         Challenges {
             delta: Self::generate_one(params, ro_acc, accumulator, instances),
             alpha: ro_acc
@@ -73,17 +79,19 @@ impl<F: PrimeField> Challenges<F> {
                     proof
                         .poly_F
                         .iter()
+                        .inspect(|coeff| debug!("coeff {coeff:?}"))
                         .map(|coeff| C::scalar_to_base(coeff).unwrap()),
                 )
-                .squeeze::<C>(NUM_CHALLENGE_BITS),
+                .squeeze::<C>(MAX_BITS),
             gamma: ro_acc
                 .absorb_field_iter(
                     proof
                         .poly_K
                         .iter()
+                        .inspect(|coeff| debug!("coeff {coeff:?}"))
                         .map(|coeff| C::scalar_to_base(coeff).unwrap()),
                 )
-                .squeeze::<C>(NUM_CHALLENGE_BITS),
+                .squeeze::<C>(MAX_BITS),
         }
     }
 }
@@ -372,6 +380,14 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
             .absorb_field_iter(poly_K.iter().map(|v| C::scalar_to_base(v).unwrap()))
             .squeeze::<C>(NUM_CHALLENGE_BITS);
 
+        debug!(
+            "
+            delta: {delta:?},
+            alpha: {alpha:?},
+            gamma: {gamma:?},
+        "
+        );
+
         let polys_L_in_gamma =
             lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, ctx.lagrange_domain())
                 .take(L + 1)
@@ -447,6 +463,13 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
             alpha,
             gamma,
         } = Challenges::generate::<_, C>(vp, ro_acc, accumulator, incoming.iter(), proof);
+        debug!(
+            "
+            delta: {delta:?},
+            alpha: {alpha:?},
+            gamma: {gamma:?},
+        "
+        );
 
         let betas_stroke = poly::PolyChallenges {
             betas: accumulator.betas.clone(),

@@ -8,6 +8,7 @@ mod verify_chip {
         },
         plonk::Error as Halo2PlonkError,
     };
+    use tracing::*;
 
     use crate::{
         gadgets::ecc::AssignedPoint,
@@ -196,8 +197,11 @@ mod verify_chip {
         }
 
         pub fn iter_wrap_value(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
+            debug!("iter wrap value len: {:?}", self.0.len());
+
             self.0
                 .iter()
+                .inspect(|coeff| debug!("coeff {coeff:?}"))
                 .map(|coeff| WrapValue::Assigned(coeff.clone()))
         }
     }
@@ -215,6 +219,12 @@ mod verify_chip {
             proof: protogalaxy::Proof<F>,
         ) -> Result<Self, Error> {
             let protogalaxy::Proof { poly_K, poly_F } = proof;
+
+            debug!(
+                "poly F len is {}, poly K len is {}",
+                poly_F.len(),
+                poly_K.len()
+            );
 
             Ok(Self {
                 poly_F: AssignedUnivariatePoly::assign::<T>(
@@ -242,14 +252,14 @@ mod verify_chip {
         pub fn assign<const T: usize>(
             region: &mut RegionCtx<C::Base>,
             main_gate_config: MainGateConfig<T>,
-            vp: protogalaxy::VerifierParam<C>,
+            vp: &protogalaxy::VerifierParam<C>,
         ) -> Result<Self, Error> {
             let protogalaxy::VerifierParam { pp_digest } = vp;
 
             Ok(Self {
                 pp_digest: main_gate_config
                     .advice_cycle_assigner::<C::Base>()
-                    .assign_next_advice_point(region, || "pp_digest", &pp_digest)
+                    .assign_next_advice_point(region, || "pp_digest", pp_digest)
                     .map_err(|err| Error::Assign {
                         annotation: "VerifierParam",
                         err,
@@ -259,21 +269,22 @@ mod verify_chip {
     }
 
     /// Assigned version of [`crate::nifs::protogalaxy::Challenges`]
-    struct AssignedChallanges<C: CurveAffine> {
-        delta: AssignedValue<C::Base>,
-        alpha: AssignedValue<C::Base>,
-        gamma: AssignedValue<C::Base>,
+    struct AssignedChallanges<F: PrimeField> {
+        delta: AssignedValue<F>,
+        alpha: AssignedValue<F>,
+        gamma: AssignedValue<F>,
     }
 
-    impl<C: CurveAffine> AssignedChallanges<C> {
-        fn generate(
+    impl<F: PrimeField> AssignedChallanges<F> {
+        #[instrument(skip_all, name = "on_circuit_generate")]
+        fn generate<C: CurveAffine<Base = F>>(
             region: &mut RegionCtx<C::Base>,
             mut ro_circuit: impl ROCircuitTrait<C::Base>,
             vp: AssignedVerifierParam<C>,
             accumulator: AssignedAccumulatorInstance<C>,
             incoming: &[AssignedPlonkInstance<C>],
             proof: AssignedProof<C::Base>,
-        ) -> Result<AssignedChallanges<C>, Halo2PlonkError>
+        ) -> Result<AssignedChallanges<F>, Halo2PlonkError>
         where
             C::Base: FromUniformBytes<64> + PrimeFieldBits,
             C::ScalarExt: FromUniformBytes<64> + PrimeFieldBits,
@@ -347,48 +358,77 @@ mod verify_chip {
 
     #[cfg(test)]
     mod tests {
-        use halo2_proofs::halo2curves::{bn256::G1Affine, group::prime::PrimeCurveAffine};
+
+        use halo2_proofs::{
+            arithmetic::Field,
+            circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter},
+        };
+        use tracing_test::traced_test;
 
         use super::*;
         use crate::{
+            halo2_proofs::{
+                halo2curves::{bn256::G1Affine, group::prime::PrimeCurveAffine},
+                plonk::ConstraintSystem,
+            },
+            main_gate::MainGate,
             nifs::{
                 self,
                 protogalaxy::{AccumulatorArgs, VerifierParam},
             },
-            poseidon::{PoseidonHash, ROTrait, Spec},
+            poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
+            table::WitnessCollector,
         };
 
-        type C = G1Affine;
+        const T: usize = 5;
+        const RATE: usize = T - 1;
+        const K: usize = 14;
+
+        type C1 = G1Affine;
+
+        type Base = <C1 as CurveAffine>::Base;
+
+        fn get_witness_collector() -> (WitnessCollector<Base>, MainGateConfig<T>) {
+            let mut cs = ConstraintSystem::default();
+            let config = MainGate::<Base, T>::configure(&mut cs);
+            let witness = WitnessCollector {
+                instances: vec![vec![]],
+                advice: vec![vec![Base::ZERO.into(); 1 << K]; cs.num_advice_columns()],
+            };
+
+            (witness, config)
+        }
 
         struct Mock {
-            params: VerifierParam<C>,
-            spec: Spec<<C as CurveAffine>::Base, 5, 4>,
-            acc: nifs::protogalaxy::Accumulator<C>,
-            proof: nifs::protogalaxy::Proof<<C as CurveAffine>::ScalarExt>,
+            params: VerifierParam<C1>,
+            spec: Spec<<C1 as CurveAffine>::Base, T, RATE>,
+            acc: nifs::protogalaxy::Accumulator<C1>,
+            proof: nifs::protogalaxy::Proof<<C1 as CurveAffine>::ScalarExt>,
         }
 
         impl Mock {
             fn new() -> Self {
-                let params = VerifierParam::<C> {
-                    pp_digest: C::identity(),
+                let params = VerifierParam::<C1> {
+                    pp_digest: C1::identity(),
                 };
 
-                let spec = Spec::<<C as CurveAffine>::Base, 5, 4>::new(10, 10);
+                let spec = Spec::<<C1 as CurveAffine>::Base, 5, 4>::new(10, 10);
 
-                let acc = nifs::protogalaxy::Accumulator::<C>::new(
+                let acc = nifs::protogalaxy::Accumulator::<C1>::new(
                     AccumulatorArgs {
                         num_io: Box::new([]),
                         num_challenges: 0,
                         num_witness: 0,
-                        k_table_size: 0,
+                        k_table_size: K,
                         round_sizes: Box::new([]),
                     },
                     10,
                 );
 
+                let mut values = (0..).map(Into::into);
                 let proof = nifs::protogalaxy::Proof {
-                    poly_F: UnivariatePoly::<<C as CurveAffine>::ScalarExt>::new_zeroed(10),
-                    poly_K: UnivariatePoly::new_zeroed(10),
+                    poly_F: UnivariatePoly::from_iter(values.by_ref().take(10)),
+                    poly_K: UnivariatePoly::from_iter(values.take(10)),
                 };
 
                 Self {
@@ -400,16 +440,84 @@ mod verify_chip {
             }
         }
 
+        #[traced_test]
         #[test]
         fn challanges() {
             let m = Mock::new();
 
-            let _challenges = nifs::protogalaxy::Challenges::generate(
+            let off_circuit_challenges = nifs::protogalaxy::Challenges::generate(
                 &m.params,
-                &mut PoseidonHash::new(m.spec),
+                &mut PoseidonHash::new(m.spec.clone()),
                 &m.acc,
-                iter::empty::<&PlonkInstance<C>>(),
+                iter::empty::<&PlonkInstance<C1>>(),
                 &m.proof,
+            );
+
+            let (mut wc, config) = get_witness_collector();
+
+            let mut layouter = SingleChipLayouter::new(&mut wc, vec![]).unwrap();
+
+            let on_circuit_challanges = layouter
+                .assign_region(
+                    || "challenges_test",
+                    move |region| {
+                        let mut region = RegionCtx::new(region, 0);
+
+                        let Mock {
+                            params,
+                            spec,
+                            acc,
+                            proof,
+                        } = &m;
+
+                        let params =
+                            AssignedVerifierParam::assign::<T>(&mut region, config.clone(), params)
+                                .unwrap();
+                        let acc = AssignedAccumulatorInstance::assign(
+                            &mut region,
+                            config.clone(),
+                            acc.clone().into(),
+                        )
+                        .unwrap();
+
+                        let proof = AssignedProof::assign(
+                            &mut region,
+                            config.clone(),
+                            protogalaxy::Proof {
+                                poly_F: proof.poly_F.fe_to_fe().unwrap(),
+                                poly_K: proof.poly_K.fe_to_fe().unwrap(),
+                            },
+                        )
+                        .unwrap();
+
+                        AssignedChallanges::generate(
+                            &mut region,
+                            PoseidonChip::new(config.clone(), spec.clone()),
+                            params,
+                            acc,
+                            &[],
+                            proof,
+                        )
+                    },
+                )
+                .unwrap();
+
+            assert_eq!(
+                on_circuit_challanges.delta.value().unwrap(),
+                Some(&crate::util::fe_to_fe(&off_circuit_challenges.delta).unwrap()),
+                "delta(1) on-circuit vs off-circuit",
+            );
+
+            assert_eq!(
+                on_circuit_challanges.alpha.value().unwrap(),
+                Some(&crate::util::fe_to_fe(&off_circuit_challenges.alpha).unwrap()),
+                "alpha(2) on-circuit vs off-circuit",
+            );
+
+            assert_eq!(
+                on_circuit_challanges.gamma.value().unwrap(),
+                Some(&crate::util::fe_to_fe(&off_circuit_challenges.gamma).unwrap()),
+                "gamma(3) on-circuit vs off-circuit",
             );
         }
     }
