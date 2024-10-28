@@ -1,4 +1,8 @@
-use std::{iter, num::NonZeroUsize, ops::Add};
+use std::{
+    iter,
+    num::NonZeroUsize,
+    ops::{Add, Mul},
+};
 
 use itertools::*;
 use tracing::*;
@@ -348,13 +352,13 @@ pub(crate) fn compute_G<F: PrimeField>(
     }
 }
 
-pub(crate) struct PolyChallenges<F: PrimeField> {
+pub(crate) struct PolyChallenges<F> {
     pub(crate) betas: Box<[F]>,
     pub(crate) alpha: F,
     pub(crate) delta: F,
 }
 
-pub(crate) struct BetaStrokeIter<F: PrimeField> {
+pub(crate) struct BetaStrokeIter<F> {
     cha: PolyChallenges<F>,
     beta_index: usize,
 }
@@ -368,15 +372,16 @@ impl<F: PrimeField> PolyChallenges<F> {
     }
 }
 
-impl<F: PrimeField> Iterator for BetaStrokeIter<F> {
+impl<F: Clone + Mul<Output = F> + Add<Output = F>> Iterator for BetaStrokeIter<F> {
     type Item = F;
 
+    /// `next = beta[i] + (alpha * delta^{2^i})`
     fn next(&mut self) -> Option<Self::Item> {
-        let next =
-            self.cha.betas.get(self.beta_index).copied()? + (self.cha.alpha * self.cha.delta);
+        let next = self.cha.betas.get(self.beta_index).cloned()?
+            + (self.cha.alpha.clone() * self.cha.delta.clone());
 
         self.beta_index += 1;
-        self.cha.delta = self.cha.delta.double();
+        self.cha.delta = self.cha.delta.clone().add(self.cha.delta.clone());
 
         Some(next)
     }
