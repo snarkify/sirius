@@ -2,7 +2,7 @@ mod verify_chip {
     use std::iter;
 
     use halo2_proofs::{
-        circuit::AssignedCell,
+        circuit::{AssignedCell, Value as Halo2Value},
         halo2curves::{
             ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
             CurveAffine,
@@ -183,8 +183,53 @@ mod verify_chip {
         }
     }
 
+    /// Powers of one assigned value counted on-circuit
+    ///
+    /// Since powers are required many times during synthesis, let's keep these values separate
+    pub struct ValuePowers<F: PrimeField> {
+        powers: Vec<AssignedValue<F>>,
+    }
+
+    impl<F: PrimeField> ValuePowers<F> {
+        pub fn new(one: AssignedValue<F>, value: AssignedValue<F>) -> Self {
+            Self {
+                powers: vec![one, value],
+            }
+        }
+
+        pub fn iter(&self) -> impl Iterator<Item = &AssignedValue<F>> {
+            self.powers.iter()
+        }
+
+        pub fn value(&self) -> &AssignedValue<F> {
+            self.powers
+                .get(1)
+                .expect("Cannot be created without at least one element inside")
+        }
+
+        pub fn get_or_eval<const T: usize>(
+            &mut self,
+            region: &mut RegionCtx<F>,
+            main_gate: &MainGate<F, T>,
+            index: usize,
+        ) -> Result<AssignedValue<F>, Halo2PlonkError> {
+            if let Some(value) = self.powers.get(index) {
+                return Ok(value.clone());
+            }
+
+            while self.powers.len() <= index {
+                let value = self.value();
+                let last = self.powers.last().unwrap();
+                let new = main_gate.mul(region, value, last)?;
+                self.powers.push(new);
+            }
+
+            Ok(self.powers.get(index).cloned().unwrap())
+        }
+    }
+
     /// Assigned version of [`crate::polynomial::univariate::UnivariatePoly`]
-    pub struct AssignedUnivariatePoly<F: PrimeField>(Box<[AssignedValue<F>]>);
+    pub struct AssignedUnivariatePoly<F: PrimeField>(UnivariatePoly<AssignedValue<F>>);
 
     impl<F: PrimeField> AssignedUnivariatePoly<F> {
         pub fn assign<const T: usize>(
@@ -193,13 +238,13 @@ mod verify_chip {
             annotation: &'static str,
             poly: &UnivariatePoly<F>,
         ) -> Result<Self, Error> {
-            let up = AssignedUnivariatePoly(
+            let up = AssignedUnivariatePoly(UnivariatePoly(
                 main_gate_config
                     .advice_cycle_assigner()
                     .assign_all_advice(region, || annotation, poly.iter().copied())
                     .map_err(|err| Error::Assign { annotation, err })?
                     .into_boxed_slice(),
-            );
+            ));
 
             region.next();
 
@@ -213,6 +258,103 @@ mod verify_chip {
                 .iter()
                 .inspect(|coeff| debug!("coeff {coeff:?}"))
                 .map(|coeff| WrapValue::Assigned(coeff.clone()))
+        }
+
+        fn degree(&self) -> usize {
+            self.0.len()
+        }
+
+        fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        pub fn eval<const T: usize>(
+            &self,
+            region: &mut RegionCtx<F>,
+            main_gate_config: MainGateConfig<T>,
+            mut challenge_powers: ValuePowers<F>,
+        ) -> Result<AssignedValue<F>, Halo2PlonkError> {
+            let main_gate = MainGate::<F, T>::new(main_gate_config.clone());
+
+            let enable_selectors = |region: &mut RegionCtx<F>| {
+                [
+                    main_gate_config.q_m[0],
+                    main_gate_config.q_m[1],
+                    main_gate_config.q_i,
+                    main_gate_config.q_o,
+                ]
+                .iter()
+                .try_for_each(|col| region.assign_fixed(|| "one", *col, F::ZERO).map(|_| ()))
+            };
+            let coeffs_col = [main_gate_config.state[0], main_gate_config.state[2]];
+            let cha_col = [main_gate_config.state[1], main_gate_config.state[3]];
+            let prev_col = &main_gate_config.input;
+            let result_col = &main_gate_config.out;
+
+            challenge_powers.get_or_eval(region, &main_gate, self.len().saturating_sub(1))?;
+
+            self.0
+                .iter()
+                .zip_eq(challenge_powers.iter())
+                .chunks(2)
+                .into_iter()
+                .try_fold(Option::<AssignedValue<F>>::None, |prev, chunks| {
+                    let (coeffs, cha_in_power): (Vec<_>, Vec<_>) = chunks.unzip();
+                    enable_selectors(region)?;
+
+                    let assigned_prev = match prev {
+                        None => {
+                            region.assign_advice(|| "zero", *prev_col, Halo2Value::known(F::ZERO))
+                        }
+                        Some(prev_cell) => region.assign_advice_from(
+                            || "previous chunk values",
+                            *prev_col,
+                            prev_cell,
+                        ),
+                    }?;
+
+                    let assigned_coeffs = coeffs
+                        .iter()
+                        .zip_eq(coeffs_col)
+                        .map(|(coeff, col)| region.assign_advice_from(|| "coeff", col, *coeff))
+                        .collect::<Result<Box<[_]>, _>>()?;
+
+                    let assigned_cha = cha_in_power
+                        .iter()
+                        .zip_eq(cha_col)
+                        .map(|(cha_in_power, col)| {
+                            region.assign_advice_from(|| "cha", col, *cha_in_power)
+                        })
+                        .collect::<Result<Box<[_]>, _>>()?;
+
+                    let output = assigned_coeffs
+                        .iter()
+                        .zip_eq(assigned_cha.iter())
+                        .fold(assigned_prev.value().copied(), |res, (coeff, cha)| {
+                            res + (coeff.value().copied() * cha.value())
+                        });
+
+                    let assigned_output = region.assign_advice(|| "result", *result_col, output);
+
+                    debug!(
+                        "coeffs: {:?}; cha_in_power: {:?}, prev: {:?}, output: {:?}",
+                        coeffs.iter().map(|cell| cell.value()).collect::<Box<[_]>>(),
+                        cha_in_power
+                            .iter()
+                            .map(|cell| cell.value())
+                            .collect::<Box<[_]>>(),
+                        assigned_prev.value(),
+                        assigned_output
+                            .as_ref()
+                            .ok()
+                            .and_then(|cell| cell.value().unwrap()),
+                    );
+
+                    region.next();
+
+                    assigned_output.map(Some)
+                })?
+                .ok_or_else(|| Halo2PlonkError::Synthesis)
         }
     }
 
@@ -427,7 +569,11 @@ mod verify_chip {
     mod tests {
         use halo2_proofs::{
             arithmetic::Field,
-            circuit::{floor_planner::single_pass::SingleChipLayouter, Layouter},
+            circuit::{
+                floor_planner::single_pass::SingleChipLayouter, Layouter, SimpleFloorPlanner,
+            },
+            dev::MockProver,
+            plonk::Circuit,
         };
         use tracing_test::traced_test;
 
@@ -646,6 +792,87 @@ mod verify_chip {
                 .collect::<Box<[_]>>();
 
             assert_eq!(off_circuit_beta_strokes, on_circuit_beta_strokes);
+        }
+
+        #[traced_test]
+        #[test]
+        fn poly_eval() {
+            struct TestCircuit;
+
+            impl Circuit<Base> for TestCircuit {
+                type Config = MainGateConfig<T>;
+                type FloorPlanner = SimpleFloorPlanner;
+
+                fn without_witnesses(&self) -> Self {
+                    todo!()
+                }
+
+                fn configure(meta: &mut ConstraintSystem<Base>) -> Self::Config {
+                    MainGate::configure(meta)
+                }
+
+                fn synthesize(
+                    &self,
+                    main_gate_config: Self::Config,
+                    mut layouter: impl Layouter<Base>,
+                ) -> Result<(), Halo2PlonkError> {
+                    let cha = Base::from_u128(123);
+                    let poly = UnivariatePoly::from_iter((0..).map(Into::into).take(10));
+
+                    let off_circuit_res = poly.eval(cha);
+
+                    let on_circuit_res = layouter.assign_region(
+                        || "assigned_poly_eval",
+                        move |region| {
+                            let mut region = RegionCtx::new(region, 0);
+
+                            let cha = region
+                                .assign_advice(
+                                    || "",
+                                    main_gate_config.state[0],
+                                    Halo2Value::known(cha),
+                                )
+                                .unwrap();
+
+                            let one = region
+                                .assign_advice(
+                                    || "",
+                                    main_gate_config.state[1],
+                                    Halo2Value::known(Base::ONE),
+                                )
+                                .unwrap();
+
+                            region.next();
+
+                            let cha = ValuePowers::new(one, cha);
+
+                            let poly = AssignedUnivariatePoly::assign(
+                                &mut region,
+                                main_gate_config.clone(),
+                                "test poly",
+                                &poly,
+                            )
+                            .unwrap();
+
+                            Ok(poly
+                                .eval(&mut region, main_gate_config.clone(), cha)
+                                .unwrap())
+                        },
+                    )?;
+
+                    assert_eq!(
+                        off_circuit_res,
+                        on_circuit_res.value().unwrap().copied().unwrap()
+                    );
+
+                    Ok(())
+                }
+            }
+
+            MockProver::run(12, &TestCircuit {}, vec![])
+                .unwrap()
+                .verify()
+                .unwrap();
         }
     }
 }
