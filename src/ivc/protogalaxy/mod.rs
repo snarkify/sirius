@@ -2,7 +2,7 @@ mod verify_chip {
     use std::iter;
 
     use halo2_proofs::{
-        circuit::{AssignedCell, Value as Halo2Value},
+        circuit::{AssignedCell, Chip, Value as Halo2Value},
         halo2curves::{
             ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
             CurveAffine,
@@ -17,9 +17,12 @@ mod verify_chip {
         main_gate::{
             AdviceCyclicAssignor, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue,
         },
-        nifs::protogalaxy::{self, poly::PolyChallenges},
+        nifs::protogalaxy::{
+            self,
+            poly::{PolyChallenges, PolyContext},
+        },
         plonk::PlonkInstance,
-        polynomial::univariate::UnivariatePoly,
+        polynomial::{lagrange::iter_cyclic_subgroup, univariate::UnivariatePoly},
         poseidon::ROCircuitTrait,
         util::ScalarToBase,
     };
@@ -204,10 +207,11 @@ mod verify_chip {
             self.powers.iter()
         }
 
-        pub fn value(&self) -> &AssignedValue<F> {
+        pub fn value(&self) -> AssignedValue<F> {
             self.powers
                 .get(1)
                 .expect("Cannot be created without at least one element inside")
+                .clone()
         }
 
         /// Get from cache or calculate the `exp` degree of original value
@@ -226,7 +230,7 @@ mod verify_chip {
             while self.powers.len() <= exp {
                 let value = self.value();
                 let last = self.powers.last().unwrap();
-                let new = main_gate.mul(region, value, last)?;
+                let new = main_gate.mul(region, &value, last)?;
                 self.powers.push(new);
             }
 
@@ -513,6 +517,48 @@ mod verify_chip {
             .map_err(|err| Error::BetasStroke { err })
     }
 
+    /// `T` is setup for main gate
+    /// - `L`: 'Length' - constant representing the number of instances to
+    ///                   fold in a single `prove`. `L-1` be power of two
+    fn eval_lagrange_zero_poly<F: PrimeField, const T: usize, const L: usize>(
+        region: &mut RegionCtx<F>,
+        main_gate: &MainGate<F, T>,
+        cha: &mut ValuePowers<F>,
+    ) -> Result<AssignedValue<F>, Halo2PlonkError> {
+        let lagrange_domain = PolyContext::<F>::get_lagrange_domain::<L>();
+        let points_count = 2usize.pow(lagrange_domain);
+
+        let inverted_n = F::from_u128(points_count as u128)
+            .invert()
+            .expect("safe because it's `2^log_n`");
+        let value = iter_cyclic_subgroup::<F>(lagrange_domain).next().unwrap();
+
+        let X = cha.value();
+
+        let X_sub_value = main_gate.add_with_const(region, &X, -value)?;
+        let (is_zero_X_sub_value, X_sub_value_inverted) =
+            main_gate.invert_with_flag(region, X_sub_value)?;
+
+        let X_pow_n = cha.get_or_eval(region, main_gate, points_count)?;
+        let X_pow_n_sub_1 = main_gate.add_with_const(region, &X_pow_n, -F::ONE)?;
+
+        let is_zero_X_pow_n_sub_1 = main_gate.is_zero_term(region, X_pow_n_sub_1.clone())?;
+
+        let is_numerator_denominator_zero =
+            main_gate.mul(region, &is_zero_X_sub_value, &is_zero_X_pow_n_sub_1)?;
+
+        let lhs = main_gate.mul(region, &X_pow_n_sub_1, &X_sub_value_inverted)?;
+        let fractional = main_gate.mul_by_const(region, &lhs, value * inverted_n)?;
+
+        let zero = region.assign_advice(
+            || "zero",
+            main_gate.config().state[0],
+            Halo2Value::known(F::ZERO),
+        )?;
+        region.next();
+        main_gate.conditional_select(region, &zero, &fractional, &is_numerator_denominator_zero)
+    }
+
     /// Assigned version of `fn verify` logic from [`crate::nifs::protogalaxy::ProtoGalaxy`].
     ///
     /// # Algorithm
@@ -594,6 +640,7 @@ mod verify_chip {
                 self,
                 protogalaxy::{AccumulatorArgs, VerifierParam},
             },
+            polynomial,
             poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
             table::WitnessCollector,
         };
@@ -869,6 +916,84 @@ mod verify_chip {
                     assert_eq!(
                         off_circuit_res,
                         on_circuit_res.value().unwrap().copied().unwrap()
+                    );
+
+                    Ok(())
+                }
+            }
+
+            MockProver::run(12, &TestCircuit {}, vec![])
+                .unwrap()
+                .verify()
+                .unwrap();
+        }
+
+        #[traced_test]
+        #[test]
+        fn lagrange() {
+            const L: usize = 1;
+
+            struct TestCircuit;
+
+            impl Circuit<Base> for TestCircuit {
+                type Config = MainGateConfig<T>;
+                type FloorPlanner = SimpleFloorPlanner;
+
+                fn without_witnesses(&self) -> Self {
+                    todo!()
+                }
+
+                fn configure(meta: &mut ConstraintSystem<Base>) -> Self::Config {
+                    MainGate::configure(meta)
+                }
+
+                fn synthesize(
+                    &self,
+                    main_gate_config: Self::Config,
+                    mut layouter: impl Layouter<Base>,
+                ) -> Result<(), Halo2PlonkError> {
+                    let cha = Base::from_u128(123);
+
+                    let lagrange_domain = PolyContext::<Base>::get_lagrange_domain::<L>();
+                    let off_circuit_poly_L0_cha =
+                        polynomial::iter_eval_lagrange_poly_for_cyclic_group(cha, lagrange_domain)
+                            .next()
+                            .unwrap();
+
+                    let on_circuit_poly_L0_cha = layouter.assign_region(
+                        || "assigned_L0",
+                        move |region| {
+                            let mut region = RegionCtx::new(region, 0);
+
+                            let cha = region
+                                .assign_advice(
+                                    || "",
+                                    main_gate_config.state[0],
+                                    Halo2Value::known(cha),
+                                )
+                                .unwrap();
+
+                            let one = region
+                                .assign_advice(
+                                    || "",
+                                    main_gate_config.state[1],
+                                    Halo2Value::known(Base::ONE),
+                                )
+                                .unwrap();
+
+                            region.next();
+
+                            eval_lagrange_zero_poly::<Base, T, L>(
+                                &mut region,
+                                &MainGate::<Base, T>::new(main_gate_config.clone()),
+                                &mut ValuePowers::new(one, cha),
+                            )
+                        },
+                    )?;
+
+                    assert_eq!(
+                        off_circuit_poly_L0_cha,
+                        on_circuit_poly_L0_cha.value().unwrap().copied().unwrap()
                     );
 
                     Ok(())
