@@ -7,7 +7,7 @@ mod verify_chip {
     use crate::{
         gadgets::ecc::AssignedPoint,
         halo2_proofs::{
-            circuit::{AssignedCell, Value as Halo2Value},
+            circuit::{AssignedCell, Chip, Value as Halo2Value},
             halo2curves::{
                 ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
                 CurveAffine,
@@ -287,10 +287,10 @@ mod verify_chip {
         pub fn eval<const T: usize>(
             &self,
             region: &mut RegionCtx<F>,
-            main_gate_config: MainGateConfig<T>,
-            mut challenge_powers: ValuePowers<F>,
+            main_gate: &MainGate<F, T>,
+            challenge_powers: &mut ValuePowers<F>,
         ) -> Result<AssignedValue<F>, Halo2PlonkError> {
-            let main_gate = MainGate::<F, T>::new(main_gate_config.clone());
+            let main_gate_config = main_gate.config();
 
             let enable_selectors = |region: &mut RegionCtx<F>| {
                 [
@@ -307,7 +307,7 @@ mod verify_chip {
             let prev_col = &main_gate_config.input;
             let result_col = &main_gate_config.out;
 
-            challenge_powers.get_or_eval(region, &main_gate, self.len().saturating_sub(1))?;
+            challenge_powers.get_or_eval(region, main_gate, self.len().saturating_sub(1))?;
 
             self.0
                 .iter()
@@ -583,7 +583,7 @@ mod verify_chip {
     /// # Result - x^n - 1
     /// X^{2^log_n} - 1
     /// -1 * X^0 + 0 * X^1 + ... + a * X^{2^log_n}
-    pub fn eval_vanish_polynomial<F: PrimeField, const T: usize>(
+    fn eval_vanish_polynomial<F: PrimeField, const T: usize>(
         region: &mut RegionCtx<F>,
         main_gate: &MainGate<F, T>,
         degree: usize,
@@ -591,6 +591,29 @@ mod verify_chip {
     ) -> Result<AssignedValue<F>, Halo2PlonkError> {
         let cha_in_degree = cha.get_or_eval(region, main_gate, degree)?;
         main_gate.add_with_const(region, &cha_in_degree, -F::ONE)
+    }
+
+    // F(alpha) * L(gamma) + Z(gamma) * K(gamma)
+    fn calculate_e<F: PrimeField, const T: usize, const L: usize>(
+        region: &mut RegionCtx<F>,
+        main_gate: &MainGate<F, T>,
+        proof: &AssignedProof<F>,
+        gamma_cha: &mut ValuePowers<F>,
+        alpha_cha: &mut ValuePowers<F>,
+    ) -> Result<AssignedValue<F>, Halo2PlonkError> {
+        let lagrange_domain = PolyContext::<F>::get_lagrange_domain::<L>();
+
+        let poly_L0_in_gamma = eval_lagrange_zero_poly::<F, T, L>(region, main_gate, gamma_cha)?;
+
+        let poly_F_alpha = proof.poly_F.eval(region, main_gate, alpha_cha)?;
+        let poly_Z_gamma =
+            eval_vanish_polynomial(region, main_gate, 1 << lagrange_domain, gamma_cha)?;
+        let poly_K_gamma = proof.poly_K.eval(region, main_gate, gamma_cha)?;
+
+        let lhs = main_gate.mul(region, &poly_F_alpha, &poly_L0_in_gamma)?;
+        let rhs = main_gate.mul(region, &poly_Z_gamma, &poly_K_gamma)?;
+
+        main_gate.add(region, &lhs, &rhs)
     }
 
     /// Assigned version of `fn verify` logic from [`crate::nifs::protogalaxy::ProtoGalaxy`].
@@ -930,7 +953,7 @@ mod verify_chip {
 
                             region.next();
 
-                            let cha = ValuePowers::new(one, cha);
+                            let mut cha = ValuePowers::new(one, cha);
 
                             let poly = AssignedUnivariatePoly::assign(
                                 &mut region,
@@ -940,9 +963,9 @@ mod verify_chip {
                             )
                             .unwrap();
 
-                            Ok(poly
-                                .eval(&mut region, main_gate_config.clone(), cha)
-                                .unwrap())
+                            let main_gate = MainGate::new(main_gate_config.clone());
+
+                            Ok(poly.eval(&mut region, &main_gate, &mut cha).unwrap())
                         },
                     )?;
 
@@ -1096,6 +1119,119 @@ mod verify_chip {
                 off_circuit_vanishing,
                 on_circuit_vanishing.value().unwrap().copied().unwrap()
             );
+        }
+
+        #[traced_test]
+        #[test]
+        fn test_e() {
+            use crate::halo2curves::bn256::Fr;
+
+            struct TestCircuit;
+
+            impl Circuit<Fr> for TestCircuit {
+                type Config = MainGateConfig<T>;
+                type FloorPlanner = SimpleFloorPlanner;
+
+                fn without_witnesses(&self) -> Self {
+                    todo!()
+                }
+
+                fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
+                    MainGate::configure(meta)
+                }
+
+                fn synthesize(
+                    &self,
+                    main_gate_config: Self::Config,
+                    mut layouter: impl Layouter<Fr>,
+                ) -> Result<(), Halo2PlonkError> {
+                    const L: usize = 3;
+
+                    let mut values = (0..).map(Into::into);
+                    let proof = nifs::protogalaxy::Proof {
+                        poly_F: UnivariatePoly::from_iter(values.by_ref().take(10)),
+                        poly_K: UnivariatePoly::from_iter(values.by_ref().take(10)),
+                    };
+
+                    let gamma = values.next().unwrap();
+                    let alpha = values.next().unwrap();
+
+                    let log_n = PolyContext::<Fr>::get_lagrange_domain::<L>();
+
+                    let off_circuit_e = nifs::protogalaxy::calculate_e(
+                        &proof.poly_F,
+                        &proof.poly_K,
+                        gamma,
+                        alpha,
+                        log_n,
+                    );
+
+                    let on_circuit_e = layouter
+                        .assign_region(
+                            || "e",
+                            move |region| {
+                                let mut region = RegionCtx::new(region, 0);
+                                let main_gate = MainGate::<Fr, T>::new(main_gate_config.clone());
+
+                                let proof = AssignedProof::assign(
+                                    &mut region,
+                                    main_gate_config.clone(),
+                                    proof.clone(),
+                                )
+                                .unwrap();
+
+                                let one = region
+                                    .assign_advice(
+                                        || "",
+                                        main_gate_config.state[0],
+                                        Halo2Value::known(Fr::ONE),
+                                    )
+                                    .unwrap();
+                                let gamma = region
+                                    .assign_advice(
+                                        || "",
+                                        main_gate_config.state[1],
+                                        Halo2Value::known(gamma),
+                                    )
+                                    .unwrap();
+
+                                let alpha = region
+                                    .assign_advice(
+                                        || "",
+                                        main_gate_config.state[2],
+                                        Halo2Value::known(alpha),
+                                    )
+                                    .unwrap();
+
+                                let mut gamma = ValuePowers::new(one.clone(), gamma);
+                                let mut alpha = ValuePowers::new(one, alpha);
+
+                                region.next();
+
+                                calculate_e::<Fr, T, L>(
+                                    &mut region,
+                                    &main_gate,
+                                    &proof,
+                                    &mut gamma,
+                                    &mut alpha,
+                                )
+                            },
+                        )
+                        .unwrap();
+
+                    assert_eq!(
+                        off_circuit_e,
+                        on_circuit_e.value().unwrap().copied().unwrap()
+                    );
+
+                    Ok(())
+                }
+            }
+
+            MockProver::run(12, &TestCircuit {}, vec![])
+                .unwrap()
+                .verify()
+                .unwrap();
         }
     }
 }
