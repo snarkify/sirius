@@ -576,6 +576,23 @@ mod verify_chip {
         main_gate.conditional_select(region, &one, &fractional, &is_numerator_denominator_zero)
     }
 
+    /// This fn calculates vanishing polynomial $Z(X)$ from the formula $G(X)=F(\alpha)L_0(X)+K(X)Z(X)$
+    /// # Parameters
+    /// - `log_n` - logarithm of polynomial degree
+    /// - `point` - `x` - eval Lagrange polynomials at this point
+    /// # Result - x^n - 1
+    /// X^{2^log_n} - 1
+    /// -1 * X^0 + 0 * X^1 + ... + a * X^{2^log_n}
+    pub fn eval_vanish_polynomial<F: PrimeField, const T: usize>(
+        region: &mut RegionCtx<F>,
+        main_gate: &MainGate<F, T>,
+        degree: usize,
+        cha: &mut ValuePowers<F>,
+    ) -> Result<AssignedValue<F>, Halo2PlonkError> {
+        let cha_in_degree = cha.get_or_eval(region, main_gate, degree)?;
+        main_gate.add_with_const(region, &cha_in_degree, -F::ONE)
+    }
+
     /// Assigned version of `fn verify` logic from [`crate::nifs::protogalaxy::ProtoGalaxy`].
     ///
     /// # Algorithm
@@ -1033,6 +1050,52 @@ mod verify_chip {
                 .unwrap()
                 .verify()
                 .unwrap();
+        }
+
+        #[traced_test]
+        #[test]
+        fn vanishing() {
+            const DEGREE: usize = 10;
+            let cha = Base::from_u128(123);
+
+            let off_circuit_vanishing = polynomial::lagrange::eval_vanish_polynomial(DEGREE, cha);
+
+            let (mut wc, main_gate_config) = get_witness_collector();
+
+            let mut layouter = SingleChipLayouter::new(&mut wc, vec![]).unwrap();
+
+            let on_circuit_vanishing = layouter
+                .assign_region(
+                    || "vanishing",
+                    move |region| {
+                        let mut region = RegionCtx::new(region, 0);
+                        let main_gate = MainGate::<Base, T>::new(main_gate_config.clone());
+
+                        let cha = region
+                            .assign_advice(|| "", main_gate_config.state[0], Halo2Value::known(cha))
+                            .unwrap();
+
+                        let one = region
+                            .assign_advice(
+                                || "",
+                                main_gate_config.state[1],
+                                Halo2Value::known(Base::ONE),
+                            )
+                            .unwrap();
+
+                        region.next();
+
+                        let mut cha = ValuePowers::new(one, cha);
+
+                        eval_vanish_polynomial(&mut region, &main_gate, DEGREE, &mut cha)
+                    },
+                )
+                .unwrap();
+
+            assert_eq!(
+                off_circuit_vanishing,
+                on_circuit_vanishing.value().unwrap().copied().unwrap()
+            );
         }
     }
 }
