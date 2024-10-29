@@ -5,6 +5,7 @@ use std::{
 };
 
 use halo2_proofs::halo2curves::ff::{PrimeField, WithSmallOrderMulGroup};
+use tracing::*;
 
 use crate::{ff::Field, fft, util};
 
@@ -12,14 +13,11 @@ use crate::{ff::Field, fft, util};
 ///
 /// Coefficients of the polynomial are presented from smaller degree to larger degree
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct UnivariatePoly<F: Field>(pub(crate) Box<[F]>);
+pub struct UnivariatePoly<F>(pub(crate) Box<[F]>);
 
 impl<F: Field> UnivariatePoly<F> {
     pub fn new_zeroed(size: usize) -> Self {
         Self::from_iter(iter::repeat(F::ZERO).take(size))
-    }
-    pub fn iter(&self) -> impl Iterator<Item = &F> {
-        self.0.iter()
     }
     pub fn degree(&self) -> usize {
         self.0
@@ -31,7 +29,19 @@ impl<F: Field> UnivariatePoly<F> {
     }
 }
 
-impl<F: Field> IntoIterator for UnivariatePoly<F> {
+impl<F> UnivariatePoly<F> {
+    pub fn iter(&self) -> impl Iterator<Item = &F> {
+        self.0.iter()
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<F> IntoIterator for UnivariatePoly<F> {
     type Item = F;
     type IntoIter = <Box<[F]> as IntoIterator>::IntoIter;
 
@@ -40,13 +50,13 @@ impl<F: Field> IntoIterator for UnivariatePoly<F> {
     }
 }
 
-impl<F: Field> AsMut<[F]> for UnivariatePoly<F> {
+impl<F> AsMut<[F]> for UnivariatePoly<F> {
     fn as_mut(&mut self) -> &mut [F] {
         self.0.as_mut()
     }
 }
 
-impl<F: Field> FromIterator<F> for UnivariatePoly<F> {
+impl<F> FromIterator<F> for UnivariatePoly<F> {
     fn from_iter<T: IntoIterator<Item = F>>(iter: T) -> Self {
         Self(iter.into_iter().collect())
     }
@@ -58,6 +68,7 @@ impl<F: Field> UnivariatePoly<F> {
         self.0
             .iter()
             .zip(iter::successors(Some(F::ONE), |val| Some(*val * challenge)))
+            .inspect(|(coeff, cha)| debug!("coeff: {coeff:?}, challenge_in_degree: {cha:?}"))
             .fold(F::ZERO, |res, (coeff, challenge_in_degree)| {
                 res + (challenge_in_degree * *coeff)
             })
@@ -73,14 +84,6 @@ impl<F: Field> UnivariatePoly<F> {
             }
             Ordering::Greater => Err(self),
         }
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
     }
 
     /// Multiplies all coefficients of the polynomial by a field element.
