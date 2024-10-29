@@ -31,7 +31,7 @@ pub use accumulator::{Accumulator, AccumulatorArgs, AccumulatorInstance};
 ///                  Circuit will be proved in `C::Scalar` field
 ///
 /// - `L`: 'Length' - constant representing the number of instances to
-///                   fold in a single `prove`
+///                   fold in a single `prove`. `L-1` be power of two
 #[derive(Clone, Debug)]
 pub struct ProtoGalaxy<C: CurveAffine, const L: usize> {
     _marker: PhantomData<C>,
