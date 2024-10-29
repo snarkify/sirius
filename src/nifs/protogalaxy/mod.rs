@@ -259,6 +259,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for VerifierP
     }
 }
 
+#[derive(Clone)]
 pub struct Proof<F: PrimeField> {
     pub poly_F: UnivariatePoly<F>,
     pub poly_K: UnivariatePoly<F>,
@@ -401,7 +402,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
 
         Ok((
             Accumulator {
-                e: calculate_e::<C>(&poly_F, &poly_K, gamma, alpha, ctx.lagrange_domain()),
+                e: calculate_e(&poly_F, &poly_K, gamma, alpha, ctx.lagrange_domain()),
                 betas: betas_stroke,
                 trace: PlonkTrace {
                     u: Self::fold_instance(
@@ -486,7 +487,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
                 incoming.iter(),
                 lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, lagrange_domain),
             ),
-            e: calculate_e::<C>(&proof.poly_F, &proof.poly_K, gamma, alpha, lagrange_domain),
+            e: calculate_e(&proof.poly_F, &proof.poly_K, gamma, alpha, lagrange_domain),
         })
     }
 }
@@ -616,13 +617,13 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
 }
 
 // F(alpha) * L(gamma) + Z(gamma) * K(gamma)
-fn calculate_e<C: CurveAffine>(
-    poly_F: &UnivariatePoly<C::Scalar>,
-    poly_K: &UnivariatePoly<C::Scalar>,
-    gamma: C::Scalar,
-    alpha: C::Scalar,
+pub(crate) fn calculate_e<F: PrimeField>(
+    poly_F: &UnivariatePoly<F>,
+    poly_K: &UnivariatePoly<F>,
+    gamma: F,
+    alpha: F,
     log_n: u32,
-) -> C::Scalar {
+) -> F {
     let poly_L0_in_gamma = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, log_n)
         .next()
         .unwrap();
