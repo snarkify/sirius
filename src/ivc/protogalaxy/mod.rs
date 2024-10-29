@@ -527,6 +527,7 @@ mod verify_chip {
     ) -> Result<AssignedValue<F>, Halo2PlonkError> {
         let lagrange_domain = PolyContext::<F>::get_lagrange_domain::<L>();
         let points_count = 2usize.pow(lagrange_domain);
+        debug!("start: {}", region.offset());
 
         let inverted_n = F::from_u128(points_count as u128)
             .invert()
@@ -536,11 +537,31 @@ mod verify_chip {
         let X = cha.value();
 
         let X_sub_value = main_gate.add_with_const(region, &X, -value)?;
+        debug!("X_sub_value: {X_sub_value:?}, region: {}", region.offset());
+
         let (is_zero_X_sub_value, X_sub_value_inverted) =
             main_gate.invert_with_flag(region, X_sub_value)?;
 
+        debug!(
+            "is_zero_X_sub_value: {:?}, region: {}",
+            is_zero_X_sub_value,
+            region.offset()
+        );
+        debug!(
+            "X_sub_value_inverted: {:?}, region: {}",
+            X_sub_value_inverted,
+            region.offset()
+        );
+
         let X_pow_n = cha.get_or_eval(region, main_gate, points_count)?;
         let X_pow_n_sub_1 = main_gate.add_with_const(region, &X_pow_n, -F::ONE)?;
+
+        debug!("X_pow_n: {:?}, region: {}", X_pow_n, region.offset());
+        debug!(
+            "X_pow_n_sub_1: {:?}, region: {}",
+            X_pow_n_sub_1,
+            region.offset()
+        );
 
         let is_zero_X_pow_n_sub_1 = main_gate.is_zero_term(region, X_pow_n_sub_1.clone())?;
 
@@ -555,7 +576,9 @@ mod verify_chip {
             main_gate.config().state[0],
             Halo2Value::known(F::ZERO),
         )?;
+
         region.next();
+
         main_gate.conditional_select(region, &zero, &fractional, &is_numerator_denominator_zero)
     }
 
@@ -631,10 +654,8 @@ mod verify_chip {
 
         use super::*;
         use crate::{
-            halo2_proofs::{
-                halo2curves::{bn256::G1Affine, group::prime::PrimeCurveAffine},
-                plonk::ConstraintSystem,
-            },
+            halo2_proofs::plonk::ConstraintSystem,
+            halo2curves::{bn256::G1Affine as Affine, group::prime::PrimeCurveAffine},
             main_gate::MainGate,
             nifs::{
                 self,
@@ -649,9 +670,7 @@ mod verify_chip {
         const RATE: usize = T - 1;
         const K: usize = 14;
 
-        type C1 = G1Affine;
-
-        type Base = <C1 as CurveAffine>::Base;
+        type Base = <Affine as CurveAffine>::Base;
 
         fn get_witness_collector() -> (WitnessCollector<Base>, MainGateConfig<T>) {
             let mut cs = ConstraintSystem::default();
@@ -665,21 +684,21 @@ mod verify_chip {
         }
 
         struct Mock {
-            params: VerifierParam<C1>,
-            spec: Spec<<C1 as CurveAffine>::Base, T, RATE>,
-            acc: nifs::protogalaxy::Accumulator<C1>,
-            proof: nifs::protogalaxy::Proof<<C1 as CurveAffine>::ScalarExt>,
+            params: VerifierParam<Affine>,
+            spec: Spec<<Affine as CurveAffine>::Base, T, RATE>,
+            acc: nifs::protogalaxy::Accumulator<Affine>,
+            proof: nifs::protogalaxy::Proof<<Affine as CurveAffine>::ScalarExt>,
         }
 
         impl Mock {
             fn new() -> Self {
-                let params = VerifierParam::<C1> {
-                    pp_digest: C1::identity(),
+                let params = VerifierParam::<Affine> {
+                    pp_digest: Affine::identity(),
                 };
 
-                let spec = Spec::<<C1 as CurveAffine>::Base, 5, 4>::new(10, 10);
+                let spec = Spec::<<Affine as CurveAffine>::Base, 5, 4>::new(10, 10);
 
-                let acc = nifs::protogalaxy::Accumulator::<C1>::new(
+                let acc = nifs::protogalaxy::Accumulator::<Affine>::new(
                     AccumulatorArgs {
                         num_io: Box::new([]),
                         num_challenges: 0,
@@ -714,7 +733,7 @@ mod verify_chip {
                 &m.params,
                 &mut PoseidonHash::new(m.spec.clone()),
                 &m.acc,
-                iter::empty::<&PlonkInstance<C1>>(),
+                iter::empty::<&PlonkInstance<Affine>>(),
                 &m.proof,
             );
 
@@ -836,7 +855,10 @@ mod verify_chip {
                                 .unwrap();
                         let main_gate = MainGate::<Base, T>::new(main_gate_config.clone());
 
-                        Ok(calculate_betas_stroke::<C1, T>(&mut region, &main_gate, cha).unwrap())
+                        Ok(
+                            calculate_betas_stroke::<Affine, T>(&mut region, &main_gate, cha)
+                                .unwrap(),
+                        )
                     },
                 )
                 .unwrap()
@@ -931,11 +953,13 @@ mod verify_chip {
         #[traced_test]
         #[test]
         fn lagrange() {
-            const L: usize = 1;
+            use crate::halo2curves::bn256::Fr;
+
+            const L: usize = 3;
 
             struct TestCircuit;
 
-            impl Circuit<Base> for TestCircuit {
+            impl Circuit<Fr> for TestCircuit {
                 type Config = MainGateConfig<T>;
                 type FloorPlanner = SimpleFloorPlanner;
 
@@ -943,26 +967,35 @@ mod verify_chip {
                     todo!()
                 }
 
-                fn configure(meta: &mut ConstraintSystem<Base>) -> Self::Config {
+                fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
                     MainGate::configure(meta)
                 }
 
                 fn synthesize(
                     &self,
                     main_gate_config: Self::Config,
-                    mut layouter: impl Layouter<Base>,
+                    mut layouter: impl Layouter<Fr>,
                 ) -> Result<(), Halo2PlonkError> {
-                    let cha = Base::from_u128(123);
+                    let cha = Fr::from_u128(123);
 
-                    let lagrange_domain = PolyContext::<Base>::get_lagrange_domain::<L>();
+                    dbg!(<Fr as PrimeField>::S);
+                    let lagrange_domain = PolyContext::<Fr>::get_lagrange_domain::<L>();
+                    debug!("lagrange_domain: {lagrange_domain}");
+
                     let off_circuit_poly_L0_cha =
-                        polynomial::iter_eval_lagrange_poly_for_cyclic_group(cha, lagrange_domain)
-                            .next()
-                            .unwrap();
+                        polynomial::iter_eval_lagrange_poly_for_cyclic_group::<Fr>(
+                            cha,
+                            lagrange_domain,
+                        )
+                        .next()
+                        .unwrap();
 
                     let on_circuit_poly_L0_cha = layouter.assign_region(
                         || "assigned_L0",
-                        move |region| {
+                        move |mut region| {
+                            let main_gate = MainGate::<Fr, T>::new(main_gate_config.clone());
+                            main_gate.config().name_columns(&mut region);
+
                             let mut region = RegionCtx::new(region, 0);
 
                             let cha = region
@@ -977,16 +1010,18 @@ mod verify_chip {
                                 .assign_advice(
                                     || "",
                                     main_gate_config.state[1],
-                                    Halo2Value::known(Base::ONE),
+                                    Halo2Value::known(Fr::ONE),
                                 )
                                 .unwrap();
 
+                            let mut values = ValuePowers::new(one, cha);
+
                             region.next();
 
-                            eval_lagrange_zero_poly::<Base, T, L>(
+                            eval_lagrange_zero_poly::<Fr, T, L>(
                                 &mut region,
-                                &MainGate::<Base, T>::new(main_gate_config.clone()),
-                                &mut ValuePowers::new(one, cha),
+                                &main_gate,
+                                &mut values,
                             )
                         },
                     )?;
