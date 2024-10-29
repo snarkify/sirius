@@ -226,15 +226,16 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         rhs: F,
     ) -> Result<AssignedValue<F>, Error> {
         let config = self.config();
+
         ctx.assign_fixed(|| "q_i", config.q_i, F::ONE)?;
         ctx.assign_fixed(|| "q_o", config.q_o, -F::ONE)?;
 
         let assigned_lhs =
             ctx.assign_advice_from(|| "lhs for sum with const", config.input, lhs)?;
-        let assigned_rhs = ctx.assign_fixed(|| "rhs for sum with const", config.rc, rhs)?;
+        let _assigned_rhs = ctx.assign_fixed(|| "rhs for sum with const", config.rc, rhs)?;
 
-        let sum = assigned_lhs.value().copied() + assigned_rhs.value();
-        let assigned_res = ctx.assign_advice(|| "result for sum with const", config.input, sum)?;
+        let sum = assigned_lhs.value().copied() + Value::known(rhs);
+        let assigned_res = ctx.assign_advice(|| "result for sum with const", config.out, sum)?;
 
         ctx.next();
         Ok(assigned_res)
