@@ -217,6 +217,8 @@ mod verify_chip {
         /// Get from cache or calculate the `exp` degree of original value
         ///
         /// `self.value^exp`
+        ///
+        /// TODO: Can be improved by using two mult in main_gate
         pub fn get_or_eval<const T: usize>(
             &mut self,
             region: &mut RegionCtx<F>,
@@ -517,6 +519,20 @@ mod verify_chip {
             .map_err(|err| Error::BetasStroke { err })
     }
 
+    /// Evaluate the values of the Lagrange polynomial zero for a cyclic subgroup of length `n` (`2.pow(log_n)`) at
+    /// the `challenge` point
+    ///
+    /// You can look at [`fft::get_omega_or_inv`] to see how the target cyclic group is formed
+    ///
+    /// # Mathematical Representation
+    ///
+    /// ```math
+    /// L_i(X)=\frac{\omega^i}{n}\frac{X^n-1}{X-\omega^i}
+    /// ```
+    /// where {1, \omega, \omega^2, ..., \omega^n} - cyclic group, check [`iter_cyclic_subgroup`] for
+    /// more details
+    ///
+    /// # Generics
     /// `T` is setup for main gate
     /// - `L`: 'Length' - constant representing the number of instances to
     ///                   fold in a single `prove`. `L-1` be power of two
@@ -527,7 +543,6 @@ mod verify_chip {
     ) -> Result<AssignedValue<F>, Halo2PlonkError> {
         let lagrange_domain = PolyContext::<F>::get_lagrange_domain::<L>();
         let points_count = 2usize.pow(lagrange_domain);
-        debug!("start: {}", region.offset());
 
         let inverted_n = F::from_u128(points_count as u128)
             .invert()
@@ -537,31 +552,12 @@ mod verify_chip {
         let X = cha.value();
 
         let X_sub_value = main_gate.add_with_const(region, &X, -value)?;
-        debug!("X_sub_value: {X_sub_value:?}, region: {}", region.offset());
 
         let (is_zero_X_sub_value, X_sub_value_inverted) =
             main_gate.invert_with_flag(region, X_sub_value)?;
 
-        debug!(
-            "is_zero_X_sub_value: {:?}, region: {}",
-            is_zero_X_sub_value,
-            region.offset()
-        );
-        debug!(
-            "X_sub_value_inverted: {:?}, region: {}",
-            X_sub_value_inverted,
-            region.offset()
-        );
-
         let X_pow_n = cha.get_or_eval(region, main_gate, points_count)?;
         let X_pow_n_sub_1 = main_gate.add_with_const(region, &X_pow_n, -F::ONE)?;
-
-        debug!("X_pow_n: {:?}, region: {}", X_pow_n, region.offset());
-        debug!(
-            "X_pow_n_sub_1: {:?}, region: {}",
-            X_pow_n_sub_1,
-            region.offset()
-        );
 
         let is_zero_X_pow_n_sub_1 = main_gate.is_zero_term(region, X_pow_n_sub_1.clone())?;
 
