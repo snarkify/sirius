@@ -186,6 +186,9 @@ mod verify_chip {
     /// Powers of one assigned value counted on-circuit
     ///
     /// Since powers are required many times during synthesis, let's keep these values separate
+    /// ```math
+    /// x^0, x^1, x^2, x^3, ... x^i, ...
+    /// ```
     pub struct ValuePowers<F: PrimeField> {
         powers: Vec<AssignedValue<F>>,
     }
@@ -207,24 +210,27 @@ mod verify_chip {
                 .expect("Cannot be created without at least one element inside")
         }
 
+        /// Get from cache or calculate the `exp` degree of original value
+        ///
+        /// `self.value^exp`
         pub fn get_or_eval<const T: usize>(
             &mut self,
             region: &mut RegionCtx<F>,
             main_gate: &MainGate<F, T>,
-            index: usize,
+            exp: usize,
         ) -> Result<AssignedValue<F>, Halo2PlonkError> {
-            if let Some(value) = self.powers.get(index) {
+            if let Some(value) = self.powers.get(exp) {
                 return Ok(value.clone());
             }
 
-            while self.powers.len() <= index {
+            while self.powers.len() <= exp {
                 let value = self.value();
                 let last = self.powers.last().unwrap();
                 let new = main_gate.mul(region, value, last)?;
                 self.powers.push(new);
             }
 
-            Ok(self.powers.get(index).cloned().unwrap())
+            Ok(self.powers.get(exp).cloned().unwrap())
         }
     }
 
