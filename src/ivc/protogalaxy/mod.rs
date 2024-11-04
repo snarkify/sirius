@@ -50,6 +50,10 @@ mod verify_chip {
 
         #[error("Error while fold instancess: {err:?}")]
         Fold { err: Halo2PlonkError },
+
+        #[allow(clippy::upper_case_acronyms)]
+        #[error("SPS Verify Error: {err:?}")]
+        SPS { err: Halo2PlonkError },
     }
 
     /// Assigned version of [`crate::plonk::PlonkInstance`]
@@ -695,6 +699,32 @@ mod verify_chip {
 
                 Result::<_, Halo2PlonkError>::Ok(acc)
             })
+    }
+
+    pub fn verify_sps<C: CurveAffine, const L: usize>(
+        region: &mut RegionCtx<C::Base>,
+        ro_circuit: &mut impl ROCircuitTrait<C::Base>,
+        incoming: &[AssignedPlonkInstance<C>; L],
+    ) -> Result<(), Halo2PlonkError>
+    where
+        C::Base: FromUniformBytes<64> + PrimeFieldBits,
+        C::ScalarExt: FromUniformBytes<64> + PrimeFieldBits,
+    {
+        for pi in incoming {
+            let num_challenges = pi.challenges.len();
+
+            ro_circuit.absorb_iter(pi.instances.iter().flat_map(|inst| inst.iter()));
+
+            for i in 0..num_challenges {
+                let expected = ro_circuit
+                    .absorb_point(WrapValue::from_assigned_point(&pi.W_commitments[i]))
+                    .squeeze(region)?;
+
+                region.constrain_equal(expected.cell(), pi.challenges[i].cell())?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Assigned version of `fn verify` logic from [`crate::nifs::protogalaxy::ProtoGalaxy`].
