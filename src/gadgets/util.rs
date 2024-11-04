@@ -232,7 +232,7 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
 
         let assigned_lhs =
             ctx.assign_advice_from(|| "lhs for sum with const", config.input, lhs)?;
-        let _assigned_rhs = ctx.assign_fixed(|| "rhs for sum with const", config.rc, rhs)?;
+        ctx.assign_fixed(|| "rhs for sum with const", config.rc, rhs)?;
 
         let sum = assigned_lhs.value().copied() + Value::known(rhs);
         let assigned_res = ctx.assign_advice(|| "result for sum with const", config.out, sum)?;
