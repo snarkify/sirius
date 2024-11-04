@@ -95,7 +95,7 @@ pub(crate) fn compute_F<F: PrimeField>(
     // collect it
     let betas = betas.take(ctx.betas_count()).collect::<Box<[_]>>();
     assert_eq!(betas.len(), ctx.betas_count());
-    let deltas = iter::successors(Some(delta), |d| Some(d.double()))
+    let deltas = iter::successors(Some(delta), |d| Some(d.pow([2])))
         .take(ctx.betas_count())
         .collect::<Box<[_]>>();
     debug!("betas & deltas ready");
@@ -383,7 +383,7 @@ impl<F: Clone + Mul<Output = F> + Add<Output = F>> Iterator for BetaStrokeIter<F
             + (self.cha.alpha.clone() * self.cha.delta.clone());
 
         self.beta_index += 1;
-        self.cha.delta = self.cha.delta.clone().add(self.cha.delta.clone());
+        self.cha.delta = self.cha.delta.clone().mul(self.cha.delta.clone());
 
         Some(next)
     }
@@ -581,7 +581,7 @@ mod test {
             .for_each(|X| {
                 let challenge_vector = betas
                     .iter()
-                    .zip(iter::successors(Some(delta), |d| Some(d.double())))
+                    .zip(iter::successors(Some(delta), |d| Some(d.pow([2]))))
                     .take(ctx.count_of_evaluation_with_padding)
                     .map(|(beta, delta)| beta + (X * delta))
                     .collect::<Box<[_]>>();
