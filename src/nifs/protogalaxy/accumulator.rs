@@ -52,7 +52,7 @@ impl<C: CurveAffine> Accumulator<C> {
 
 /// Represents an accumulator for folding multiple instances into a single instance,
 /// following the accumulation schemes.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct AccumulatorInstance<C: CurveAffine> {
     /// `φ`: Represents the combined state of all instances. It is a summary that captures the
     /// essential data and relationships from the instances being merged.
