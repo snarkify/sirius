@@ -523,7 +523,7 @@ mod verify_chip {
             .map_err(|err| Error::BetasStroke { err })
     }
 
-    /// Evaluate the values of the Lagrange polynomial zero for a cyclic subgroup of length `n` (`2.pow(log_n)`) at
+    /// Evaluate the values of the Lagrange polynomial for a cyclic subgroup of length `n` (`2.pow(log_n)`) at
     /// the `challenge` point
     ///
     /// You can look at [`fft::get_omega_or_inv`] to see how the target cyclic group is formed
@@ -540,18 +540,22 @@ mod verify_chip {
     /// `T` is setup for main gate
     /// - `L`: 'Length' - constant representing the number of instances to
     ///                   fold in a single `prove`. `L-1` be power of two
-    fn eval_lagrange_zero_poly<F: PrimeField, const T: usize, const L: usize>(
+    fn eval_lagrange_poly<F: PrimeField, const T: usize, const L: usize>(
         region: &mut RegionCtx<F>,
         main_gate: &MainGate<F, T>,
+        lagrange_index: usize,
         cha: &mut ValuePowers<F>,
     ) -> Result<AssignedValue<F>, Halo2PlonkError> {
         let lagrange_domain = PolyContext::<F>::get_lagrange_domain::<L>();
         let points_count = 2usize.pow(lagrange_domain);
+        assert!(lagrange_index < points_count);
 
         let inverted_n = F::from_u128(points_count as u128)
             .invert()
             .expect("safe because it's `2^log_n`");
-        let value = iter_cyclic_subgroup::<F>(lagrange_domain).next().unwrap();
+        let value = iter_cyclic_subgroup::<F>(lagrange_domain)
+            .nth(lagrange_index)
+            .unwrap();
 
         let X = cha.value();
 
@@ -603,7 +607,7 @@ mod verify_chip {
     ) -> Result<AssignedValue<F>, Halo2PlonkError> {
         let lagrange_domain = PolyContext::<F>::get_lagrange_domain::<L>();
 
-        let poly_L0_in_gamma = eval_lagrange_zero_poly::<F, T, L>(region, main_gate, gamma_cha)?;
+        let poly_L0_in_gamma = eval_lagrange_poly::<F, T, L>(region, main_gate, 0, gamma_cha)?;
 
         let poly_F_alpha = proof.poly_F.eval(region, main_gate, alpha_cha)?;
         let poly_Z_gamma =
@@ -1016,15 +1020,17 @@ mod verify_chip {
                     let lagrange_domain = PolyContext::<Fr>::get_lagrange_domain::<L>();
                     debug!("lagrange_domain: {lagrange_domain}");
 
-                    let off_circuit_poly_L0_cha =
+                    let [off_circuit_poly_L0_cha, off_circuit_poly_L1_cha] =
                         polynomial::iter_eval_lagrange_poly_for_cyclic_group::<Fr>(
                             cha,
                             lagrange_domain,
                         )
-                        .next()
+                        .take(2)
+                        .collect::<Vec<_>>()
+                        .try_into()
                         .unwrap();
 
-                    let on_circuit_poly_L0_cha = layouter.assign_region(
+                    let (on_circuit_poly_L0_cha, on_circuit_poly_L1_cha) = layouter.assign_region(
                         || "assigned_L0",
                         move |mut region| {
                             let main_gate = MainGate::<Fr, T>::new(main_gate_config.clone());
@@ -1052,17 +1058,31 @@ mod verify_chip {
 
                             region.next();
 
-                            eval_lagrange_zero_poly::<Fr, T, L>(
-                                &mut region,
-                                &main_gate,
-                                &mut values,
-                            )
+                            Ok((
+                                eval_lagrange_poly::<Fr, T, L>(
+                                    &mut region,
+                                    &main_gate,
+                                    0,
+                                    &mut values,
+                                )?,
+                                eval_lagrange_poly::<Fr, T, L>(
+                                    &mut region,
+                                    &main_gate,
+                                    1,
+                                    &mut values,
+                                )?,
+                            ))
                         },
                     )?;
 
                     assert_eq!(
                         off_circuit_poly_L0_cha,
                         on_circuit_poly_L0_cha.value().unwrap().copied().unwrap()
+                    );
+
+                    assert_eq!(
+                        off_circuit_poly_L1_cha,
+                        on_circuit_poly_L1_cha.value().unwrap().copied().unwrap()
                     );
 
                     Ok(())
