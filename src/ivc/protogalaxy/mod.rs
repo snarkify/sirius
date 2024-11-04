@@ -620,6 +620,76 @@ mod verify_chip {
         main_gate.add(region, &lhs, &rhs)
     }
 
+    /// Fold instances, but without on-circuit ecc operations
+    fn fold_instances<C: CurveAffine, const T: usize, const L: usize>(
+        region: &mut RegionCtx<C::Base>,
+        main_gate: &MainGate<C::Base, T>,
+        acc: &AssignedPlonkInstance<C>,
+        incoming: &[AssignedPlonkInstance<C>; L],
+        gamma_cha: &mut ValuePowers<C::Base>,
+    ) -> Result<AssignedPlonkInstance<C>, Halo2PlonkError> {
+        let l_0 = eval_lagrange_poly::<C::Base, T, L>(region, main_gate, 0, gamma_cha)?;
+
+        let new_acc = AssignedPlonkInstance {
+            W_commitments: acc.W_commitments.clone(), // Don't fold here, delegate it to secondary circuit
+            instances: acc
+                .instances
+                .iter()
+                .map(|instance| {
+                    instance
+                        .iter()
+                        .map(|cell| main_gate.mul(region, cell, &l_0))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            challenges: acc
+                .challenges
+                .iter()
+                .map(|cell| main_gate.mul(region, cell, &l_0))
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+
+        incoming
+            .iter()
+            .enumerate()
+            .try_fold(new_acc, |mut acc, (index, tr)| {
+                let l_n =
+                    eval_lagrange_poly::<C::Base, T, L>(region, main_gate, index + 1, gamma_cha)?;
+
+                acc.instances
+                    .iter_mut()
+                    .zip_eq(tr.instances.iter())
+                    .try_for_each(|(acc_instances, instances)| {
+                        acc_instances.iter_mut().zip_eq(instances).try_for_each(
+                            |(acc_instance, instance)| {
+                                let rhs = main_gate.mul(region, instance, &l_n)?;
+
+                                let new = main_gate.add(region, acc_instance, &rhs)?;
+
+                                *acc_instance = new;
+
+                                Result::<_, Halo2PlonkError>::Ok(())
+                            },
+                        )
+                    })?;
+
+                acc.challenges
+                    .iter_mut()
+                    .zip_eq(tr.challenges.iter())
+                    .try_for_each(|(acc_challenge, challenge)| {
+                        let rhs = main_gate.mul(region, challenge, &l_n)?;
+
+                        let new = main_gate.add(region, acc_challenge, &rhs)?;
+
+                        *acc_challenge = new;
+
+                        Result::<_, Halo2PlonkError>::Ok(())
+                    })?;
+
+                Result::<_, Halo2PlonkError>::Ok(acc)
+            })
+    }
+
     /// Assigned version of `fn verify` logic from [`crate::nifs::protogalaxy::ProtoGalaxy`].
     ///
     /// # Algorithm

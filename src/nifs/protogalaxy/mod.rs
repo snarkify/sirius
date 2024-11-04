@@ -158,7 +158,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
             })
     }
 
-    fn fold_instance<'i>(
+    pub(crate) fn fold_instance<'i>(
         acc: PlonkInstance<C>,
         incoming: impl Iterator<Item = &'i PlonkInstance<C>>,
         mut lagrange_for_gamma: impl Iterator<Item = C::Scalar>,
@@ -636,4 +636,4 @@ pub(crate) fn calculate_e<F: PrimeField>(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
