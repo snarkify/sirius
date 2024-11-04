@@ -711,16 +711,18 @@ mod verify_chip {
         C::ScalarExt: FromUniformBytes<64> + PrimeFieldBits,
     {
         for pi in incoming {
-            let num_challenges = pi.challenges.len();
+            if pi.challenges.is_empty() {
+                continue;
+            }
 
             ro_circuit.absorb_iter(pi.instances.iter().flat_map(|inst| inst.iter()));
 
-            for i in 0..num_challenges {
+            for (W_commitment, challenge) in pi.W_commitments.iter().zip_eq(pi.challenges.iter()) {
                 let expected = ro_circuit
-                    .absorb_point(WrapValue::from_assigned_point(&pi.W_commitments[i]))
+                    .absorb_point(WrapValue::from_assigned_point(W_commitment))
                     .squeeze(region)?;
 
-                region.constrain_equal(expected.cell(), pi.challenges[i].cell())?;
+                region.constrain_equal(expected.cell(), challenge.cell())?;
             }
         }
 
