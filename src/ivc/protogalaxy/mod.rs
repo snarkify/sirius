@@ -1,19 +1,19 @@
 mod verify_chip {
     use std::iter;
 
-    use halo2_proofs::{
-        circuit::{AssignedCell, Value as Halo2Value},
-        halo2curves::{
-            ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
-            CurveAffine,
-        },
-        plonk::Error as Halo2PlonkError,
-    };
     use itertools::Itertools;
     use tracing::*;
 
     use crate::{
         gadgets::ecc::AssignedPoint,
+        halo2_proofs::{
+            circuit::{AssignedCell, Value as Halo2Value},
+            halo2curves::{
+                ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
+                CurveAffine,
+            },
+            plonk::Error as Halo2PlonkError,
+        },
         main_gate::{
             AdviceCyclicAssignor, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue,
         },
@@ -636,19 +636,19 @@ mod verify_chip {
 
     #[cfg(test)]
     mod tests {
-        use halo2_proofs::{
-            arithmetic::Field,
-            circuit::{
-                floor_planner::single_pass::SingleChipLayouter, Layouter, SimpleFloorPlanner,
-            },
-            dev::MockProver,
-            plonk::Circuit,
-        };
         use tracing_test::traced_test;
 
         use super::*;
         use crate::{
-            halo2_proofs::plonk::ConstraintSystem,
+            halo2_proofs::{
+                arithmetic::Field,
+                circuit::{
+                    floor_planner::single_pass::SingleChipLayouter, Chip, Layouter,
+                    SimpleFloorPlanner,
+                },
+                dev::MockProver,
+                plonk::{Circuit, ConstraintSystem},
+            },
             halo2curves::{bn256::G1Affine as Affine, group::prime::PrimeCurveAffine},
             main_gate::MainGate,
             nifs::{
