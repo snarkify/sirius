@@ -2,7 +2,7 @@ mod verify_chip {
     use std::iter;
 
     use halo2_proofs::{
-        circuit::{AssignedCell, Chip, Value as Halo2Value},
+        circuit::{AssignedCell, Value as Halo2Value},
         halo2curves::{
             ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
             CurveAffine,
@@ -198,6 +198,10 @@ mod verify_chip {
 
     impl<F: PrimeField> ValuePowers<F> {
         pub fn new(one: AssignedValue<F>, value: AssignedValue<F>) -> Self {
+            if let Some(one) = one.value().unwrap() {
+                assert_eq!(one, &F::ONE);
+            }
+
             Self {
                 powers: vec![one, value],
             }
@@ -567,15 +571,9 @@ mod verify_chip {
         let lhs = main_gate.mul(region, &X_pow_n_sub_1, &X_sub_value_inverted)?;
         let fractional = main_gate.mul_by_const(region, &lhs, value * inverted_n)?;
 
-        let zero = region.assign_advice(
-            || "zero",
-            main_gate.config().state[0],
-            Halo2Value::known(F::ZERO),
-        )?;
+        let one = cha.get_or_eval(region, main_gate, 0)?;
 
-        region.next();
-
-        main_gate.conditional_select(region, &zero, &fractional, &is_numerator_denominator_zero)
+        main_gate.conditional_select(region, &one, &fractional, &is_numerator_denominator_zero)
     }
 
     /// Assigned version of `fn verify` logic from [`crate::nifs::protogalaxy::ProtoGalaxy`].
