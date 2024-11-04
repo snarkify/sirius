@@ -7,6 +7,7 @@ mod verify_chip {
     use crate::{
         gadgets::ecc::AssignedPoint,
         halo2_proofs::{
+            arithmetic::Field,
             circuit::{AssignedCell, Chip, Value as Halo2Value},
             halo2curves::{
                 ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
@@ -43,6 +44,12 @@ mod verify_chip {
 
         #[error("Error while calculate beta stoke: {err:?}")]
         BetasStroke { err: Halo2PlonkError },
+
+        #[error("Error while calculate new `e`: {err:?}")]
+        WhileE { err: Halo2PlonkError },
+
+        #[error("Error while fold instancess: {err:?}")]
+        Fold { err: Halo2PlonkError },
     }
 
     /// Assigned version of [`crate::plonk::PlonkInstance`]
@@ -451,7 +458,7 @@ mod verify_chip {
             vp: AssignedVerifierParam<C>,
             accumulator: &AssignedAccumulatorInstance<C>,
             incoming: &[AssignedPlonkInstance<C>],
-            proof: AssignedProof<C::Base>,
+            proof: &AssignedProof<C::Base>,
         ) -> Result<AssignedChallanges<F>, Halo2PlonkError>
         where
             C::Base: FromUniformBytes<64> + PrimeFieldBits,
@@ -719,7 +726,7 @@ mod verify_chip {
         ro_circuit: impl ROCircuitTrait<C::Base>,
         vp: AssignedVerifierParam<C>,
         accumulator: AssignedAccumulatorInstance<C>,
-        incoming: &[AssignedPlonkInstance<C>],
+        incoming: &[AssignedPlonkInstance<C>; L],
         proof: AssignedProof<C::Base>,
     ) -> Result<AssignedAccumulatorInstance<C>, Error>
     where
@@ -729,23 +736,56 @@ mod verify_chip {
         let AssignedChallanges {
             delta,
             alpha,
-            gamma: _,
-        } = AssignedChallanges::generate(region, ro_circuit, vp, &accumulator, incoming, proof)
+            gamma,
+        } = AssignedChallanges::generate(region, ro_circuit, vp, &accumulator, incoming, &proof)
             .map_err(|err| Error::Squeeze { err })?;
 
         let main_gate = MainGate::new(main_gate_config);
 
-        let _betas_stroke = calculate_betas_stroke::<C, T>(
+        let betas = calculate_betas_stroke::<C, T>(
             region,
             &main_gate,
             PolyChallenges {
                 betas: accumulator.betas.clone(),
-                alpha,
+                alpha: alpha.clone(),
                 delta,
             },
         )?;
 
-        todo!()
+        let one = region
+            .assign_advice(
+                || "one",
+                main_gate.config().state[0],
+                Halo2Value::known(C::Base::ONE),
+            )
+            .map_err(|err| Error::Assign {
+                annotation: "one",
+                err,
+            })?;
+        region.next();
+
+        let mut gamma_powers = ValuePowers::new(one.clone(), gamma);
+        let mut alpha_powers = ValuePowers::new(one, alpha);
+
+        let e = calculate_e::<C::Base, T, L>(
+            region,
+            &main_gate,
+            &proof,
+            &mut gamma_powers,
+            &mut alpha_powers,
+        )
+        .map_err(|err| Error::WhileE { err })?;
+
+        let ins = fold_instances(
+            region,
+            &main_gate,
+            &accumulator.ins,
+            incoming,
+            &mut gamma_powers,
+        )
+        .map_err(|err| Error::Fold { err })?;
+
+        Ok(AssignedAccumulatorInstance { ins, betas, e })
     }
 
     #[cfg(test)]
@@ -888,7 +928,7 @@ mod verify_chip {
                             params,
                             &acc,
                             &[],
-                            proof,
+                            &proof,
                         )
                     },
                 )
