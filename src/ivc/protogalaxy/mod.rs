@@ -338,7 +338,7 @@ mod verify_chip {
                     }
                 };
 
-                Some(main_gate.add(region, prev, prev))
+                Some(main_gate.mul(region, prev, prev))
             },
         )
         .take(len)
@@ -357,8 +357,8 @@ mod verify_chip {
         cha.betas
             .iter()
             .zip_eq(deltas)
-            .map(|(beta, delta)| {
-                let alpha_mul_delta = main_gate.mul(region, &cha.alpha, &delta)?;
+            .map(|(beta, delta_power)| {
+                let alpha_mul_delta = main_gate.mul(region, &cha.alpha, &delta_power)?;
                 main_gate.add(region, beta, &alpha_mul_delta)
             })
             .collect::<Result<Box<[_]>, Halo2PlonkError>>()
