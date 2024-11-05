@@ -1,4 +1,4 @@
-mod verify_chip {
+pub mod verify_chip {
     use std::iter;
 
     use itertools::Itertools;
