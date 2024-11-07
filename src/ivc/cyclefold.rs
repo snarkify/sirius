@@ -16,7 +16,131 @@ where
 }
 
 /// Circuit for secondary curve, which implements a lightweight version of ecc
-pub mod support_circuit {}
+pub mod support_circuit {
+    use halo2_proofs::plonk::{Column, Instance};
+
+    use crate::{
+        gadgets::ecc::EccGate,
+        halo2_proofs::{
+            circuit::{Chip, Layouter, SimpleFloorPlanner},
+            halo2curves::ff::PrimeField,
+            plonk::{Circuit, ConstraintSystem, Error as Halo2PlonkError},
+        },
+    };
+
+    #[derive(Clone, Debug)]
+    pub struct Config {
+        io: Column<Instance>,
+    }
+
+    struct Gate {}
+
+    impl<F: PrimeField> Chip<F> for Gate {
+        type Config = Config;
+        type Loaded = ();
+
+        fn config(&self) -> &Self::Config {
+            todo!()
+        }
+
+        fn loaded(&self) -> &Self::Loaded {
+            todo!()
+        }
+    }
+
+    impl<F: PrimeField> EccGate<F> for Gate {
+        fn new(_config: Self::Config) -> Self {
+            todo!()
+        }
+
+        fn assign_point<C: halo2_proofs::halo2curves::CurveAffine<Base = F>, AN: Into<String>>(
+            &self,
+            _ctx: &mut crate::main_gate::RegionCtx<'_, F>,
+            _annotation: impl Fn() -> AN,
+            _coords: Option<(F, F)>,
+        ) -> Result<crate::gadgets::ecc::AssignedPoint<C>, halo2_proofs::plonk::Error> {
+            todo!()
+        }
+
+        fn conditional_select(
+            &self,
+            _ctx: &mut crate::main_gate::RegionCtx<'_, F>,
+            _lhs: &crate::main_gate::AssignedValue<F>,
+            _rhs: &crate::main_gate::AssignedValue<F>,
+            _condition: &crate::main_gate::AssignedValue<F>,
+        ) -> Result<crate::main_gate::AssignedValue<F>, halo2_proofs::plonk::Error> {
+            todo!()
+        }
+
+        fn is_infinity_point(
+            &self,
+            _ctx: &mut crate::main_gate::RegionCtx<'_, F>,
+            _x: &crate::main_gate::AssignedValue<F>,
+            _y: &crate::main_gate::AssignedValue<F>,
+        ) -> Result<crate::main_gate::AssignedValue<F>, halo2_proofs::plonk::Error> {
+            todo!()
+        }
+
+        fn is_equal_term(
+            &self,
+            _ctx: &mut crate::main_gate::RegionCtx<'_, F>,
+            _a: &crate::main_gate::AssignedValue<F>,
+            _b: &crate::main_gate::AssignedValue<F>,
+        ) -> Result<crate::main_gate::AssignedValue<F>, halo2_proofs::plonk::Error> {
+            todo!()
+        }
+
+        unsafe fn unchecked_add<C: halo2_proofs::halo2curves::CurveAffine<Base = F>>(
+            &self,
+            _ctx: &mut crate::main_gate::RegionCtx<'_, C::Base>,
+            _p: &crate::gadgets::ecc::AssignedPoint<C>,
+            _q: &crate::gadgets::ecc::AssignedPoint<C>,
+        ) -> Result<crate::gadgets::ecc::AssignedPoint<C>, halo2_proofs::plonk::Error> {
+            todo!()
+        }
+
+        unsafe fn unchecked_double<C: halo2_proofs::halo2curves::CurveAffine<Base = F>>(
+            &self,
+            _ctx: &mut crate::main_gate::RegionCtx<'_, C::Base>,
+            _p: &crate::gadgets::ecc::AssignedPoint<C>,
+        ) -> Result<crate::gadgets::ecc::AssignedPoint<C>, halo2_proofs::plonk::Error> {
+            todo!()
+        }
+
+        fn negate<C: halo2_proofs::halo2curves::CurveAffine<Base = F>>(
+            &self,
+            _ctx: &mut crate::main_gate::RegionCtx<'_, F>,
+            _p: &crate::gadgets::ecc::AssignedPoint<C>,
+        ) -> Result<crate::gadgets::ecc::AssignedPoint<C>, halo2_proofs::plonk::Error> {
+            todo!()
+        }
+    }
+
+    pub struct EccCircuit {
+        gate: Gate,
+    }
+
+    impl<F: PrimeField> Circuit<F> for EccCircuit {
+        type Config = Config;
+        type FloorPlanner = SimpleFloorPlanner;
+
+        fn without_witnesses(&self) -> Self {
+            todo!()
+        }
+
+        fn configure(_meta: &mut ConstraintSystem<F>) -> Self::Config {
+            todo!()
+        }
+
+        fn synthesize(
+            &self,
+            _config: Self::Config,
+            _layouter: impl Layouter<F>,
+        ) -> Result<(), Halo2PlonkError> {
+            todo!()
+        }
+    }
+}
 
 /// Circuit for the primary curve that checks for folding from one to three support-circuit
 pub mod delegated_circuit {
