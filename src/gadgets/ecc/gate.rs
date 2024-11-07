@@ -170,15 +170,17 @@ impl<const T: usize, F: PrimeField> EccGate<F> for MainGate<F, T> {
         ctx: &mut RegionCtx<'_, F>,
         p: &AssignedPoint<C>,
     ) -> Result<AssignedPoint<C>, Halo2PlonkError> {
-        let x = p.clone().x;
-        let y = &p.y;
+        let AssignedPoint { x, y } = p.clone();
+
         let y_minus_val: Value<C::Base> = -y.value().copied();
+
         let y = self.apply(
             ctx,
             (Some(vec![C::Base::ONE]), None, Some(vec![y.into()])),
             None,
             (C::Base::ONE, y_minus_val.into()),
         )?;
+
         Ok(AssignedPoint { x, y })
     }
 }
