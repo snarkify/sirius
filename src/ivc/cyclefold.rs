@@ -15,6 +15,12 @@ where
     type BaseExt = C::Base;
 }
 
+/// Circuit for secondary curve, which implements a lightweight version of ecc
+pub mod support_circuit {
+
+}
+
+/// Circuit for the primary curve that checks for folding from one to three support-circuit
 pub mod delegated_circuit {
     use super::{
         super::sangria::fold_relaxed_plonk_instance_chip::FoldRelaxedPlonkInstanceChip,
