@@ -125,7 +125,7 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
     where
         C::Base: PrimeFieldBits,
     {
-        let ecc = EccChip::<C, T>::new(config.clone());
+        let ecc = EccChip::<C, MainGate<C::Base, T>>::new(config.clone());
         let gate = MainGate::<C::Base, T>::new(config.clone());
 
         let Self {
@@ -443,7 +443,7 @@ where
         input_W_commitments: &[AssignedPoint<C>],
         r: &[AssignedCell<C::Base, C::Base>],
     ) -> Result<Vec<AssignedPoint<C>>, Error> {
-        let ecc = EccChip::<C, T>::new(config.clone());
+        let ecc = EccChip::<C, MainGate<C::Base, T>>::new(config.clone());
 
         folded_W
             .iter()
@@ -513,7 +513,7 @@ where
         .take(cross_term_commits.len())
         .collect::<Result<Vec<_>, _>>()?;
 
-        let ecc = EccChip::<C, T>::new(self.config.clone());
+        let ecc = EccChip::<C, MainGate<C::Base, T>>::new(self.config.clone());
         // TODO Check what with all commits
         let rT = cross_term_commits
             .iter()
@@ -1139,7 +1139,7 @@ mod tests {
 
     fn assign_curve_points<C, const T: usize>(
         ctx: &mut RegionCtx<C::Base>,
-        ecc: &EccChip<C, T>,
+        ecc: &EccChip<C, MainGate<C::Base, T>>,
         points: &[C],
         var_prefix: &str,
     ) -> Result<Vec<AssignedPoint<C>>, halo2_proofs::plonk::Error>
@@ -1162,7 +1162,7 @@ mod tests {
         ws: WitnessCollector<Base>,
         config: MainGateConfig<T>,
         rnd: ThreadRng,
-        ecc: EccChip<C1, T>,
+        ecc: EccChip<C1, MainGate<Base, T>>,
         gate: MainGate<Base, T>,
         r: ScalarExt,
     }
@@ -1175,7 +1175,7 @@ mod tests {
             Self {
                 ws,
                 r: ScalarExt::from_u128(rnd.gen()),
-                ecc: EccChip::<C1, T>::new(config.clone()),
+                ecc: EccChip::<C1, MainGate<Base, T>>::new(config.clone()),
                 gate: MainGate::new(config.clone()),
                 config,
                 rnd,

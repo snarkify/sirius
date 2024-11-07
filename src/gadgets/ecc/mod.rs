@@ -1,234 +1,31 @@
-use std::{cmp, marker::PhantomData, num::NonZeroUsize};
+use std::{cmp, marker::PhantomData};
 
-use halo2_proofs::{
-    arithmetic::CurveAffine,
-    circuit::{Chip, Value},
-    halo2curves::ff::{PrimeField, PrimeFieldBits},
-    plonk::Error,
-};
 use tracing::*;
 
 use crate::{
-    ff::Field,
-    main_gate::{AdviceCyclicAssignor, AssignedValue, MainGate, RegionCtx},
+    halo2_proofs::{
+        arithmetic::{CurveAffine, Field},
+        halo2curves::ff::PrimeField,
+        plonk::Error,
+    },
+    main_gate::{AssignedValue, RegionCtx},
 };
 
-// assume point is not infinity
-#[derive(Clone, Debug)]
-pub struct AssignedPoint<C: CurveAffine> {
-    pub(crate) x: AssignedValue<C::Base>,
-    pub(crate) y: AssignedValue<C::Base>,
-}
+mod point;
+pub use point::AssignedPoint;
 
-impl<C: CurveAffine> AssignedPoint<C> {
-    pub fn coordinates(&self) -> (&AssignedValue<C::Base>, &AssignedValue<C::Base>) {
-        (&self.x, &self.y)
-    }
+mod gate;
+pub use gate::EccGate;
 
-    pub fn coordinates_values(&self) -> Option<(C::Base, C::Base)> {
-        let x = self.x.value().copied().unwrap();
-        let y = self.y.value().copied().unwrap();
-
-        Some((x?, y?))
-    }
-
-    pub fn to_curve(&self) -> Option<C> {
-        let (x, y) = self.coordinates();
-        C::from_xy(x.value().unwrap().copied()?, y.value().unwrap().copied()?).into()
-    }
-}
-
-pub trait EccGate<const T: usize, F: PrimeField>: Chip<F> {
-    fn new(config: <Self as Chip<F>>::Config) -> Self;
-
-    fn advice_cycle_assigner(&self) -> impl '_ + AdviceCyclicAssignor<F>;
-
-    fn conditional_select(
-        &self,
-        ctx: &mut RegionCtx<'_, F>,
-        a: &AssignedValue<F>,
-        b: &AssignedValue<F>,
-        cond: &AssignedValue<F>,
-    ) -> Result<AssignedValue<F>, Error>;
-
-    fn is_infinity_point(
-        &self,
-        ctx: &mut RegionCtx<'_, F>,
-        x: &AssignedValue<F>,
-        y: &AssignedValue<F>,
-    ) -> Result<AssignedValue<F>, Error>;
-
-    fn negate<C: CurveAffine<Base = F>>(
-        &self,
-        ctx: &mut RegionCtx<'_, F>,
-        p: &AssignedPoint<C>,
-    ) -> Result<AssignedPoint<C>, Error>;
-
-    fn le_num_to_bits(
-        &self,
-        ctx: &mut RegionCtx<'_, F>,
-        input: AssignedValue<F>,
-        bit_len: NonZeroUsize,
-    ) -> Result<Vec<AssignedValue<F>>, Error>
-    where
-        F: PrimeFieldBits;
-
-    /// # Safety
-    /// TODO
-    unsafe fn double<C: CurveAffine<Base = F>>(
-        &self,
-        ctx: &mut RegionCtx<'_, C::Base>,
-        p: &AssignedPoint<C>,
-    ) -> Result<AssignedPoint<C>, Error>;
-
-    /// # Safety
-    /// TODO
-    unsafe fn add<C: CurveAffine<Base = F>>(
-        &self,
-        ctx: &mut RegionCtx<'_, F>,
-        p: &AssignedPoint<C>,
-        q: &AssignedPoint<C>,
-    ) -> Result<AssignedPoint<C>, Error>;
-
-    fn is_equal_term(
-        &self,
-        ctx: &mut RegionCtx<'_, F>,
-        a: &AssignedValue<F>,
-        b: &AssignedValue<F>,
-    ) -> Result<AssignedValue<F>, Error>;
-}
-
-impl<const T: usize, F: PrimeField> EccGate<T, F> for MainGate<F, T> {
-    fn new(config: Self::Config) -> Self {
-        MainGate::new(config)
-    }
-
-    fn advice_cycle_assigner(&self) -> impl '_ + AdviceCyclicAssignor<F> {
-        self.config().advice_cycle_assigner()
-    }
-
-    fn conditional_select(
-        &self,
-        ctx: &mut RegionCtx<'_, F>,
-        a: &AssignedValue<F>,
-        b: &AssignedValue<F>,
-        cond: &AssignedValue<F>,
-    ) -> Result<AssignedValue<F>, Error> {
-        let state = Some(vec![a.into(), cond.into(), b.into(), cond.into()]);
-        // val = cond * a + (1-cond) * b
-        let val = cond.value().copied() * a.value().copied()
-            + (Value::known(F::ONE) - cond.value().copied()) * b.value().copied();
-        self.apply(
-            ctx,
-            (
-                Some(vec![F::ZERO, F::ZERO, F::ONE]),
-                Some(vec![F::ONE, -F::ONE]),
-                state,
-            ),
-            None,
-            (-F::ONE, val.into()),
-        )
-    }
-
-    fn is_infinity_point(
-        &self,
-        ctx: &mut RegionCtx<'_, F>,
-        x: &AssignedValue<F>,
-        y: &AssignedValue<F>,
-    ) -> Result<AssignedValue<F>, Error> {
-        self.is_infinity_point(ctx, x, y)
-    }
-
-    fn negate<C: CurveAffine<Base = F>>(
-        &self,
-        ctx: &mut RegionCtx<'_, F>,
-        p: &AssignedPoint<C>,
-    ) -> Result<AssignedPoint<C>, Error> {
-        let x = p.clone().x;
-        let y = &p.y;
-        let y_minus_val: Value<F> = -y.value().copied();
-        let y = self.apply(
-            ctx,
-            (Some(vec![F::ONE]), None, Some(vec![y.into()])),
-            None,
-            (F::ONE, y_minus_val.into()),
-        )?;
-        Ok(AssignedPoint { x, y })
-    }
-
-    fn le_num_to_bits(
-        &self,
-        ctx: &mut RegionCtx<'_, F>,
-        input: AssignedValue<F>,
-        bit_len: NonZeroUsize,
-    ) -> Result<Vec<AssignedValue<F>>, Error>
-    where
-        F: PrimeFieldBits,
-    {
-        MainGate::le_num_to_bits(self, ctx, input, bit_len)
-    }
-
-    unsafe fn double<C: CurveAffine<Base = F>>(
-        &self,
-        ctx: &mut RegionCtx<'_, C::Base>,
-        p: &AssignedPoint<C>,
-    ) -> Result<AssignedPoint<C>, Error> {
-        let xp2 = self.square(ctx, &p.x)?;
-        let lnum = self.mul_by_const(ctx, &xp2, C::Base::from(3))?;
-        let lden = self.add(ctx, &p.y, &p.y)?;
-        let lambda = self.divide(ctx, &lnum, &lden)?;
-        let lambda2 = self.square(ctx, &lambda)?;
-
-        let tmp1 = self.sub(ctx, &lambda2, &p.x)?;
-        let xr = self.sub(ctx, &tmp1, &p.x)?;
-        let tmp2 = self.sub(ctx, &p.x, &xr)?;
-        let tmp3 = self.mul(ctx, &lambda, &tmp2)?;
-        let yr = self.sub(ctx, &tmp3, &p.y)?;
-        Ok(AssignedPoint { x: xr, y: yr })
-    }
-
-    unsafe fn add<C: CurveAffine<Base = F>>(
-        &self,
-        ctx: &mut RegionCtx<'_, C::Base>,
-        p: &AssignedPoint<C>,
-        q: &AssignedPoint<C>,
-    ) -> Result<AssignedPoint<C>, Error> {
-        let yd = self.sub(ctx, &p.y, &q.y)?;
-        let xd = self.sub(ctx, &p.x, &q.x)?;
-        let lambda = self.divide(ctx, &yd, &xd)?;
-        let lambda2 = self.square(ctx, &lambda)?;
-        let tmp1 = self.sub(ctx, &lambda2, &p.x)?;
-        let xr = self.sub(ctx, &tmp1, &q.x)?;
-        let tmp2 = self.sub(ctx, &p.x, &xr)?;
-        let tmp3 = self.mul(ctx, &lambda, &tmp2)?;
-        let yr = self.sub(ctx, &tmp3, &p.y)?;
-        Ok(AssignedPoint { x: xr, y: yr })
-    }
-
-    fn is_equal_term(
-        &self,
-        ctx: &mut RegionCtx<'_, F>,
-        a: &AssignedValue<F>,
-        b: &AssignedValue<F>,
-    ) -> Result<AssignedValue<F>, Error> {
-        MainGate::is_equal_term(self, ctx, a, b)
-    }
-}
-
-pub struct EccChip<
-    C: CurveAffine,
-    const T: usize,
-    G: EccGate<T, C::Base> = MainGate<<C as CurveAffine>::Base, T>,
-> {
+pub struct EccChip<C: CurveAffine, G: EccGate<C::Base>> {
     gate: G,
     _p: PhantomData<C>,
 }
 
-impl<C: CurveAffine, const T: usize, G: EccGate<T, C::Base>> EccChip<C, T, G> {
+impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
     pub fn new(config: G::Config) -> Self {
-        let gate = G::new(config);
         Self {
-            gate,
+            gate: G::new(config),
             _p: PhantomData,
         }
     }
@@ -243,33 +40,83 @@ impl<C: CurveAffine, const T: usize, G: EccGate<T, C::Base>> EccChip<C, T, G> {
             .coordinates()
             .map(|coordinates| (*coordinates.x(), *coordinates.y()))
             .into();
-        self.assign_point(ctx, annotation, coordinates)
+        self.gate.assign_point(ctx, annotation, coordinates)
     }
 
-    pub fn assign_point<AN: Into<String>>(
+    pub fn negate(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
-        annotation: impl Fn() -> AN,
-        coords: Option<(C::Base, C::Base)>,
+        p: &AssignedPoint<C>,
     ) -> Result<AssignedPoint<C>, Error> {
-        let mut assigner = self.gate.advice_cycle_assigner();
-        let x = assigner.assign_next_advice(
-            ctx,
-            || format!("{}.x", annotation().into()),
-            coords.map_or(C::Base::ZERO, |c| c.0),
-        )?;
-        let y = assigner.assign_next_advice(
-            ctx,
-            || format!("{}.y", annotation().into()),
-            coords.map_or(C::Base::ZERO, |c| c.1),
-        )?;
+        self.gate.negate(ctx, p)
+    }
 
-        ctx.next();
+    pub fn add(
+        &self,
+        ctx: &mut RegionCtx<'_, C::Base>,
+        p: &AssignedPoint<C>,
+        q: &AssignedPoint<C>,
+    ) -> Result<AssignedPoint<C>, Error> {
+        let is_p_iden = self.gate.is_infinity_point(ctx, &p.x, &p.y)?;
+        let is_q_iden = self.gate.is_infinity_point(ctx, &q.x, &q.y)?;
+        let is_equal_x = self.gate.is_equal_term(ctx, &p.x, &q.x)?;
+        let is_equal_y = self.gate.is_equal_term(ctx, &p.y, &q.y)?;
+
+        let inf = self.gate.assign_point::<C, _>(ctx, || "inf", None)?;
+        // Safety: TODO #371
+        let r = unsafe { self.gate.unchecked_add(ctx, p, q) }?;
+        let p2 = self.double(ctx, p)?;
+
+        let x1 = self
+            .gate
+            .conditional_select(ctx, &p2.x, &inf.x, &is_equal_y)?;
+        let y1 = self
+            .gate
+            .conditional_select(ctx, &p2.y, &inf.y, &is_equal_y)?;
+        let x2 = self.gate.conditional_select(ctx, &x1, &r.x, &is_equal_x)?;
+        let y2 = self.gate.conditional_select(ctx, &y1, &r.y, &is_equal_x)?;
+        let x3 = self.gate.conditional_select(ctx, &p.x, &x2, &is_q_iden)?;
+        let y3 = self.gate.conditional_select(ctx, &p.y, &y2, &is_q_iden)?;
+        let x = self.gate.conditional_select(ctx, &q.x, &x3, &is_p_iden)?;
+        let y = self.gate.conditional_select(ctx, &q.y, &y3, &is_p_iden)?;
 
         Ok(AssignedPoint { x, y })
     }
 
-    // optimization here is analogous to https://github.com/arkworks-rs/r1cs-std/blob/6d64f379a27011b3629cf4c9cb38b7b7b695d5a0/src/groups/curves/short_weierstrass/mod.rs#L295
+    fn double(
+        &self,
+        ctx: &mut RegionCtx<'_, C::Base>,
+        p: &AssignedPoint<C>,
+    ) -> Result<AssignedPoint<C>, Error> {
+        let is_inf = self.gate.is_infinity_point(ctx, &p.x, &p.y)?;
+        let inf = self.gate.assign_point::<C, _>(ctx, || "inf", None)?;
+        // Safety: TODO #371
+        let p2 = unsafe { self.gate.unchecked_double(ctx, p) }?;
+
+        let x = self.gate.conditional_select(ctx, &inf.x, &p2.x, &is_inf)?;
+        let y = self.gate.conditional_select(ctx, &inf.y, &p2.y, &is_inf)?;
+        Ok(AssignedPoint { x, y })
+    }
+
+    pub fn conditional_select(
+        &self,
+        ctx: &mut RegionCtx<'_, C::Base>,
+        lhs: &AssignedPoint<C>,
+        rhs: &AssignedPoint<C>,
+        condition: &AssignedValue<C::Base>,
+    ) -> Result<AssignedPoint<C>, Error> {
+        Ok(AssignedPoint {
+            x: self
+                .gate
+                .conditional_select(ctx, &lhs.x, &rhs.x, condition)?,
+            y: self
+                .gate
+                .conditional_select(ctx, &lhs.y, &rhs.y, condition)?,
+        })
+    }
+
+    // optimization here is analogous to
+    /// https://github.com/arkworks-rs/r1cs-std/blob/6d64f379a27011b3629cf4c9cb38b7b7b695d5a0/src/groups/curves/short_weierstrass/mod.rs#L295
     pub fn scalar_mul(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
@@ -284,21 +131,24 @@ impl<C: CurveAffine, const T: usize, G: EccGate<T, C::Base>> EccChip<C, T, G> {
         // assume first bit of scalar_bits is 1 for now
         // so we can use unsafe_add later
         let mut acc = p0.clone();
-        let mut p = unsafe { self.gate.double(ctx, p0) }?;
+        // Safety: TODO #371
+        let mut p = unsafe { self.gate.unchecked_double(ctx, p0) }?;
 
         // the size of incomplete_bits ensures a + b != 0
         for bit in incomplete_bits.iter().skip(1) {
-            let tmp = unsafe { self.gate.add(ctx, &acc, &p) }?;
+            // Safety: TODO #371
+            let tmp = unsafe { self.gate.unchecked_add(ctx, &acc, &p) }?;
             let x = self.gate.conditional_select(ctx, &tmp.x, &acc.x, bit)?;
             let y = self.gate.conditional_select(ctx, &tmp.y, &acc.y, bit)?;
             acc = AssignedPoint { x, y };
-            p = self.double(ctx, &p)?
+            // Safety: TODO #371
+            p = unsafe { self.gate.unchecked_double(ctx, &p) }?;
         }
 
         // make correction if first bit is 0
         let res: AssignedPoint<C> = {
             let acc_minus_initial = {
-                let neg = self.gate.negate(ctx, p0)?;
+                let neg = self.negate(ctx, p0)?;
                 self.add(ctx, &acc, &neg)?
             };
             let x =
@@ -311,7 +161,7 @@ impl<C: CurveAffine, const T: usize, G: EccGate<T, C::Base>> EccChip<C, T, G> {
         };
 
         // (2) modify acc and p if p0 is infinity
-        let infp = self.assign_point(ctx, || "infp", None)?;
+        let infp = self.gate.assign_point::<C, _>(ctx, || "infp", None)?;
         let is_p_iden = self.gate.is_infinity_point(ctx, &p0.x, &p0.y)?;
         let x = self
             .gate
@@ -363,23 +213,24 @@ impl<C: CurveAffine, const T: usize, G: EccGate<T, C::Base>> EccChip<C, T, G> {
         // assume first bit of scalar_bits is 1 for now
         // so we can use unsafe_add later
         let mut acc = p0.clone();
-        let mut p = unsafe { self.gate.double(ctx, p0) }?;
+        let mut p = unsafe { self.gate.unchecked_double(ctx, p0) }?;
 
         // the size of incomplete_bits ensures a + b != 0
         for bit in incomplete_bits.iter().skip(1) {
-            let sum = unsafe { self.gate.add(ctx, &acc, &p) }?;
+            // Safety: TODO #371
+            let sum = unsafe { self.gate.unchecked_add(ctx, &acc, &p) }?;
             acc = AssignedPoint {
                 x: self.gate.conditional_select(ctx, &sum.x, &acc.x, bit)?,
                 y: self.gate.conditional_select(ctx, &sum.y, &acc.y, bit)?,
             };
-            p = unsafe { self.gate.double(ctx, &p) }?;
+            p = unsafe { self.gate.unchecked_double(ctx, &p) }?;
         }
 
         // make correction if first bit is 0
         // make correction if first bit is 0
         acc = {
             let acc_minus_initial = {
-                let neg = self.gate.negate(ctx, p0)?;
+                let neg = self.negate(ctx, p0)?;
                 self.add(ctx, &acc, &neg)?
             };
             AssignedPoint {
@@ -410,87 +261,26 @@ impl<C: CurveAffine, const T: usize, G: EccGate<T, C::Base>> EccChip<C, T, G> {
 
         Ok(acc)
     }
-
-    pub fn add(
-        &self,
-        ctx: &mut RegionCtx<'_, C::Base>,
-        p: &AssignedPoint<C>,
-        q: &AssignedPoint<C>,
-    ) -> Result<AssignedPoint<C>, Error> {
-        let is_p_iden = self.gate.is_infinity_point(ctx, &p.x, &p.y)?;
-        let is_q_iden = self.gate.is_infinity_point(ctx, &q.x, &q.y)?;
-        let is_equal_x = self.gate.is_equal_term(ctx, &p.x, &q.x)?;
-        let is_equal_y = self.gate.is_equal_term(ctx, &p.y, &q.y)?;
-
-        let inf = self.assign_point(ctx, || "inf", None)?;
-        let r = unsafe { self.gate.add(ctx, p, q) }?;
-        let p2 = self.double(ctx, p)?;
-
-        let x1 = self
-            .gate
-            .conditional_select(ctx, &p2.x, &inf.x, &is_equal_y)?;
-        let y1 = self
-            .gate
-            .conditional_select(ctx, &p2.y, &inf.y, &is_equal_y)?;
-        let x2 = self.gate.conditional_select(ctx, &x1, &r.x, &is_equal_x)?;
-        let y2 = self.gate.conditional_select(ctx, &y1, &r.y, &is_equal_x)?;
-        let x3 = self.gate.conditional_select(ctx, &p.x, &x2, &is_q_iden)?;
-        let y3 = self.gate.conditional_select(ctx, &p.y, &y2, &is_q_iden)?;
-        let x = self.gate.conditional_select(ctx, &q.x, &x3, &is_p_iden)?;
-        let y = self.gate.conditional_select(ctx, &q.y, &y3, &is_p_iden)?;
-
-        Ok(AssignedPoint { x, y })
-    }
-
-    fn double(
-        &self,
-        ctx: &mut RegionCtx<'_, C::Base>,
-        p: &AssignedPoint<C>,
-    ) -> Result<AssignedPoint<C>, Error> {
-        let is_inf = self.gate.is_infinity_point(ctx, &p.x, &p.y)?;
-        let inf = self.assign_point(ctx, || "inf", None)?;
-        let p2 = unsafe { self.gate.double(ctx, p)? };
-
-        let x = self.gate.conditional_select(ctx, &inf.x, &p2.x, &is_inf)?;
-        let y = self.gate.conditional_select(ctx, &inf.y, &p2.y, &is_inf)?;
-        Ok(AssignedPoint { x, y })
-    }
-
-    pub fn conditional_select(
-        &self,
-        ctx: &mut RegionCtx<'_, C::Base>,
-        lhs: &AssignedPoint<C>,
-        rhs: &AssignedPoint<C>,
-        condition: &AssignedValue<C::Base>,
-    ) -> Result<AssignedPoint<C>, Error> {
-        Ok(AssignedPoint {
-            x: self
-                .gate
-                .conditional_select(ctx, &lhs.x, &rhs.x, condition)?,
-            y: self
-                .gate
-                .conditional_select(ctx, &lhs.y, &rhs.y, condition)?,
-        })
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
 
-    use halo2_proofs::{
-        circuit::{Layouter, SimpleFloorPlanner},
-        plonk::{Circuit, Column, ConstraintSystem, Instance},
-    };
+    use halo2_proofs::{circuit::Value, halo2curves::ff::PrimeFieldBits};
     use rand_core::OsRng;
     use tracing_test::traced_test;
 
     use super::*;
     use crate::{
         create_and_verify_proof,
-        ff::{Field, PrimeFieldBits},
+        ff::Field,
+        halo2_proofs::{
+            circuit::{Chip, Layouter, SimpleFloorPlanner},
+            plonk::{Circuit, Column, ConstraintSystem, Instance},
+        },
         halo2curves::pasta::{pallas, EqAffine, Fp, Fq},
-        main_gate::MainGateConfig,
+        main_gate::{MainGate, MainGateConfig},
         run_mock_prover_test,
         util::ScalarToBase,
     };
@@ -647,7 +437,7 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<C::Base>,
         ) -> Result<(), Error> {
-            let ecc_chip = EccChip::<C, T>::new(config.config);
+            let ecc_chip = EccChip::<C, MainGate<F, T>>::new(config.config);
             let output = layouter.assign_region(
                 || "ecc test circuit",
                 |region| {
