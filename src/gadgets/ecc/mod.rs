@@ -63,7 +63,8 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
         let is_equal_y = self.gate.is_equal_term(ctx, &p.y, &q.y)?;
 
         let inf = self.gate.assign_point::<C, _>(ctx, || "inf", None)?;
-        // Safety: TODO #371
+        // # Safety
+        // We check at the bottom of this fn, what p.x == q.x
         let r = unsafe { self.gate.unchecked_add(ctx, p, q) }?;
         let p2 = self.double(ctx, p)?;
 
@@ -90,7 +91,9 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
     ) -> Result<AssignedPoint<C>, Error> {
         let is_inf = self.gate.is_infinity_point(ctx, &p.x, &p.y)?;
         let inf = self.gate.assign_point::<C, _>(ctx, || "inf", None)?;
-        // Safety: TODO #371
+        // Safety:
+        // This value will be used only if `is_inf = false`
+        // `is_inf` false, only if p.x & p.y not zero
         let p2 = unsafe { self.gate.unchecked_double(ctx, p) }?;
 
         let x = self.gate.conditional_select(ctx, &inf.x, &p2.x, &is_inf)?;
@@ -126,22 +129,28 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
         let split_len = cmp::min(scalar_bits.len(), (C::Base::NUM_BITS - 2) as usize);
         let (incomplete_bits, complete_bits) = scalar_bits.split_at(split_len);
 
+        let mut acc = p0.clone();
+        // # Safety:
         // (1) assume p0 is not infinity
-
         // assume first bit of scalar_bits is 1 for now
         // so we can use unsafe_add later
-        let mut acc = p0.clone();
-        // Safety: TODO #371
         let mut p = unsafe { self.gate.unchecked_double(ctx, p0) }?;
 
         // the size of incomplete_bits ensures a + b != 0
         for bit in incomplete_bits.iter().skip(1) {
-            // Safety: TODO #371
+            // # Safety:
+            // (1) assume p0 is not infinity
+            // assume first bit of scalar_bits is 1 for now
+            // so we can use unsafe_add later
             let tmp = unsafe { self.gate.unchecked_add(ctx, &acc, &p) }?;
-            let x = self.gate.conditional_select(ctx, &tmp.x, &acc.x, bit)?;
-            let y = self.gate.conditional_select(ctx, &tmp.y, &acc.y, bit)?;
-            acc = AssignedPoint { x, y };
-            // Safety: TODO #371
+            acc = AssignedPoint {
+                x: self.gate.conditional_select(ctx, &tmp.x, &acc.x, bit)?,
+                y: self.gate.conditional_select(ctx, &tmp.y, &acc.y, bit)?,
+            };
+            // # Safety:
+            // (1) assume p0 is not infinity
+            // assume first bit of scalar_bits is 1 for now
+            // so we can use unsafe_add later
             p = unsafe { self.gate.unchecked_double(ctx, &p) }?;
         }
 
@@ -208,21 +217,28 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
         let split_len = cmp::min(scalar_bits.len(), (C::Base::NUM_BITS - 2) as usize);
         let (incomplete_bits, complete_bits) = scalar_bits.split_at(split_len);
 
+        let mut acc = p0.clone();
+        // # Safety:
         // (1) assume p0 is not infinity
-
         // assume first bit of scalar_bits is 1 for now
         // so we can use unsafe_add later
-        let mut acc = p0.clone();
         let mut p = unsafe { self.gate.unchecked_double(ctx, p0) }?;
 
         // the size of incomplete_bits ensures a + b != 0
         for bit in incomplete_bits.iter().skip(1) {
-            // Safety: TODO #371
+            // # Safety:
+            // (1) assume p0 is not infinity
+            // assume first bit of scalar_bits is 1 for now
+            // so we can use unsafe_add later
             let sum = unsafe { self.gate.unchecked_add(ctx, &acc, &p) }?;
             acc = AssignedPoint {
                 x: self.gate.conditional_select(ctx, &sum.x, &acc.x, bit)?,
                 y: self.gate.conditional_select(ctx, &sum.y, &acc.y, bit)?,
             };
+            // # Safety:
+            // (1) assume p0 is not infinity
+            // assume first bit of scalar_bits is 1 for now
+            // so we can use unsafe_add later
             p = unsafe { self.gate.unchecked_double(ctx, &p) }?;
         }
 
