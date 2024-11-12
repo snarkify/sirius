@@ -8,7 +8,9 @@
 //! For more details look at:
 //! - Paragraph '3. Folding scheme' at [Nova whitepaper](https://eprint.iacr.org/2021/370)
 //! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
-use halo2_proofs::{arithmetic::CurveAffine, plonk::Error as Halo2Error};
+use halo2_proofs::{
+    arithmetic::CurveAffine, halo2curves::ff::PrimeField, plonk::Error as Halo2Error,
+};
 use rayon::prelude::*;
 
 use crate::{
@@ -22,7 +24,7 @@ pub mod protogalaxy;
 pub mod sangria;
 
 /// Trait representing the NIFS folding scheme.
-pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
+pub trait FoldingScheme<C: CurveAffine, F: PrimeField, const L: usize = 1> {
     type Error;
 
     /// Metadata for prover including hash of public params
@@ -50,22 +52,22 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
 
     fn setup_params(
         pp_digest: C,
-        S: PlonkStructure<C::ScalarExt>,
+        S: PlonkStructure<F>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Self::Error>;
 
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
-        instances: &[Vec<C::ScalarExt>],
-        witness: &[Vec<C::ScalarExt>],
+        instances: &[Vec<F>],
+        witness: &[Vec<F>],
         pp: &Self::ProverParam,
-        ro_nark: &mut impl ROTrait<C::Base>,
+        ro_nark: &mut impl ROTrait<F>,
     ) -> Result<Self::Trace, Self::Error>;
 
     /// Perform the folding operation as a prover.
     fn prove(
         ck: &CommitmentKey<C>,
         pp: &Self::ProverParam,
-        ro_acc: &mut impl ROTrait<C::Base>,
+        ro_acc: &mut impl ROTrait<F>,
         accumulator: Self::Accumulator,
         incoming: &[Self::Trace; L],
     ) -> Result<(Self::Accumulator, Self::Proof), Self::Error>;
@@ -73,8 +75,8 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
     /// Perform the folding operation as a verifier.
     fn verify(
         vp: &Self::VerifierParam,
-        ro_nark: &mut impl ROTrait<C::Base>,
-        ro_acc: &mut impl ROTrait<C::Base>,
+        ro_nark: &mut impl ROTrait<F>,
+        ro_acc: &mut impl ROTrait<F>,
         accumulator: &Self::AccumulatorInstance,
         incoming: &[Self::Instance; L],
         proof: &Self::Proof,
@@ -83,7 +85,9 @@ pub trait FoldingScheme<C: CurveAffine, const L: usize = 1> {
 
 /// Trait representing the requirements for checking the satisfaction of
 /// accumulation relations in a Non-Interactive Folding Scheme (NIFS).
-pub trait VerifyAccumulation<C: CurveAffine, const L: usize = 1>: FoldingScheme<C, L> {
+pub trait VerifyAccumulation<C: CurveAffine, F: PrimeField, const L: usize = 1>:
+    FoldingScheme<C, F, L>
+{
     type VerifyError;
 
     /// Checks if the given accumulator satisfies the specified polynomial
@@ -92,8 +96,8 @@ pub trait VerifyAccumulation<C: CurveAffine, const L: usize = 1>: FoldingScheme<
     /// This method verifies the accumulation of polynomial relations to ensure
     /// they adhere to the constraints defined in the folding scheme.
     fn is_sat_accumulation(
-        S: &PlonkStructure<C::ScalarExt>,
-        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+        S: &PlonkStructure<F>,
+        acc: &<Self as FoldingScheme<C, F, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError>;
 
     /// Checks if the permutation relations in the accumulator are satisfied.
@@ -102,8 +106,8 @@ pub trait VerifyAccumulation<C: CurveAffine, const L: usize = 1>: FoldingScheme<
     /// originate from copy constraints in the PLONK protocol, are correctly
     /// enforced in the accumulator.
     fn is_sat_permutation(
-        S: &PlonkStructure<C::ScalarExt>,
-        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+        S: &PlonkStructure<F>,
+        acc: &<Self as FoldingScheme<C, F, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError>;
 
     /// Checks if the witness commitments in the accumulator are satisfied.
@@ -112,7 +116,7 @@ pub trait VerifyAccumulation<C: CurveAffine, const L: usize = 1>: FoldingScheme<
     /// correctly enforced in the accumulator.
     fn is_sat_witness_commit(
         ck: &CommitmentKey<C>,
-        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+        acc: &<Self as FoldingScheme<C, F, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError>;
 
     /// Checks that the accumulator for instance columns (public input) is correct
@@ -120,8 +124,8 @@ pub trait VerifyAccumulation<C: CurveAffine, const L: usize = 1>: FoldingScheme<
     /// This method ensure that the instance accumulator in `acc` really contains these public
     /// inputs
     fn is_sat_pub_instances(
-        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
-        pub_instances: &[Vec<Vec<C::ScalarExt>>],
+        acc: &<Self as FoldingScheme<C, F, L>>::Accumulator,
+        pub_instances: &[Vec<Vec<F>>],
     ) -> Result<(), Self::VerifyError>;
 }
 
@@ -129,7 +133,9 @@ pub trait VerifyAccumulation<C: CurveAffine, const L: usize = 1>: FoldingScheme<
 ///
 /// This trait combines multiple specific satisfaction checks into one method
 /// for comprehensive verification of accumulators.
-pub trait IsSatAccumulator<C: CurveAffine, const L: usize = 1>: VerifyAccumulation<C, L> {
+pub trait IsSatAccumulator<C: CurveAffine, F: PrimeField, const L: usize = 1>:
+    VerifyAccumulation<C, F, L>
+{
     /// Comprehensive satisfaction check for an accumulator.
     ///
     /// This method runs multiple checks ([`IsSatAccumulation::is_sat_accumulation`],
@@ -137,9 +143,9 @@ pub trait IsSatAccumulator<C: CurveAffine, const L: usize = 1>: VerifyAccumulati
     /// ensure that all required constraints are satisfied in the accumulator.
     fn is_sat(
         ck: &CommitmentKey<C>,
-        S: &PlonkStructure<C::ScalarExt>,
-        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
-        pub_instances: &[Vec<Vec<C::ScalarExt>>],
+        S: &PlonkStructure<F>,
+        acc: &<Self as FoldingScheme<C, F, L>>::Accumulator,
+        pub_instances: &[Vec<Vec<F>>],
     ) -> Result<(), Vec<Self::VerifyError>> {
         let mut errors = vec![];
 
@@ -167,7 +173,10 @@ pub trait IsSatAccumulator<C: CurveAffine, const L: usize = 1>: VerifyAccumulati
     }
 }
 
-impl<C: CurveAffine, const L: usize, F: VerifyAccumulation<C, L>> IsSatAccumulator<C, L> for F {}
+impl<C: CurveAffine, F: PrimeField, const L: usize, VA: VerifyAccumulation<C, F, L>>
+    IsSatAccumulator<C, F, L> for VA
+{
+}
 
 #[cfg(test)]
 pub(crate) mod tests;

@@ -1,16 +1,18 @@
+use serde::Serialize;
+
 use crate::halo2_proofs::halo2curves::{
     ff::{FromUniformBytes, PrimeFieldBits},
     CurveAffine,
 };
 
-pub trait SuitableCurve: CurveAffine<Base = Self::BaseExt> {
-    type BaseExt: PrimeFieldBits + FromUniformBytes<64>;
+pub trait SuitableCurve: CurveAffine<Base = Self::BaseExt> + Serialize {
+    type BaseExt: PrimeFieldBits + FromUniformBytes<64> + Serialize;
 }
 
 impl<C> SuitableCurve for C
 where
-    C: CurveAffine,
-    C::Base: PrimeFieldBits + FromUniformBytes<64>,
+    C: CurveAffine + Serialize,
+    C::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
 {
     type BaseExt = C::Base;
 }
@@ -190,11 +192,12 @@ pub mod delegated_circuit {
 pub mod step_folding_circuit {
     use std::marker::PhantomData;
 
-    use halo2_proofs::{circuit::floor_planner, plonk::Circuit as Halo2Circuit};
+    use serde::Serialize;
 
-    use super::SuitableCurve;
+    use super::{public_params::CircuitPublicParams, SuitableCurve};
     use crate::{
         gadgets::ecc::AssignedPoint,
+        halo2_proofs::{circuit::floor_planner, plonk::Circuit as Halo2Circuit},
         ivc::{
             protogalaxy::verify_chip::{
                 AssignedAccumulatorInstance, AssignedPlonkInstance, AssignedProof,
@@ -213,15 +216,15 @@ pub mod step_folding_circuit {
         C: SuitableCurve,
         RO: ROCircuitTrait<C::BaseExt>,
     > {
-        pp_digest: C,
-        args: RO::Args,
-        accumulator: protogalaxy::AccumulatorInstance<C>,
-        incoming: [PlonkInstance<C>; LENGTH],
-        proof: protogalaxy::Proof<C::BaseExt>,
+        pub pp_digest: C,
+        pub args: RO::Args,
+        pub accumulator: protogalaxy::AccumulatorInstance<C>,
+        pub incoming: [PlonkInstance<C>; LENGTH],
+        pub proof: protogalaxy::Proof<C::BaseExt>,
 
-        step: usize,
-        z_0: [C::BaseExt; ARITY],
-        z_i: [C::BaseExt; ARITY],
+        pub step: usize,
+        pub z_0: [C::BaseExt; ARITY],
+        pub z_i: [C::BaseExt; ARITY],
     }
 
     impl<
@@ -258,19 +261,6 @@ pub mod step_folding_circuit {
         z_i: [AssignedValue<C::BaseExt>; ARITY],
     }
 
-    pub struct StepFoldingCircuit<
-        'link,
-        const LENGTH: usize,
-        const ARITY: usize,
-        const MAIN_GATE_T: usize,
-        C: SuitableCurve,
-        SC: StepCircuit<ARITY, C::BaseExt>,
-        RO: ROCircuitTrait<C::BaseExt>,
-    > {
-        sc: &'link SC,
-        input: Input<LENGTH, ARITY, C, RO>,
-    }
-
     pub struct StepFoldingCircuitConfig<
         const ARITY: usize,
         const MAIN_GATE_T: usize,
@@ -283,6 +273,41 @@ pub mod step_folding_circuit {
         sc: SC::Config,
         main: MainGateConfig<MAIN_GATE_T>,
         _p: PhantomData<C::BaseExt>,
+    }
+
+    pub struct StepFoldingCircuit<
+        'link,
+        const LENGTH: usize,
+        const ARITY: usize,
+        const MAIN_GATE_T: usize,
+        C: SuitableCurve,
+        SC: StepCircuit<ARITY, C::BaseExt>,
+        RO: ROCircuitTrait<C::BaseExt>,
+    > {
+        pub(crate) sc: &'link SC,
+        pub(crate) input: Input<LENGTH, ARITY, C, RO>,
+    }
+
+    impl<
+            'link,
+            const LENGTH: usize,
+            const ARITY: usize,
+            const MAIN_GATE_T: usize,
+            C: SuitableCurve,
+            SC: StepCircuit<ARITY, C::BaseExt>,
+            RO: ROCircuitTrait<C::BaseExt>,
+        > StepFoldingCircuit<'link, LENGTH, ARITY, MAIN_GATE_T, C, SC, RO>
+    {
+        pub fn without_witness<PairedCircuit: Halo2Circuit<C::Scalar>>(
+            _k_table_size: u32,
+            _native_num_io: &[usize],
+            _step_pp: &'link CircuitPublicParams<C, RO::Args>,
+        ) -> Self
+        where
+            RO::Args: Serialize,
+        {
+            todo!()
+        }
     }
 
     impl<
@@ -345,86 +370,213 @@ pub mod public_params {
     use serde::Serialize;
 
     use super::SuitableCurve;
-    use crate::{ivc::StepCircuit, poseidon::ROPair};
+    use crate::{
+        ivc::StepCircuit,
+        nifs::protogalaxy,
+        plonk::{PlonkStructure, PlonkTrace},
+        polynomial::univariate::UnivariatePoly,
+        poseidon::ROPair,
+        prelude::CommitmentKey,
+    };
+
+    #[derive(Serialize)]
+    #[serde(bound(serialize = ""))]
+    pub struct CircuitPublicParams<'key, C, RPArgs>
+    where
+        C: SuitableCurve,
+        RPArgs: Serialize,
+    {
+        commitment_key: &'key CommitmentKey<C>,
+        k_table_size: u32,
+        ro_constant: RPArgs,
+    }
+
+    impl<'key, C, RPArgs> CircuitPublicParams<'key, C, RPArgs>
+    where
+        C: SuitableCurve,
+        RPArgs: Serialize + Clone,
+    {
+        pub fn ro_args(&self) -> RPArgs {
+            self.ro_constant.clone()
+        }
+
+        pub fn initial_proof(&self) -> protogalaxy::Proof<C::Base>
+        where
+            C::Base: Serialize,
+        {
+            protogalaxy::Proof {
+                poly_F: UnivariatePoly::new_zeroed(10),
+                poly_K: UnivariatePoly::new_zeroed(10),
+            }
+        }
+    }
 
     #[derive(Serialize)]
     #[serde(bound(serialize = ""))]
     pub struct PublicParams<
-        const ARITY1: usize,
-        const ARITY2: usize,
+        'key,
+        const ARITY: usize,
         const MAIN_GATE_T: usize,
         C1,
         C2,
-        SC1,
-        SC2,
+        SC,
         RP1,
         RP2,
     >
     where
-        C1: SuitableCurve<BaseExt = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
-        C2: SuitableCurve<BaseExt = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
+        C1: SuitableCurve<BaseExt = <C2 as PrimeCurveAffine>::Scalar>,
+        C2: SuitableCurve<BaseExt = <C1 as PrimeCurveAffine>::Scalar>,
 
-        C1::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
-        C2::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
+        SC: StepCircuit<ARITY, C1::BaseExt>,
 
-        SC1: StepCircuit<ARITY1, C1::BaseExt>,
-        SC2: StepCircuit<ARITY2, C2::BaseExt>,
+        C1::BaseExt: PrimeFieldBits + FromUniformBytes<64> + Serialize,
+        C2::BaseExt: PrimeFieldBits + FromUniformBytes<64> + Serialize,
 
         RP1: ROPair<C1::BaseExt>,
         RP2: ROPair<C2::BaseExt>,
     {
-        _p: PhantomData<(C1, C2, SC1, SC2, RP1, RP2)>,
+        pub(crate) primary: CircuitPublicParams<'key, C1, RP1::Args>,
+        pub(crate) secondary: CircuitPublicParams<'key, C2, RP2::Args>,
+        _p: PhantomData<(C1, C2, SC, RP1, RP2)>,
     }
 
-    impl<
-            const ARITY1: usize,
-            const ARITY2: usize,
-            const MAIN_GATE_T: usize,
-            C1,
-            C2,
-            SC1,
-            SC2,
-            RP1,
-            RP2,
-        > PublicParams<ARITY1, ARITY2, MAIN_GATE_T, C1, C2, SC1, SC2, RP1, RP2>
+    impl<'key, const ARITY: usize, const MAIN_GATE_T: usize, C1, C2, SC, RP1, RP2>
+        PublicParams<'key, ARITY, MAIN_GATE_T, C1, C2, SC, RP1, RP2>
     where
-        C1: SuitableCurve<BaseExt = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
-        C2: SuitableCurve<BaseExt = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
+        C1: SuitableCurve<BaseExt = <C2 as PrimeCurveAffine>::Scalar>,
+        C2: SuitableCurve<BaseExt = <C1 as PrimeCurveAffine>::Scalar>,
 
-        C1::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
-        C2::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
+        SC: StepCircuit<ARITY, C1::BaseExt>,
 
-        SC1: StepCircuit<ARITY1, C1::BaseExt>,
-        SC2: StepCircuit<ARITY2, C2::BaseExt>,
+        C1::BaseExt: PrimeFieldBits + FromUniformBytes<64> + Serialize,
+        C2::BaseExt: PrimeFieldBits + FromUniformBytes<64> + Serialize,
 
         RP1: ROPair<C1::BaseExt>,
         RP2: ROPair<C2::BaseExt>,
     {
+        pub fn new(
+            _step_circuit: &SC,
+            primary: CircuitPublicParams<'key, C1, RP1::Args>,
+            secondary: CircuitPublicParams<'key, C2, RP2::Args>,
+        ) -> Self {
+            Self {
+                primary,
+                secondary,
+                _p: PhantomData,
+            }
+        }
+
+        pub fn initial_plonk_trace(&self) -> PlonkTrace<C1> {
+            todo!()
+        }
+
+        pub fn digest(&self) -> C1 {
+            todo!()
+        }
+
+        pub fn plonk_structure1(&self) -> PlonkStructure<C1::Base> {
+            todo!()
+        }
+
+        pub fn plonk_structure2(&self) -> PlonkStructure<C2::Base> {
+            todo!()
+        }
     }
 }
 
 pub mod incrementally_verifiable_computation {
     use std::marker::PhantomData;
 
-    use halo2_proofs::halo2curves::group::prime::PrimeCurveAffine;
+    use serde::Serialize;
 
-    use super::SuitableCurve;
-    use crate::ivc::StepCircuit;
+    use super::{public_params::PublicParams, SuitableCurve};
+    use crate::{
+        halo2_proofs::halo2curves::{
+            ff::{FromUniformBytes, PrimeFieldBits},
+            group::prime::PrimeCurveAffine,
+        },
+        ivc::{
+            cyclefold::step_folding_circuit::{Input, StepFoldingCircuit},
+            StepCircuit,
+        },
+        nifs::protogalaxy::{AccumulatorArgs, ProtoGalaxy, ProverParam},
+        poseidon::{random_oracle::ROTrait, ROPair},
+    };
 
-    pub struct IVC<const ARITY: usize, C1, C2, SC>
+    pub struct IVC<const ARITY: usize, const MAIN_GATE_T: usize, C1, C2, SC>
     where
         C1: SuitableCurve<BaseExt = <C2 as PrimeCurveAffine>::Scalar>,
         C2: SuitableCurve<BaseExt = <C1 as PrimeCurveAffine>::Scalar>,
+
         SC: StepCircuit<ARITY, C1::Base>,
     {
         _p: PhantomData<(C1, C2, SC)>,
     }
 
-    impl<const ARITY: usize, C1, C2, SC> IVC<ARITY, C1, C2, SC>
+    impl<const ARITY: usize, const MAIN_GATE_T: usize, C1, C2, SC> IVC<ARITY, MAIN_GATE_T, C1, C2, SC>
     where
         C1: SuitableCurve<BaseExt = <C2 as PrimeCurveAffine>::Scalar>,
         C2: SuitableCurve<BaseExt = <C1 as PrimeCurveAffine>::Scalar>,
+        C1::BaseExt: PrimeFieldBits + FromUniformBytes<64> + Serialize,
+        C2::BaseExt: PrimeFieldBits + FromUniformBytes<64> + Serialize,
         SC: StepCircuit<ARITY, C1::Base>,
     {
+        pub fn new<RP1, RP2>(
+            pp: &PublicParams<ARITY, MAIN_GATE_T, C1, C2, SC, RP1, RP2>,
+            primary: &SC,
+            input_z_0: [C1::Base; ARITY],
+        ) -> Self
+        where
+            RP1: ROPair<C1::BaseExt>,
+            RP2: ROPair<C2::BaseExt>,
+        {
+            let initial_plonk_trace = pp.initial_plonk_trace();
+
+            let accumulator = ProtoGalaxy::<C1, 2>::new_accumulator(
+                AccumulatorArgs::from(&pp.plonk_structure1()),
+                &ProverParam::<C1> {
+                    S: pp.plonk_structure1().clone(),
+                    pp_digest: pp.digest(),
+                },
+                &mut RP1::OffCircuit::new(pp.primary.ro_args()),
+            );
+
+            let sfc = StepFoldingCircuit::<'_, 1, ARITY, MAIN_GATE_T, C1, SC, RP1::OnCircuit> {
+                sc: primary,
+                input: Input::<1, ARITY, C1, RP1::OnCircuit> {
+                    pp_digest: pp.digest(),
+                    args: pp.primary.ro_args(),
+                    accumulator: accumulator.into(),
+                    incoming: [initial_plonk_trace.u],
+                    step: 0,
+                    z_0: input_z_0,
+                    z_i: input_z_0,
+                    proof: pp.primary.initial_proof(),
+                },
+            };
+
+            todo!()
+        }
+
+        pub fn fold_step<RP1, RP2>(
+            _pp: &PublicParams<ARITY, MAIN_GATE_T, C1, C2, SC, RP1, RP2>,
+            _primary: &SC,
+        ) -> Self
+        where
+            RP1: ROPair<C1::BaseExt>,
+            RP2: ROPair<C2::BaseExt>,
+        {
+            todo!()
+        }
+
+        pub fn verify<RP1, RP2>(
+            _pp: &PublicParams<ARITY, MAIN_GATE_T, C1, C2, SC, RP1, RP2>,
+        ) -> Self
+        where
+            RP1: ROPair<C1::BaseExt>,
+            RP2: ROPair<C2::BaseExt>,
+        {
+            todo!()
+        }
     }
 }

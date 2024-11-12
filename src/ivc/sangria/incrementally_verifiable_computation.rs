@@ -124,8 +124,8 @@ where
     secondary: StepCircuitContext<A2, C2, SC2>,
 
     step: usize,
-    secondary_nifs_pp: <VanillaFS<C2> as FoldingScheme<C2>>::ProverParam,
-    primary_nifs_pp: <VanillaFS<C1> as FoldingScheme<C1>>::ProverParam,
+    secondary_nifs_pp: <VanillaFS<C2> as FoldingScheme<C2, C2::ScalarExt>>::ProverParam,
+    primary_nifs_pp: <VanillaFS<C1> as FoldingScheme<C1, C1::ScalarExt>>::ProverParam,
     secondary_trace: [FoldablePlonkTrace<C2>; 1],
 
     debug_mode: bool,

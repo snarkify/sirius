@@ -184,7 +184,7 @@ pub enum Error {
     NoConsistencyMarkers,
 }
 
-impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C>
+impl<C: CurveAffine> FoldingScheme<C, C::ScalarExt> for VanillaFS<C>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
@@ -309,7 +309,7 @@ pub enum VerifyError {
     InstanceMismatch,
 }
 
-impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C>
+impl<C: CurveAffine> VerifyAccumulation<C, C::ScalarExt> for VanillaFS<C>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
@@ -317,7 +317,7 @@ where
 
     fn is_sat_accumulation(
         S: &PlonkStructure<C::ScalarExt>,
-        acc: &<Self as FoldingScheme<C>>::Accumulator,
+        acc: &<Self as FoldingScheme<C, C::ScalarExt>>::Accumulator,
     ) -> Result<(), Self::VerifyError> {
         let RelaxedPlonkTrace { U, W } = acc;
 
@@ -368,7 +368,7 @@ where
 
     fn is_sat_permutation(
         S: &PlonkStructure<C::ScalarExt>,
-        acc: &<Self as FoldingScheme<C>>::Accumulator,
+        acc: &<Self as FoldingScheme<C, C::ScalarExt>>::Accumulator,
     ) -> Result<(), Self::VerifyError> {
         /// Under this collapsing scheme, `instance` columns other than consistency markers are not
         /// foldeded, but accumulated using hash. Therefore, they need to be cut out for
@@ -438,7 +438,7 @@ where
 
     fn is_sat_witness_commit(
         ck: &CommitmentKey<C>,
-        acc: &<Self as FoldingScheme<C, 1>>::Accumulator,
+        acc: &<Self as FoldingScheme<C, C::ScalarExt, 1>>::Accumulator,
     ) -> Result<(), Self::VerifyError> {
         let RelaxedPlonkTrace { U, W } = acc;
 
@@ -458,7 +458,7 @@ where
     }
 
     fn is_sat_pub_instances(
-        acc: &<Self as FoldingScheme<C, 1>>::Accumulator,
+        acc: &<Self as FoldingScheme<C, C::ScalarExt, 1>>::Accumulator,
         pub_instances: &[Vec<Vec<<C as CurveAffine>::ScalarExt>>],
     ) -> Result<(), Self::VerifyError> {
         pub_instances

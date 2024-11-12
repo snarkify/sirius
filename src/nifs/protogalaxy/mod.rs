@@ -1,12 +1,14 @@
 use std::{iter, marker::PhantomData};
 
 use itertools::Itertools;
+use serde::Serialize;
 use tracing::{debug, instrument, warn};
 
 use super::*;
 use crate::{
     commitment::CommitmentKey,
     constants::MAX_BITS,
+    digest::{DefaultHasher, DigestToCurve},
     ff::PrimeField,
     halo2_proofs::arithmetic::{self, CurveAffine, Field},
     nifs::protogalaxy::poly::PolyContext,
@@ -97,7 +99,7 @@ impl<F: PrimeField> Challenges<F> {
 }
 
 impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
-    fn get_count_of_valuation(S: &PlonkStructure<C::ScalarExt>) -> usize {
+    fn get_count_of_valuation<F: PrimeField>(S: &PlonkStructure<F>) -> usize {
         let count_of_rows = 2usize.pow(S.k as u32);
         let count_of_gates = S.gates.len();
 
@@ -108,7 +110,10 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         args: AccumulatorArgs,
         params: &ProverParam<C>,
         ro_acc: &mut impl ROTrait<C::Base>,
-    ) -> Accumulator<C> {
+    ) -> Accumulator<C>
+    where
+        C::Base: Serialize,
+    {
         let mut accumulator = Accumulator::new(args, Self::get_count_of_valuation(&params.S));
 
         let beta = Challenges::generate_one::<_, C>(params, ro_acc, &accumulator, iter::empty());
@@ -237,14 +242,22 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
 }
 
 pub struct ProverParam<C: CurveAffine> {
-    pub(crate) S: PlonkStructure<C::ScalarExt>,
+    pub(crate) S: PlonkStructure<C::Base>,
     /// Digest of public parameter of IVC circuit
-    pp_digest: C,
+    pub(crate) pp_digest: C,
 }
 
-impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for ProverParam<C> {
+impl<C, RO> AbsorbInRO<C::Base, RO> for ProverParam<C>
+where
+    C: CurveAffine,
+    C::Base: Serialize,
+    RO: ROTrait<C::Base>,
+{
     fn absorb_into(&self, ro: &mut RO) {
-        ro.absorb_point(&self.pp_digest);
+        let Self { S, pp_digest } = self;
+
+        ro.absorb_point(pp_digest)
+            .absorb_point(&DefaultHasher::digest_to_curve::<C>(S).unwrap());
     }
 }
 
@@ -275,7 +288,7 @@ pub enum Error {
     VerifySps(Box<[(usize, sps::Error)]>),
 }
 
-impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
+impl<C: CurveAffine, const L: usize> FoldingScheme<C, C::Base, L> for ProtoGalaxy<C, L> {
     type Error = Error;
     type ProverParam = ProverParam<C>;
     type VerifierParam = VerifierParam<C>;
@@ -287,15 +300,15 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
 
     fn setup_params(
         pp_digest: C,
-        S: PlonkStructure<C::ScalarExt>,
+        S: PlonkStructure<C::Base>,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
         Ok((ProverParam { S, pp_digest }, VerifierParam { pp_digest }))
     }
 
     fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
-        instances: &[Vec<C::ScalarExt>],
-        witness: &[Vec<C::ScalarExt>],
+        instances: &[Vec<C::Base>],
+        witness: &[Vec<C::Base>],
         pp: &Self::ProverParam,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
@@ -504,11 +517,11 @@ pub enum VerifyError<F: PrimeField> {
     WitnessCommitmentMismatch(Box<[usize]>),
 }
 
-impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C, L> {
-    type VerifyError = VerifyError<C::ScalarExt>;
+impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, C::Base, L> for ProtoGalaxy<C, L> {
+    type VerifyError = VerifyError<C::Base>;
 
     fn is_sat_accumulation(
-        S: &PlonkStructure<C::ScalarExt>,
+        S: &PlonkStructure<C::Base>,
         acc: &Accumulator<C>,
     ) -> Result<(), Self::VerifyError> {
         struct Node<F: PrimeField> {
@@ -516,7 +529,7 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
             height: usize,
         }
 
-        let evaluated_e = plonk::iter_evaluate_witness::<C::ScalarExt>(S, &acc.trace)
+        let evaluated_e = plonk::iter_evaluate_witness::<C::Base>(S, &acc.trace)
             .map(|result_with_evaluated_gate| {
                 result_with_evaluated_gate.map(|value| Node { value, height: 0 })
             })
@@ -554,7 +567,7 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
     }
 
     fn is_sat_permutation(
-        S: &PlonkStructure<<C as CurveAffine>::ScalarExt>,
+        S: &PlonkStructure<<C as CurveAffine>::Base>,
         acc: &Accumulator<C>,
     ) -> Result<(), Self::VerifyError> {
         let PlonkTrace { u, w } = &acc.trace;
@@ -586,7 +599,7 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
 
     fn is_sat_witness_commit(
         ck: &CommitmentKey<C>,
-        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+        acc: &<Self as FoldingScheme<C, C::Base, L>>::Accumulator,
     ) -> Result<(), Self::VerifyError> {
         let Accumulator {
             trace: PlonkTrace { u, w },
@@ -609,8 +622,8 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
     }
 
     fn is_sat_pub_instances(
-        _acc: &<Self as FoldingScheme<C, L>>::Accumulator,
-        _pub_instances: &[Vec<Vec<<C as CurveAffine>::ScalarExt>>],
+        _acc: &<Self as FoldingScheme<C, C::Base, L>>::Accumulator,
+        _pub_instances: &[Vec<Vec<<C as CurveAffine>::Base>>],
     ) -> Result<(), Self::VerifyError> {
         Ok(())
     }
