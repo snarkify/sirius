@@ -24,7 +24,6 @@ use crate::{
             accumulator::FoldablePlonkTrace, GetConsistencyMarkers, VanillaFS,
             CONSISTENCY_MARKERS_COUNT,
         },
-        FoldingScheme,
     },
     plonk::PlonkStructure,
     poseidon::{random_oracle::ROTrait, ROPair},
