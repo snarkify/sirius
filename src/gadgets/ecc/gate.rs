@@ -43,8 +43,7 @@ pub trait EccGate<F: PrimeField>: Chip<F> {
     ) -> Result<AssignedValue<F>, Halo2PlonkError>;
 
     /// # Safety
-    ///
-    /// TODO
+    /// The proof will be invalid if `p.x` & `q.x` not equal
     unsafe fn unchecked_add<C: CurveAffine<Base = F>>(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
@@ -53,8 +52,7 @@ pub trait EccGate<F: PrimeField>: Chip<F> {
     ) -> Result<AssignedPoint<C>, Halo2PlonkError>;
 
     /// # Safety
-    ///
-    /// TODO
+    // The proof will be invalid if `p.y == 0`.
     unsafe fn unchecked_double<C: CurveAffine<Base = F>>(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
@@ -123,8 +121,7 @@ impl<const T: usize, F: PrimeField> EccGate<F> for MainGate<F, T> {
     }
 
     /// # Safety
-    ///
-    /// TODO
+    /// The proof will be invalid if `p.x` & `q.x` not equal
     unsafe fn unchecked_add<C: CurveAffine<Base = F>>(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
@@ -144,8 +141,9 @@ impl<const T: usize, F: PrimeField> EccGate<F> for MainGate<F, T> {
     }
 
     // assume a = 0 in weierstrass curve y^2 = x^3 + ax + b
+    //
     // # Safety:
-    // TODO
+    // The proof will be invalid if `p.y == 0`.
     unsafe fn unchecked_double<C: CurveAffine<Base = F>>(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
