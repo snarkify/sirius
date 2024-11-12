@@ -3,7 +3,6 @@ use std::{iter, marker::PhantomData};
 use itertools::Itertools;
 use tracing::{debug, instrument, warn};
 
-use super::*;
 use crate::{
     commitment::CommitmentKey,
     constants::MAX_BITS,
@@ -12,7 +11,7 @@ use crate::{
     nifs::protogalaxy::poly::PolyContext,
     plonk::{self, PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness},
     polynomial::{lagrange, sparse, univariate::UnivariatePoly},
-    poseidon::AbsorbInRO,
+    poseidon::{AbsorbInRO, ROTrait},
     sps::{self, SpecialSoundnessVerifier},
     util::ScalarToBase,
 };
@@ -275,20 +274,11 @@ pub enum Error {
     VerifySps(Box<[(usize, sps::Error)]>),
 }
 
-impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
-    type Error = Error;
-    type ProverParam = ProverParam<C>;
-    type VerifierParam = VerifierParam<C>;
-    type Trace = PlonkTrace<C>;
-    type Instance = PlonkInstance<C>;
-    type Accumulator = Accumulator<C>;
-    type AccumulatorInstance = AccumulatorInstance<C>;
-    type Proof = Proof<C::ScalarExt>;
-
+impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     fn setup_params(
         pp_digest: C,
         S: PlonkStructure<C::ScalarExt>,
-    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
+    ) -> Result<(ProverParam<C>, VerifierParam<C>), Error> {
         Ok((ProverParam { S, pp_digest }, VerifierParam { pp_digest }))
     }
 
@@ -296,7 +286,7 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
         ck: &CommitmentKey<C>,
         instances: &[Vec<C::ScalarExt>],
         witness: &[Vec<C::ScalarExt>],
-        pp: &Self::ProverParam,
+        pp: &ProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
         Ok(pp
@@ -336,11 +326,11 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
     ///     - [`ProtoGalaxy::fold_witness`] & [`ProtoGalaxy::fold_instance`]
     fn prove(
         _ck: &CommitmentKey<C>,
-        pp: &Self::ProverParam,
+        pp: &ProverParam<C>,
         ro_acc: &mut impl ROTrait<C::Base>,
-        accumulator: Self::Accumulator,
+        accumulator: Accumulator<C>,
         incoming: &[PlonkTrace<C>; L],
-    ) -> Result<(Self::Accumulator, Self::Proof), Error> {
+    ) -> Result<(Accumulator<C>, Proof<C::ScalarExt>), Error> {
         let ctx = PolyContext::new(&pp.S, incoming);
 
         let delta = Challenges::generate_one::<_, C>(
@@ -448,13 +438,13 @@ impl<C: CurveAffine, const L: usize> FoldingScheme<C, L> for ProtoGalaxy<C, L> {
     /// 6. **Fold the Instance:**
     ///     - [`ProtoGalaxy::fold_instance`]
     fn verify(
-        vp: &Self::VerifierParam,
+        vp: &VerifierParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
         ro_acc: &mut impl ROTrait<C::Base>,
-        accumulator: &Self::AccumulatorInstance,
+        accumulator: &AccumulatorInstance<C>,
         incoming: &[PlonkInstance<C>; L],
-        proof: &Self::Proof,
-    ) -> Result<Self::AccumulatorInstance, Error> {
+        proof: &Proof<C::ScalarExt>,
+    ) -> Result<AccumulatorInstance<C>, Error> {
         let lagrange_domain = PolyContext::<C::Base>::get_lagrange_domain::<L>();
 
         Self::verify_sps(incoming.iter(), ro_nark)?;
@@ -504,13 +494,11 @@ pub enum VerifyError<F: PrimeField> {
     WitnessCommitmentMismatch(Box<[usize]>),
 }
 
-impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C, L> {
-    type VerifyError = VerifyError<C::ScalarExt>;
-
+impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     fn is_sat_accumulation(
         S: &PlonkStructure<C::ScalarExt>,
         acc: &Accumulator<C>,
-    ) -> Result<(), Self::VerifyError> {
+    ) -> Result<(), VerifyError<C::ScalarExt>> {
         struct Node<F: PrimeField> {
             value: F,
             height: usize,
@@ -556,7 +544,7 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
     fn is_sat_permutation(
         S: &PlonkStructure<<C as CurveAffine>::ScalarExt>,
         acc: &Accumulator<C>,
-    ) -> Result<(), Self::VerifyError> {
+    ) -> Result<(), VerifyError<C::ScalarExt>> {
         let PlonkTrace { u, w } = &acc.trace;
 
         let Z = u
@@ -580,14 +568,14 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
         if mismatch_count == 0 {
             Ok(())
         } else {
-            Err(Self::VerifyError::PermCheckFailed { mismatch_count })
+            Err(VerifyError::PermCheckFailed { mismatch_count })
         }
     }
 
     fn is_sat_witness_commit(
         ck: &CommitmentKey<C>,
-        acc: &<Self as FoldingScheme<C, L>>::Accumulator,
-    ) -> Result<(), Self::VerifyError> {
+        acc: &Accumulator<C>,
+    ) -> Result<(), VerifyError<C::ScalarExt>> {
         let Accumulator {
             trace: PlonkTrace { u, w },
             ..
@@ -609,10 +597,46 @@ impl<C: CurveAffine, const L: usize> VerifyAccumulation<C, L> for ProtoGalaxy<C,
     }
 
     fn is_sat_pub_instances(
-        _acc: &<Self as FoldingScheme<C, L>>::Accumulator,
+        _acc: &Accumulator<C>,
         _pub_instances: &[Vec<Vec<<C as CurveAffine>::ScalarExt>>],
-    ) -> Result<(), Self::VerifyError> {
+    ) -> Result<(), VerifyError<C::ScalarExt>> {
         Ok(())
+    }
+
+    /// Comprehensive satisfaction check for an accumulator.
+    ///
+    /// This method runs multiple checks ([`IsSatAccumulation::is_sat_accumulation`],
+    /// [`IsSatAccumulation::is_sat_permutation`], [`IsSatAccumulation::is_sat_witness_commit`]) to
+    /// ensure that all required constraints are satisfied in the accumulator.
+    pub fn is_sat(
+        ck: &CommitmentKey<C>,
+        S: &PlonkStructure<C::ScalarExt>,
+        acc: &Accumulator<C>,
+        pub_instances: &[Vec<Vec<C::ScalarExt>>],
+    ) -> Result<(), Vec<VerifyError<C::ScalarExt>>> {
+        let mut errors = vec![];
+
+        if let Err(err) = Self::is_sat_accumulation(S, acc) {
+            errors.push(err);
+        }
+
+        if let Err(err) = Self::is_sat_permutation(S, acc) {
+            errors.push(err);
+        }
+
+        if let Err(err) = Self::is_sat_witness_commit(ck, acc) {
+            errors.push(err);
+        }
+
+        if let Err(err) = Self::is_sat_pub_instances(acc, pub_instances) {
+            errors.push(err);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 

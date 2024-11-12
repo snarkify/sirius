@@ -30,7 +30,7 @@ enum Error<C: CurveAffine> {
     Plonk(#[from] plonk::Error),
     #[error("while verify: {errors:?}")]
     Verify {
-        errors: Vec<(&'static str, sangria::VerifyError)>,
+        errors: Vec<(&'static str, nifs::sangria::VerifyError)>,
     },
     #[error("not equal: {from_verify:?} != {from_prove:?}")]
     VerifyProveNotMatch {

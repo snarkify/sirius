@@ -21,7 +21,6 @@ use crate::{
             accumulator::{FoldablePlonkTrace, RelaxedPlonkTrace},
             GetConsistencyMarkers, VanillaFS, VerifyError,
         },
-        FoldingScheme, IsSatAccumulator,
     },
     poseidon::{random_oracle::ROTrait, ROPair},
     sps,
@@ -124,8 +123,8 @@ where
     secondary: StepCircuitContext<A2, C2, SC2>,
 
     step: usize,
-    secondary_nifs_pp: <VanillaFS<C2> as FoldingScheme<C2>>::ProverParam,
-    primary_nifs_pp: <VanillaFS<C1> as FoldingScheme<C1>>::ProverParam,
+    secondary_nifs_pp: nifs::sangria::ProverParam<C2>,
+    primary_nifs_pp: nifs::sangria::ProverParam<C1>,
     secondary_trace: [FoldablePlonkTrace<C2>; 1],
 
     debug_mode: bool,

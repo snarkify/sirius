@@ -1,26 +1,27 @@
 use std::{iter, marker::PhantomData, num::NonZeroUsize};
 
 use count_to_non_zero::CountToNonZeroExt;
-use halo2_proofs::{
-    arithmetic::CurveAffine,
-    halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
-};
 use itertools::Itertools;
+use rayon::prelude::*;
 use some_to_err::ErrOr;
 use tracing::*;
 
 use self::accumulator::{FoldablePlonkInstance, FoldablePlonkTrace};
-use super::*;
 use crate::{
-    commitment::CommitmentKey,
+    commitment::{self, CommitmentKey},
     concat_vec,
     constants::NUM_CHALLENGE_BITS,
     ff::Field,
+    halo2_proofs::{
+        arithmetic::CurveAffine,
+        halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
+        plonk::Error as Halo2Error,
+    },
     ivc::{instances_accumulator_computation, Instances},
     nifs::sangria::accumulator::{RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness},
     plonk::{
         self,
-        eval::{GetDataForEval, PlonkEvalDomain},
+        eval::{Error as EvalError, GetDataForEval, PlonkEvalDomain},
         PlonkInstance, PlonkStructure, PlonkWitness,
     },
     polynomial::{
@@ -28,7 +29,7 @@ use crate::{
         sparse::{self, SparseMatrix},
     },
     poseidon::ROTrait,
-    sps::SpecialSoundnessVerifier,
+    sps::{Error as SpsError, SpecialSoundnessVerifier},
 };
 
 pub mod accumulator;
@@ -60,7 +61,7 @@ pub struct VanillaFS<C: CurveAffine> {
     _marker: PhantomData<C>,
 }
 
-pub struct VanillaFSProverParam<C: CurveAffine> {
+pub struct ProverParam<C: CurveAffine> {
     pub(crate) S: PlonkStructure<C::ScalarExt>,
     /// digest of public parameter of IVC circuit
     pp_digest: C,
@@ -184,32 +185,25 @@ pub enum Error {
     NoConsistencyMarkers,
 }
 
-impl<C: CurveAffine> FoldingScheme<C> for VanillaFS<C>
+pub type VerifierParam<C> = C;
+
+impl<C: CurveAffine> VanillaFS<C>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    type Error = Error;
-    type ProverParam = VanillaFSProverParam<C>;
-    type VerifierParam = C;
-    type Accumulator = RelaxedPlonkTrace<C>;
-    type AccumulatorInstance = RelaxedPlonkInstance<C>;
-    type Trace = FoldablePlonkTrace<C>;
-    type Instance = FoldablePlonkInstance<C>;
-    type Proof = CrossTermCommits<C>;
-
-    fn setup_params(
+    pub fn setup_params(
         pp_digest: C,
         S: PlonkStructure<C::ScalarExt>,
-    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
-        Ok((VanillaFSProverParam { S, pp_digest }, pp_digest))
+    ) -> Result<(ProverParam<C>, VerifierParam<C>), Error> {
+        Ok((ProverParam { S, pp_digest }, pp_digest))
     }
 
     #[instrument(skip_all)]
-    fn generate_plonk_trace(
+    pub fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
         instances: &[Vec<C::ScalarExt>],
         witness: &[Vec<C::ScalarExt>],
-        pp: &VanillaFSProverParam<C>,
+        pp: &ProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<FoldablePlonkTrace<C>, Error> {
         pp.S.run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)
@@ -233,13 +227,13 @@ where
     /// # Returns
     /// A tuple containing folded accumulator and proof for the folding scheme verifier
     #[instrument(skip_all)]
-    fn prove(
+    pub fn prove(
         ck: &CommitmentKey<C>,
-        pp: &Self::ProverParam,
+        pp: &ProverParam<C>,
         ro_acc: &mut impl ROTrait<C::Base>,
-        accumulator: Self::Accumulator,
+        accumulator: RelaxedPlonkTrace<C>,
         incoming: &[FoldablePlonkTrace<C>; 1],
-    ) -> Result<(Self::Accumulator, Self::Proof), Error> {
+    ) -> Result<(RelaxedPlonkTrace<C>, CrossTermCommits<C>), Error> {
         let incoming = &incoming[0];
 
         let U1 = &accumulator.U;
@@ -275,14 +269,14 @@ where
     ///
     /// # Returns
     /// The folded relaxed Plonk instance.
-    fn verify(
-        vp: &Self::VerifierParam,
+    pub fn verify(
+        vp: &VerifierParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
         ro_acc: &mut impl ROTrait<C::Base>,
-        U1: &Self::AccumulatorInstance,
+        U1: &RelaxedPlonkInstance<C>,
         U2: &[FoldablePlonkInstance<C>; 1],
         cross_term_commits: &CrossTermCommits<C>,
-    ) -> Result<Self::AccumulatorInstance, Error> {
+    ) -> Result<RelaxedPlonkInstance<C>, Error> {
         let U2 = &U2[0];
 
         U2.sps_verify(ro_nark)?;
@@ -309,16 +303,14 @@ pub enum VerifyError {
     InstanceMismatch,
 }
 
-impl<C: CurveAffine> VerifyAccumulation<C> for VanillaFS<C>
+impl<C: CurveAffine> VanillaFS<C>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    type VerifyError = VerifyError;
-
-    fn is_sat_accumulation(
+    pub fn is_sat_accumulation(
         S: &PlonkStructure<C::ScalarExt>,
-        acc: &<Self as FoldingScheme<C>>::Accumulator,
-    ) -> Result<(), Self::VerifyError> {
+        acc: &RelaxedPlonkTrace<C>,
+    ) -> Result<(), VerifyError> {
         let RelaxedPlonkTrace { U, W } = acc;
 
         let total_row = 1 << S.k;
@@ -366,10 +358,10 @@ where
         Ok(())
     }
 
-    fn is_sat_permutation(
+    pub fn is_sat_permutation(
         S: &PlonkStructure<C::ScalarExt>,
-        acc: &<Self as FoldingScheme<C>>::Accumulator,
-    ) -> Result<(), Self::VerifyError> {
+        acc: &RelaxedPlonkTrace<C>,
+    ) -> Result<(), VerifyError> {
         /// Under this collapsing scheme, `instance` columns other than consistency markers are not
         /// foldeded, but accumulated using hash. Therefore, they need to be cut out for
         /// `is_sat_permutation`.
@@ -432,14 +424,14 @@ where
         if mismatch_count == 0 {
             Ok(())
         } else {
-            Err(Self::VerifyError::PermCheckFail { mismatch_count })
+            Err(VerifyError::PermCheckFail { mismatch_count })
         }
     }
 
-    fn is_sat_witness_commit(
+    pub fn is_sat_witness_commit(
         ck: &CommitmentKey<C>,
-        acc: &<Self as FoldingScheme<C, 1>>::Accumulator,
-    ) -> Result<(), Self::VerifyError> {
+        acc: &RelaxedPlonkTrace<C>,
+    ) -> Result<(), VerifyError> {
         let RelaxedPlonkTrace { U, W } = acc;
 
         U.W_commitments
@@ -451,16 +443,16 @@ where
             .err_or(())?;
 
         if ck.commit(&W.E).unwrap().ne(&U.E_commitment) {
-            return Err(Self::VerifyError::ECommitmentMismatch);
+            return Err(VerifyError::ECommitmentMismatch);
         }
 
         Ok(())
     }
 
-    fn is_sat_pub_instances(
-        acc: &<Self as FoldingScheme<C, 1>>::Accumulator,
+    pub fn is_sat_pub_instances(
+        acc: &RelaxedPlonkTrace<C>,
         pub_instances: &[Vec<Vec<<C as CurveAffine>::ScalarExt>>],
-    ) -> Result<(), Self::VerifyError> {
+    ) -> Result<(), VerifyError> {
         pub_instances
             .iter()
             .fold(
@@ -475,6 +467,42 @@ where
             .ne(&acc.U.step_circuit_instances_hash_accumulator)
             .then_some(VerifyError::InstanceMismatch)
             .err_or(())
+    }
+
+    /// Comprehensive satisfaction check for an accumulator.
+    ///
+    /// This method runs multiple checks ([`IsSatAccumulation::is_sat_accumulation`],
+    /// [`IsSatAccumulation::is_sat_permutation`], [`IsSatAccumulation::is_sat_witness_commit`]) to
+    /// ensure that all required constraints are satisfied in the accumulator.
+    pub fn is_sat(
+        ck: &CommitmentKey<C>,
+        S: &PlonkStructure<C::ScalarExt>,
+        acc: &RelaxedPlonkTrace<C>,
+        pub_instances: &[Vec<Vec<C::ScalarExt>>],
+    ) -> Result<(), Vec<VerifyError>> {
+        let mut errors = vec![];
+
+        if let Err(err) = Self::is_sat_accumulation(S, acc) {
+            errors.push(err);
+        }
+
+        if let Err(err) = Self::is_sat_permutation(S, acc) {
+            errors.push(err);
+        }
+
+        if let Err(err) = Self::is_sat_witness_commit(ck, acc) {
+            errors.push(err);
+        }
+
+        if let Err(err) = Self::is_sat_pub_instances(acc, pub_instances) {
+            errors.push(err);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 

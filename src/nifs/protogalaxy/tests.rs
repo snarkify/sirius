@@ -13,10 +13,13 @@ use super::*;
 use crate::{
     commitment,
     halo2curves::bn256::G1Affine as Affine,
-    nifs::tests::{
-        fibo_circuit::{get_fibo_seq, FiboCircuit},
-        fibo_circuit_with_lookup::{get_sequence, FiboCircuitWithLookup},
-        random_linear_combination_circuit::RandomLinearCombinationCircuit,
+    nifs::{
+        self,
+        tests::{
+            fibo_circuit::{get_fibo_seq, FiboCircuit},
+            fibo_circuit_with_lookup::{get_sequence, FiboCircuitWithLookup},
+            random_linear_combination_circuit::RandomLinearCombinationCircuit,
+        },
     },
     poseidon::{PoseidonHash, Spec},
     table::{CircuitRunner, Witness},
@@ -35,10 +38,10 @@ type RO<F> = PoseidonHash<F, T, RATE>;
 type Instance<F> = Vec<F>;
 
 type ProtoGalaxy = crate::nifs::protogalaxy::ProtoGalaxy<Affine, L>;
-type ProverParam = <ProtoGalaxy as FoldingScheme<Affine, L>>::ProverParam;
-type VerifierParam = <ProtoGalaxy as FoldingScheme<Affine, L>>::VerifierParam;
-type Proof = <ProtoGalaxy as FoldingScheme<Affine, L>>::Proof;
-type Accumulator = <ProtoGalaxy as FoldingScheme<Affine, L>>::Accumulator;
+type ProverParam = nifs::protogalaxy::ProverParam<Affine>;
+type VerifierParam = nifs::protogalaxy::VerifierParam<Affine>;
+type Proof = nifs::protogalaxy::Proof<Affine>;
+type Accumulator = nifs::protogalaxy::Accumulator<Affine>;
 
 struct CircuitCtx {
     witness: Witness<Scalar>,
