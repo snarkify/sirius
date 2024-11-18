@@ -7,6 +7,8 @@ pub use sangria::{
 
 pub mod protogalaxy;
 
+pub mod cyclefold;
+
 mod consistency_markers_computation;
 pub mod instances_accumulator_computation;
 mod public_params;
