@@ -63,13 +63,12 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         ctx: &mut RegionCtx<'_, F>,
         a: AssignedValue<F>,
     ) -> Result<(AssignedValue<F>, AssignedValue<F>), Error> {
-        let (one, zero) = (F::ONE, F::ZERO);
         let (r, a_inv) = a
             .value()
             .map(|a| {
                 Option::from(a.invert())
-                    .map(|a_inverted| (zero, a_inverted))
-                    .unwrap_or_else(|| (one, one))
+                    .map(|a_inverted| (F::ZERO, a_inverted))
+                    .unwrap_or_else(|| (F::ONE, F::ONE))
             })
             .unzip();
 
