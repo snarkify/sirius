@@ -87,11 +87,11 @@ impl<F: PrimeField> Gate<F> {
             ..
         } = self.config();
 
-        ctx.assign_fixed(|| "", *mul, F::ONE)?;
-        let l = ctx.assign_advice_from(|| "", *state0, lhs)?;
-        let r = ctx.assign_advice_from(|| "", *state1, rhs)?;
+        ctx.assign_fixed(|| "one", *mul, F::ONE)?;
+        let l = ctx.assign_advice_from(|| "mul.lhs", *state0, lhs)?;
+        let r = ctx.assign_advice_from(|| "mul.rhs", *state1, rhs)?;
 
-        let res = ctx.assign_advice(|| "", *output, l.value().copied() * r.value());
+        let res = ctx.assign_advice(|| "mul.out", *output, l.value().copied() * r.value());
 
         ctx.next();
 
@@ -113,12 +113,16 @@ impl<F: PrimeField> Gate<F> {
             ..
         } = self.config();
 
-        ctx.assign_fixed(|| "", *sum0, *lhs_coeff)?;
+        ctx.assign_fixed(|| "add_with_const.lhs_coeff", *sum0, *lhs_coeff)?;
 
-        let l = ctx.assign_advice_from(|| "", *state0, lhs)?;
-        let r = ctx.assign_fixed(|| "", *rc, *rhs)?;
+        let l = ctx.assign_advice_from(|| "add_with_const.lhs", *state0, lhs)?;
+        let r = ctx.assign_fixed(|| "add_with_const.rc", *rc, *rhs)?;
 
-        let res = ctx.assign_advice(|| "", *output, l.value().copied() + r.value());
+        let res = ctx.assign_advice(
+            || "add_with_const.out",
+            *output,
+            l.value().copied() + r.value(),
+        );
 
         ctx.next();
 
@@ -138,13 +142,13 @@ impl<F: PrimeField> Gate<F> {
             ..
         } = self.config();
 
-        ctx.assign_fixed(|| "", *sum0, F::ONE)?;
-        ctx.assign_fixed(|| "", *sum1, F::ONE)?;
+        ctx.assign_fixed(|| "add.sum0", *sum0, F::ONE)?;
+        ctx.assign_fixed(|| "add.sum1", *sum1, F::ONE)?;
 
-        let l = ctx.assign_advice_from(|| "", *state0, lhs)?;
-        let r = ctx.assign_advice_from(|| "", *state1, rhs)?;
+        let l = ctx.assign_advice_from(|| "add.lhs", *state0, lhs)?;
+        let r = ctx.assign_advice_from(|| "add.rhs", *state1, rhs)?;
 
-        let res = ctx.assign_advice(|| "", *output, l.value().copied() + r.value());
+        let res = ctx.assign_advice(|| "add.out", *output, l.value().copied() + r.value());
 
         ctx.next();
 
@@ -164,13 +168,13 @@ impl<F: PrimeField> Gate<F> {
             ..
         } = self.config();
 
-        ctx.assign_fixed(|| "", *sum0, F::ONE)?;
-        ctx.assign_fixed(|| "", *sum1, -F::ONE)?;
+        ctx.assign_fixed(|| "sub.sum0", *sum0, F::ONE)?;
+        ctx.assign_fixed(|| "sub.sum1", *sum1, -F::ONE)?;
 
-        let l = ctx.assign_advice_from(|| "", *state0, lhs)?;
-        let r = ctx.assign_advice_from(|| "", *state1, rhs)?;
+        let l = ctx.assign_advice_from(|| "sub.lhs", *state0, lhs)?;
+        let r = ctx.assign_advice_from(|| "sub.rhs", *state1, rhs)?;
 
-        let res = ctx.assign_advice(|| "", *output, l.value().copied() + r.value());
+        let res = ctx.assign_advice(|| "sub.out", *output, l.value().copied() + r.value());
 
         ctx.next();
 
@@ -188,8 +192,8 @@ impl<F: PrimeField> Gate<F> {
             ..
         } = self.config();
 
-        ctx.assign_advice_from(|| "", *state0, value)?;
-        ctx.assign_fixed(|| "", *sum0, F::ONE)?;
+        ctx.assign_advice_from(|| "check_zero.state0", *state0, value)?;
+        ctx.assign_fixed(|| "check_zero.sum0", *sum0, F::ONE)?;
 
         ctx.next();
 
@@ -215,7 +219,7 @@ impl<F: PrimeField> Gate<F> {
         let mut result = Vec::with_capacity(values.len());
         for chunk in values.chunks(advice.len()) {
             for (value, col) in chunk.iter().zip(advice.iter()) {
-                result.push(ctx.assign_advice_from(|| "", *col, value.clone())?);
+                result.push(ctx.assign_advice_from(|| "assign_value.val", *col, value.clone())?);
             }
             ctx.next();
         }
