@@ -5,6 +5,7 @@ use tracing::*;
 use crate::{
     halo2_proofs::{
         arithmetic::{CurveAffine, Field},
+        circuit::Chip,
         halo2curves::ff::PrimeField,
         plonk::Error,
     },
@@ -18,7 +19,7 @@ mod gate;
 pub use gate::EccGate;
 
 pub struct EccChip<C: CurveAffine, G: EccGate<C::Base>> {
-    gate: G,
+    pub(crate) gate: G,
     _p: PhantomData<C>,
 }
 
@@ -28,6 +29,10 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
             gate: G::new(config),
             _p: PhantomData,
         }
+    }
+
+    pub fn config(&self) -> <G as Chip<C::Base>>::Config {
+        self.gate.config().clone()
     }
 
     pub fn assign_from_curve<AN: Into<String>>(
