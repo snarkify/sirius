@@ -56,35 +56,72 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
         self.gate.negate(ctx, p)
     }
 
+    #[instrument(skip_all)]
     pub fn add(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
         p: &AssignedPoint<C>,
         q: &AssignedPoint<C>,
     ) -> Result<AssignedPoint<C>, Error> {
-        let is_p_iden = self.gate.is_infinity_point(ctx, &p.x, &p.y)?;
-        let is_q_iden = self.gate.is_infinity_point(ctx, &q.x, &q.y)?;
-        let is_equal_x = self.gate.is_equal_term(ctx, &p.x, &q.x)?;
-        let is_equal_y = self.gate.is_equal_term(ctx, &p.y, &q.y)?;
+        let is_p_iden = self
+            .gate
+            .is_infinity_point(ctx, &p.x, &p.y)
+            .inspect_err(|err| error!("while is_infinity p: {err:?}"))?;
+        let is_q_iden = self
+            .gate
+            .is_infinity_point(ctx, &q.x, &q.y)
+            .inspect_err(|err| error!("while is_infinity q: {err:?}"))?;
+        let is_equal_x = self
+            .gate
+            .is_equal_term(ctx, &p.x, &q.x)
+            .inspect_err(|err| error!("while is_equal p.q == q.x: {err:?}"))?;
+        let is_equal_y = self
+            .gate
+            .is_equal_term(ctx, &p.y, &q.y)
+            .inspect_err(|err| error!("while is_infinity p.y == q.y: {err:?}"))?;
 
-        let inf = self.gate.assign_point::<C, _>(ctx, || "inf", None)?;
+        let inf = self
+            .gate
+            .assign_point::<C, _>(ctx, || "inf", None)
+            .inspect_err(|err| error!("while assigned point `inf`: {err:?}"))?;
         // # Safety
         // We check at the bottom of this fn, what p.x == q.x
-        let r = unsafe { self.gate.unchecked_add(ctx, p, q) }?;
+        let r = unsafe { self.gate.unchecked_add(ctx, p, q) }
+            .inspect_err(|err| error!("while unchecked add p & q: {err:?}"))?;
         let p2 = self.double(ctx, p)?;
 
         let x1 = self
             .gate
-            .conditional_select(ctx, &p2.x, &inf.x, &is_equal_y)?;
+            .conditional_select(ctx, &p2.x, &inf.x, &is_equal_y)
+            .inspect_err(|err| error!("while conditional select p2.x & inf.x: {err:?}"))?;
         let y1 = self
             .gate
-            .conditional_select(ctx, &p2.y, &inf.y, &is_equal_y)?;
-        let x2 = self.gate.conditional_select(ctx, &x1, &r.x, &is_equal_x)?;
-        let y2 = self.gate.conditional_select(ctx, &y1, &r.y, &is_equal_x)?;
-        let x3 = self.gate.conditional_select(ctx, &p.x, &x2, &is_q_iden)?;
-        let y3 = self.gate.conditional_select(ctx, &p.y, &y2, &is_q_iden)?;
-        let x = self.gate.conditional_select(ctx, &q.x, &x3, &is_p_iden)?;
-        let y = self.gate.conditional_select(ctx, &q.y, &y3, &is_p_iden)?;
+            .conditional_select(ctx, &p2.y, &inf.y, &is_equal_y)
+            .inspect_err(|err| error!("while conditional select p2.y & inf.y: {err:?}"))?;
+        let x2 = self
+            .gate
+            .conditional_select(ctx, &x1, &r.x, &is_equal_x)
+            .inspect_err(|err| error!("while conditional select x1 & r.x: {err:?}"))?;
+        let y2 = self
+            .gate
+            .conditional_select(ctx, &y1, &r.y, &is_equal_x)
+            .inspect_err(|err| error!("while conditional select y1 & r.y: {err:?}"))?;
+        let x3 = self
+            .gate
+            .conditional_select(ctx, &p.x, &x2, &is_q_iden)
+            .inspect_err(|err| error!("while conditional select p.x & x2: {err:?}"))?;
+        let y3 = self
+            .gate
+            .conditional_select(ctx, &p.y, &y2, &is_q_iden)
+            .inspect_err(|err| error!("while conditional select p.y & y2: {err:?}"))?;
+        let x = self
+            .gate
+            .conditional_select(ctx, &q.x, &x3, &is_p_iden)
+            .inspect_err(|err| error!("while conditional select q.x & x3: {err:?}"))?;
+        let y = self
+            .gate
+            .conditional_select(ctx, &q.y, &y3, &is_p_iden)
+            .inspect_err(|err| error!("while conditional select q.y & y3: {err:?}"))?;
 
         Ok(AssignedPoint { x, y })
     }
@@ -206,12 +243,15 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
 
     // scalar_mul for non_zero point
     // we assume the point p0 is not infinity here
+    #[instrument(skip_all)]
     pub fn scalar_mul_non_zero(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
         p0: &AssignedPoint<C>,
         scalar_bits: &[AssignedValue<C::Base>],
     ) -> Result<AssignedPoint<C>, Error> {
+        debug!("start at {} offset", ctx.offset());
+
         if let Some((x, y)) = p0.coordinates_values() {
             if x == C::Base::ZERO && y == C::Base::ZERO {
                 error!("point cannot be zero");
@@ -227,7 +267,9 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
         // (1) assume p0 is not infinity
         // assume first bit of scalar_bits is 1 for now
         // so we can use unsafe_add later
-        let mut p = unsafe { self.gate.unchecked_double(ctx, p0) }?;
+        let mut p = unsafe { self.gate.unchecked_double(ctx, p0) }.inspect_err(|err| {
+            error!("while unchecked_double: {err:?}");
+        })?;
 
         // the size of incomplete_bits ensures a + b != 0
         for bit in incomplete_bits.iter().skip(1) {
@@ -235,49 +277,66 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
             // (1) assume p0 is not infinity
             // assume first bit of scalar_bits is 1 for now
             // so we can use unsafe_add later
-            let sum = unsafe { self.gate.unchecked_add(ctx, &acc, &p) }?;
+            let sum = unsafe { self.gate.unchecked_add(ctx, &acc, &p) }.inspect_err(|err| {
+                error!("while unchecked_add: {err:?}");
+            })?;
             acc = AssignedPoint {
-                x: self.gate.conditional_select(ctx, &sum.x, &acc.x, bit)?,
-                y: self.gate.conditional_select(ctx, &sum.y, &acc.y, bit)?,
+                x: self
+                    .gate
+                    .conditional_select(ctx, &sum.x, &acc.x, bit)
+                    .inspect_err(|err| error!("conditional select x: {err:?}"))?,
+                y: self
+                    .gate
+                    .conditional_select(ctx, &sum.y, &acc.y, bit)
+                    .inspect_err(|err| error!("conditional select x: {err:?}"))?,
             };
             // # Safety:
             // (1) assume p0 is not infinity
             // assume first bit of scalar_bits is 1 for now
             // so we can use unsafe_add later
-            p = unsafe { self.gate.unchecked_double(ctx, &p) }?;
+            p = unsafe { self.gate.unchecked_double(ctx, &p) }
+                .inspect_err(|err| error!("while unchecked double in cycle: {err:?}"))?;
         }
 
         // make correction if first bit is 0
-        // make correction if first bit is 0
         acc = {
             let acc_minus_initial = {
-                let neg = self.negate(ctx, p0)?;
-                self.add(ctx, &acc, &neg)?
+                let neg = self
+                    .negate(ctx, p0)
+                    .inspect_err(|err| error!("while negate: {err:?}"))?;
+                self.add(ctx, &acc, &neg)
+                    .inspect_err(|err| error!("while add acc & neg: {err:?}"))?
             };
             AssignedPoint {
-                x: self.gate.conditional_select(
-                    ctx,
-                    &acc.x,
-                    &acc_minus_initial.x,
-                    &scalar_bits[0],
-                )?,
-                y: self.gate.conditional_select(
-                    ctx,
-                    &acc.y,
-                    &acc_minus_initial.y,
-                    &scalar_bits[0],
-                )?,
+                x: self
+                    .gate
+                    .conditional_select(ctx, &acc.x, &acc_minus_initial.x, &scalar_bits[0])
+                    .inspect_err(|err| error!("while conditional select 'x': {err:?}"))?,
+                y: self
+                    .gate
+                    .conditional_select(ctx, &acc.y, &acc_minus_initial.y, &scalar_bits[0])
+                    .inspect_err(|err| error!("while conditional select 'y': {err:?}"))?,
             }
         };
 
         // (2) finish the rest bits
         for bit in complete_bits {
-            let sum = self.add(ctx, &acc, &p)?;
+            let sum = self
+                .add(ctx, &acc, &p)
+                .inspect_err(|err| error!("while add acc & p: {err:?}"))?;
             acc = AssignedPoint {
-                x: self.gate.conditional_select(ctx, &sum.x, &acc.x, bit)?,
-                y: self.gate.conditional_select(ctx, &sum.y, &acc.y, bit)?,
+                x: self
+                    .gate
+                    .conditional_select(ctx, &sum.x, &acc.x, bit)
+                    .inspect_err(|err| error!("while conditional select 'x' in acc: {err:?}"))?,
+                y: self
+                    .gate
+                    .conditional_select(ctx, &sum.y, &acc.y, bit)
+                    .inspect_err(|err| error!("while conditional select 'y' in acc: {err:?}"))?,
             };
-            p = self.double(ctx, &p)?;
+            p = self
+                .double(ctx, &p)
+                .inspect_err(|err| error!("while double at the end: {err:?}"))?;
         }
 
         Ok(acc)
@@ -285,7 +344,7 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::num::NonZeroUsize;
 
     use halo2_proofs::{circuit::Value, halo2curves::ff::PrimeFieldBits};
@@ -307,7 +366,7 @@ mod tests {
     };
 
     #[derive(Clone, Debug)]
-    struct Point<C: CurveAffine> {
+    pub(crate) struct Point<C: CurveAffine> {
         x: C::Base,
         y: C::Base,
         is_inf: bool,
@@ -421,14 +480,19 @@ mod tests {
         instance: Column<Instance>,
     }
 
+    enum TestCase {
+        Add,
+        ScalarMul,
+    }
+
     struct TestCircuit<C: CurveAffine<Base = F>, F: PrimeFieldBits> {
         a: Point<C>,
         b: Point<C>,
         lambda: C::Scalar,
-        test_case: usize, // 0: add, 1: scalar_mul
+        test_case: TestCase,
     }
     impl<C: CurveAffine<Base = F>, F: PrimeFieldBits> TestCircuit<C, F> {
-        fn new(a: Point<C>, b: Point<C>, lambda: C::Scalar, test_case: usize) -> Self {
+        fn new(a: Point<C>, b: Point<C>, lambda: C::Scalar, test_case: TestCase) -> Self {
             Self {
                 a,
                 b,
@@ -443,7 +507,12 @@ mod tests {
         type FloorPlanner = SimpleFloorPlanner;
 
         fn without_witnesses(&self) -> Self {
-            TestCircuit::new(Point::default(), Point::default(), C::Scalar::ZERO, 0)
+            TestCircuit::new(
+                Point::default(),
+                Point::default(),
+                C::Scalar::ZERO,
+                TestCase::Add,
+            )
         }
 
         fn configure(meta: &mut ConstraintSystem<C::Base>) -> Self::Config {
@@ -474,32 +543,35 @@ mod tests {
                         Value::known(self.a.y),
                     )?;
                     let a = AssignedPoint { x: ax, y: ay };
-                    if self.test_case == 0 {
-                        let bx = ctx.assign_advice(
-                            || "b.x",
-                            ecc_chip.gate.config().state[2],
-                            Value::known(self.b.x),
-                        )?;
-                        let by = ctx.assign_advice(
-                            || "b.y",
-                            ecc_chip.gate.config().state[3],
-                            Value::known(self.b.y),
-                        )?;
-                        let b = AssignedPoint { x: bx, y: by };
-                        ctx.next();
-                        ecc_chip.add(ctx, &a, &b)
-                    } else {
-                        let lambda: C::Base = C::scalar_to_base(&self.lambda).unwrap();
-                        let bit_len =
-                            NonZeroUsize::new(lambda.to_le_bits().len()).expect("Non Zero");
-                        let lambda = ctx.assign_advice(
-                            || "lambda",
-                            ecc_chip.gate.config().state[2],
-                            Value::known(lambda),
-                        )?;
-                        ctx.next();
-                        let bits = ecc_chip.gate.le_num_to_bits(ctx, lambda, bit_len)?;
-                        ecc_chip.scalar_mul(ctx, &a, &bits)
+                    match self.test_case {
+                        TestCase::Add => {
+                            let bx = ctx.assign_advice(
+                                || "b.x",
+                                ecc_chip.gate.config().state[2],
+                                Value::known(self.b.x),
+                            )?;
+                            let by = ctx.assign_advice(
+                                || "b.y",
+                                ecc_chip.gate.config().state[3],
+                                Value::known(self.b.y),
+                            )?;
+                            let b = AssignedPoint { x: bx, y: by };
+                            ctx.next();
+                            ecc_chip.add(ctx, &a, &b)
+                        }
+                        TestCase::ScalarMul => {
+                            let lambda: C::Base = C::scalar_to_base(&self.lambda).unwrap();
+                            let bit_len =
+                                NonZeroUsize::new(lambda.to_le_bits().len()).expect("Non Zero");
+                            let lambda = ctx.assign_advice(
+                                || "lambda",
+                                ecc_chip.gate.config().state[2],
+                                Value::known(lambda),
+                            )?;
+                            ctx.next();
+                            let bits = ecc_chip.gate.le_num_to_bits(ctx, lambda, bit_len)?;
+                            ecc_chip.scalar_mul(ctx, &a, &bits)
+                        }
                     }
                 },
             )?;
@@ -523,7 +595,7 @@ mod tests {
         //let q: Point<pallas::Affine> = Point { x: p.x, y: -p.y, is_inf: false };
         let lambda = Fq::random(&mut OsRng);
         let r = p.scalar_mul(&lambda);
-        let circuit = TestCircuit::new(p, q, lambda, 1);
+        let circuit = TestCircuit::new(p, q, lambda, TestCase::ScalarMul);
         let public_inputs: &[&[Fp]] = &[&[r.x, r.y]];
 
         let K: u32 = 14;
@@ -544,7 +616,7 @@ mod tests {
         //let lambda = Fq::from_raw([11037532056220336128, 2469829653914515739, 0, 4611686018427387904]);
         let lambda = Fq::from(1);
         let r = p.scalar_mul(&lambda);
-        let circuit = TestCircuit::new(p, q, lambda, 1);
+        let circuit = TestCircuit::new(p, q, lambda, TestCase::ScalarMul);
         let public_inputs = vec![vec![r.x, r.y]];
         run_mock_prover_test!(K, circuit, public_inputs);
     }

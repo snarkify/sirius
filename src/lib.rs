@@ -31,7 +31,7 @@ pub mod prelude {
     use crate::ff::{FromUniformBytes, PrimeFieldBits};
     pub use crate::{
         commitment::CommitmentKey,
-        ff::PrimeField,
+        ff::{Field, PrimeField},
         ivc::{StepCircuit, IVC},
     };
 
