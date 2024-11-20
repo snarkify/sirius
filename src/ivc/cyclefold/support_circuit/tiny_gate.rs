@@ -139,7 +139,7 @@ impl<F: PrimeField> Gate<F> {
         let res = ctx.assign_advice(
             || "add_with_const.out",
             *output,
-            l.value().copied() + r.value(),
+            (l.value().copied() * Value::known(lhs_coeff)) + r.value(),
         );
 
         ctx.assign_fixed(|| "", *mul, F::ZERO)?;
