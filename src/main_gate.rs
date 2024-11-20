@@ -2,7 +2,7 @@ use std::{array, iter, marker::PhantomData, num::NonZeroUsize};
 
 use halo2_proofs::{
     circuit::{AssignedCell, Cell, Chip, Region, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance},
+    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance, Selector},
     poly::Rotation,
 };
 use itertools::Itertools;
@@ -34,6 +34,11 @@ impl<'a, F: PrimeField> RegionCtx<'a, F> {
 
     pub fn into_region(self) -> Region<'a, F> {
         self.region
+    }
+
+    pub fn enable_selector(&mut self, selector: &Selector) -> Result<(), Error> {
+        let offset = self.offset();
+        selector.enable(&mut self.region, offset)
     }
 
     pub fn assign_fixed<A, AR>(
