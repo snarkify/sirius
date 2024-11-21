@@ -9,7 +9,7 @@ use crate::{
 };
 
 mod input;
-use input::Input;
+pub use input::Input;
 
 const T_MAIN_GATE: usize = 5;
 
@@ -26,8 +26,20 @@ pub struct StepFoldingCircuit<
     C: CurveAffine,
     SC: StepCircuit<ARITY, C::ScalarExt>,
 > {
-    sc: &'sc SC,
-    input: Input<ARITY, C>,
+    pub sc: &'sc SC,
+    pub input: Input<ARITY, C::ScalarExt>,
+}
+
+pub fn instances_lens() -> Box<[usize]> {
+    todo!()
+}
+
+impl<'sc, const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>>
+    StepFoldingCircuit<'sc, ARITY, C, SC>
+{
+    pub fn instances(&self) -> Vec<Vec<C::ScalarExt>> {
+        todo!()
+    }
 }
 
 impl<'sc, const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>>
@@ -39,7 +51,7 @@ impl<'sc, const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarEx
     fn without_witnesses(&self) -> Self {
         Self {
             sc: self.sc,
-            input: self.input.without_witness(),
+            input: self.input.get_without_witness(),
         }
     }
 

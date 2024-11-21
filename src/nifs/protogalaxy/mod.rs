@@ -96,7 +96,7 @@ impl<F: PrimeField> Challenges<F> {
 }
 
 impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
-    fn get_count_of_valuation(S: &PlonkStructure<C::ScalarExt>) -> usize {
+    pub fn get_count_of_valuation(S: &PlonkStructure<C::ScalarExt>) -> usize {
         let count_of_rows = 2usize.pow(S.k as u32);
         let count_of_gates = S.gates.len();
 
@@ -238,7 +238,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
 pub struct ProverParam<C: CurveAffine> {
     pub(crate) S: PlonkStructure<C::ScalarExt>,
     /// Digest of public parameter of IVC circuit
-    pp_digest: C,
+    pub(crate) pp_digest: C,
 }
 
 impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for ProverParam<C> {
@@ -282,16 +282,14 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         Ok((ProverParam { S, pp_digest }, VerifierParam { pp_digest }))
     }
 
-    fn generate_plonk_trace(
+    pub fn generate_plonk_trace(
         ck: &CommitmentKey<C>,
         instances: &[Vec<C::ScalarExt>],
         witness: &[Vec<C::ScalarExt>],
         pp: &ProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<PlonkTrace<C>, Error> {
-        Ok(pp
-            .S
-            .run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)?)
+        Ok(pp.S.run_sps_protocol(ck, instances, witness, ro_nark)?)
     }
 
     /// Proves a statement using the ProtoGalaxy protocol.
