@@ -45,6 +45,7 @@ impl<C: CurveAffine> From<nifs::protogalaxy::AccumulatorInstance<C>>
     }
 }
 
+/// Recursive trace of the circuit itself
 pub struct SelfTrace<F: PrimeField> {
     pub input_accumulator: AccumulatorInstance<F>,
     pub incoming: PlonkInstance<F>,
@@ -61,7 +62,9 @@ pub struct Input<const ARITY: usize, C: CurveAffine> {
     pub pp_digest: (C::ScalarExt, C::ScalarExt),
 
     pub self_trace: SelfTrace<C::ScalarExt>,
-    pub paired_trace: PairedTrace<C>,
+
+    /// One to three traces of support_circuit from paired curve
+    pub paired_trace: Box<[PairedTrace<C>]>,
 
     pub proof: nifs::protogalaxy::Proof<C::ScalarExt>,
 
