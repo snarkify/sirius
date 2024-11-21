@@ -1,16 +1,16 @@
 /// Module name acronym `StepFoldingCircuit` -> `sfc`
 use std::{fmt, iter, num::NonZeroUsize};
 
-use halo2_proofs::{
-    circuit::{floor_planner, Layouter, Value},
-    plonk::{Circuit, Column, ConstraintSystem, Error as Halo2PlonkError, Instance},
-};
 use itertools::Itertools;
 use serde::Serialize;
 use tracing::*;
 
 use crate::{
     ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
+    halo2_proofs::{
+        circuit::{floor_planner, Layouter, Value},
+        plonk::{Circuit, Column, ConstraintSystem, Error as Halo2PlonkError, Instance},
+    },
     halo2curves::CurveAffine,
     ivc::{
         consistency_markers_computation::AssignedConsistencyMarkersComputation,

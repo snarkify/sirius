@@ -26,6 +26,39 @@ pub struct SupportCircuit<C: CurveAffine> {
     _p: PhantomData<C>,
 }
 
+pub struct InstanceInput<C: CurveAffine> {
+    pub p0: C,
+    pub l0: C::Base,
+
+    pub p1: C,
+    pub l1: C::Base,
+
+    pub p_out: C,
+}
+
+impl<C: CurveAffine> InstanceInput<C> {
+    pub fn into_instance(self) -> Vec<Vec<C::Base>> {
+        let p0 = self.p0.coordinates().unwrap();
+        let p1 = self.p1.coordinates().unwrap();
+        let p_out = self.p_out.coordinates().unwrap();
+
+        vec![vec![
+            *p0.x(),
+            *p0.y(),
+            self.l0,
+            *p1.x(),
+            *p1.y(),
+            self.l1,
+            *p_out.x(),
+            *p_out.y(),
+        ]]
+    }
+}
+
+impl<C: CurveAffine> SupportCircuit<C> {
+    pub const MIN_K_TABLE_SIZE: u32 = 15;
+}
+
 #[derive(Clone, Debug)]
 pub struct Config {
     gate_config: GateConfig,
@@ -144,15 +177,22 @@ mod tests {
 
         let tmp = p0 * l0;
         trace!("p0 * l0_bits = {:?}", tmp);
-        let p2 = (p0 * l0) + (p1 * l1);
+        let p_out = ((p0 * l0) + (p1 * l1)).into();
 
         let l0 = Base::from_repr(l0.to_repr()).unwrap();
         let l1 = Base::from_repr(l1.to_repr()).unwrap();
 
         MockProver::run(
-            15,
+            SupportCircuit::<Curve>::MIN_K_TABLE_SIZE,
             &circuit,
-            vec![vec![p0.x, p0.y, l0, p1.x, p1.y, l1, p2.x, p2.y]],
+            InstanceInput {
+                p0,
+                l0,
+                p1,
+                l1,
+                p_out,
+            }
+            .into_instance(),
         )
         .unwrap()
         .verify()

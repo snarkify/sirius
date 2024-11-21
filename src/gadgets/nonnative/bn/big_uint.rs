@@ -19,7 +19,7 @@ use crate::{error::Halo2PlonkError, ff::PrimeField, main_gate::RegionCtx};
 // IMPORTANT: It is not an independent
 // integer-type, but only a wrapper for
 // storing a natural number with limbs.
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct BigUint<F: PrimeField> {
     limbs: Vec<F>,
     width: NonZeroUsize,
@@ -198,7 +198,7 @@ impl<F: PrimeField> BigUint<F> {
     }
 
     pub fn from_different_field<D: PrimeField>(
-        _input: D,
+        _input: &D,
         _limb_width: NonZeroUsize,
         _n_limbs: NonZeroUsize,
     ) -> Result<Self, Error> {

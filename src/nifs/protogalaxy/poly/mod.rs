@@ -436,7 +436,7 @@ fn compute_K_from_G<F: WithSmallOrderMulGroup<3>>(
     )
 }
 
-fn get_count_of_valuation<F: PrimeField>(S: &PlonkStructure<F>) -> Option<NonZeroUsize> {
+pub fn get_count_of_valuation<F: PrimeField>(S: &PlonkStructure<F>) -> Option<NonZeroUsize> {
     let count_of_rows = 2usize.pow(S.k as u32);
     let count_of_gates = S.gates.len();
 
@@ -520,7 +520,6 @@ mod test {
                 &instances,
                 &witness,
                 &mut RO::new(PoseidonSpec::new(R_F1, R_P1)),
-                S.num_challenges,
             )
             .unwrap();
 

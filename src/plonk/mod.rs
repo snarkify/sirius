@@ -422,9 +422,8 @@ impl<F: PrimeField> PlonkStructure<F> {
         instances: &[Vec<F>],
         advice: &[Vec<F>],
         ro_nark: &mut RO,
-        num_challenges: usize,
     ) -> Result<PlonkTrace<C>, SpsError> {
-        match num_challenges {
+        match self.num_challenges {
             0 => self.run_sps_protocol_0(instances, advice, ck),
             1 => self.run_sps_protocol_1(instances, advice, ck, ro_nark),
             2 => self.run_sps_protocol_2(instances, advice, ck, ro_nark),
@@ -851,7 +850,6 @@ pub(crate) mod test_eval_witness {
                 &[],
                 &witness,
                 &mut RO::new(PoseidonSpec::new(R_F1, R_P1)),
-                S.num_challenges,
             )
             .unwrap();
 

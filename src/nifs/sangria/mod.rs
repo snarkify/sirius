@@ -6,7 +6,7 @@ use rayon::prelude::*;
 use some_to_err::ErrOr;
 use tracing::*;
 
-use self::accumulator::{FoldablePlonkInstance, FoldablePlonkTrace};
+pub use self::accumulator::{FoldablePlonkInstance, FoldablePlonkTrace};
 use crate::{
     commitment::{self, CommitmentKey},
     concat_vec,
@@ -64,7 +64,7 @@ pub struct VanillaFS<C: CurveAffine> {
 pub struct ProverParam<C: CurveAffine> {
     pub(crate) S: PlonkStructure<C::ScalarExt>,
     /// digest of public parameter of IVC circuit
-    pp_digest: C,
+    pub pp_digest: C,
 }
 
 impl<C: CurveAffine> VanillaFS<C>
@@ -206,7 +206,7 @@ where
         pp: &ProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
     ) -> Result<FoldablePlonkTrace<C>, Error> {
-        pp.S.run_sps_protocol(ck, instances, witness, ro_nark, pp.S.num_challenges)
+        pp.S.run_sps_protocol(ck, instances, witness, ro_nark)
             .map(FoldablePlonkTrace::new)?
             .ok_or(Error::NoConsistencyMarkers)
     }
