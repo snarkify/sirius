@@ -59,9 +59,9 @@ pub trait ROTrait<F: PrimeField> {
     }
 
     /// Adds a point to the internal state
-    fn absorb_point<C: CurveAffine<Base = F>>(&mut self, p: &C) -> &mut Self;
+    fn absorb_point<C: CurveAffine>(&mut self, p: &C) -> &mut Self;
 
-    fn absorb_point_iter<'item, C: CurveAffine<Base = F>>(
+    fn absorb_point_iter<'item, C: CurveAffine>(
         &mut self,
         points: impl Iterator<Item = &'item C>,
     ) -> &mut Self {
@@ -75,7 +75,7 @@ pub trait ROTrait<F: PrimeField> {
     fn inspect(&mut self, scan: impl FnOnce(&[F])) -> &mut Self;
 
     /// Returns a challenge by hashing the internal state
-    fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar;
+    fn squeeze<D: PrimeField>(&mut self, num_bits: NonZeroUsize) -> D;
 }
 
 /// A helper trait that defines the behavior of a hash function used as a Random Oracle (RO)

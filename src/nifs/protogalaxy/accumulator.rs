@@ -1,11 +1,12 @@
 use std::iter;
 
+use halo2_proofs::halo2curves::ff::PrimeField;
+
 use crate::{
     ff::Field,
     halo2curves::CurveAffine,
     plonk::{self, PlonkInstance, PlonkTrace, PlonkWitness},
     poseidon::{AbsorbInRO, ROTrait},
-    util::ScalarToBase,
 };
 
 /// Represents an accumulator for folding multiple instances into a single instance,
@@ -27,13 +28,13 @@ pub struct Accumulator<C: CurveAffine> {
     pub(super) e: C::ScalarExt,
 }
 
-impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for Accumulator<C> {
+impl<C: CurveAffine, F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for Accumulator<C> {
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb(&self.trace.u).absorb_field_iter(
             self.betas
                 .iter()
                 .chain(iter::once(&self.e))
-                .map(|b| C::scalar_to_base(b).unwrap()),
+                .map(|b| crate::util::fe_to_fe(b).unwrap()),
         );
     }
 }
@@ -90,13 +91,11 @@ impl<C: CurveAffine> From<Accumulator<C>> for AccumulatorInstance<C> {
     }
 }
 
-impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for AccumulatorInstance<C> {
+impl<C: CurveAffine, RO: ROTrait<C::ScalarExt>> AbsorbInRO<C::ScalarExt, RO>
+    for AccumulatorInstance<C>
+{
     fn absorb_into(&self, ro: &mut RO) {
-        ro.absorb(&self.ins).absorb_field_iter(
-            self.betas
-                .iter()
-                .chain(iter::once(&self.e))
-                .map(|b| C::scalar_to_base(b).unwrap()),
-        );
+        ro.absorb(&self.ins)
+            .absorb_field_iter(self.betas.iter().chain(iter::once(&self.e)).copied());
     }
 }
