@@ -8,7 +8,12 @@ use num_bigint::BigUint as BigUintRaw;
 use num_traits::{identities::One, Zero};
 use tracing::*;
 
-use crate::{error::Halo2PlonkError, ff::PrimeField, main_gate::RegionCtx};
+use crate::{
+    error::Halo2PlonkError,
+    ff::PrimeField,
+    main_gate::RegionCtx,
+    poseidon::{AbsorbInRO, ROTrait},
+};
 
 // A big natural number with limbs in field `F`
 //
@@ -38,6 +43,12 @@ impl<F: PrimeField> BigUint<F> {
             limbs: vec![F::ONE],
             width: limb_width,
         }
+    }
+}
+
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for BigUint<F> {
+    fn absorb_into(&self, ro: &mut RO) {
+        ro.absorb_field_iter(self.limbs().iter().copied());
     }
 }
 
@@ -198,11 +209,15 @@ impl<F: PrimeField> BigUint<F> {
     }
 
     pub fn from_different_field<D: PrimeField>(
-        _input: &D,
-        _limb_width: NonZeroUsize,
-        _n_limbs: NonZeroUsize,
+        input: &D,
+        limb_width: NonZeroUsize,
+        n_limbs: NonZeroUsize,
     ) -> Result<Self, Error> {
-        todo!("Implement and test the conversion of an element from another field")
+        Self::from_biguint(
+            &BigUintRaw::from_bytes_le(input.to_repr().as_ref()),
+            limb_width,
+            n_limbs,
+        )
     }
 
     pub fn into_bigint(&self) -> num_bigint::BigUint {
@@ -300,6 +315,7 @@ fn get_max_word_mask_bits(limb_width: usize) -> usize {
 mod tests {
     use std::mem;
 
+    use halo2_proofs::halo2curves::pasta::Fq;
     use tracing_test::traced_test;
 
     use super::*;
@@ -396,5 +412,19 @@ mod tests {
                 actual: 100,
             })
         );
+    }
+
+    #[traced_test]
+    #[test]
+    fn from_diff_field() {
+        let input = Fq::from_u128(u64::MAX as u128 * 2);
+
+        let limbs_count = NonZeroUsize::new(50).unwrap();
+        let _result_with_bn = BigUint::<Fp>::from_different_field(
+            &input,
+            NonZeroUsize::new(10).unwrap(),
+            limbs_count,
+        )
+        .unwrap();
     }
 }
