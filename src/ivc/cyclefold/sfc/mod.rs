@@ -1,14 +1,18 @@
+use std::num::NonZeroUsize;
+
 use crate::{
     halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         halo2curves::CurveAffine,
         plonk::{Circuit, ConstraintSystem, Error as Halo2PlonkError},
     },
-    ivc::StepCircuit,
+    ivc::{cyclefold, StepCircuit},
     main_gate::{MainGate, MainGateConfig},
+    poseidon::ROTrait,
 };
 
 mod input;
+use halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 pub use input::Input;
 
 const T_MAIN_GATE: usize = 5;
@@ -32,9 +36,28 @@ pub struct StepFoldingCircuit<
 
 impl<const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>>
     StepFoldingCircuit<'_, ARITY, C, SC>
+where
+    C::ScalarExt: PrimeFieldBits + FromUniformBytes<64>,
 {
-    pub fn instances(&self) -> Vec<Vec<C::ScalarExt>> {
-        todo!()
+    /// For the initial iteration, we will give the same accumulators that we take from the input
+    pub fn initial_instances(&self) -> Vec<Vec<C::ScalarExt>> {
+        let marker = cyclefold::ro()
+            .absorb(&self.input)
+            .output(NonZeroUsize::new(<C::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap());
+
+        let mut instances = self.sc.instances();
+        instances.insert(0, vec![marker, marker]);
+        instances
+    }
+
+    pub fn instances(&self, expected_out: C::ScalarExt) -> Vec<Vec<C::ScalarExt>> {
+        let input_marker = cyclefold::ro()
+            .absorb(&self.input)
+            .output(NonZeroUsize::new(<C::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap());
+
+        let mut instances = self.sc.instances();
+        instances.insert(0, vec![input_marker, expected_out]);
+        instances
     }
 }
 
