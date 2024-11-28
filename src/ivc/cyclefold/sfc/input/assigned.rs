@@ -437,7 +437,7 @@ pub struct Input<const ARITY: usize, F: PrimeField> {
 }
 
 impl<const A: usize, F: PrimeField> Input<A, F> {
-    fn assign_advice_from(
+    pub fn assign_advice_from(
         region: &mut RegionCtx<'_, F>,
         original: &super::Input<A, F>,
         main_gate_config: &MainGateConfig,

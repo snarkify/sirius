@@ -7,7 +7,7 @@ use crate::{
         plonk::{Circuit, ConstraintSystem, Error as Halo2PlonkError},
     },
     ivc::{cyclefold, StepCircuit},
-    main_gate::{MainGate, MainGateConfig},
+    main_gate::{MainGate, MainGateConfig, RegionCtx},
     poseidon::ROTrait,
 };
 
@@ -83,9 +83,24 @@ impl<const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>> C
 
     fn synthesize(
         &self,
-        _config: Self::Config,
-        _layouter: impl Layouter<C::ScalarExt>,
+        config: Self::Config,
+        mut layouter: impl Layouter<C::ScalarExt>,
     ) -> Result<(), Halo2PlonkError> {
+        layouter.assign_region(
+            || "sfc main",
+            |region| {
+                let mut region = RegionCtx::new(region, 0);
+
+                let _input = input::assigned::Input::assign_advice_from(
+                    &mut region,
+                    &self.input,
+                    &config.mg,
+                )?;
+
+                Ok(())
+            },
+        )?;
+
         todo!()
     }
 }
