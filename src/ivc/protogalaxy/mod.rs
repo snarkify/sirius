@@ -381,7 +381,7 @@ mod verify_chip {
 
                     assigned_output.map(Some)
                 })?
-                .ok_or_else(|| Halo2PlonkError::Synthesis)
+                .ok_or(Halo2PlonkError::Synthesis)
         }
     }
 

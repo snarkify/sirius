@@ -77,8 +77,8 @@ where
     }
 }
 
-impl<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, RP> fmt::Debug
-    for CircuitPublicParams<'key, ARITY, MAIN_GATE_T, C, RP>
+impl<const ARITY: usize, const MAIN_GATE_T: usize, C, RP> fmt::Debug
+    for CircuitPublicParams<'_, ARITY, MAIN_GATE_T, C, RP>
 where
     C: fmt::Debug + CurveAffine,
     C::Base: PrimeFieldBits + FromUniformBytes<64> + Serialize,
@@ -157,18 +157,8 @@ pub struct PublicParams<
     digest_2: C2,
 }
 
-impl<
-        'key,
-        const A1: usize,
-        const A2: usize,
-        const MAIN_GATE_T: usize,
-        C1,
-        C2,
-        SC1,
-        SC2,
-        RP1,
-        RP2,
-    > fmt::Debug for PublicParams<'key, A1, A2, MAIN_GATE_T, C1, C2, SC1, SC2, RP1, RP2>
+impl<const A1: usize, const A2: usize, const MAIN_GATE_T: usize, C1, C2, SC1, SC2, RP1, RP2>
+    fmt::Debug for PublicParams<'_, A1, A2, MAIN_GATE_T, C1, C2, SC1, SC2, RP1, RP2>
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,
@@ -417,7 +407,7 @@ where
     secondary_params: &'l StepParams<C2::Scalar, RP2::OnCircuit>,
 }
 
-impl<'l, C1, C2, RP1, RP2> PublicParamsDigestWrapper<'l, C1, C2, RP1, RP2>
+impl<C1, C2, RP1, RP2> PublicParamsDigestWrapper<'_, C1, C2, RP1, RP2>
 where
     C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar> + Serialize,
     C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar> + Serialize,

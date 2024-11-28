@@ -33,8 +33,8 @@ pub(crate) struct AssignedConsistencyMarkersComputation<
     pub relaxed: &'l AssignedRelaxedPlonkInstance<C>,
 }
 
-impl<'l, const A: usize, const T: usize, C: CurveAffine, RO>
-    AssignedConsistencyMarkersComputation<'l, RO, A, T, C>
+impl<const A: usize, const T: usize, C: CurveAffine, RO>
+    AssignedConsistencyMarkersComputation<'_, RO, A, T, C>
 where
     C::Base: FromUniformBytes<64> + PrimeFieldBits,
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
@@ -80,7 +80,7 @@ where
     pub limbs_count: NonZeroUsize,
 }
 
-impl<'l, C, RP, const A: usize> ConsistencyMarkerComputation<'l, A, C, RP>
+impl<C, RP, const A: usize> ConsistencyMarkerComputation<'_, A, C, RP>
 where
     RP: ROTrait<C::Base>,
     C: CurveAffine + Serialize,
@@ -95,8 +95,8 @@ where
             pub(crate) step_circuit_instances_hash_accumulator: &'l C::ScalarExt,
         }
 
-        impl<'l, C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO>
-            for RelaxedPlonkInstanceBigUintView<'l, C>
+        impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO>
+            for RelaxedPlonkInstanceBigUintView<'_, C>
         {
             fn absorb_into(&self, ro: &mut RO) {
                 ro.absorb_point_iter(self.W_commitments.iter())

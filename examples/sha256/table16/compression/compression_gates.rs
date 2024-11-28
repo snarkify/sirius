@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use std::marker::PhantomData;
 
 use halo2_proofs::plonk::{Constraint, Constraints, Expression};

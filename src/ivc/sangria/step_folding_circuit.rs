@@ -106,7 +106,7 @@ where
     pub step_circuit_instances: Vec<Vec<C::Base>>,
 }
 
-impl<'link, const ARITY: usize, C: fmt::Debug, RO> fmt::Debug for StepInputs<'link, ARITY, C, RO>
+impl<const ARITY: usize, C: fmt::Debug, RO> fmt::Debug for StepInputs<'_, ARITY, C, RO>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
     C: CurveAffine,
@@ -262,8 +262,7 @@ where
     pub input: StepInputs<'link, ARITY, C, RO>,
 }
 
-impl<'link, const ARITY: usize, C, SC, RO, const T: usize>
-    StepFoldingCircuit<'link, ARITY, C, SC, RO, T>
+impl<const ARITY: usize, C, SC, RO, const T: usize> StepFoldingCircuit<'_, ARITY, C, SC, RO, T>
 where
     C: CurveAffine,
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
@@ -278,8 +277,8 @@ where
     }
 }
 
-impl<'link, const ARITY: usize, C, SC, RO, const T: usize> Circuit<C::Base>
-    for StepFoldingCircuit<'link, ARITY, C, SC, RO, T>
+impl<const ARITY: usize, C, SC, RO, const T: usize> Circuit<C::Base>
+    for StepFoldingCircuit<'_, ARITY, C, SC, RO, T>
 where
     C: CurveAffine,
     C::Base: PrimeFieldBits + FromUniformBytes<64>,

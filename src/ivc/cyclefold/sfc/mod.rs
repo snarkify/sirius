@@ -30,16 +30,16 @@ pub struct StepFoldingCircuit<
     pub input: Input<ARITY, C::ScalarExt>,
 }
 
-impl<'sc, const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>>
-    StepFoldingCircuit<'sc, ARITY, C, SC>
+impl<const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>>
+    StepFoldingCircuit<'_, ARITY, C, SC>
 {
     pub fn instances(&self) -> Vec<Vec<C::ScalarExt>> {
         todo!()
     }
 }
 
-impl<'sc, const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>>
-    Circuit<C::ScalarExt> for StepFoldingCircuit<'sc, ARITY, C, SC>
+impl<const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>> Circuit<C::ScalarExt>
+    for StepFoldingCircuit<'_, ARITY, C, SC>
 {
     type Config = Config<SC::Config>;
     type FloorPlanner = SimpleFloorPlanner;
