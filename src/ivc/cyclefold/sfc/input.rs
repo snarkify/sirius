@@ -1,11 +1,12 @@
 use std::array;
 
+use super::super::{DEFAULT_LIMBS_COUNT_LIMIT, DEFAULT_LIMB_WIDTH};
 use crate::{
     gadgets::nonnative::bn::big_uint::BigUint,
     halo2_proofs::halo2curves::{ff::PrimeField, CurveAffine},
     nifs, plonk,
     polynomial::univariate::UnivariatePoly,
-    prelude::{DEFAULT_LIMBS_COUNT_LIMIT, DEFAULT_LIMB_WIDTH},
+    poseidon::{AbsorbInRO, ROTrait},
 };
 
 #[derive(Clone)]
@@ -14,15 +15,30 @@ pub struct BigUintPoint<F: PrimeField> {
     y: BigUint<F>,
 }
 
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for BigUintPoint<F> {
+    fn absorb_into(&self, ro: &mut RO) {
+        ro.absorb_field_iter(self.x.limbs().iter().chain(self.y.limbs().iter()).cloned());
+    }
+}
+
 impl<C: CurveAffine> From<&C> for BigUintPoint<C::ScalarExt> {
-    fn from(_value: &C) -> Self {
-        todo!()
+    fn from(value: &C) -> Self {
+        let c = value.coordinates().unwrap();
+        Self {
+            x: BigUint::from_different_field(c.x(), DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT_LIMIT)
+                .unwrap(),
+            y: BigUint::from_different_field(c.y(), DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT_LIMIT)
+                .unwrap(),
+        }
     }
 }
 
 impl<F: PrimeField> BigUintPoint<F> {
     fn identity() -> Self {
-        todo!()
+        Self {
+            x: BigUint::zero(DEFAULT_LIMB_WIDTH),
+            y: BigUint::zero(DEFAULT_LIMB_WIDTH),
+        }
     }
 }
 
@@ -33,11 +49,38 @@ pub struct NativePlonkInstance<F: PrimeField> {
     pub(crate) challenges: Vec<F>,
 }
 
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for NativePlonkInstance<F> {
+    fn absorb_into(&self, ro: &mut RO) {
+        let Self {
+            W_commitments,
+            instances,
+            challenges,
+        } = self;
+        ro.absorb_iter(W_commitments.iter())
+            .absorb_field_iter(instances.iter().flatten().cloned())
+            .absorb_field_iter(challenges.iter().cloned());
+    }
+}
+
 #[derive(Clone)]
 pub struct PairedPlonkInstance<F: PrimeField> {
     pub(crate) W_commitments: Vec<(F, F)>,
     pub(crate) instances: Vec<Vec<BigUint<F>>>,
     pub(crate) challenges: Vec<BigUint<F>>,
+}
+
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for PairedPlonkInstance<F> {
+    fn absorb_into(&self, ro: &mut RO) {
+        let Self {
+            W_commitments,
+            instances,
+            challenges,
+        } = self;
+
+        ro.absorb_field_iter(W_commitments.iter().flat_map(|(x, y)| [x, y]).copied())
+            .absorb_iter(instances.iter().flatten())
+            .absorb_iter(challenges.iter());
+    }
 }
 
 impl<C: CurveAffine> From<plonk::PlonkInstance<C>> for NativePlonkInstance<C::ScalarExt> {
@@ -57,11 +100,37 @@ pub struct ProtoGalaxyAccumulatorInstance<F: PrimeField> {
     pub(crate) e: F,
 }
 
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for ProtoGalaxyAccumulatorInstance<F> {
+    fn absorb_into(&self, ro: &mut RO) {
+        let Self { ins, betas, e } = self;
+
+        ro.absorb(ins)
+            .absorb_field_iter(betas.iter().cloned())
+            .absorb_field(*e);
+    }
+}
+
 /// Recursive trace of the circuit itself
 pub struct SelfTrace<F: PrimeField> {
     pub input_accumulator: ProtoGalaxyAccumulatorInstance<F>,
     pub incoming: NativePlonkInstance<F>,
     pub proof: nifs::protogalaxy::Proof<F>,
+}
+
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SelfTrace<F> {
+    fn absorb_into(&self, ro: &mut RO) {
+        let Self {
+            input_accumulator,
+            incoming,
+            proof,
+        } = self;
+
+        let nifs::protogalaxy::Proof { poly_F, poly_K } = proof;
+
+        ro.absorb(input_accumulator)
+            .absorb(incoming)
+            .absorb_field_iter(poly_K.iter().chain(poly_F.iter()).copied());
+    }
 }
 
 impl<F: PrimeField> SelfTrace<F> {
@@ -114,12 +183,40 @@ pub struct SangriaAccumulatorInstance<F: PrimeField> {
     pub(crate) u: BigUint<F>,
 }
 
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SangriaAccumulatorInstance<F> {
+    fn absorb_into(&self, ro: &mut RO) {
+        let Self {
+            ins,
+            E_commitment: (ex, ey),
+            u,
+        } = self;
+
+        ro.absorb(ins).absorb_field(*ex).absorb_field(*ey).absorb(u);
+    }
+}
+
 pub struct PairedTrace<F: PrimeField> {
     pub input_accumulator: SangriaAccumulatorInstance<F>,
     // The size from one to three
     // Depdend on `W_commitments_len`
     pub incoming: Box<[PairedPlonkInstance<F>]>,
     proof: nifs::sangria::CrossTermCommits<(F, F)>,
+}
+
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for PairedTrace<F> {
+    fn absorb_into(&self, ro: &mut RO) {
+        let Self {
+            input_accumulator,
+            incoming,
+            proof,
+        } = self;
+
+        let proof_iter = proof.iter().flat_map(|(a, b)| [a, b]).copied();
+
+        ro.absorb(input_accumulator)
+            .absorb_iter(incoming.iter())
+            .absorb_field_iter(proof_iter);
+    }
 }
 
 impl<F: PrimeField> PairedTrace<F> {
@@ -201,6 +298,27 @@ pub struct Input<const ARITY: usize, F: PrimeField> {
     pub step: usize,
     pub z_0: [F; ARITY],
     pub z_i: [F; ARITY],
+}
+
+impl<const ARITY: usize, F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for Input<ARITY, F> {
+    fn absorb_into(&self, ro: &mut RO) {
+        let Self {
+            pp_digest: (pp0, pp1),
+            self_trace,
+            paired_trace,
+            step,
+            z_0,
+            z_i,
+        } = self;
+
+        ro.absorb_field(*pp0)
+            .absorb_field(*pp1)
+            .absorb(self_trace)
+            .absorb(paired_trace)
+            .absorb_field(F::from(*step as u64))
+            .absorb_field_iter(z_0.iter().copied())
+            .absorb_field_iter(z_i.iter().copied());
+    }
 }
 
 impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {

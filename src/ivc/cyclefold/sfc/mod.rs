@@ -30,10 +30,6 @@ pub struct StepFoldingCircuit<
     pub input: Input<ARITY, C::ScalarExt>,
 }
 
-pub fn instances_lens() -> Box<[usize]> {
-    todo!()
-}
-
 impl<'sc, const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>>
     StepFoldingCircuit<'sc, ARITY, C, SC>
 {
