@@ -404,7 +404,7 @@ impl<'l, F: PrimeField> From<&'l [AssignedValue<F>]> for CellsValuesView<'l, F> 
         Self { cells: value }
     }
 }
-impl<'l, F: PrimeField> fmt::Debug for CellsValuesView<'l, F> {
+impl<F: PrimeField> fmt::Debug for CellsValuesView<'_, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Cells: [")?;
 

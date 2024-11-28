@@ -48,8 +48,8 @@ impl<const A: usize, F: PrimeField, SC: StepCircuit<A, F>> Clone for StepCircuit
     }
 }
 
-impl<'sc, const A: usize, F: PrimeField, SC: StepCircuit<A, F>> Circuit<F>
-    for StepCircuitWrapper<'sc, A, F, SC>
+impl<const A: usize, F: PrimeField, SC: StepCircuit<A, F>> Circuit<F>
+    for StepCircuitWrapper<'_, A, F, SC>
 {
     type Config = StepCircuitConfig<A, F, SC>;
     type FloorPlanner = SimpleFloorPlanner;
@@ -133,7 +133,7 @@ pub struct MockProver<'a, const A: usize, F: Field> {
     last_z_out: [Value<F>; A],
 }
 
-impl<'a, const A: usize, F: Field> MockProver<'a, A, F> {
+impl<const A: usize, F: Field> MockProver<'_, A, F> {
     /// Runs the step circuit with the provided initial input and returns
     /// a `MockProver` instance containing the resulting outputs.
     ///
