@@ -1,55 +1,23 @@
 use std::iter;
 
 use halo2_proofs::halo2curves::ff::PrimeField;
+use itertools::Itertools;
 
 use crate::{
     halo2_proofs::plonk::Error as Halo2PlonkError,
-    main_gate::{self, AdviceCyclicAssignor, AssignedValue, RegionCtx, WrapValue},
+    ivc,
+    main_gate::{self, AdviceCyclicAssignor, AssignedValue, MainGate, RegionCtx, WrapValue},
 };
 
 pub type MainGateConfig = main_gate::MainGateConfig<{ super::super::T_MAIN_GATE }>;
 
-type BigUint<F> = Vec<AssignedValue<F>>;
+pub type BigUint<F> = Vec<F>;
 
-#[derive(Clone)]
-pub struct BigUintPoint<F: PrimeField> {
-    pub x_limbs: BigUint<F>,
-    pub y_limbs: BigUint<F>,
-}
-
-impl<F: PrimeField> BigUintPoint<F> {
-    fn assign_advice_from(
-        region: &mut RegionCtx<'_, F>,
-        original: &super::BigUintPoint<F>,
-        main_gate_config: &MainGateConfig,
-    ) -> Result<Self, Halo2PlonkError> {
-        let super::BigUintPoint { x, y } = original;
-        let mut assigner = main_gate_config.advice_cycle_assigner();
-
-        Ok(Self {
-            x_limbs: assigner.assign_all_advice(region, || "x", x.limbs().iter().copied())?,
-            y_limbs: assigner.assign_all_advice(region, || "y", y.limbs().iter().copied())?,
-        })
-    }
-
-    fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
-        self.x_limbs
-            .iter()
-            .chain(self.y_limbs.iter())
-            .cloned()
-            .map(|l| WrapValue::Assigned(l))
-    }
-}
-
-#[derive(Clone)]
-pub struct NativePlonkInstance<F: PrimeField> {
-    pub(crate) W_commitments: Vec<BigUintPoint<F>>,
-    pub(crate) instances: Vec<Vec<AssignedValue<F>>>,
-    pub(crate) challenges: Vec<AssignedValue<F>>,
-}
+pub type BigUintPoint<F> = ivc::protogalaxy::verify_chip::BigUintPoint<F>;
+pub type NativePlonkInstance<F> = ivc::protogalaxy::verify_chip::AssignedPlonkInstance<F>;
 
 impl<F: PrimeField> NativePlonkInstance<F> {
-    fn assign_advice_from(
+    pub fn assign_advice_from_native(
         region: &mut RegionCtx<'_, F>,
         original: &super::NativePlonkInstance<F>,
         main_gate_config: &MainGateConfig,
@@ -62,7 +30,8 @@ impl<F: PrimeField> NativePlonkInstance<F> {
 
         let W_commitments = W_commitments
             .iter()
-            .map(|p| BigUintPoint::assign_advice_from(region, p, main_gate_config))
+            .cloned()
+            .map(|p| p.assign(region, main_gate_config))
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut assigner = main_gate_config.advice_cycle_assigner();
@@ -83,45 +52,19 @@ impl<F: PrimeField> NativePlonkInstance<F> {
             challenges,
         })
     }
-
-    fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
-        let Self {
-            W_commitments,
-            instances,
-            challenges,
-        } = self;
-
-        W_commitments
-            .iter()
-            .flat_map(|W_commitment| W_commitment.iter_wrap_values())
-            .chain(instances.iter().flat_map(|instance| {
-                instance
-                    .iter()
-                    .map(|value| WrapValue::Assigned(value.clone()))
-            }))
-            .chain(
-                challenges
-                    .iter()
-                    .map(|cha| WrapValue::Assigned(cha.clone())),
-            )
-    }
 }
 
-#[derive(Clone)]
-pub struct ProtoGalaxyAccumulatorInstance<F: PrimeField> {
-    pub(crate) ins: NativePlonkInstance<F>,
-    pub(crate) betas: Box<[AssignedValue<F>]>,
-    pub(crate) e: AssignedValue<F>,
-}
+pub type ProtoGalaxyAccumulatorInstance<F> =
+    ivc::protogalaxy::verify_chip::AssignedAccumulatorInstance<F>;
 
 impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
-    fn assign_advice_from(
+    fn assign_advice_from_native(
         region: &mut RegionCtx<'_, F>,
         original: &super::ProtoGalaxyAccumulatorInstance<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
         let super::ProtoGalaxyAccumulatorInstance { ins, betas, e } = original;
-        let ins = NativePlonkInstance::assign_advice_from(region, ins, main_gate_config)?;
+        let ins = NativePlonkInstance::assign_advice_from_native(region, ins, main_gate_config)?;
 
         let mut assigner = main_gate_config.advice_cycle_assigner();
         Ok(Self {
@@ -133,19 +76,39 @@ impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
         })
     }
 
-    fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
-        let Self { ins, betas, e } = self;
-        ins.iter_wrap_values()
-            .chain(betas.iter().cloned().map(WrapValue::Assigned))
-            .chain(iter::once(WrapValue::Assigned(e.clone())))
+    fn conditional_select<const T: usize>(
+        region: &mut RegionCtx<'_, F>,
+        mg: &MainGate<F, T>,
+        lhs: &Self,
+        rhs: &Self,
+        cond: &AssignedValue<F>,
+    ) -> Result<Self, Halo2PlonkError> {
+        let Self {
+            ins: lhs_ins,
+            betas: lhs_betas,
+            e: lhs_e,
+        } = lhs;
+
+        let Self {
+            ins: rhs_ins,
+            betas: rhs_betas,
+            e: rhs_e,
+        } = rhs;
+
+        Ok(Self {
+            ins: NativePlonkInstance::conditional_select(region, mg, lhs_ins, rhs_ins, cond)?,
+            betas: lhs_betas
+                .iter()
+                .zip_eq(rhs_betas)
+                .map(|(l, r)| mg.conditional_select(region, l, r, cond))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_boxed_slice(),
+            e: mg.conditional_select(region, lhs_e, rhs_e, cond)?,
+        })
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ProtogalaxyProof<F: PrimeField> {
-    pub poly_F: Vec<AssignedValue<F>>,
-    pub poly_K: Vec<AssignedValue<F>>,
-}
+pub type ProtogalaxyProof<F> = ivc::protogalaxy::verify_chip::AssignedProof<F>;
 
 impl<F: PrimeField> ProtogalaxyProof<F> {
     fn assign_advice_from(
@@ -157,8 +120,12 @@ impl<F: PrimeField> ProtogalaxyProof<F> {
         let super::nifs::protogalaxy::Proof { poly_F, poly_K } = original;
 
         Ok(Self {
-            poly_F: assigner.assign_all_advice(region, || "poly_F", poly_F.iter().cloned())?,
-            poly_K: assigner.assign_all_advice(region, || "poly_K", poly_K.iter().cloned())?,
+            poly_F: assigner
+                .assign_all_advice(region, || "poly_F", poly_F.iter().cloned())?
+                .into(),
+            poly_K: assigner
+                .assign_all_advice(region, || "poly_K", poly_K.iter().cloned())?
+                .into(),
         })
     }
 
@@ -166,8 +133,9 @@ impl<F: PrimeField> ProtogalaxyProof<F> {
         let Self { poly_F, poly_K } = self;
 
         poly_K
+            .0
             .iter()
-            .chain(poly_F.iter())
+            .chain(poly_F.0.iter())
             .cloned()
             .map(WrapValue::Assigned)
     }
@@ -193,12 +161,16 @@ impl<F: PrimeField> SelfTrace<F> {
         } = original;
 
         Ok(Self {
-            input_accumulator: ProtoGalaxyAccumulatorInstance::assign_advice_from(
+            input_accumulator: ProtoGalaxyAccumulatorInstance::assign_advice_from_native(
                 region,
                 input_accumulator,
                 main_gate_config,
             )?,
-            incoming: NativePlonkInstance::assign_advice_from(region, incoming, main_gate_config)?,
+            incoming: NativePlonkInstance::assign_advice_from_native(
+                region,
+                incoming,
+                main_gate_config,
+            )?,
             proof: ProtogalaxyProof::assign_advice_from(region, proof, main_gate_config)?,
         })
     }
@@ -220,8 +192,8 @@ impl<F: PrimeField> SelfTrace<F> {
 #[derive(Clone)]
 pub struct PairedPlonkInstance<F: PrimeField> {
     pub(crate) W_commitments: Vec<(AssignedValue<F>, AssignedValue<F>)>,
-    pub(crate) instances: Vec<Vec<BigUint<F>>>,
-    pub(crate) challenges: Vec<BigUint<F>>,
+    pub(crate) instances: Vec<Vec<BigUint<AssignedValue<F>>>>,
+    pub(crate) challenges: Vec<BigUint<AssignedValue<F>>>,
 }
 
 impl<F: PrimeField> PairedPlonkInstance<F> {
@@ -303,7 +275,7 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
 pub struct SangriaAccumulatorInstance<F: PrimeField> {
     pub(crate) ins: PairedPlonkInstance<F>,
     pub(crate) E_commitment: (AssignedValue<F>, AssignedValue<F>),
-    pub(crate) u: BigUint<F>,
+    pub(crate) u: BigUint<AssignedValue<F>>,
 }
 
 impl<F: PrimeField> SangriaAccumulatorInstance<F> {

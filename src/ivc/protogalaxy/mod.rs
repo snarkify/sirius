@@ -22,9 +22,9 @@ pub mod verify_chip {
             self,
             poly::{PolyChallenges, PolyContext},
         },
-        plonk::PlonkInstance,
+        plonk,
         polynomial::{lagrange::iter_cyclic_subgroup, univariate::UnivariatePoly},
-        poseidon::ROCircuitTrait,
+        poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
         prelude::DEFAULT_LIMB_WIDTH,
         util,
     };
@@ -58,91 +58,216 @@ pub mod verify_chip {
     }
 
     pub type BigUint<F> = Vec<F>;
-    pub type BigUintPoint<F> = (BigUint<F>, BigUint<F>);
+
+    #[derive(Debug, Clone)]
+    pub struct BigUintPoint<F> {
+        pub x: BigUint<F>,
+        pub y: BigUint<F>,
+    }
+
+    impl<F> BigUintPoint<F> {
+        fn x_limbs(&self) -> impl Iterator<Item = &F> {
+            self.x.iter()
+        }
+
+        fn y_limbs(&self) -> impl Iterator<Item = &F> {
+            self.y.iter()
+        }
+    }
+
+    impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for BigUintPoint<F> {
+        fn absorb_into(&self, ro: &mut RO) {
+            ro.absorb_field_iter(self.x.iter().chain(self.y.iter()).cloned());
+        }
+    }
+
+    impl<F: PrimeField> BigUintPoint<AssignedValue<F>> {
+        pub fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
+            let Self { x, y } = self;
+            x.iter()
+                .chain(y.iter())
+                .map(|v| WrapValue::Assigned(v.clone()))
+        }
+
+        fn conditional_select<const T: usize>(
+            region: &mut RegionCtx<'_, F>,
+            mg: &MainGate<F, T>,
+            lhs: &Self,
+            rhs: &Self,
+            cond: &AssignedValue<F>,
+        ) -> Result<Self, Halo2PlonkError> {
+            let Self { x: lhs_x, y: lhs_y } = lhs;
+            let Self { x: rhs_x, y: rhs_y } = rhs;
+
+            let x = lhs_x
+                .iter()
+                .zip_eq(rhs_x.iter())
+                .map(|(l, r)| mg.conditional_select(region, l, r, cond))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let y = lhs_y
+                .iter()
+                .zip_eq(rhs_y.iter())
+                .map(|(l, r)| mg.conditional_select(region, l, r, cond))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(Self { x, y })
+        }
+    }
+
+    impl<F: PrimeField> BigUintPoint<F> {
+        pub fn new<C: CurveAffine<ScalarExt = F>>(v: &C) -> Result<Self, big_uint::Error> {
+            let coordinates = v.coordinates().unwrap();
+
+            let x = big_uint::BigUint::<C::ScalarExt>::from_different_field::<C::Base>(
+                coordinates.x(),
+                DEFAULT_LIMB_WIDTH,
+                DEFAULT_LIMBS_COUNT_LIMIT,
+            )?;
+
+            let y = big_uint::BigUint::<C::ScalarExt>::from_different_field::<C::Base>(
+                coordinates.y(),
+                DEFAULT_LIMB_WIDTH,
+                DEFAULT_LIMBS_COUNT_LIMIT,
+            )?;
+
+            Ok(Self {
+                x: x.limbs().to_vec(),
+                y: y.limbs().to_vec(),
+            })
+        }
+
+        pub fn assign<const T: usize>(
+            self,
+            region: &mut RegionCtx<F>,
+            main_gate_config: &MainGateConfig<T>,
+        ) -> Result<BigUintPoint<AssignedValue<F>>, Halo2PlonkError> {
+            let mut assigner = main_gate_config.advice_cycle_assigner();
+
+            Ok(BigUintPoint {
+                x: assigner.assign_all_advice(region, || "x", self.x.into_iter())?,
+                y: assigner.assign_all_advice(region, || "y", self.y.into_iter())?,
+            })
+        }
+    }
+
+    impl<F: PrimeField> BigUintPoint<F> {
+        pub fn identity() -> Self {
+            Self {
+                x: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH).limbs().to_vec(),
+                y: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH).limbs().to_vec(),
+            }
+        }
+    }
 
     /// Assigned version of [`crate::plonk::PlonkInstance`]
+    #[derive(Clone)]
     pub struct AssignedPlonkInstance<F: PrimeField> {
         pub W_commitments: Vec<BigUintPoint<AssignedValue<F>>>,
         pub instances: Vec<Vec<AssignedValue<F>>>,
         pub challenges: Vec<AssignedValue<F>>,
     }
 
-    fn to_bn<C: CurveAffine>(v: &C) -> Result<BigUintPoint<C::ScalarExt>, big_uint::Error> {
-        let coordinates = v.coordinates().unwrap();
-
-        let x = big_uint::BigUint::<C::ScalarExt>::from_different_field::<C::Base>(
-            coordinates.x(),
-            DEFAULT_LIMB_WIDTH,
-            DEFAULT_LIMBS_COUNT_LIMIT,
-        )?;
-
-        let y = big_uint::BigUint::<C::ScalarExt>::from_different_field::<C::Base>(
-            coordinates.y(),
-            DEFAULT_LIMB_WIDTH,
-            DEFAULT_LIMBS_COUNT_LIMIT,
-        )?;
-
-        Ok((x.limbs().to_vec(), y.limbs().to_vec()))
-    }
-
     impl<F: PrimeField> AssignedPlonkInstance<F> {
         pub fn assign_advice_from<const T: usize, C: CurveAffine<ScalarExt = F>>(
             region: &mut RegionCtx<F>,
+            original: plonk::PlonkInstance<C>,
             main_gate_config: MainGateConfig<T>,
-            original: PlonkInstance<C>,
         ) -> Result<Self, Error> {
-            let PlonkInstance {
+            let plonk::PlonkInstance {
                 W_commitments,
                 instances,
                 challenges,
             } = original;
 
-            let mut assigner = main_gate_config.advice_cycle_assigner();
-
             let W_commitments = W_commitments
                 .iter()
-                .enumerate()
-                .map(|(i, W_commitment)| {
-                    let (x, y) = to_bn(W_commitment).unwrap();
-
-                    Ok((
-                        assigner.assign_all_advice(
-                            region,
-                            || format!("W_commitments[{i}]"),
-                            x.into_iter(),
-                        )?,
-                        assigner.assign_all_advice(
-                            region,
-                            || format!("W_commitments[{i}]"),
-                            y.into_iter(),
-                        )?,
-                    ))
+                .map(|W_commitment| {
+                    BigUintPoint::new(W_commitment)
+                        .expect("TODO")
+                        .assign(region, &main_gate_config)
                 })
-                .collect::<Result<Vec<_>, _>>();
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| Error::Assign {
+                    annotation: "W_commitments",
+                    err,
+                })?;
 
-            let instances = instances
-                .iter()
-                .map(|instance| {
-                    assigner.assign_all_advice(region, || "instance", instance.iter().cloned())
-                })
-                .collect::<Result<Vec<_>, _>>();
-
-            let challenges =
-                assigner.assign_all_advice(region, || "challenges", challenges.iter().cloned());
-
-            let map_err = |err| Error::Assign {
-                annotation: "PlonkInstance",
-                err,
-            };
+            let mut assigner = main_gate_config.advice_cycle_assigner();
 
             Ok(Self {
-                W_commitments: W_commitments.map_err(map_err)?,
-                instances: instances.map_err(map_err)?,
-                challenges: challenges.map_err(map_err)?,
+                W_commitments,
+                instances: instances
+                    .into_iter()
+                    .map(|instance| {
+                        assigner.assign_all_advice(region, || "instance", instance.into_iter())
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|err| Error::Assign {
+                        annotation: "instances",
+                        err,
+                    })?,
+                challenges: assigner
+                    .assign_all_advice(region, || "challenges", challenges.into_iter())
+                    .map_err(|err| Error::Assign {
+                        annotation: "challenges",
+                        err,
+                    })?,
             })
         }
 
-        pub fn iter_wrap_value(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
+        pub fn conditional_select<const T: usize>(
+            region: &mut RegionCtx<'_, F>,
+            mg: &MainGate<F, T>,
+            lhs: &Self,
+            rhs: &Self,
+            cond: &AssignedValue<F>,
+        ) -> Result<Self, Halo2PlonkError> {
+            let Self {
+                W_commitments: lhs_W_commitments,
+                instances: lhs_instances,
+                challenges: lhs_challenges,
+            } = lhs;
+            let Self {
+                W_commitments: rhs_W_commitments,
+                instances: rhs_instances,
+                challenges: rhs_challenges,
+            } = rhs;
+
+            Ok(Self {
+                W_commitments: lhs_W_commitments
+                    .iter()
+                    .zip_eq(rhs_W_commitments.iter())
+                    .map(|(lhs_W_commitment, rhs_W_commitment)| {
+                        BigUintPoint::conditional_select(
+                            region,
+                            mg,
+                            lhs_W_commitment,
+                            rhs_W_commitment,
+                            cond,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                instances: lhs_instances
+                    .iter()
+                    .zip_eq(rhs_instances.iter())
+                    .map(|(l_instance, r_instance)| {
+                        l_instance
+                            .iter()
+                            .zip_eq(r_instance.iter())
+                            .map(|(l, r)| mg.conditional_select(region, l, r, cond))
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .collect::<Result<Vec<Vec<_>>, _>>()?,
+                challenges: lhs_challenges
+                    .iter()
+                    .zip_eq(rhs_challenges.iter())
+                    .map(|(l, r)| mg.conditional_select(region, l, r, cond))
+                    .collect::<Result<Vec<_>, _>>()?,
+            })
+        }
+
+        pub fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
             let Self {
                 W_commitments,
                 instances,
@@ -151,21 +276,22 @@ pub mod verify_chip {
 
             W_commitments
                 .iter()
-                .flat_map(|(W_commitment_x, W_commitment_y)| {
-                    W_commitment_x.iter().chain(W_commitment_y.iter()).cloned()
-                })
-                .chain(
-                    instances
+                .flat_map(|W_commitment| W_commitment.iter_wrap_values())
+                .chain(instances.iter().flat_map(|instance| {
+                    instance
                         .iter()
-                        .flat_map(|instance| instance.iter())
-                        .cloned(),
+                        .map(|value| WrapValue::Assigned(value.clone()))
+                }))
+                .chain(
+                    challenges
+                        .iter()
+                        .map(|cha| WrapValue::Assigned(cha.clone())),
                 )
-                .chain(challenges.iter().cloned())
-                .map(|value| WrapValue::Assigned(value))
         }
     }
 
     /// Assigned version of [`crate::nifs::protogalaxy::accumulator::AccumulatorInstance`]
+    #[derive(Clone)]
     pub struct AssignedAccumulatorInstance<F: PrimeField> {
         pub ins: AssignedPlonkInstance<F>,
         pub betas: Box<[AssignedValue<F>]>,
@@ -173,7 +299,7 @@ pub mod verify_chip {
     }
 
     impl<F: PrimeField> AssignedAccumulatorInstance<F> {
-        pub fn assign<const T: usize, C: CurveAffine<ScalarExt = F>>(
+        pub fn assign_advice_from<const T: usize, C: CurveAffine<ScalarExt = F>>(
             region: &mut RegionCtx<F>,
             main_gate_config: MainGateConfig<T>,
             acc: protogalaxy::AccumulatorInstance<C>,
@@ -181,7 +307,7 @@ pub mod verify_chip {
             let protogalaxy::AccumulatorInstance { ins, betas, e } = acc;
 
             let ins =
-                AssignedPlonkInstance::assign_advice_from(region, main_gate_config.clone(), ins)?;
+                AssignedPlonkInstance::assign_advice_from(region, ins, main_gate_config.clone())?;
 
             let mut assigner = main_gate_config.advice_cycle_assigner();
 
@@ -207,10 +333,10 @@ pub mod verify_chip {
             Ok(Self { ins, betas, e })
         }
 
-        pub fn iter_wrap_value(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
+        pub fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
             let Self { ins, betas, e } = self;
 
-            ins.iter_wrap_value()
+            ins.iter_wrap_values()
                 .chain(betas.iter().map(|beta| WrapValue::Assigned(beta.clone())))
                 .chain(iter::once(WrapValue::Assigned(e.clone())))
         }
@@ -275,9 +401,32 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::polynomial::univariate::UnivariatePoly`]
+    #[derive(Clone)]
     pub struct AssignedUnivariatePoly<F: PrimeField>(pub UnivariatePoly<AssignedValue<F>>);
 
+    impl<F: PrimeField> From<UnivariatePoly<AssignedValue<F>>> for AssignedUnivariatePoly<F> {
+        fn from(value: UnivariatePoly<AssignedValue<F>>) -> Self {
+            Self(value)
+        }
+    }
+
+    impl<F: PrimeField> From<Vec<AssignedValue<F>>> for AssignedUnivariatePoly<F> {
+        fn from(value: Vec<AssignedValue<F>>) -> Self {
+            Self(UnivariatePoly(value.into_boxed_slice()))
+        }
+    }
+
+    impl<F: PrimeField> FromIterator<AssignedValue<F>> for AssignedUnivariatePoly<F> {
+        fn from_iter<T: IntoIterator<Item = AssignedValue<F>>>(iter: T) -> Self {
+            Self(UnivariatePoly::from_iter(iter))
+        }
+    }
+
     impl<F: PrimeField> AssignedUnivariatePoly<F> {
+        pub fn new(coeff: Box<[AssignedValue<F>]>) -> Self {
+            Self(UnivariatePoly(coeff))
+        }
+
         pub fn assign<const T: usize>(
             region: &mut RegionCtx<F>,
             main_gate_config: MainGateConfig<T>,
@@ -405,6 +554,7 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::nifs::protogalaxy::Proof]
+    #[derive(Clone)]
     pub struct AssignedProof<F: PrimeField> {
         pub poly_F: AssignedUnivariatePoly<F>,
         pub poly_K: AssignedUnivariatePoly<F>,
@@ -511,8 +661,8 @@ pub mod verify_chip {
         {
             let delta = ro_circuit
                 .absorb_iter(vp.iter_wrap_value())
-                .absorb_iter(accumulator.iter_wrap_value())
-                .absorb_iter(incoming.iter().flat_map(|tr| tr.iter_wrap_value()))
+                .absorb_iter(accumulator.iter_wrap_values())
+                .absorb_iter(incoming.iter().flat_map(|tr| tr.iter_wrap_values()))
                 .squeeze(region)?;
 
             let alpha = ro_circuit
@@ -758,10 +908,9 @@ pub mod verify_chip {
             ro_circuit.absorb_iter(pi.instances.iter().flat_map(|inst| inst.iter()));
 
             for (W_commitment, challenge) in pi.W_commitments.iter().zip_eq(pi.challenges.iter()) {
-                let (W_commitment_x, W_commitment_y) = W_commitment;
                 let expected = ro_circuit
-                    .absorb_iter(W_commitment_x.iter())
-                    .absorb_iter(W_commitment_y.iter())
+                    .absorb_iter(W_commitment.x_limbs())
+                    .absorb_iter(W_commitment.y_limbs())
                     .squeeze(region)?;
 
                 region.constrain_equal(expected.cell(), challenge.cell())?;
@@ -883,6 +1032,7 @@ pub mod verify_chip {
                 self,
                 protogalaxy::{AccumulatorArgs, VerifierParam},
             },
+            plonk::PlonkInstance,
             polynomial,
             table::WitnessCollector,
         };
@@ -968,7 +1118,7 @@ pub mod verify_chip {
                             params,
                         )
                         .unwrap();
-                        let acc = AssignedAccumulatorInstance::assign(
+                        let acc = AssignedAccumulatorInstance::assign_advice_from(
                             &mut region,
                             config.clone(),
                             acc.clone().into(),

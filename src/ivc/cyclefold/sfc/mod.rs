@@ -15,7 +15,6 @@ use crate::{
         StepCircuit,
     },
     main_gate::{MainGate, MainGateConfig, RegionCtx},
-    polynomial::univariate::UnivariatePoly,
     poseidon::ROTrait,
 };
 
@@ -114,28 +113,29 @@ where
                 Halo2PlonkError::Synthesis
             })?;
 
-        let _self_acc_out = layouter.assign_region(
-            || "sfc protogalaxy",
-            |region| {
-                let mut region = RegionCtx::new(region, 0);
+        let _self_acc_out: input::assigned::ProtoGalaxyAccumulatorInstance<C::ScalarExt> = layouter
+            .assign_region(
+                || "sfc protogalaxy",
+                |region| {
+                    let mut region = RegionCtx::new(region, 0);
 
-                protogalaxy::verify_chip::verify(
-                    &mut region,
-                    config.mg.clone(),
-                    ro_chip(config.mg.clone()),
-                    verify_chip::AssignedVerifierParam {
-                        pp_digest: input.pp_digest.clone(),
-                    },
-                    input.self_trace.input_accumulator.clone().into(),
-                    &[input.self_trace.incoming.clone().into()],
-                    input.self_trace.proof.clone().into(),
-                )
-                .map_err(|err| {
-                    error!("while protogalaxy::verify: {err:?}");
-                    Halo2PlonkError::Synthesis
-                })
-            },
-        )?;
+                    protogalaxy::verify_chip::verify(
+                        &mut region,
+                        config.mg.clone(),
+                        ro_chip(config.mg.clone()),
+                        verify_chip::AssignedVerifierParam {
+                            pp_digest: input.pp_digest.clone(),
+                        },
+                        input.self_trace.input_accumulator.clone(),
+                        &[input.self_trace.incoming.clone()],
+                        input.self_trace.proof.clone(),
+                    )
+                    .map_err(|err| {
+                        error!("while protogalaxy::verify: {err:?}");
+                        Halo2PlonkError::Synthesis
+                    })
+                },
+            )?;
 
         layouter.assign_region(
             || "sfc out",
@@ -161,69 +161,5 @@ where
         )?;
 
         todo!()
-    }
-}
-
-impl<F: PrimeField> From<input::assigned::ProtoGalaxyAccumulatorInstance<F>>
-    for verify_chip::AssignedAccumulatorInstance<F>
-{
-    fn from(value: input::assigned::ProtoGalaxyAccumulatorInstance<F>) -> Self {
-        use self::input::assigned::{NativePlonkInstance, ProtoGalaxyAccumulatorInstance};
-
-        let ProtoGalaxyAccumulatorInstance {
-            ins:
-                NativePlonkInstance {
-                    W_commitments,
-                    instances,
-                    challenges,
-                },
-            betas,
-            e,
-        } = value;
-
-        Self {
-            betas,
-            e,
-            ins: verify_chip::AssignedPlonkInstance {
-                instances,
-                challenges,
-                W_commitments: W_commitments
-                    .into_iter()
-                    .map(|W_commitment| (W_commitment.x_limbs, W_commitment.y_limbs))
-                    .collect(),
-            },
-        }
-    }
-}
-
-impl<F: PrimeField> From<input::assigned::ProtogalaxyProof<F>> for verify_chip::AssignedProof<F> {
-    fn from(value: input::assigned::ProtogalaxyProof<F>) -> Self {
-        let input::assigned::ProtogalaxyProof { poly_F, poly_K } = value;
-
-        verify_chip::AssignedProof {
-            poly_F: verify_chip::AssignedUnivariatePoly(UnivariatePoly(poly_F.into_boxed_slice())),
-            poly_K: verify_chip::AssignedUnivariatePoly(UnivariatePoly(poly_K.into_boxed_slice())),
-        }
-    }
-}
-
-impl<F: PrimeField> From<input::assigned::NativePlonkInstance<F>>
-    for verify_chip::AssignedPlonkInstance<F>
-{
-    fn from(value: input::assigned::NativePlonkInstance<F>) -> Self {
-        let input::assigned::NativePlonkInstance {
-            W_commitments,
-            instances,
-            challenges,
-        } = value;
-
-        Self {
-            instances,
-            challenges,
-            W_commitments: W_commitments
-                .into_iter()
-                .map(|W_commitment| (W_commitment.x_limbs, W_commitment.y_limbs))
-                .collect(),
-        }
     }
 }
