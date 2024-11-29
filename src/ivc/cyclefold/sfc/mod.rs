@@ -1,19 +1,28 @@
 use std::num::NonZeroUsize;
 
+use itertools::Itertools;
+use tracing::error;
+
 use crate::{
     halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         halo2curves::CurveAffine,
         plonk::{Circuit, ConstraintSystem, Error as Halo2PlonkError},
     },
-    ivc::{cyclefold, StepCircuit},
+    ivc::{
+        cyclefold::{self, ro_chip},
+        protogalaxy::{self, verify_chip},
+        StepCircuit,
+    },
     main_gate::{MainGate, MainGateConfig, RegionCtx},
+    polynomial::univariate::UnivariatePoly,
     poseidon::ROTrait,
 };
 
 mod input;
-use halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 pub use input::Input;
+
+use crate::halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 
 const T_MAIN_GATE: usize = 5;
 
@@ -63,6 +72,8 @@ where
 
 impl<const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>> Circuit<C::ScalarExt>
     for StepFoldingCircuit<'_, ARITY, C, SC>
+where
+    C::ScalarExt: PrimeFieldBits + FromUniformBytes<64>,
 {
     type Config = Config<SC::Config>;
     type FloorPlanner = SimpleFloorPlanner;
@@ -86,21 +97,133 @@ impl<const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>> C
         config: Self::Config,
         mut layouter: impl Layouter<C::ScalarExt>,
     ) -> Result<(), Halo2PlonkError> {
-        layouter.assign_region(
-            || "sfc main",
+        let input = layouter.assign_region(
+            || "sfc input",
             |region| {
                 let mut region = RegionCtx::new(region, 0);
 
-                let _input = input::assigned::Input::assign_advice_from(
+                input::assigned::Input::assign_advice_from(&mut region, &self.input, &config.mg)
+            },
+        )?;
+
+        let z_out = self
+            .sc
+            .synthesize_step(config.sc, &mut layouter, &input.z_i)
+            .map_err(|err| {
+                error!("while synthesize_step: {err:?}");
+                Halo2PlonkError::Synthesis
+            })?;
+
+        let _self_acc_out = layouter.assign_region(
+            || "sfc protogalaxy",
+            |region| {
+                let mut region = RegionCtx::new(region, 0);
+
+                protogalaxy::verify_chip::verify(
                     &mut region,
-                    &self.input,
-                    &config.mg,
-                )?;
+                    config.mg.clone(),
+                    ro_chip(config.mg.clone()),
+                    verify_chip::AssignedVerifierParam {
+                        pp_digest: input.pp_digest.clone(),
+                    },
+                    input.self_trace.input_accumulator.clone().into(),
+                    &[input.self_trace.incoming.clone().into()],
+                    input.self_trace.proof.clone().into(),
+                )
+                .map_err(|err| {
+                    error!("while protogalaxy::verify: {err:?}");
+                    Halo2PlonkError::Synthesis
+                })
+            },
+        )?;
+
+        layouter.assign_region(
+            || "sfc out",
+            |region| {
+                let mut region = RegionCtx::new(region, 0);
+
+                let mg = MainGate::new(config.mg.clone());
+                let is_zero_step = mg.is_zero_term(&mut region, input.step.clone())?;
+
+                let _z_out: [_; ARITY] = input
+                    .z_0
+                    .iter()
+                    .zip_eq(z_out.iter())
+                    .map(|(z_0_i, z_out_i)| {
+                        mg.conditional_select(&mut region, z_0_i, z_out_i, &is_zero_step)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .try_into()
+                    .unwrap();
 
                 Ok(())
             },
         )?;
 
         todo!()
+    }
+}
+
+impl<F: PrimeField> From<input::assigned::ProtoGalaxyAccumulatorInstance<F>>
+    for verify_chip::AssignedAccumulatorInstance<F>
+{
+    fn from(value: input::assigned::ProtoGalaxyAccumulatorInstance<F>) -> Self {
+        use self::input::assigned::{NativePlonkInstance, ProtoGalaxyAccumulatorInstance};
+
+        let ProtoGalaxyAccumulatorInstance {
+            ins:
+                NativePlonkInstance {
+                    W_commitments,
+                    instances,
+                    challenges,
+                },
+            betas,
+            e,
+        } = value;
+
+        Self {
+            betas,
+            e,
+            ins: verify_chip::AssignedPlonkInstance {
+                instances,
+                challenges,
+                W_commitments: W_commitments
+                    .into_iter()
+                    .map(|W_commitment| (W_commitment.x_limbs, W_commitment.y_limbs))
+                    .collect(),
+            },
+        }
+    }
+}
+
+impl<F: PrimeField> From<input::assigned::ProtogalaxyProof<F>> for verify_chip::AssignedProof<F> {
+    fn from(value: input::assigned::ProtogalaxyProof<F>) -> Self {
+        let input::assigned::ProtogalaxyProof { poly_F, poly_K } = value;
+
+        verify_chip::AssignedProof {
+            poly_F: verify_chip::AssignedUnivariatePoly(UnivariatePoly(poly_F.into_boxed_slice())),
+            poly_K: verify_chip::AssignedUnivariatePoly(UnivariatePoly(poly_K.into_boxed_slice())),
+        }
+    }
+}
+
+impl<F: PrimeField> From<input::assigned::NativePlonkInstance<F>>
+    for verify_chip::AssignedPlonkInstance<F>
+{
+    fn from(value: input::assigned::NativePlonkInstance<F>) -> Self {
+        let input::assigned::NativePlonkInstance {
+            W_commitments,
+            instances,
+            challenges,
+        } = value;
+
+        Self {
+            instances,
+            challenges,
+            W_commitments: W_commitments
+                .into_iter()
+                .map(|W_commitment| (W_commitment.x_limbs, W_commitment.y_limbs))
+                .collect(),
+        }
     }
 }

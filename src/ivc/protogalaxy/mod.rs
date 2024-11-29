@@ -7,7 +7,6 @@ pub mod verify_chip {
     use crate::{
         gadgets::nonnative::bn::big_uint,
         halo2_proofs::{
-            arithmetic::Field,
             circuit::{AssignedCell, Chip, Value as Halo2Value},
             halo2curves::{
                 ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
@@ -63,9 +62,9 @@ pub mod verify_chip {
 
     /// Assigned version of [`crate::plonk::PlonkInstance`]
     pub struct AssignedPlonkInstance<F: PrimeField> {
-        W_commitments: Vec<BigUintPoint<AssignedValue<F>>>,
-        instances: Vec<Vec<AssignedValue<F>>>,
-        challenges: Vec<AssignedValue<F>>,
+        pub W_commitments: Vec<BigUintPoint<AssignedValue<F>>>,
+        pub instances: Vec<Vec<AssignedValue<F>>>,
+        pub challenges: Vec<AssignedValue<F>>,
     }
 
     fn to_bn<C: CurveAffine>(v: &C) -> Result<BigUintPoint<C::ScalarExt>, big_uint::Error> {
@@ -168,9 +167,9 @@ pub mod verify_chip {
 
     /// Assigned version of [`crate::nifs::protogalaxy::accumulator::AccumulatorInstance`]
     pub struct AssignedAccumulatorInstance<F: PrimeField> {
-        ins: AssignedPlonkInstance<F>,
-        betas: Box<[AssignedValue<F>]>,
-        e: AssignedValue<F>,
+        pub ins: AssignedPlonkInstance<F>,
+        pub betas: Box<[AssignedValue<F>]>,
+        pub e: AssignedValue<F>,
     }
 
     impl<F: PrimeField> AssignedAccumulatorInstance<F> {
@@ -276,7 +275,7 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::polynomial::univariate::UnivariatePoly`]
-    pub struct AssignedUnivariatePoly<F: PrimeField>(UnivariatePoly<AssignedValue<F>>);
+    pub struct AssignedUnivariatePoly<F: PrimeField>(pub UnivariatePoly<AssignedValue<F>>);
 
     impl<F: PrimeField> AssignedUnivariatePoly<F> {
         pub fn assign<const T: usize>(
@@ -407,8 +406,8 @@ pub mod verify_chip {
 
     /// Assigned version of [`crate::nifs::protogalaxy::Proof]
     pub struct AssignedProof<F: PrimeField> {
-        poly_F: AssignedUnivariatePoly<F>,
-        poly_K: AssignedUnivariatePoly<F>,
+        pub poly_F: AssignedUnivariatePoly<F>,
+        pub poly_K: AssignedUnivariatePoly<F>,
     }
 
     impl<F: PrimeField> AssignedProof<F> {
@@ -556,11 +555,11 @@ pub mod verify_chip {
         .collect::<Result<Box<[_]>, Halo2PlonkError>>()
     }
 
-    fn calculate_betas_stroke<C: CurveAffine, const T: usize>(
-        region: &mut RegionCtx<C::ScalarExt>,
-        main_gate: &MainGate<C::ScalarExt, T>,
-        cha: PolyChallenges<AssignedCell<C::ScalarExt, C::ScalarExt>>,
-    ) -> Result<Box<[AssignedCell<C::ScalarExt, C::ScalarExt>]>, Error> {
+    fn calculate_betas_stroke<F: PrimeField, const T: usize>(
+        region: &mut RegionCtx<F>,
+        main_gate: &MainGate<F, T>,
+        cha: PolyChallenges<AssignedValue<F>>,
+    ) -> Result<Box<[AssignedValue<F>]>, Error> {
         let deltas =
             calculate_exponentiation_sequence(region, main_gate, cha.delta, cha.betas.len())
                 .map_err(|err| Error::Deltas { err })?;
@@ -795,18 +794,17 @@ pub mod verify_chip {
     ///
     /// 5. **Fold the Instance:**
     ///     - [`ProtoGalaxy::fold_instance`]
-    pub fn verify<C: CurveAffine, const L: usize, const T: usize>(
-        region: &mut RegionCtx<C::ScalarExt>,
+    pub fn verify<F, const L: usize, const T: usize>(
+        region: &mut RegionCtx<F>,
         main_gate_config: MainGateConfig<T>,
-        ro_circuit: impl ROCircuitTrait<C::ScalarExt>,
-        vp: AssignedVerifierParam<C::ScalarExt>,
-        accumulator: AssignedAccumulatorInstance<C::ScalarExt>,
-        incoming: &[AssignedPlonkInstance<C::ScalarExt>; L],
-        proof: AssignedProof<C::ScalarExt>,
-    ) -> Result<AssignedAccumulatorInstance<C::ScalarExt>, Error>
+        ro_circuit: impl ROCircuitTrait<F>,
+        vp: AssignedVerifierParam<F>,
+        accumulator: AssignedAccumulatorInstance<F>,
+        incoming: &[AssignedPlonkInstance<F>; L],
+        proof: AssignedProof<F>,
+    ) -> Result<AssignedAccumulatorInstance<F>, Error>
     where
-        C::ScalarExt: FromUniformBytes<64> + PrimeFieldBits,
-        C::ScalarExt: FromUniformBytes<64> + PrimeFieldBits,
+        F: FromUniformBytes<64> + PrimeFieldBits,
     {
         let AssignedChallanges {
             delta,
@@ -817,7 +815,7 @@ pub mod verify_chip {
 
         let main_gate = MainGate::new(main_gate_config);
 
-        let betas = calculate_betas_stroke::<C, T>(
+        let betas = calculate_betas_stroke::<F, T>(
             region,
             &main_gate,
             PolyChallenges {
@@ -831,7 +829,7 @@ pub mod verify_chip {
             .assign_advice(
                 || "one",
                 main_gate.config().state[0],
-                Halo2Value::known(C::ScalarExt::ONE),
+                Halo2Value::known(F::ONE),
             )
             .map_err(|err| Error::Assign {
                 annotation: "one",
@@ -842,7 +840,7 @@ pub mod verify_chip {
         let mut gamma_powers = ValuePowers::new(one.clone(), gamma);
         let mut alpha_powers = ValuePowers::new(one, alpha);
 
-        let e = calculate_e::<C::ScalarExt, T, L>(
+        let e = calculate_e::<F, T, L>(
             region,
             &main_gate,
             &proof,
@@ -1069,7 +1067,7 @@ pub mod verify_chip {
                         let main_gate = MainGate::<Scalar, T>::new(main_gate_config.clone());
 
                         Ok(
-                            calculate_betas_stroke::<Affine1, T>(&mut region, &main_gate, cha)
+                            calculate_betas_stroke::<Scalar, T>(&mut region, &main_gate, cha)
                                 .unwrap(),
                         )
                     },

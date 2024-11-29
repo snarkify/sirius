@@ -13,8 +13,8 @@ type BigUint<F> = Vec<AssignedValue<F>>;
 
 #[derive(Clone)]
 pub struct BigUintPoint<F: PrimeField> {
-    x_limbs: BigUint<F>,
-    y_limbs: BigUint<F>,
+    pub x_limbs: BigUint<F>,
+    pub y_limbs: BigUint<F>,
 }
 
 impl<F: PrimeField> BigUintPoint<F> {
@@ -141,9 +141,10 @@ impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct ProtogalaxyProof<F: PrimeField> {
-    poly_F: Vec<AssignedValue<F>>,
-    poly_K: Vec<AssignedValue<F>>,
+    pub poly_F: Vec<AssignedValue<F>>,
+    pub poly_K: Vec<AssignedValue<F>>,
 }
 
 impl<F: PrimeField> ProtogalaxyProof<F> {
