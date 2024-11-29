@@ -1,6 +1,5 @@
-use std::num::NonZeroUsize;
-
 use halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeFieldBits};
+use std::num::NonZeroUsize;
 
 use crate::{
     main_gate::MainGateConfig,

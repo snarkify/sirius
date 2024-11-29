@@ -1,6 +1,7 @@
 use std::array;
 
 use super::super::{DEFAULT_LIMBS_COUNT_LIMIT, DEFAULT_LIMB_WIDTH};
+pub use crate::ivc::protogalaxy::verify_chip::BigUintPoint;
 use crate::{
     gadgets::nonnative::bn::big_uint::BigUint,
     halo2_proofs::halo2curves::{ff::PrimeField, CurveAffine},
@@ -10,39 +11,6 @@ use crate::{
 };
 
 pub mod assigned;
-
-#[derive(Debug, Clone)]
-pub struct BigUintPoint<F: PrimeField> {
-    x: BigUint<F>,
-    y: BigUint<F>,
-}
-
-impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for BigUintPoint<F> {
-    fn absorb_into(&self, ro: &mut RO) {
-        ro.absorb_field_iter(self.x.limbs().iter().chain(self.y.limbs().iter()).cloned());
-    }
-}
-
-impl<C: CurveAffine> From<&C> for BigUintPoint<C::ScalarExt> {
-    fn from(value: &C) -> Self {
-        let c = value.coordinates().unwrap();
-        Self {
-            x: BigUint::from_different_field(c.x(), DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT_LIMIT)
-                .unwrap(),
-            y: BigUint::from_different_field(c.y(), DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT_LIMIT)
-                .unwrap(),
-        }
-    }
-}
-
-impl<F: PrimeField> BigUintPoint<F> {
-    fn identity() -> Self {
-        Self {
-            x: BigUint::zero(DEFAULT_LIMB_WIDTH),
-            y: BigUint::zero(DEFAULT_LIMB_WIDTH),
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct NativePlonkInstance<F: PrimeField> {
@@ -88,7 +56,12 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for PairedPlonkInstance<F>
 impl<C: CurveAffine> From<plonk::PlonkInstance<C>> for NativePlonkInstance<C::ScalarExt> {
     fn from(value: plonk::PlonkInstance<C>) -> Self {
         Self {
-            W_commitments: value.W_commitments.iter().map(BigUintPoint::from).collect(),
+            W_commitments: value
+                .W_commitments
+                .iter()
+                .map(BigUintPoint::new)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
             instances: value.instances,
             challenges: value.challenges,
         }
@@ -148,7 +121,7 @@ impl<F: PrimeField> SelfTrace<F> {
         };
 
         let ins = NativePlonkInstance::<F> {
-            W_commitments: vec![BigUintPoint::identity(); W_commitments_len],
+            W_commitments: vec![BigUintPoint::<F>::identity(); W_commitments_len],
             instances: native_plonk_structure
                 .num_io
                 .iter()
@@ -335,8 +308,8 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
             input_accumulator: ProtoGalaxyAccumulatorInstance {
                 ins: NativePlonkInstance {
                     W_commitments: vec![BigUintPoint {
-                        x: random_big_uint(&mut gen),
-                        y: random_big_uint(&mut gen),
+                        x: random_big_uint(&mut gen).limbs().to_vec(),
+                        y: random_big_uint(&mut gen).limbs().to_vec(),
                     }],
                     instances: vec![
                         vec![gen.next().unwrap(); 10]; // 5 instances each with 10 field elements
@@ -349,8 +322,8 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
             },
             incoming: NativePlonkInstance {
                 W_commitments: vec![BigUintPoint {
-                    x: random_big_uint(&mut gen),
-                    y: random_big_uint(&mut gen),
+                    x: random_big_uint(&mut gen).limbs().to_vec(),
+                    y: random_big_uint(&mut gen).limbs().to_vec(),
                 }],
                 instances: vec![
                     vec![gen.next().unwrap(); 10]; // 10 instances each with 10 field elements
