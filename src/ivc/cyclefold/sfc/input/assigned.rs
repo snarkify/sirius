@@ -9,7 +9,7 @@ use crate::{
     main_gate::{self, AdviceCyclicAssignor, AssignedValue, MainGate, RegionCtx, WrapValue},
 };
 
-pub type MainGateConfig = main_gate::MainGateConfig<{ super::super::T_MAIN_GATE }>;
+pub type MainGateConfig = main_gate::MainGateConfig<{ super::super::MAIN_GATE_T }>;
 
 pub type BigUint<F> = Vec<F>;
 
@@ -76,7 +76,7 @@ impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
         })
     }
 
-    fn conditional_select<const T: usize>(
+    pub fn conditional_select<const T: usize>(
         region: &mut RegionCtx<'_, F>,
         mg: &MainGate<F, T>,
         lhs: &Self,
@@ -272,10 +272,11 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
     }
 }
 
+#[derive(Clone)]
 pub struct SangriaAccumulatorInstance<F: PrimeField> {
     pub(crate) ins: PairedPlonkInstance<F>,
     pub(crate) E_commitment: (AssignedValue<F>, AssignedValue<F>),
-    pub(crate) u: BigUint<AssignedValue<F>>,
+    pub(crate) u: AssignedValue<F>,
 }
 
 impl<F: PrimeField> SangriaAccumulatorInstance<F> {
@@ -302,8 +303,18 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
                     original.E_commitment.1,
                 )?,
             ),
-            u: assigner.assign_all_advice(region, || "u", original.u.limbs().iter().cloned())?,
+            u: assigner.assign_next_advice(region, || "u", original.u)?,
         })
+    }
+
+    pub fn conditional_select<const T: usize>(
+        _region: &mut RegionCtx<'_, F>,
+        _mg: &MainGate<F, T>,
+        _lhs: &Self,
+        _rhs: &Self,
+        _cond: &AssignedValue<F>,
+    ) -> Result<Self, Halo2PlonkError> {
+        todo!()
     }
 
     fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
@@ -316,7 +327,7 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
         ins.iter_wrap_values().chain(
             [E_commitment.0.clone(), E_commitment.1.clone()]
                 .into_iter()
-                .chain(u.iter().cloned())
+                .chain(iter::once(u.clone()))
                 .map(|v| WrapValue::Assigned(v)),
         )
     }
@@ -329,7 +340,7 @@ pub struct PairedTrace<F: PrimeField> {
     // The size from one to three
     // Depdend on `W_commitments_len`
     pub incoming: Box<[PairedPlonkInstance<F>]>,
-    proof: SangriaCrossTermCommits<F>,
+    pub proof: SangriaCrossTermCommits<F>,
 }
 
 impl<F: PrimeField> PairedTrace<F> {
@@ -377,7 +388,7 @@ impl<F: PrimeField> PairedTrace<F> {
         })
     }
 
-    fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
+    pub fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
         let Self {
             input_accumulator,
             incoming,

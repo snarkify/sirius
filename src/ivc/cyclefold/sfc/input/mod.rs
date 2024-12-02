@@ -157,7 +157,7 @@ impl<F: PrimeField> SelfTrace<F> {
 pub struct SangriaAccumulatorInstance<F: PrimeField> {
     pub(crate) ins: PairedPlonkInstance<F>,
     pub(crate) E_commitment: (F, F),
-    pub(crate) u: BigUint<F>,
+    pub(crate) u: F,
 }
 
 impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SangriaAccumulatorInstance<F> {
@@ -168,7 +168,10 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SangriaAccumulatorInst
             u,
         } = self;
 
-        ro.absorb(ins).absorb_field(*ex).absorb_field(*ey).absorb(u);
+        ro.absorb(ins)
+            .absorb_field(*ex)
+            .absorb_field(*ey)
+            .absorb_field(*u);
     }
 }
 
@@ -246,7 +249,7 @@ impl<F: PrimeField> PairedTrace<F> {
             input_accumulator: SangriaAccumulatorInstance {
                 ins: ins.clone(),
                 E_commitment: (F::ZERO, F::ZERO),
-                u: BigUint::zero(DEFAULT_LIMB_WIDTH),
+                u: F::ZERO,
             },
             incoming: vec![ins.clone(); W_commitments_len].into_boxed_slice(),
             proof: vec![
@@ -353,7 +356,7 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
                     challenges: vec![random_big_uint(&mut gen); 1],
                 },
                 E_commitment: (gen.next().unwrap(), gen.next().unwrap()),
-                u: random_big_uint(&mut gen),
+                u: gen.next().unwrap(),
             },
             incoming: vec![
                 PairedPlonkInstance {
