@@ -1,4 +1,4 @@
-use std::num::NonZeroUsize;
+use std::{marker::PhantomData, num::NonZeroUsize};
 
 use itertools::Itertools;
 use tracing::error;
@@ -21,47 +21,55 @@ use crate::{
 mod input;
 pub use input::Input;
 
+pub mod sangria_adapter;
+
 use crate::halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 
-const T_MAIN_GATE: usize = 5;
+const MAIN_GATE_T: usize = 5;
 
 /// 'SCC' here is 'Step Circuit Config'
 #[derive(Debug, Clone)]
 pub struct Config<SCC> {
     sc: SCC,
-    mg: MainGateConfig<T_MAIN_GATE>,
+    mg: MainGateConfig<MAIN_GATE_T>,
 }
 
 pub struct StepFoldingCircuit<
     'sc,
     const ARITY: usize,
-    C: CurveAffine,
-    SC: StepCircuit<ARITY, C::ScalarExt>,
+    CMain: CurveAffine,
+    CSup: CurveAffine<Base = CMain::ScalarExt>,
+    SC: StepCircuit<ARITY, CMain::ScalarExt>,
 > {
     pub sc: &'sc SC,
-    pub input: Input<ARITY, C::ScalarExt>,
+    pub input: Input<ARITY, CMain::ScalarExt>,
+    pub _p: PhantomData<CSup>,
 }
 
-impl<const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>>
-    StepFoldingCircuit<'_, ARITY, C, SC>
+impl<
+        const ARITY: usize,
+        CMain: CurveAffine,
+        CSup: CurveAffine<Base = CMain::ScalarExt>,
+        SC: StepCircuit<ARITY, CMain::ScalarExt>,
+    > StepFoldingCircuit<'_, ARITY, CMain, CSup, SC>
 where
-    C::ScalarExt: PrimeFieldBits + FromUniformBytes<64>,
+    CMain::ScalarExt: PrimeFieldBits + FromUniformBytes<64>,
 {
     /// For the initial iteration, we will give the same accumulators that we take from the input
-    pub fn initial_instances(&self) -> Vec<Vec<C::ScalarExt>> {
-        let marker = cyclefold::ro()
-            .absorb(&self.input)
-            .output(NonZeroUsize::new(<C::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap());
+    pub fn initial_instances(&self) -> Vec<Vec<CMain::ScalarExt>> {
+        let marker = cyclefold::ro().absorb(&self.input).output(
+            NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
+        );
 
         let mut instances = self.sc.instances();
         instances.insert(0, vec![marker, marker]);
         instances
     }
 
-    pub fn instances(&self, expected_out: C::ScalarExt) -> Vec<Vec<C::ScalarExt>> {
-        let input_marker = cyclefold::ro()
-            .absorb(&self.input)
-            .output(NonZeroUsize::new(<C::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap());
+    pub fn instances(&self, expected_out: CMain::ScalarExt) -> Vec<Vec<CMain::ScalarExt>> {
+        let input_marker = cyclefold::ro().absorb(&self.input).output(
+            NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
+        );
 
         let mut instances = self.sc.instances();
         instances.insert(0, vec![input_marker, expected_out]);
@@ -69,10 +77,14 @@ where
     }
 }
 
-impl<const ARITY: usize, C: CurveAffine, SC: StepCircuit<ARITY, C::ScalarExt>> Circuit<C::ScalarExt>
-    for StepFoldingCircuit<'_, ARITY, C, SC>
+impl<
+        const ARITY: usize,
+        CMain: CurveAffine,
+        CSup: CurveAffine<Base = CMain::ScalarExt>,
+        SC: StepCircuit<ARITY, CMain::ScalarExt>,
+    > Circuit<CMain::ScalarExt> for StepFoldingCircuit<'_, ARITY, CMain, CSup, SC>
 where
-    C::ScalarExt: PrimeFieldBits + FromUniformBytes<64>,
+    CMain::ScalarExt: PrimeFieldBits + FromUniformBytes<64>,
 {
     type Config = Config<SC::Config>;
     type FloorPlanner = SimpleFloorPlanner;
@@ -81,10 +93,11 @@ where
         Self {
             sc: self.sc,
             input: self.input.get_without_witness(),
+            _p: PhantomData,
         }
     }
 
-    fn configure(meta: &mut ConstraintSystem<C::ScalarExt>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<CMain::ScalarExt>) -> Self::Config {
         Self::Config {
             sc: SC::configure(meta),
             mg: MainGate::configure(meta),
@@ -94,7 +107,7 @@ where
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<C::ScalarExt>,
+        mut layouter: impl Layouter<CMain::ScalarExt>,
     ) -> Result<(), Halo2PlonkError> {
         let input = layouter.assign_region(
             || "sfc input",
@@ -113,8 +126,8 @@ where
                 Halo2PlonkError::Synthesis
             })?;
 
-        let _self_acc_out: input::assigned::ProtoGalaxyAccumulatorInstance<C::ScalarExt> = layouter
-            .assign_region(
+        let self_acc_out: input::assigned::ProtoGalaxyAccumulatorInstance<CMain::ScalarExt> =
+            layouter.assign_region(
                 || "sfc protogalaxy",
                 |region| {
                     let mut region = RegionCtx::new(region, 0);
@@ -137,6 +150,18 @@ where
                 },
             )?;
 
+        let paired_acc_out: input::assigned::SangriaAccumulatorInstance<CMain::ScalarExt> =
+            layouter.assign_region(
+                || "sfc sangria",
+                |region| {
+                    sangria_adapter::fold::<CMain, CSup>(
+                        &mut RegionCtx::new(region, 0),
+                        config.mg.clone(),
+                        &input.paired_trace,
+                    )
+                },
+            )?;
+
         layouter.assign_region(
             || "sfc out",
             |region| {
@@ -155,6 +180,24 @@ where
                     .collect::<Result<Vec<_>, _>>()?
                     .try_into()
                     .unwrap();
+
+                let _self_trace_output =
+                    input::assigned::ProtoGalaxyAccumulatorInstance::conditional_select(
+                        &mut region,
+                        &mg,
+                        &input.self_trace.input_accumulator,
+                        &self_acc_out,
+                        &is_zero_step,
+                    )?;
+
+                let _paired_trace_output =
+                    input::assigned::SangriaAccumulatorInstance::conditional_select(
+                        &mut region,
+                        &mg,
+                        &input.paired_trace.input_accumulator,
+                        &paired_acc_out,
+                        &is_zero_step,
+                    );
 
                 Ok(())
             },
