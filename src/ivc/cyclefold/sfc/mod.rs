@@ -60,7 +60,12 @@ where
     /// For the initial iteration, we will give the same accumulators that we take from the input
     pub fn initial_instances(&self) -> Vec<Vec<CMain::ScalarExt>> {
         let mut input = self.input.clone();
-        input.step += 1;
+        assert_eq!(
+            input.step, 0,
+            "this method can only be called for step == 0"
+        );
+
+        input.step = 1;
         let out_marker = cyclefold::ro().absorb(&input).output(
             NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
         );
