@@ -25,7 +25,7 @@ use crate::{
 // integer-type, but only a wrapper for
 // storing a natural number with limbs.
 #[derive(PartialEq, Debug, Clone)]
-pub struct BigUint<F: PrimeField> {
+pub struct BigUint<F> {
     limbs: Vec<F>,
     width: NonZeroUsize,
 }
