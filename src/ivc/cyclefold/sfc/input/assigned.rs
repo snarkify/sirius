@@ -1,12 +1,14 @@
 use std::iter;
 
-use halo2_proofs::halo2curves::ff::PrimeField;
+use halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use itertools::Itertools;
+use tracing::error;
 
 use crate::{
     halo2_proofs::plonk::Error as Halo2PlonkError,
-    ivc,
+    ivc::{self, cyclefold::ro_chip},
     main_gate::{self, AdviceCyclicAssignor, AssignedValue, MainGate, RegionCtx, WrapValue},
+    poseidon::ROCircuitTrait,
 };
 
 pub type MainGateConfig = main_gate::MainGateConfig<{ super::super::MAIN_GATE_T }>;
@@ -546,7 +548,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         })
     }
 
-    fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
+    fn iter_consistency_marker_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
         let Self {
             self_trace,
             paired_trace,
@@ -556,18 +558,65 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
             z_i,
         } = self;
 
-        self_trace
-            .input_accumulator
-            .iter_wrap_values()
-            .chain(paired_trace.input_accumulator.iter_wrap_values())
-            .chain(
-                [pp0, pp1, step]
-                    .into_iter()
-                    .chain(z_0.iter())
-                    .chain(z_i.iter())
-                    .map(|v| WrapValue::Assigned(v.clone())),
-            )
+        iter_consistency_marker_wrap_values(
+            (pp0, pp1),
+            &self_trace.input_accumulator,
+            &paired_trace.input_accumulator,
+            step,
+            z_0,
+            z_i,
+        )
     }
+
+    pub fn consistency_check(
+        self,
+        region: &mut RegionCtx<F>,
+        main_gate_config: &MainGateConfig,
+    ) -> Result<Self, Halo2PlonkError>
+    where
+        F: PrimeFieldBits + FromUniformBytes<64>,
+    {
+        let calculated = ro_chip(main_gate_config.clone())
+            .absorb_iter(self.iter_consistency_marker_wrap_values())
+            .squeeze(region)?;
+
+        let provided = self
+            .self_trace
+            .incoming
+            .instances
+            .first()
+            .and_then(|instance| instance.first())
+            .ok_or_else(|| {
+                error!("No consistency marker in `incoming` trace");
+                Halo2PlonkError::Synthesis
+            })?;
+
+        region.constrain_equal(calculated.cell(), provided.cell())?;
+
+        Ok(self)
+    }
+}
+
+pub fn iter_consistency_marker_wrap_values<'l, const ARITY: usize, F: PrimeField>(
+    pp_digest: (&'l AssignedValue<F>, &'l AssignedValue<F>),
+    self_accumulator: &'l ProtoGalaxyAccumulatorInstance<F>,
+    paried_accumulator: &'l SangriaAccumulatorInstance<F>,
+    step: &'l AssignedValue<F>,
+    z_0: &'l [AssignedValue<F>; ARITY],
+    z_i: &'l [AssignedValue<F>; ARITY],
+) -> impl 'l + Iterator<Item = WrapValue<F>> {
+    let (pp0, pp1) = pp_digest;
+
+    self_accumulator
+        .iter_wrap_values()
+        .chain(paried_accumulator.iter_wrap_values())
+        .chain(
+            [pp0, pp1, step]
+                .into_iter()
+                .chain(z_0.iter())
+                .chain(z_i.iter())
+                .map(|v| WrapValue::Assigned(v.clone())),
+        )
 }
 
 #[cfg(test)]
@@ -636,7 +685,7 @@ mod tests {
 
                         let mut ro = ro_chip::<F>(config.mg.clone());
                         let output = ro
-                            .absorb_iter(assigned_input.iter_wrap_values())
+                            .absorb_iter(assigned_input.iter_consistency_marker_wrap_values())
                             .squeeze(&mut region)?;
 
                         Ok(output)
