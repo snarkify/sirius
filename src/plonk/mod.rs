@@ -38,7 +38,7 @@ use crate::{
     },
     poseidon::{AbsorbInRO, ROTrait},
     sps::{Error as SpsError, SpecialSoundnessVerifier},
-    util::{concatenate_with_padding, ScalarToBase},
+    util::{concatenate_with_padding, fe_to_fe},
 };
 
 pub mod eval;
@@ -263,19 +263,15 @@ impl<C: CurveAffine> GetChallenges<C::ScalarExt> for PlonkTrace<C> {
     }
 }
 
-impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for PlonkInstance<C> {
+impl<C: CurveAffine, F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for PlonkInstance<C> {
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb_point_iter(self.W_commitments.iter())
             .absorb_field_iter(
                 self.instances
                     .iter()
-                    .flat_map(|inst| inst.iter().map(|i| C::scalar_to_base(i).unwrap())),
+                    .flat_map(|inst| inst.iter().map(|i| fe_to_fe(i).unwrap())),
             )
-            .absorb_field_iter(
-                self.challenges
-                    .iter()
-                    .map(|cha| C::scalar_to_base(cha).unwrap()),
-            );
+            .absorb_field_iter(self.challenges.iter().map(|cha| fe_to_fe(cha).unwrap()));
     }
 }
 
@@ -307,7 +303,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             .unwrap_or(false)
     }
 
-    pub fn is_sat<C, RO: ROTrait<C::Base>>(
+    pub fn is_sat<C, RF: PrimeField, RO: ROTrait<RF>>(
         &self,
         ck: &CommitmentKey<C>,
         ro_nark: &mut RO,
@@ -416,13 +412,14 @@ impl<F: PrimeField> PlonkStructure<F> {
     /// depending on whether we have multiple gates, lookup arguments and whether
     /// we have vector lookup, we will call different sub-sps protocol
     #[instrument(name = "sps", skip_all)]
-    pub fn run_sps_protocol<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
+    pub fn run_sps_protocol<C: CurveAffine<ScalarExt = F>, RF: PrimeField, RO: ROTrait<RF>>(
         &self,
         ck: &CommitmentKey<C>,
         instances: &[Vec<F>],
         advice: &[Vec<F>],
         ro_nark: &mut RO,
     ) -> Result<PlonkTrace<C>, SpsError> {
+        debug!("run sps for {} challenges", self.num_challenges);
         match self.num_challenges {
             0 => self.run_sps_protocol_0(instances, advice, ck),
             1 => self.run_sps_protocol_1(instances, advice, ck, ro_nark),
@@ -467,7 +464,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     /// [pi.instance] -> [C] -> ]r1[
     /// w.r.t multiple gates + no lookup
     #[instrument(name = "1", skip_all)]
-    fn run_sps_protocol_1<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
+    fn run_sps_protocol_1<C: CurveAffine<ScalarExt = F>, RF: PrimeField, RO: ROTrait<RF>>(
         &self,
         instances: &[Vec<F>],
         advice: &[Vec<F>],
@@ -485,13 +482,13 @@ impl<F: PrimeField> PlonkStructure<F> {
                 instances
                     .iter()
                     .flat_map(|instance| instance.iter())
-                    .map(|val| C::scalar_to_base(val).unwrap()),
+                    .map(|val| fe_to_fe(val).unwrap()),
             )
             .absorb_point_iter(plonk_instance.W_commitments.iter());
 
         plonk_instance
             .challenges
-            .push(ro_nark.squeeze::<C>(NUM_CHALLENGE_BITS));
+            .push(ro_nark.squeeze::<C::ScalarExt>(NUM_CHALLENGE_BITS));
 
         Ok(PlonkTrace {
             u: plonk_instance,
@@ -505,7 +502,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     /// [pi.instance] -> [C1] -> ]r1[ -> [C2] -> ]r2[
     /// w.r.t has lookup but no vector lookup
     #[instrument(name = "2", skip_all)]
-    fn run_sps_protocol_2<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
+    fn run_sps_protocol_2<C: CurveAffine<ScalarExt = F>, RF: PrimeField, RO: ROTrait<RF>>(
         &self,
         instances: &[Vec<F>],
         advice: &[Vec<F>],
@@ -544,10 +541,10 @@ impl<F: PrimeField> PlonkStructure<F> {
                 instances
                     .iter()
                     .flat_map(|inst| inst.iter())
-                    .map(|val| C::scalar_to_base(val).unwrap()),
+                    .map(|val| fe_to_fe(val).unwrap()),
             )
             .absorb_point(&C1)
-            .squeeze::<C>(NUM_CHALLENGE_BITS);
+            .squeeze::<C::ScalarExt>(NUM_CHALLENGE_BITS);
 
         // round 2
         let lookup_coeff = lookup_coeff.evaluate_coefficient_2(r1);
@@ -564,7 +561,9 @@ impl<F: PrimeField> PlonkStructure<F> {
                 err,
             })
         }?;
-        let r2 = ro_nark.absorb_point(&C2).squeeze::<C>(NUM_CHALLENGE_BITS);
+        let r2 = ro_nark
+            .absorb_point(&C2)
+            .squeeze::<C::ScalarExt>(NUM_CHALLENGE_BITS);
 
         Ok(PlonkTrace {
             u: PlonkInstance {
@@ -581,7 +580,7 @@ impl<F: PrimeField> PlonkStructure<F> {
     /// sequence of generating challenges:
     /// [pi.instance] -> [C1] -> ]r1[ -> [C2] -> ]r2[ -> [C3] -> ]r3[
     #[instrument(name = "3", skip_all)]
-    fn run_sps_protocol_3<C: CurveAffine<ScalarExt = F>, RO: ROTrait<C::Base>>(
+    fn run_sps_protocol_3<C: CurveAffine<ScalarExt = F>, RD: PrimeField, RO: ROTrait<RD>>(
         &self,
         instances: &[Vec<F>],
         advice: &[Vec<F>],
@@ -592,7 +591,7 @@ impl<F: PrimeField> PlonkStructure<F> {
             instances
                 .iter()
                 .flat_map(|i| i.iter())
-                .map(|inst| C::scalar_to_base(inst).unwrap()),
+                .map(|inst| fe_to_fe(inst).unwrap()),
         );
 
         let k_power_of_2 = 1 << self.k;
@@ -606,7 +605,9 @@ impl<F: PrimeField> PlonkStructure<F> {
                 err,
             })
         }?;
-        let r1 = ro_nark.absorb_point(&C1).squeeze::<C>(NUM_CHALLENGE_BITS);
+        let r1 = ro_nark
+            .absorb_point(&C1)
+            .squeeze::<C::ScalarExt>(NUM_CHALLENGE_BITS);
 
         // round 2
         let lookup_coeff = self
@@ -627,7 +628,9 @@ impl<F: PrimeField> PlonkStructure<F> {
                 err,
             })
         }?;
-        let r2 = ro_nark.absorb_point(&C2).squeeze::<C>(NUM_CHALLENGE_BITS);
+        let r2 = ro_nark
+            .absorb_point(&C2)
+            .squeeze::<C::ScalarExt>(NUM_CHALLENGE_BITS);
 
         // round 3
         let lookup_coeff = lookup_coeff.evaluate_coefficient_2(r2);
@@ -644,7 +647,9 @@ impl<F: PrimeField> PlonkStructure<F> {
                 err,
             })
         }?;
-        let r3 = ro_nark.absorb_point(&C3).squeeze::<C>(NUM_CHALLENGE_BITS);
+        let r3 = ro_nark
+            .absorb_point(&C3)
+            .squeeze::<C::ScalarExt>(NUM_CHALLENGE_BITS);
 
         Ok(PlonkTrace {
             u: PlonkInstance {

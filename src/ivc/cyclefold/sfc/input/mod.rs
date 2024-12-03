@@ -9,7 +9,7 @@ use crate::{
     poseidon::{AbsorbInRO, ROTrait},
 };
 
-mod assigned;
+pub mod assigned;
 
 #[derive(Debug, Clone)]
 pub struct BigUintPoint<F: PrimeField> {

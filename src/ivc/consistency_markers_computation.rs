@@ -166,7 +166,7 @@ where
                 .absorb_field_iter(self.z_i.iter().copied())
                 .absorb(&relaxed)
                 .inspect(inspect)
-                .squeeze::<C>(NUM_CHALLENGE_BITS),
+                .squeeze::<C::ScalarExt>(NUM_CHALLENGE_BITS),
         )
         .unwrap()
     }

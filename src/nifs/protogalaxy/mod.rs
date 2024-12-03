@@ -13,7 +13,7 @@ use crate::{
     polynomial::{lagrange, sparse, univariate::UnivariatePoly},
     poseidon::{AbsorbInRO, ROTrait},
     sps::{self, SpecialSoundnessVerifier},
-    util::ScalarToBase,
+    util,
 };
 
 mod accumulator;
@@ -44,24 +44,24 @@ pub(crate) struct Challenges<F: PrimeField> {
 
 impl<F: PrimeField> Challenges<F> {
     #[instrument(skip_all)]
-    pub(crate) fn generate_one<'i, RO: ROTrait<C::Base>, C: CurveAffine<Base = F>>(
-        params: &impl AbsorbInRO<C::Base, RO>,
+    pub(crate) fn generate_one<'i, D: PrimeField, RO: ROTrait<D>, C: CurveAffine>(
+        params: &impl AbsorbInRO<D, RO>,
         ro_acc: &mut RO,
-        accumulator: &impl AbsorbInRO<C::Base, RO>,
+        accumulator: &impl AbsorbInRO<D, RO>,
         instances: impl Iterator<Item = &'i PlonkInstance<C>>,
     ) -> <C as CurveAffine>::ScalarExt {
         ro_acc
             .absorb(params)
             .absorb(accumulator)
             .absorb_iter(instances)
-            .squeeze::<C>(MAX_BITS)
+            .squeeze::<C::ScalarExt>(MAX_BITS)
     }
 
     #[instrument(skip_all, name = "off_circuit_generate")]
-    pub(crate) fn generate<'i, RO: ROTrait<C::Base>, C: CurveAffine<Base = F>>(
-        params: &impl AbsorbInRO<C::Base, RO>,
+    pub(crate) fn generate<'i, D: PrimeField, RO: ROTrait<D>, C: CurveAffine>(
+        params: &impl AbsorbInRO<D, RO>,
         ro_acc: &mut RO,
-        accumulator: &impl AbsorbInRO<C::Base, RO>,
+        accumulator: &impl AbsorbInRO<D, RO>,
         instances: impl Iterator<Item = &'i PlonkInstance<C>>,
         proof: &Proof<C::ScalarExt>,
     ) -> Challenges<<C as CurveAffine>::ScalarExt> {
@@ -79,18 +79,18 @@ impl<F: PrimeField> Challenges<F> {
                         .poly_F
                         .iter()
                         .inspect(|coeff| debug!("coeff {coeff:?}"))
-                        .map(|coeff| C::scalar_to_base(coeff).unwrap()),
+                        .map(|coeff| util::fe_to_fe(coeff).unwrap()),
                 )
-                .squeeze::<C>(MAX_BITS),
+                .squeeze::<C::ScalarExt>(MAX_BITS),
             gamma: ro_acc
                 .absorb_field_iter(
                     proof
                         .poly_K
                         .iter()
                         .inspect(|coeff| debug!("coeff {coeff:?}"))
-                        .map(|coeff| C::scalar_to_base(coeff).unwrap()),
+                        .map(|coeff| util::fe_to_fe(coeff).unwrap()),
                 )
-                .squeeze::<C>(MAX_BITS),
+                .squeeze::<C::ScalarExt>(MAX_BITS),
         }
     }
 }
@@ -106,11 +106,16 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     pub(crate) fn new_accumulator(
         args: AccumulatorArgs,
         params: &ProverParam<C>,
-        ro_acc: &mut impl ROTrait<C::Base>,
+        ro_acc: &mut impl ROTrait<C::ScalarExt>,
     ) -> Accumulator<C> {
         let mut accumulator = Accumulator::new(args, Self::get_count_of_valuation(&params.S));
 
-        let beta = Challenges::generate_one::<_, C>(params, ro_acc, &accumulator, iter::empty());
+        let beta = Challenges::<C::ScalarExt>::generate_one::<C::ScalarExt, _, C>(
+            params,
+            ro_acc,
+            &accumulator,
+            iter::empty(),
+        );
 
         accumulator
             .betas
@@ -220,7 +225,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
 
     pub fn verify_sps<'l>(
         incoming: impl Iterator<Item = &'l PlonkInstance<C>>,
-        ro_nark: &mut impl ROTrait<C::Base>,
+        ro_nark: &mut impl ROTrait<C::ScalarExt>,
     ) -> Result<(), Error> {
         let errors = incoming
             .enumerate()
@@ -241,7 +246,7 @@ pub struct ProverParam<C: CurveAffine> {
     pub(crate) pp_digest: C,
 }
 
-impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for ProverParam<C> {
+impl<C: CurveAffine, RO: ROTrait<C::ScalarExt>> AbsorbInRO<C::ScalarExt, RO> for ProverParam<C> {
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb_point(&self.pp_digest);
     }
@@ -252,7 +257,7 @@ pub struct VerifierParam<C: CurveAffine> {
     pub(crate) pp_digest: C,
 }
 
-impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for VerifierParam<C> {
+impl<C: CurveAffine, RO: ROTrait<C::ScalarExt>> AbsorbInRO<C::ScalarExt, RO> for VerifierParam<C> {
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb_point(&self.pp_digest);
     }
@@ -287,7 +292,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         instances: &[Vec<C::ScalarExt>],
         witness: &[Vec<C::ScalarExt>],
         pp: &ProverParam<C>,
-        ro_nark: &mut impl ROTrait<C::Base>,
+        ro_nark: &mut impl ROTrait<C::ScalarExt>,
     ) -> Result<PlonkTrace<C>, Error> {
         Ok(pp.S.run_sps_protocol(ck, instances, witness, ro_nark)?)
     }
@@ -325,13 +330,13 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     fn prove(
         _ck: &CommitmentKey<C>,
         pp: &ProverParam<C>,
-        ro_acc: &mut impl ROTrait<C::Base>,
+        ro_acc: &mut impl ROTrait<C::ScalarExt>,
         accumulator: Accumulator<C>,
         incoming: &[PlonkTrace<C>; L],
     ) -> Result<(Accumulator<C>, Proof<C::ScalarExt>), Error> {
         let ctx = PolyContext::new(&pp.S, incoming);
 
-        let delta = Challenges::generate_one::<_, C>(
+        let delta = Challenges::<C::ScalarExt>::generate_one::<_, _, C>(
             pp,
             ro_acc,
             &accumulator,
@@ -346,8 +351,8 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         )?;
 
         let alpha = ro_acc
-            .absorb_field_iter(poly_F.iter().map(|v| C::scalar_to_base(v).unwrap()))
-            .squeeze::<C>(MAX_BITS);
+            .absorb_field_iter(poly_F.iter().map(|v| util::fe_to_fe(v).unwrap()))
+            .squeeze::<C::ScalarExt>(MAX_BITS);
 
         let betas_stroke = poly::PolyChallenges {
             betas: accumulator.betas.clone(),
@@ -366,8 +371,8 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         )?;
 
         let gamma = ro_acc
-            .absorb_field_iter(poly_K.iter().map(|v| C::scalar_to_base(v).unwrap()))
-            .squeeze::<C>(MAX_BITS);
+            .absorb_field_iter(poly_K.iter().map(|v| util::fe_to_fe(v).unwrap()))
+            .squeeze::<C::ScalarExt>(MAX_BITS);
 
         debug!(
             "
@@ -437,13 +442,13 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     ///     - [`ProtoGalaxy::fold_instance`]
     fn verify(
         vp: &VerifierParam<C>,
-        ro_nark: &mut impl ROTrait<C::Base>,
-        ro_acc: &mut impl ROTrait<C::Base>,
+        ro_nark: &mut impl ROTrait<C::ScalarExt>,
+        ro_acc: &mut impl ROTrait<C::ScalarExt>,
         accumulator: &AccumulatorInstance<C>,
         incoming: &[PlonkInstance<C>; L],
         proof: &Proof<C::ScalarExt>,
     ) -> Result<AccumulatorInstance<C>, Error> {
-        let lagrange_domain = PolyContext::<C::Base>::get_lagrange_domain::<L>();
+        let lagrange_domain = PolyContext::<C::ScalarExt>::get_lagrange_domain::<L>();
 
         Self::verify_sps(incoming.iter(), ro_nark)?;
 
@@ -451,7 +456,13 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
             delta,
             alpha,
             gamma,
-        } = Challenges::generate::<_, C>(vp, ro_acc, accumulator, incoming.iter(), proof);
+        } = Challenges::<C::ScalarExt>::generate::<_, _, C>(
+            vp,
+            ro_acc,
+            accumulator,
+            incoming.iter(),
+            proof,
+        );
         debug!(
             "
             delta: {delta:?},

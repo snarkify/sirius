@@ -165,7 +165,7 @@ where
             .absorb(U1)
             .absorb(U2)
             .absorb_point_iter(cross_term_commits.iter())
-            .squeeze::<C>(NUM_CHALLENGE_BITS))
+            .squeeze::<C::ScalarExt>(NUM_CHALLENGE_BITS))
     }
 }
 

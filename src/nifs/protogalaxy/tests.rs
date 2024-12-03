@@ -108,7 +108,8 @@ impl<C: Circuit<Scalar>> Mock<C> {
 
     pub fn generate_plonk_traces(&mut self) -> [PlonkTrace<Affine>; L] {
         let mut generate_ro = ro();
-        let mut is_sat_ro = ro();
+        let mut is_sat_ro: PoseidonHash<Scalar, 3, 2> = ro();
+
         self.circuits_ctx
             .iter()
             .map(|ctx| {

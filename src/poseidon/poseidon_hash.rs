@@ -8,7 +8,7 @@ use super::Spec;
 use crate::{
     halo2curves::group::ff::{FromUniformBytes, PrimeField},
     poseidon::{ROConstantsTrait, ROTrait},
-    util::{bits_to_fe_le, fe_to_bits_le},
+    util::{self, bits_to_fe_le, fe_to_bits_le},
 };
 
 // adapted from: https://github.com/privacy-scaling-explorations/snark-verifier
@@ -124,17 +124,17 @@ where
         self
     }
 
-    fn absorb_point<C: CurveAffine<Base = F>>(&mut self, point: &C) -> &mut Self {
+    fn absorb_point<C: CurveAffine>(&mut self, point: &C) -> &mut Self {
         let encoded = point.coordinates().map(|coordinates| {
             [coordinates.x(), coordinates.y()]
                 .into_iter()
-                .cloned()
+                .map(|v| util::fe_to_fe(v).unwrap())
                 .collect::<Vec<_>>()
         });
         if bool::from(encoded.is_some()) {
             self.update(&encoded.unwrap())
         } else {
-            self.update(&[C::Base::ZERO, C::Base::ZERO]) // C is infinity
+            self.update(&[F::ZERO, F::ZERO]) // C is infinity
         }
 
         self
@@ -146,8 +146,8 @@ where
     }
 
     #[instrument(skip_all)]
-    fn squeeze<C: CurveAffine<Base = F>>(&mut self, num_bits: NonZeroUsize) -> C::Scalar {
-        self.output::<C::Scalar>(num_bits)
+    fn squeeze<D: PrimeField>(&mut self, num_bits: NonZeroUsize) -> D {
+        self.output::<D>(num_bits)
     }
 }
 
@@ -256,7 +256,7 @@ mod tests {
 
         let output = PH::new(Spec::<Fp, T, RATE>::new(R_F, R_P))
             .absorb_field_iter((0..5).map(|i| Fp::from(i as u64)))
-            .squeeze::<EpAffine>(NonZeroUsize::new(128).unwrap());
+            .squeeze::<<EpAffine as CurveAffine>::ScalarExt>(NonZeroUsize::new(128).unwrap());
 
         assert_eq!(
             output,
