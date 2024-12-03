@@ -5,8 +5,12 @@ use itertools::Itertools;
 use tracing::error;
 
 use crate::{
+    gadgets::nonnative::bn::big_uint_mul_mod_chip::BigUintMulModChip,
     halo2_proofs::plonk::Error as Halo2PlonkError,
-    ivc::{self, cyclefold::ro_chip},
+    ivc::{
+        self,
+        cyclefold::{ro_chip, DEFAULT_LIMBS_COUNT_LIMIT, DEFAULT_LIMB_WIDTH},
+    },
     main_gate::{self, AdviceCyclicAssignor, AssignedValue, MainGate, RegionCtx, WrapValue},
     poseidon::ROCircuitTrait,
 };
@@ -498,6 +502,19 @@ impl<F: PrimeField> PairedTrace<F> {
                     .chain(std::iter::once(WrapValue::Assigned(b.clone())))
             }))
     }
+
+    pub fn get_self_W_commitment_from_paired(&self) -> Vec<BigUintPoint<AssignedValue<F>>> {
+        self.incoming
+            .iter()
+            .map(|tr| {
+                let (W, _other) = tr.instances[0].split_at(2);
+                BigUintPoint {
+                    x: W[0].clone(),
+                    y: W[1].clone(),
+                }
+            })
+            .collect::<Vec<_>>()
+    }
 }
 
 pub struct Input<const ARITY: usize, F: PrimeField> {
@@ -601,6 +618,62 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         region.constrain_equal(calculated.cell(), provided.cell())?;
 
         Ok(self)
+    }
+
+    pub fn pairing_check(
+        &self,
+        region: &mut RegionCtx<F>,
+        main_gate_config: &MainGateConfig,
+        poly_L_values: &[AssignedValue<F>],
+        new_acc: &mut ProtoGalaxyAccumulatorInstance<F>,
+    ) -> Result<(), Halo2PlonkError> {
+        let bn_chip = BigUintMulModChip::new(
+            main_gate_config.into_smaller_size().unwrap(),
+            DEFAULT_LIMB_WIDTH,
+            DEFAULT_LIMBS_COUNT_LIMIT,
+        );
+
+        let expected_l0 = bn_chip
+            .from_assigned_cell_to_limbs(region, &poly_L_values[0])
+            .map_err(|err| {
+                error!("while make from L0 biguint form: {err:?}");
+                Halo2PlonkError::Synthesis
+            })?;
+
+        let expected_l1 = bn_chip
+            .from_assigned_cell_to_limbs(region, &poly_L_values[1])
+            .map_err(|err| {
+                error!("while make from L1 biguint form: {err:?}");
+                Halo2PlonkError::Synthesis
+            })?;
+
+        for (acc_W, incoming_W, trace, new_acc_W) in itertools::multizip((
+            self.self_trace.input_accumulator.ins.W_commitments.iter(),
+            self.self_trace.incoming.W_commitments.iter(),
+            self.paired_trace.incoming.iter(),
+            new_acc.ins.W_commitments.iter_mut(),
+        )) {
+            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1] =
+                trace.instances[0].clone().try_into().unwrap();
+
+            l0.iter()
+                .zip_eq(expected_l0.iter())
+                .try_for_each(|(l, r)| region.constrain_equal(l.cell(), r.cell()))?;
+
+            l1.iter()
+                .zip_eq(expected_l1.iter())
+                .try_for_each(|(l, r)| region.constrain_equal(l.cell(), r.cell()))?;
+
+            BigUintPoint::constrain_equal(region, acc_W, &BigUintPoint { x: x0, y: y0 })?;
+            BigUintPoint::constrain_equal(region, incoming_W, &BigUintPoint { x: x1, y: y1 })?;
+
+            *new_acc_W = BigUintPoint {
+                x: expected_x,
+                y: expected_y,
+            };
+        }
+
+        Ok(())
     }
 }
 
