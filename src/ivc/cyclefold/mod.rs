@@ -1,7 +1,7 @@
-use halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeFieldBits};
 use std::num::NonZeroUsize;
 
 use crate::{
+    halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeFieldBits},
     main_gate::MainGateConfig,
     poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
 };

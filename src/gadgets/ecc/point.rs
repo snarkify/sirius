@@ -9,6 +9,13 @@ pub struct AssignedPoint<C: CurveAffine> {
     pub(crate) y: AssignedValue<C::Base>,
 }
 
+impl<C: CurveAffine> From<AssignedPoint<C>> for (AssignedValue<C::Base>, AssignedValue<C::Base>) {
+    fn from(p: AssignedPoint<C>) -> (AssignedValue<C::Base>, AssignedValue<C::Base>) {
+        let AssignedPoint { x, y } = p;
+        (x, y)
+    }
+}
+
 impl<C: CurveAffine> AssignedPoint<C> {
     pub fn coordinates(&self) -> (&AssignedValue<C::Base>, &AssignedValue<C::Base>) {
         (&self.x, &self.y)

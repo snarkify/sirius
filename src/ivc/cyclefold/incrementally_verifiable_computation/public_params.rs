@@ -113,7 +113,7 @@ where
         };
 
         let (primary_plonk_structure, initial_primary_trace) = {
-            let mut mock_sfc = StepFoldingCircuit::<A1, CMain, SC> {
+            let mut mock_sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
                 sc: primary_sfc,
                 input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
                     &PlonkStructure {
@@ -123,6 +123,7 @@ where
                     &support_plonk_structure,
                     &initial_support_trace.u,
                 ),
+                _p: PhantomData,
             };
 
             let mock_instances = mock_sfc.initial_instances();
@@ -142,13 +143,14 @@ where
                 .try_collect_plonk_structure()
                 .unwrap();
 
-            let sfc = StepFoldingCircuit::<A1, CMain, SC> {
+            let sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
                 sc: primary_sfc,
                 input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
                     &mock_S,
                     &support_plonk_structure,
                     &initial_support_trace.u,
                 ),
+                _p: PhantomData,
             };
 
             // TODO #369 Use expected out marker, instead of zero

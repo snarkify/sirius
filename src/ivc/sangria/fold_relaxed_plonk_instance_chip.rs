@@ -436,7 +436,7 @@ where
     /// ```markdown
     /// new_folded_W[i] = folded_W[i] + input_W[i] * r
     /// ```
-    fn fold_W(
+    pub fn fold_W(
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
         folded_W: &[AssignedPoint<C>],
@@ -458,133 +458,6 @@ where
                 Ok(res)
             })
             .collect()
-    }
-
-    /// Fold [`RelaxedPlonkInstance::E_commitments`] & [`CrossTermCommits`]
-    ///
-    /// # Description
-    ///
-    /// This function is responsible for combining the current `folded_W` accumulator with
-    /// `cross_term_commits`. This is achieved through a scalar multiplication followed by
-    /// an elliptic curve addition. The scalar multiplication is defined by a random
-    /// scalar `r` in power of cross term commit index.
-    ///
-    /// # Implementation Details
-    ///
-    /// 1. **Multiplication & Conversion to bits**: Form a vector of degrees `r` and their representations as bits
-    /// 2. **Scalar Multiplication**: Each element of `cross_term_commits` is multiplied by power of random scalar
-    ///    `r` (challenge) in bits representation. This is executed using the [`EccChip`] for elliptic curve operations.
-    /// 3. **Accumulation**: The result of the scalar multiplication is then added to the corresponding component in
-    ///    the current `folded_E` accumulator. This is executed using the [`EccChip`] for elliptic curve operations.
-    ///
-    /// ```markdown
-    /// new_folded_E = folded_E + Sum [ cross_term_commits[i] * (r ^ i) ]
-    /// ```
-    fn fold_E(
-        &self,
-        region: &mut RegionCtx<C::Base>,
-        folded_E: AssignedPoint<C>,
-        cross_term_commits: &[AssignedPoint<C>],
-        r: BigUintView<C::Base>,
-        m_bn: &BigUint<C::Base>,
-    ) -> Result<AssignedPoint<C>, Error> {
-        debug!("Start calculate r^i from {r:?}");
-
-        let powers_of_r = iter::successors(Some(Ok(r.clone())), |val| {
-            Some(Ok(val.as_ref().ok()?).and_then(|r_pow_i| {
-                let BigUintView {
-                    as_bn_limbs,
-                    as_bits: _,
-                } = r_pow_i;
-
-                let next = self
-                    .bn_chip
-                    .mult_mod(region, as_bn_limbs, &r.as_bn_limbs, m_bn)?
-                    .remainder;
-
-                debug!("Next r^i from {next:?}");
-
-                Result::<_, Error>::Ok(BigUintView {
-                    as_bits: self.bn_chip.to_le_bits(region, &next)?,
-                    as_bn_limbs: next,
-                })
-            }))
-        })
-        .take(cross_term_commits.len())
-        .collect::<Result<Vec<_>, _>>()?;
-
-        let ecc = EccChip::<C, MainGate<C::Base, T>>::new(self.config.clone());
-        // TODO Check what with all commits
-        let rT = cross_term_commits
-            .iter()
-            .zip(powers_of_r.into_iter())
-            .map(|(commit, r_pow_i)| ecc.scalar_mul(region, commit, &r_pow_i))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(rT
-            .into_iter()
-            .try_fold(folded_E, |folded_E, rT_i| ecc.add(region, &folded_E, &rT_i))?)
-    }
-
-    /// Fold `input` with `folded` in bn form
-    ///
-    /// # Implementation Details
-    ///
-    /// 1. Multiplies a part of the PLONK instance (`$input`) by a randomized value (`r_as_bn`),
-    ///    and then takes the remainder modulo a specified modulus (`m_bn`).
-    /// 2. Sums this multiplication result with a pre-assigned part of the instance (`$folded`).
-    /// 3. Reduces the sum modulo the modulus (`m_bn`) to get the final folded value.
-    ///
-    /// ```markdown
-    /// new_folded = folded + (input * r mod m) mod m
-    /// ```
-    ///
-    /// # Notes
-    ///
-    /// We call this function in the chip if we need to perform the fold on a `Scalar` field.
-    fn fold_via_biguint(
-        region: &mut RegionCtx<C::Base>,
-        bn_chip: &BigUintMulModChip<C::Base>,
-        input: &[AssignedValue<C::Base>],
-        folded: Vec<AssignedValue<C::Base>>,
-        m_bn: &BigUint<C::Base>,
-        r_as_bn: &[AssignedValue<C::Base>],
-        limb_width: NonZeroUsize,
-    ) -> Result<Vec<AssignedCell<C::Base, C::Base>>, Error> {
-        debug!(
-            "fold: via bn input: input = {:?} folded = {:?}, r = {:?}",
-            CellsValuesView::from(input),
-            CellsValuesView::from(folded.as_slice()),
-            CellsValuesView::from(r_as_bn)
-        );
-        // Multiply the part of the instance by the randomized value
-        let part_mult_r = bn_chip
-            .mult_mod(region, input, r_as_bn, m_bn)
-            .inspect_err(|err| error!("while mult: input * r mod m: {err:?}"))?
-            .remainder;
-        debug!(
-            "fold: mult mod: {:?}",
-            CellsValuesView::from(part_mult_r.as_slice())
-        );
-
-        // Sum the multiplication result with the assigned part
-        let part_mult_r_sum_part = bn_chip
-            .assign_sum(
-                region,
-                &OverflowingBigUint::new(folded, limb_width),
-                &part_mult_r,
-            )?
-            .res;
-
-        debug!(
-            "fold: assign_sum {:?}",
-            CellsValuesView::from(part_mult_r_sum_part.cells.as_slice())
-        );
-
-        // Reduce the sum modulo the modulus
-        Ok(bn_chip
-            .red_mod(region, part_mult_r_sum_part, m_bn)?
-            .remainder)
     }
 
     /// Fold consistency markers
@@ -612,7 +485,7 @@ where
         let [input_X0, input_X1] = input_consistency_marker;
         let [folded_X0, folded_X1] = folded_consistency_marker;
 
-        let new_folded_X0 = Self::fold_via_biguint(
+        let new_folded_X0 = fold_via_biguint(
             region, bn_chip, &input_X0, folded_X0, m_bn, r_as_bn, limb_width,
         )
         .inspect_err(|err| error!("Error while fold X0: {err:?}"))?;
@@ -622,7 +495,7 @@ where
             CellsValuesView::from(new_folded_X0.as_slice())
         );
 
-        let new_folded_X1 = Self::fold_via_biguint(
+        let new_folded_X1 = fold_via_biguint(
             region, bn_chip, &input_X1, folded_X1, m_bn, r_as_bn, limb_width,
         )
         .inspect_err(|err| error!("Error while fold X1: {err:?}"))?;
@@ -651,6 +524,46 @@ where
         )
     }
 
+    /// Fold [`RelaxedPlonkInstance::E_commitments`] & [`CrossTermCommits`]
+    ///
+    /// # Description
+    ///
+    /// This function is responsible for combining the current `folded_W` accumulator with
+    /// `cross_term_commits`. This is achieved through a scalar multiplication followed by
+    /// an elliptic curve addition. The scalar multiplication is defined by a random
+    /// scalar `r` in power of cross term commit index.
+    ///
+    /// # Implementation Details
+    ///
+    /// 1. **Multiplication & Conversion to bits**: Form a vector of degrees `r` and their representations as bits
+    /// 2. **Scalar Multiplication**: Each element of `cross_term_commits` is multiplied by power of random scalar
+    ///    `r` (challenge) in bits representation. This is executed using the [`EccChip`] for elliptic curve operations.
+    /// 3. **Accumulation**: The result of the scalar multiplication is then added to the corresponding component in
+    ///    the current `folded_E` accumulator. This is executed using the [`EccChip`] for elliptic curve operations.
+    ///
+    /// ```markdown
+    /// new_folded_E = folded_E + Sum [ cross_term_commits[i] * (r ^ i) ]
+    /// ```
+    pub fn fold_E(
+        &self,
+        region: &mut RegionCtx<C::Base>,
+        folded_E: AssignedPoint<C>,
+        cross_term_commits: &[AssignedPoint<C>],
+        r: BigUintView<C::Base>,
+        m_bn: &BigUint<C::Base>,
+    ) -> Result<AssignedPoint<C>, Error> {
+        debug!("Start calculate r^i from {r:?}");
+        fold_E(
+            region,
+            &self.bn_chip,
+            &EccChip::<C, MainGate<C::Base, T>>::new(self.config.clone()),
+            folded_E,
+            cross_term_commits,
+            r,
+            m_bn,
+        )
+    }
+
     /// Fold [`RelaxedPlonkInstance::challenges`] & [`PlonkInstance::challenges`]
     ///
     /// # Description
@@ -664,7 +577,7 @@ where
     /// ```
     ///
     /// Please check [`FoldRelaxedPlonkInstanceChip::fold_via_biguint`] for more details
-    fn fold_challenges(
+    pub fn fold_challenges(
         region: &mut RegionCtx<C::Base>,
         bn_chip: &BigUintMulModChip<C::Base>,
         input_challenges: Vec<Vec<AssignedValue<C::Base>>>,
@@ -677,7 +590,7 @@ where
             .into_iter()
             .zip_eq(input_challenges)
             .map(|(folded_challenge, input_challange)| {
-                Self::fold_via_biguint(
+                fold_via_biguint(
                     region,
                     bn_chip,
                     &input_challange,
@@ -1025,10 +938,139 @@ where
     }
 }
 
+/// Fold [`RelaxedPlonkInstance::E_commitments`] & [`CrossTermCommits`]
+///
+/// # Description
+///
+/// This function is responsible for combining the current `folded_W` accumulator with
+/// `cross_term_commits`. This is achieved through a scalar multiplication followed by
+/// an elliptic curve addition. The scalar multiplication is defined by a random
+/// scalar `r` in power of cross term commit index.
+///
+/// # Implementation Details
+///
+/// 1. **Multiplication & Conversion to bits**: Form a vector of degrees `r` and their representations as bits
+/// 2. **Scalar Multiplication**: Each element of `cross_term_commits` is multiplied by power of random scalar
+///    `r` (challenge) in bits representation. This is executed using the [`EccChip`] for elliptic curve operations.
+/// 3. **Accumulation**: The result of the scalar multiplication is then added to the corresponding component in
+///    the current `folded_E` accumulator. This is executed using the [`EccChip`] for elliptic curve operations.
+///
+/// ```markdown
+/// new_folded_E = folded_E + Sum [ cross_term_commits[i] * (r ^ i) ]
+/// ```
+pub fn fold_E<const T: usize, C: CurveAffine>(
+    region: &mut RegionCtx<C::Base>,
+    bn_chip: &BigUintMulModChip<C::Base>,
+    ecc_chip: &EccChip<C, MainGate<C::Base, T>>,
+    folded_E: AssignedPoint<C>,
+    cross_term_commits: &[AssignedPoint<C>],
+    r: BigUintView<C::Base>,
+    m_bn: &BigUint<C::Base>,
+) -> Result<AssignedPoint<C>, Error>
+where
+    C::Base: PrimeFieldBits,
+{
+    debug!("Start calculate r^i from {r:?}");
+
+    let powers_of_r = iter::successors(Some(Ok(r.clone())), |val| {
+        Some(Ok(val.as_ref().ok()?).and_then(|r_pow_i| {
+            let BigUintView {
+                as_bn_limbs,
+                as_bits: _,
+            } = r_pow_i;
+
+            let next = bn_chip
+                .mult_mod(region, as_bn_limbs, &r.as_bn_limbs, m_bn)?
+                .remainder;
+
+            debug!("Next r^i from {next:?}");
+
+            Result::<_, Error>::Ok(BigUintView {
+                as_bits: bn_chip.to_le_bits(region, &next)?,
+                as_bn_limbs: next,
+            })
+        }))
+    })
+    .take(cross_term_commits.len())
+    .collect::<Result<Vec<_>, _>>()?;
+
+    // TODO Check what with all commits
+    let rT = cross_term_commits
+        .iter()
+        .zip(powers_of_r.into_iter())
+        .map(|(commit, r_pow_i)| ecc_chip.scalar_mul(region, commit, &r_pow_i))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(rT.into_iter().try_fold(folded_E, |folded_E, rT_i| {
+        ecc_chip.add(region, &folded_E, &rT_i)
+    })?)
+}
+
+/// Fold `input` with `folded` in bn form
+///
+/// # Implementation Details
+///
+/// 1. Multiplies a part of the PLONK instance (`$input`) by a randomized value (`r_as_bn`),
+///    and then takes the remainder modulo a specified modulus (`m_bn`).
+/// 2. Sums this multiplication result with a pre-assigned part of the instance (`$folded`).
+/// 3. Reduces the sum modulo the modulus (`m_bn`) to get the final folded value.
+///
+/// ```markdown
+/// new_folded = folded + (input * r mod m) mod m
+/// ```
+///
+/// # Notes
+///
+/// We call this function in the chip if we need to perform the fold on a `Scalar` field.
+pub fn fold_via_biguint<F: PrimeField>(
+    region: &mut RegionCtx<F>,
+    bn_chip: &BigUintMulModChip<F>,
+    input: &[AssignedValue<F>],
+    folded: Vec<AssignedValue<F>>,
+    m_bn: &BigUint<F>,
+    r_as_bn: &[AssignedValue<F>],
+    limb_width: NonZeroUsize,
+) -> Result<Vec<AssignedValue<F>>, Error> {
+    debug!(
+        "fold: via bn input: input = {:?} folded = {:?}, r = {:?}",
+        CellsValuesView::from(input),
+        CellsValuesView::from(folded.as_slice()),
+        CellsValuesView::from(r_as_bn)
+    );
+    // Multiply the part of the instance by the randomized value
+    let part_mult_r = bn_chip
+        .mult_mod(region, input, r_as_bn, m_bn)
+        .inspect_err(|err| error!("while mult: input * r mod m: {err:?}"))?
+        .remainder;
+    debug!(
+        "fold: mult mod: {:?}",
+        CellsValuesView::from(part_mult_r.as_slice())
+    );
+
+    // Sum the multiplication result with the assigned part
+    let part_mult_r_sum_part = bn_chip
+        .assign_sum(
+            region,
+            &OverflowingBigUint::new(folded, limb_width),
+            &part_mult_r,
+        )?
+        .res;
+
+    debug!(
+        "fold: assign_sum {:?}",
+        CellsValuesView::from(part_mult_r_sum_part.cells.as_slice())
+    );
+
+    // Reduce the sum modulo the modulus
+    Ok(bn_chip
+        .red_mod(region, part_mult_r_sum_part, m_bn)?
+        .remainder)
+}
+
 #[derive(Debug, Clone)]
-struct BigUintView<F: Field> {
-    as_bn_limbs: Vec<AssignedValue<F>>,
-    as_bits: Vec<AssignedValue<F>>,
+pub struct BigUintView<F: Field> {
+    pub as_bn_limbs: Vec<AssignedValue<F>>,
+    pub as_bits: Vec<AssignedValue<F>>,
 }
 impl<F: Field> ops::Deref for BigUintView<F> {
     type Target = [AssignedValue<F>];
