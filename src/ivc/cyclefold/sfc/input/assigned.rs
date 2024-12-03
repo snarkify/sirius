@@ -252,6 +252,71 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
         })
     }
 
+    pub fn conditional_select<const T: usize>(
+        region: &mut RegionCtx<'_, F>,
+        mg: &MainGate<F, T>,
+        lhs: &Self,
+        rhs: &Self,
+        cond: &AssignedValue<F>,
+    ) -> Result<Self, Halo2PlonkError> {
+        let Self {
+            W_commitments: lhs_W_commitments,
+            instances: lhs_instances,
+            challenges: lhs_challenges,
+        } = lhs;
+        let Self {
+            W_commitments: rhs_W_commitments,
+            instances: rhs_instances,
+            challenges: rhs_challenges,
+        } = rhs;
+
+        let W_commitments = lhs_W_commitments
+            .iter()
+            .zip_eq(rhs_W_commitments.iter())
+            .map(|((lx, ly), (rx, ry))| {
+                Ok((
+                    mg.conditional_select(region, lx, rx, cond)?,
+                    mg.conditional_select(region, ly, ry, cond)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+
+        let instances = lhs_instances
+            .iter()
+            .zip_eq(rhs_instances.iter())
+            .map(|(l_instance, r_instance)| {
+                l_instance
+                    .iter()
+                    .zip_eq(r_instance.iter())
+                    .map(|(l_val, r_val)| {
+                        l_val
+                            .iter()
+                            .zip_eq(r_val.iter())
+                            .map(|(l, r)| mg.conditional_select(region, l, r, cond))
+                            .collect()
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+
+        let challenges = lhs_challenges
+            .iter()
+            .zip(rhs_challenges.iter())
+            .map(|(lbn, rbn)| {
+                lbn.iter()
+                    .zip_eq(rbn.iter())
+                    .map(|(l, r)| mg.conditional_select(region, l, r, cond))
+                    .collect()
+            })
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+
+        Ok(Self {
+            W_commitments,
+            instances,
+            challenges,
+        })
+    }
+
     fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
         let Self {
             W_commitments,
@@ -308,13 +373,37 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
     }
 
     pub fn conditional_select<const T: usize>(
-        _region: &mut RegionCtx<'_, F>,
-        _mg: &MainGate<F, T>,
-        _lhs: &Self,
-        _rhs: &Self,
-        _cond: &AssignedValue<F>,
+        region: &mut RegionCtx<'_, F>,
+        mg: &MainGate<F, T>,
+        lhs: &Self,
+        rhs: &Self,
+        cond: &AssignedValue<F>,
     ) -> Result<Self, Halo2PlonkError> {
-        todo!()
+        let Self {
+            ins: lhs_ins,
+            E_commitment: lhs_E_commitment,
+            u: lhs_u,
+        } = lhs;
+        let Self {
+            ins: rhs_ins,
+            E_commitment: rhs_E_commitment,
+            u: rhs_u,
+        } = rhs;
+
+        let ins = PairedPlonkInstance::conditional_select(region, mg, lhs_ins, rhs_ins, cond)?;
+
+        let E_commitment = (
+            mg.conditional_select(region, &lhs_E_commitment.0, &rhs_E_commitment.0, cond)?,
+            mg.conditional_select(region, &lhs_E_commitment.1, &rhs_E_commitment.1, cond)?,
+        );
+
+        let u = mg.conditional_select(region, lhs_u, rhs_u, cond)?;
+
+        Ok(Self {
+            ins,
+            E_commitment,
+            u,
+        })
     }
 
     fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
