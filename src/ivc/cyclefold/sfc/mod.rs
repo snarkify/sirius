@@ -5,9 +5,10 @@ use tracing::error;
 
 use crate::{
     halo2_proofs::{
+        arithmetic::Field,
         circuit::{Layouter, SimpleFloorPlanner},
         halo2curves::CurveAffine,
-        plonk::{Circuit, ConstraintSystem, Error as Halo2PlonkError},
+        plonk::{Circuit, Column, ConstraintSystem, Error as Halo2PlonkError, Instance},
     },
     ivc::{
         cyclefold::{self, ro_chip},
@@ -15,7 +16,7 @@ use crate::{
         StepCircuit,
     },
     main_gate::{MainGate, MainGateConfig, RegionCtx},
-    poseidon::ROTrait,
+    poseidon::{ROCircuitTrait, ROTrait},
 };
 
 mod input;
@@ -30,6 +31,7 @@ const MAIN_GATE_T: usize = 5;
 /// 'SCC' here is 'Step Circuit Config'
 #[derive(Debug, Clone)]
 pub struct Config<SCC> {
+    consistency_marker: Column<Instance>,
     sc: SCC,
     mg: MainGateConfig<MAIN_GATE_T>,
 }
@@ -62,17 +64,13 @@ where
         );
 
         let mut instances = self.sc.instances();
-        instances.insert(0, vec![marker, marker]);
+        instances.insert(0, vec![marker]);
         instances
     }
 
     pub fn instances(&self, expected_out: CMain::ScalarExt) -> Vec<Vec<CMain::ScalarExt>> {
-        let input_marker = cyclefold::ro().absorb(&self.input).output(
-            NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
-        );
-
         let mut instances = self.sc.instances();
-        instances.insert(0, vec![input_marker, expected_out]);
+        instances.insert(0, vec![expected_out]);
         instances
     }
 }
@@ -98,7 +96,11 @@ where
     }
 
     fn configure(meta: &mut ConstraintSystem<CMain::ScalarExt>) -> Self::Config {
+        let consistency_marker = meta.instance_column();
+        meta.enable_equality(consistency_marker);
+
         Self::Config {
+            consistency_marker,
             sc: SC::configure(meta),
             mg: MainGate::configure(meta),
         }
@@ -114,7 +116,8 @@ where
             |region| {
                 let mut region = RegionCtx::new(region, 0);
 
-                input::assigned::Input::assign_advice_from(&mut region, &self.input, &config.mg)
+                input::assigned::Input::assign_advice_from(&mut region, &self.input, &config.mg)?
+                    .consistency_check(&mut region, &config.mg)
             },
         )?;
 
@@ -162,7 +165,7 @@ where
                 },
             )?;
 
-        layouter.assign_region(
+        let consistency_marker_output = layouter.assign_region(
             || "sfc out",
             |region| {
                 let mut region = RegionCtx::new(region, 0);
@@ -170,7 +173,7 @@ where
                 let mg = MainGate::new(config.mg.clone());
                 let is_zero_step = mg.is_zero_term(&mut region, input.step.clone())?;
 
-                let _z_out: [_; ARITY] = input
+                let z_out: [_; ARITY] = input
                     .z_0
                     .iter()
                     .zip_eq(z_out.iter())
@@ -181,7 +184,7 @@ where
                     .try_into()
                     .unwrap();
 
-                let _self_trace_output =
+                let self_trace_output =
                     input::assigned::ProtoGalaxyAccumulatorInstance::conditional_select(
                         &mut region,
                         &mg,
@@ -190,19 +193,37 @@ where
                         &is_zero_step,
                     )?;
 
-                let _paired_trace_output =
+                let paired_trace_output =
                     input::assigned::SangriaAccumulatorInstance::conditional_select(
                         &mut region,
                         &mg,
                         &input.paired_trace.input_accumulator,
                         &paired_acc_out,
                         &is_zero_step,
-                    );
+                    )?;
 
-                Ok(())
+                let next_step =
+                    mg.add_with_const(&mut region, &input.step, CMain::ScalarExt::ONE)?;
+
+                ro_chip(config.mg.clone())
+                    .absorb_iter(input::assigned::iter_consistency_marker_wrap_values(
+                        (&input.pp_digest.0, &input.pp_digest.1),
+                        &self_trace_output,
+                        &paired_trace_output,
+                        &next_step,
+                        &input.z_0,
+                        &z_out,
+                    ))
+                    .squeeze(&mut region)
             },
         )?;
 
-        todo!()
+        layouter.constrain_instance(
+            consistency_marker_output.cell(),
+            config.consistency_marker,
+            0,
+        )?;
+
+        Ok(())
     }
 }
