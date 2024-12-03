@@ -89,6 +89,22 @@ pub mod verify_chip {
                 .map(|v| WrapValue::Assigned(v.clone()))
         }
 
+        pub fn constrain_equal(
+            region: &mut RegionCtx<'_, F>,
+            lhs: &Self,
+            rhs: &Self,
+        ) -> Result<(), Halo2PlonkError> {
+            lhs.x_limbs()
+                .zip_eq(rhs.x_limbs())
+                .try_for_each(|(lhs, rhs)| region.constrain_equal(lhs.cell(), rhs.cell()))?;
+
+            lhs.y_limbs()
+                .zip_eq(rhs.y_limbs())
+                .try_for_each(|(lhs, rhs)| region.constrain_equal(lhs.cell(), rhs.cell()))?;
+
+            Ok(())
+        }
+
         fn conditional_select<const T: usize>(
             region: &mut RegionCtx<'_, F>,
             mg: &MainGate<F, T>,
@@ -828,9 +844,9 @@ pub mod verify_chip {
         main_gate: &MainGate<F, T>,
         acc: &AssignedPlonkInstance<F>,
         incoming: &[AssignedPlonkInstance<F>; L],
-        gamma_cha: &mut ValuePowers<F>,
+        poly_L_values: &[AssignedValue<F>],
     ) -> Result<AssignedPlonkInstance<F>, Halo2PlonkError> {
-        let l_0 = eval_lagrange_poly::<F, T, L>(region, main_gate, 0, gamma_cha)?;
+        let l_0 = &poly_L_values[0];
 
         let new_acc = AssignedPlonkInstance {
             W_commitments: acc.W_commitments.clone(), // Don't fold here, delegate it to secondary circuit
@@ -840,14 +856,14 @@ pub mod verify_chip {
                 .map(|instance| {
                     instance
                         .iter()
-                        .map(|cell| main_gate.mul(region, cell, &l_0))
+                        .map(|cell| main_gate.mul(region, cell, l_0))
                         .collect::<Result<Vec<_>, _>>()
                 })
                 .collect::<Result<Vec<_>, _>>()?,
             challenges: acc
                 .challenges
                 .iter()
-                .map(|cell| main_gate.mul(region, cell, &l_0))
+                .map(|cell| main_gate.mul(region, cell, l_0))
                 .collect::<Result<Vec<_>, _>>()?,
         };
 
@@ -855,7 +871,7 @@ pub mod verify_chip {
             .iter()
             .enumerate()
             .try_fold(new_acc, |mut acc, (index, tr)| {
-                let l_n = eval_lagrange_poly::<F, T, L>(region, main_gate, index + 1, gamma_cha)?;
+                let l_n = &poly_L_values[index + 1];
 
                 acc.instances
                     .iter_mut()
@@ -863,7 +879,7 @@ pub mod verify_chip {
                     .try_for_each(|(acc_instances, instances)| {
                         acc_instances.iter_mut().zip_eq(instances).try_for_each(
                             |(acc_instance, instance)| {
-                                let rhs = main_gate.mul(region, instance, &l_n)?;
+                                let rhs = main_gate.mul(region, instance, l_n)?;
 
                                 let new = main_gate.add(region, acc_instance, &rhs)?;
 
@@ -878,7 +894,7 @@ pub mod verify_chip {
                     .iter_mut()
                     .zip_eq(tr.challenges.iter())
                     .try_for_each(|(acc_challenge, challenge)| {
-                        let rhs = main_gate.mul(region, challenge, &l_n)?;
+                        let rhs = main_gate.mul(region, challenge, l_n)?;
 
                         let new = main_gate.add(region, acc_challenge, &rhs)?;
 
@@ -920,6 +936,11 @@ pub mod verify_chip {
         Ok(())
     }
 
+    pub struct VerifyResult<F: PrimeField> {
+        pub result_acc: AssignedAccumulatorInstance<F>,
+        pub poly_L_values: Box<[AssignedValue<F>]>,
+    }
+
     /// Assigned version of `fn verify` logic from [`crate::nifs::protogalaxy::ProtoGalaxy`].
     ///
     /// # Algorithm
@@ -951,7 +972,7 @@ pub mod verify_chip {
         accumulator: AssignedAccumulatorInstance<F>,
         incoming: &[AssignedPlonkInstance<F>; L],
         proof: AssignedProof<F>,
-    ) -> Result<AssignedAccumulatorInstance<F>, Error>
+    ) -> Result<VerifyResult<F>, Error>
     where
         F: FromUniformBytes<64> + PrimeFieldBits,
     {
@@ -998,16 +1019,27 @@ pub mod verify_chip {
         )
         .map_err(|err| Error::WhileE { err })?;
 
+        let poly_L_values = (0..)
+            .map(|index| {
+                eval_lagrange_poly::<F, T, L>(region, &main_gate, index, &mut gamma_powers)
+            })
+            .take(L + 1)
+            .collect::<Result<Box<[_]>, _>>()
+            .map_err(|err| Error::Fold { err })?;
+
         let ins = fold_instances(
             region,
             &main_gate,
             &accumulator.ins,
             incoming,
-            &mut gamma_powers,
+            &poly_L_values,
         )
         .map_err(|err| Error::Fold { err })?;
 
-        Ok(AssignedAccumulatorInstance { ins, betas, e })
+        Ok(VerifyResult {
+            result_acc: AssignedAccumulatorInstance { ins, betas, e },
+            poly_L_values,
+        })
     }
 
     #[cfg(test)]

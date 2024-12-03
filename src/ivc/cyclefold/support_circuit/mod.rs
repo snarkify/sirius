@@ -43,14 +43,14 @@ impl<C: CurveAffine> InstanceInput<C> {
         let p_out = self.p_out.coordinates().unwrap();
 
         vec![vec![
+            *p_out.x(),
+            *p_out.y(),
             *p0.x(),
             *p0.y(),
             self.l0,
             *p1.x(),
             *p1.y(),
             self.l1,
-            *p_out.x(),
-            *p_out.y(),
         ]]
     }
 }
@@ -98,7 +98,7 @@ where
             |region| {
                 let mut ctx = RegionCtx::new(region, 0);
 
-                let [x0, y0, l0, x1, y1, l1, _expected_x, _expected_y] = ecc_chip
+                let [expected_x, expected_y, x0, y0, l0, x1, y1, l1] = ecc_chip
                     .gate
                     .assign_values_from_instance(&mut ctx, config.instance, 0)
                     .unwrap();
@@ -133,15 +133,15 @@ where
                 trace!("p1 * l1_bits");
 
                 let AssignedPoint {
-                    x: _actual_x,
-                    y: _actual_y,
+                    x: actual_x,
+                    y: actual_y,
                 } = ecc_chip.add(&mut ctx, &lhs, &rhs).unwrap();
                 trace!("add finished");
 
-                //ctx.constrain_equal(expected_x.cell(), actual_x.cell())
-                //    .unwrap();
-                //ctx.constrain_equal(expected_y.cell(), actual_y.cell())
-                //    .unwrap();
+                ctx.constrain_equal(expected_x.cell(), actual_x.cell())
+                    .unwrap();
+                ctx.constrain_equal(expected_y.cell(), actual_y.cell())
+                    .unwrap();
 
                 Ok(())
             },
@@ -156,6 +156,7 @@ mod tests {
 
     use super::*;
     use crate::{
+        gadgets::ecc::tests::Point,
         halo2_proofs::dev::MockProver,
         prelude::{bn256::C1Affine as Curve, Field},
     };
@@ -177,7 +178,11 @@ mod tests {
 
         let tmp = p0 * l0;
         trace!("p0 * l0_bits = {:?}", tmp);
-        let p_out = ((p0 * l0) + (p1 * l1)).into();
+
+        let p_out = Point::from(p0)
+            .scalar_mul(&l0)
+            .add(&Point::from(p1).scalar_mul(&l1))
+            .into_curve();
 
         let l0 = Base::from_repr(l0.to_repr()).unwrap();
         let l1 = Base::from_repr(l1.to_repr()).unwrap();

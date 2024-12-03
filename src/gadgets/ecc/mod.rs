@@ -371,6 +371,25 @@ pub(crate) mod tests {
         y: C::Base,
         is_inf: bool,
     }
+    impl<C: CurveAffine> From<C> for Point<C> {
+        fn from(value: C) -> Self {
+            let c = value.coordinates().unwrap();
+
+            Self {
+                x: *c.x(),
+                y: *c.y(),
+                is_inf: value.is_identity().into(),
+            }
+        }
+    }
+
+    impl<C: CurveAffine> Point<C> {
+        pub fn into_curve(self) -> C {
+            let Self { x, y, is_inf: _ } = self;
+            C::from_xy(x, y).unwrap()
+        }
+    }
+
     impl<C: CurveAffine> Point<C> {
         fn default() -> Self {
             Self {
@@ -441,7 +460,7 @@ pub(crate) mod tests {
             }
         }
 
-        fn scalar_mul<F: PrimeFieldBits>(&self, scalar: &F) -> Self {
+        pub fn scalar_mul<F: PrimeFieldBits>(&self, scalar: &F) -> Self {
             let mut res = Self {
                 x: C::Base::ZERO,
                 y: C::Base::ZERO,

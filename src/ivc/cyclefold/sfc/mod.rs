@@ -12,7 +12,10 @@ use crate::{
     },
     ivc::{
         cyclefold::{self, ro_chip},
-        protogalaxy::{self, verify_chip},
+        protogalaxy::{
+            self,
+            verify_chip::{self, VerifyResult},
+        },
         StepCircuit,
     },
     main_gate::{MainGate, MainGateConfig, RegionCtx},
@@ -142,7 +145,10 @@ where
                 |region| {
                     let mut region = RegionCtx::new(region, 0);
 
-                    protogalaxy::verify_chip::verify(
+                    let VerifyResult {
+                        mut result_acc,
+                        poly_L_values,
+                    } = protogalaxy::verify_chip::verify(
                         &mut region,
                         config.mg.clone(),
                         ro_chip(config.mg.clone()),
@@ -156,7 +162,16 @@ where
                     .map_err(|err| {
                         error!("while protogalaxy::verify: {err:?}");
                         Halo2PlonkError::Synthesis
-                    })
+                    })?;
+
+                    input.pairing_check(
+                        &mut region,
+                        &config.mg,
+                        &poly_L_values,
+                        &mut result_acc,
+                    )?;
+
+                    Ok(result_acc)
                 },
             )?;
 
