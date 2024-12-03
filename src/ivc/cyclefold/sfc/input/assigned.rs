@@ -576,6 +576,10 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
     where
         F: PrimeFieldBits + FromUniformBytes<64>,
     {
+        let mg = MainGate::new(main_gate_config.clone());
+
+        let is_not_zero_term = mg.is_not_zero_term(region, self.step.clone())?;
+
         let calculated = ro_chip(main_gate_config.clone())
             .absorb_iter(self.iter_consistency_marker_wrap_values())
             .squeeze(region)?;
@@ -590,6 +594,9 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
                 error!("No consistency marker in `incoming` trace");
                 Halo2PlonkError::Synthesis
             })?;
+
+        let calculated = mg.mul(region, &calculated, &is_not_zero_term)?;
+        let provided = mg.mul(region, provided, &is_not_zero_term)?;
 
         region.constrain_equal(calculated.cell(), provided.cell())?;
 

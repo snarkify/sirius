@@ -96,6 +96,17 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         Ok(r)
     }
 
+    pub fn is_not_zero_term(
+        &self,
+        ctx: &mut RegionCtx<'_, F>,
+        a: AssignedValue<F>,
+    ) -> Result<AssignedValue<F>, Error> {
+        let is_zero = self.is_zero_term(ctx, a)?;
+
+        let lhs = self.mul_by_const(ctx, &is_zero, -F::ONE)?;
+        self.add_with_const(ctx, &lhs, F::ONE)
+    }
+
     pub fn is_equal_term(
         &self,
         ctx: &mut RegionCtx<'_, F>,

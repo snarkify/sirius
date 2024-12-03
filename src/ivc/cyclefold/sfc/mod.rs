@@ -59,12 +59,14 @@ where
 {
     /// For the initial iteration, we will give the same accumulators that we take from the input
     pub fn initial_instances(&self) -> Vec<Vec<CMain::ScalarExt>> {
-        let marker = cyclefold::ro().absorb(&self.input).output(
+        let mut input = self.input.clone();
+        input.step += 1;
+        let out_marker = cyclefold::ro().absorb(&input).output(
             NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
         );
 
         let mut instances = self.sc.instances();
-        instances.insert(0, vec![marker]);
+        instances.insert(0, vec![out_marker]);
         instances
     }
 
