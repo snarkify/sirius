@@ -258,7 +258,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for VerifierP
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Proof<F: PrimeField> {
     pub poly_F: UnivariatePoly<F>,
     pub poly_K: UnivariatePoly<F>,

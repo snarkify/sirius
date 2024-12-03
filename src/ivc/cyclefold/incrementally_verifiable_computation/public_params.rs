@@ -125,7 +125,7 @@ where
                 ),
             };
 
-            let mock_instances = mock_sfc.instances();
+            let mock_instances = mock_sfc.initial_instances();
 
             // Correct `num_io`
             mock_sfc.input = sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
@@ -151,7 +151,8 @@ where
                 ),
             };
 
-            let primary_instances = sfc.instances();
+            // TODO #369 Use expected out marker, instead of zero
+            let primary_instances = sfc.initial_instances();
             let primary_cr = CircuitRunner::new(k_table_size, sfc, primary_instances.clone());
 
             (

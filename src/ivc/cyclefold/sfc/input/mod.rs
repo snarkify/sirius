@@ -9,7 +9,9 @@ use crate::{
     poseidon::{AbsorbInRO, ROTrait},
 };
 
-#[derive(Clone)]
+mod assigned;
+
+#[derive(Debug, Clone)]
 pub struct BigUintPoint<F: PrimeField> {
     x: BigUint<F>,
     y: BigUint<F>,
@@ -42,7 +44,7 @@ impl<F: PrimeField> BigUintPoint<F> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct NativePlonkInstance<F: PrimeField> {
     pub(crate) W_commitments: Vec<BigUintPoint<F>>,
     pub(crate) instances: Vec<Vec<F>>,
@@ -62,7 +64,7 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for NativePlonkInstance<F>
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PairedPlonkInstance<F: PrimeField> {
     pub(crate) W_commitments: Vec<(F, F)>,
     pub(crate) instances: Vec<Vec<BigUint<F>>>,
@@ -93,7 +95,7 @@ impl<C: CurveAffine> From<plonk::PlonkInstance<C>> for NativePlonkInstance<C::Sc
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ProtoGalaxyAccumulatorInstance<F: PrimeField> {
     pub(crate) ins: NativePlonkInstance<F>,
     pub(crate) betas: Box<[F]>,
@@ -111,6 +113,7 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for ProtoGalaxyAccumulator
 }
 
 /// Recursive trace of the circuit itself
+#[derive(Debug, Clone)]
 pub struct SelfTrace<F: PrimeField> {
     pub input_accumulator: ProtoGalaxyAccumulatorInstance<F>,
     pub incoming: NativePlonkInstance<F>,
@@ -177,6 +180,7 @@ impl<F: PrimeField> SelfTrace<F> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct SangriaAccumulatorInstance<F: PrimeField> {
     pub(crate) ins: PairedPlonkInstance<F>,
     pub(crate) E_commitment: (F, F),
@@ -195,6 +199,7 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SangriaAccumulatorInst
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct PairedTrace<F: PrimeField> {
     pub input_accumulator: SangriaAccumulatorInstance<F>,
     // The size from one to three
@@ -281,6 +286,7 @@ impl<F: PrimeField> PairedTrace<F> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Input<const ARITY: usize, F: PrimeField> {
     pub pp_digest: (F, F),
 
@@ -300,6 +306,109 @@ pub struct Input<const ARITY: usize, F: PrimeField> {
     pub z_i: [F; ARITY],
 }
 
+#[cfg(test)]
+impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
+    pub fn random<R: rand::Rng + ?Sized>(mut rng: &mut R) -> Self {
+        use std::iter;
+
+        // Initialize `step` with a random value.
+        let step: usize = rng.gen();
+
+        // Create an infinite generator of random field elements.
+        let mut gen = iter::repeat_with(move || F::random(&mut rng));
+
+        // Helper closure to create a random BigUint<F>
+        fn random_big_uint<F: PrimeField>(gen: &mut impl Iterator<Item = F>) -> BigUint<F> {
+            BigUint::from_limbs(
+                gen.by_ref().take(DEFAULT_LIMBS_COUNT_LIMIT.get()),
+                DEFAULT_LIMB_WIDTH,
+                DEFAULT_LIMBS_COUNT_LIMIT,
+            )
+            .expect("Failed to create BigUint from limbs")
+        }
+
+        // Initialize `pp_digest` with random field elements.
+        let pp_digest = (gen.next().unwrap(), gen.next().unwrap());
+
+        // Initialize `self_trace` with random values.
+        let self_trace = SelfTrace {
+            input_accumulator: ProtoGalaxyAccumulatorInstance {
+                ins: NativePlonkInstance {
+                    W_commitments: vec![BigUintPoint {
+                        x: random_big_uint(&mut gen),
+                        y: random_big_uint(&mut gen),
+                    }],
+                    instances: vec![
+                        vec![gen.next().unwrap(); 10]; // 5 instances each with 10 field elements
+                        1
+                    ],
+                    challenges: vec![gen.next().unwrap(); 1],
+                },
+                betas: vec![gen.next().unwrap()].into_boxed_slice(),
+                e: gen.next().unwrap(),
+            },
+            incoming: NativePlonkInstance {
+                W_commitments: vec![BigUintPoint {
+                    x: random_big_uint(&mut gen),
+                    y: random_big_uint(&mut gen),
+                }],
+                instances: vec![
+                    vec![gen.next().unwrap(); 10]; // 10 instances each with 10 field elements
+                    1
+                ],
+                challenges: vec![gen.next().unwrap(); 1],
+            },
+            proof: nifs::protogalaxy::Proof {
+                poly_F: UnivariatePoly::from_iter(
+                    iter::repeat_with(|| gen.next().unwrap()).take(1),
+                ),
+                poly_K: UnivariatePoly::from_iter(
+                    iter::repeat_with(|| gen.next().unwrap()).take(2),
+                ),
+            },
+        };
+
+        // Initialize `paired_trace` with random values.
+        let paired_trace = PairedTrace {
+            input_accumulator: SangriaAccumulatorInstance {
+                ins: PairedPlonkInstance {
+                    W_commitments: vec![(gen.next().unwrap(), gen.next().unwrap()); 1],
+                    instances: vec![
+                        vec![random_big_uint(&mut gen); 10]; // 5 instances each with 10 BigUint<F>
+                        1
+                    ],
+                    challenges: vec![random_big_uint(&mut gen); 1],
+                },
+                E_commitment: (gen.next().unwrap(), gen.next().unwrap()),
+                u: random_big_uint(&mut gen),
+            },
+            incoming: vec![
+                PairedPlonkInstance {
+                    W_commitments: vec![(gen.next().unwrap(), gen.next().unwrap()); 1],
+                    instances: vec![vec![random_big_uint(&mut gen); 1]; 2],
+                    challenges: vec![random_big_uint(&mut gen); 2],
+                };
+                1
+            ]
+            .into_boxed_slice(),
+            proof: vec![(gen.next().unwrap(), gen.next().unwrap()); 1],
+        };
+
+        // Initialize `z_0` and `z_i` arrays with random field elements.
+        let z_0 = array::from_fn(|_| gen.next().unwrap());
+        let z_i = array::from_fn(|_| gen.next().unwrap());
+
+        Self {
+            pp_digest,
+            self_trace,
+            paired_trace,
+            step,
+            z_0,
+            z_i,
+        }
+    }
+}
+
 impl<const ARITY: usize, F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for Input<ARITY, F> {
     fn absorb_into(&self, ro: &mut RO) {
         let Self {
@@ -311,10 +420,10 @@ impl<const ARITY: usize, F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for In
             z_i,
         } = self;
 
-        ro.absorb_field(*pp0)
+        ro.absorb(&self_trace.input_accumulator)
+            .absorb(&paired_trace.input_accumulator)
+            .absorb_field(*pp0)
             .absorb_field(*pp1)
-            .absorb(self_trace)
-            .absorb(paired_trace)
             .absorb_field(F::from(*step as u64))
             .absorb_field_iter(z_0.iter().copied())
             .absorb_field_iter(z_i.iter().copied());
