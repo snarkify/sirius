@@ -52,6 +52,8 @@ impl<F: PrimeField> NativePlonkInstance<F> {
         let challenges =
             assigner.assign_all_advice(region, || "challenges", challenges.iter().cloned())?;
 
+        region.next();
+
         Ok(Self {
             W_commitments,
             instances,
@@ -73,13 +75,17 @@ impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
         let ins = NativePlonkInstance::assign_advice_from_native(region, ins, main_gate_config)?;
 
         let mut assigner = main_gate_config.advice_cycle_assigner();
-        Ok(Self {
+        let self_ = Self {
             ins,
             betas: assigner
                 .assign_all_advice(region, || "betas", betas.iter().cloned())?
                 .into_boxed_slice(),
             e: assigner.assign_next_advice(region, || "e", *e)?,
-        })
+        };
+
+        region.next();
+
+        Ok(self_)
     }
 
     pub fn conditional_select<const T: usize>(
@@ -125,14 +131,18 @@ impl<F: PrimeField> ProtogalaxyProof<F> {
         let mut assigner = main_gate_config.advice_cycle_assigner();
         let super::nifs::protogalaxy::Proof { poly_F, poly_K } = original;
 
-        Ok(Self {
+        let self_ = Self {
             poly_F: assigner
                 .assign_all_advice(region, || "poly_F", poly_F.iter().cloned())?
                 .into(),
             poly_K: assigner
                 .assign_all_advice(region, || "poly_K", poly_K.iter().cloned())?
                 .into(),
-        })
+        };
+
+        region.next();
+
+        Ok(self_)
     }
 
     fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
@@ -251,6 +261,8 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
+        region.next();
+
         Ok(Self {
             W_commitments,
             instances,
@@ -360,7 +372,7 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
 
         let mut assigner = main_gate_config.advice_cycle_assigner();
 
-        Ok(Self {
+        let self_ = Self {
             ins,
             E_commitment: (
                 assigner.assign_next_advice(
@@ -375,7 +387,11 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
                 )?,
             ),
             u: assigner.assign_next_advice(region, || "u", original.u)?,
-        })
+        };
+
+        region.next();
+
+        Ok(self_)
     }
 
     pub fn conditional_select<const T: usize>(
@@ -476,6 +492,8 @@ impl<F: PrimeField> PairedTrace<F> {
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
+        region.next();
+
         Ok(Self {
             input_accumulator,
             incoming,
@@ -554,6 +572,8 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         let z_0 = assigner.assign_all_advice(region, || "z_0", original.z_0.iter().cloned())?;
 
         let z_i = assigner.assign_all_advice(region, || "z_i", original.z_i.iter().cloned())?;
+
+        region.next();
 
         Ok(Self {
             pp_digest: (pp_digest_0, pp_digest_1),
@@ -653,8 +673,13 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
             self.paired_trace.incoming.iter(),
             new_acc.ins.W_commitments.iter_mut(),
         )) {
-            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1] =
-                trace.instances[0].clone().try_into().unwrap();
+            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1] = trace
+                .instances
+                .first()
+                .expect("`SupportCircuit` always has instances.len() == 1 and it should always be used for sfc")
+                .clone()
+                .try_into()
+                .unwrap();
 
             l0.iter()
                 .zip_eq(expected_l0.iter())

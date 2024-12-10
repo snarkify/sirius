@@ -295,8 +295,8 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
 
         // Helper closure to create a random BigUint<F>
         fn random_big_uint<F: PrimeField>(gen: &mut impl Iterator<Item = F>) -> BigUint<F> {
-            BigUint::from_limbs(
-                gen.by_ref().take(DEFAULT_LIMBS_COUNT_LIMIT.get()),
+            BigUint::from_f(
+                &gen.next().unwrap(),
                 DEFAULT_LIMB_WIDTH,
                 DEFAULT_LIMBS_COUNT_LIMIT,
             )
@@ -349,10 +349,7 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
             input_accumulator: SangriaAccumulatorInstance {
                 ins: PairedPlonkInstance {
                     W_commitments: vec![(gen.next().unwrap(), gen.next().unwrap()); 1],
-                    instances: vec![
-                        vec![random_big_uint(&mut gen); 10]; // 5 instances each with 10 BigUint<F>
-                        1
-                    ],
+                    instances: vec![vec![random_big_uint(&mut gen); 8]; 1],
                     challenges: vec![random_big_uint(&mut gen); 1],
                 },
                 E_commitment: (gen.next().unwrap(), gen.next().unwrap()),
@@ -361,8 +358,8 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
             incoming: vec![
                 PairedPlonkInstance {
                     W_commitments: vec![(gen.next().unwrap(), gen.next().unwrap()); 1],
-                    instances: vec![vec![random_big_uint(&mut gen); 1]; 2],
-                    challenges: vec![random_big_uint(&mut gen); 2],
+                    instances: vec![vec![random_big_uint(&mut gen); 8]; 1],
+                    challenges: vec![random_big_uint(&mut gen); 1],
                 };
                 1
             ]

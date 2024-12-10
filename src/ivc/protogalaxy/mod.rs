@@ -160,10 +160,14 @@ pub mod verify_chip {
         ) -> Result<BigUintPoint<AssignedValue<F>>, Halo2PlonkError> {
             let mut assigner = main_gate_config.advice_cycle_assigner();
 
-            Ok(BigUintPoint {
+            let p = BigUintPoint {
                 x: assigner.assign_all_advice(region, || "x", self.x.into_iter())?,
                 y: assigner.assign_all_advice(region, || "y", self.y.into_iter())?,
-            })
+            };
+
+            region.next();
+
+            Ok(p)
         }
     }
 
@@ -502,11 +506,11 @@ pub mod verify_chip {
             let prev_col = &main_gate_config.input;
             let result_col = &main_gate_config.out;
 
-            challenge_powers.get_or_eval(region, main_gate, self.len().saturating_sub(1))?;
+            challenge_powers.get_or_eval(region, main_gate, self.len().saturating_add(1))?;
 
             self.0
                 .iter()
-                .zip_eq(challenge_powers.iter())
+                .zip_eq(challenge_powers.iter().take(self.0.len()))
                 .chunks(2)
                 .into_iter()
                 .try_fold(Option::<AssignedValue<F>>::None, |prev, chunks| {
@@ -526,13 +530,13 @@ pub mod verify_chip {
 
                     let assigned_coeffs = coeffs
                         .iter()
-                        .zip_eq(coeffs_col)
+                        .zip(coeffs_col)
                         .map(|(coeff, col)| region.assign_advice_from(|| "coeff", col, *coeff))
                         .collect::<Result<Box<[_]>, _>>()?;
 
                     let assigned_cha = cha_in_power
                         .iter()
-                        .zip_eq(cha_col)
+                        .zip(cha_col)
                         .map(|(cha_in_power, col)| {
                             region.assign_advice_from(|| "cha", col, *cha_in_power)
                         })
@@ -540,7 +544,7 @@ pub mod verify_chip {
 
                     let output = assigned_coeffs
                         .iter()
-                        .zip_eq(assigned_cha.iter())
+                        .zip(assigned_cha.iter())
                         .fold(assigned_prev.value().copied(), |res, (coeff, cha)| {
                             res + (coeff.value().copied() * cha.value())
                         });
@@ -730,7 +734,8 @@ pub mod verify_chip {
             calculate_exponentiation_sequence(region, main_gate, cha.delta, cha.betas.len())
                 .map_err(|err| Error::Deltas { err })?;
 
-        cha.betas
+        let bs = cha
+            .betas
             .iter()
             .zip_eq(deltas)
             .map(|(beta, delta_power)| {
@@ -738,7 +743,11 @@ pub mod verify_chip {
                 main_gate.add(region, beta, &alpha_mul_delta)
             })
             .collect::<Result<Box<[_]>, Halo2PlonkError>>()
-            .map_err(|err| Error::BetasStroke { err })
+            .map_err(|err| Error::BetasStroke { err })?;
+
+        region.next();
+
+        Ok(bs)
     }
 
     /// Evaluate the values of the Lagrange polynomial for a cyclic subgroup of length `n` (`2.pow(log_n)`) at
@@ -777,6 +786,8 @@ pub mod verify_chip {
 
         let X = cha.value();
 
+        region.next();
+        dbg!(region.offset());
         let X_sub_value = main_gate.add_with_const(region, &X, -value)?;
 
         let (is_zero_X_sub_value, X_sub_value_inverted) =
@@ -1019,11 +1030,10 @@ pub mod verify_chip {
         )
         .map_err(|err| Error::WhileE { err })?;
 
-        let poly_L_values = (0..)
+        let poly_L_values = (0..(L + 1))
             .map(|index| {
                 eval_lagrange_poly::<F, T, L>(region, &main_gate, index, &mut gamma_powers)
             })
-            .take(L + 1)
             .collect::<Result<Box<[_]>, _>>()
             .map_err(|err| Error::Fold { err })?;
 
