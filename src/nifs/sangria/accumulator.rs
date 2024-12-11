@@ -24,7 +24,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RelaxedPlonkInstance<C: CurveAffine> {
+pub struct RelaxedPlonkInstance<C: CurveAffine, const MARKERS: usize = 2> {
     /// `W_commitments = round_sizes.len()`, see [`PlonkStructure::round_sizes`]
     pub(crate) W_commitments: Vec<C>,
     /// First instance column [`crate::ivc::step_folding_circuit::StepFoldingCircuit`] reserved for
@@ -33,7 +33,7 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
     /// These are the two values that allow for proof of acceptance
     /// The null is a hash of all input parameters per folding step
     /// The first one is a hash of all output parameters for each folding step
-    pub(crate) consistency_markers: [C::ScalarExt; 2],
+    pub(crate) consistency_markers: [C::ScalarExt; MARKERS],
     /// Challenges generated in special soundness protocol (sps)
     /// we will have 0 ~ 3 challenges depending on different cases:
     /// name them as r1, r2, r3:

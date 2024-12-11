@@ -74,10 +74,14 @@ where
 
     let mut acc = input.input_accumulator.clone();
 
-    for input::assigned::PairedPlonkInstance {
-        W_commitments: input_W_commitments,
-        challenges: input_challenges,
-        instances: input_instances,
+    for input::assigned::PairedIncoming {
+        instance:
+            input::assigned::PairedPlonkInstance {
+                W_commitments: input_W_commitments,
+                challenges: input_challenges,
+                instances: input_instances,
+            },
+        proof,
     } in input.incoming.iter()
     {
         let input::assigned::SangriaAccumulatorInstance {
@@ -170,8 +174,7 @@ where
                 x: acc_E_commitment.0.clone(),
                 y: acc_E_commitment.1.clone(),
             },
-            &input
-                .proof
+            &proof
                 .iter()
                 .cloned()
                 .map(|(x, y)| AssignedPoint { x, y })

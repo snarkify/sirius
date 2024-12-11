@@ -446,12 +446,55 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
 
 pub type SangriaCrossTermCommits<F> = Vec<(AssignedValue<F>, AssignedValue<F>)>;
 
+pub struct PairedIncoming<F: PrimeField> {
+    pub instance: PairedPlonkInstance<F>,
+    pub proof: SangriaCrossTermCommits<F>,
+}
+
+impl<F: PrimeField> PairedIncoming<F> {
+    fn assign_advice_from(
+        region: &mut RegionCtx<'_, F>,
+        original: &super::PairedIncoming<F>,
+        main_gate_config: &MainGateConfig,
+    ) -> Result<Self, Halo2PlonkError> {
+        let super::PairedIncoming { instance, proof } = original;
+
+        let instance = PairedPlonkInstance::assign_advice_from(region, instance, main_gate_config)?;
+
+        let mut assigner = main_gate_config.advice_cycle_assigner();
+
+        let proof = proof
+            .iter()
+            .copied()
+            .map(|(commit_x, commit_y)| -> Result<_, Halo2PlonkError> {
+                Ok((
+                    assigner.assign_next_advice(region, || "commit.x", commit_x)?,
+                    assigner.assign_next_advice(region, || "commit.y", commit_y)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        region.next();
+
+        Ok(Self { instance, proof })
+    }
+
+    pub fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
+        let Self { instance, proof } = self;
+        instance
+            .iter_wrap_values()
+            .chain(proof.iter().flat_map(|(a, b)| {
+                iter::once(WrapValue::Assigned(a.clone()))
+                    .chain(std::iter::once(WrapValue::Assigned(b.clone())))
+            }))
+    }
+}
+
 pub struct PairedTrace<F: PrimeField> {
     pub input_accumulator: SangriaAccumulatorInstance<F>,
     // The size from one to three
     // Depdend on `W_commitments_len`
-    pub incoming: Box<[PairedPlonkInstance<F>]>,
-    pub proof: SangriaCrossTermCommits<F>,
+    pub incoming: Box<[PairedIncoming<F>]>,
 }
 
 impl<F: PrimeField> PairedTrace<F> {
@@ -470,34 +513,14 @@ impl<F: PrimeField> PairedTrace<F> {
             .incoming
             .iter()
             .map(|paired_plonk_instance| {
-                PairedPlonkInstance::assign_advice_from(
-                    region,
-                    paired_plonk_instance,
-                    main_gate_config,
-                )
+                PairedIncoming::assign_advice_from(region, paired_plonk_instance, main_gate_config)
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?
             .into_boxed_slice();
 
-        let mut assigner = main_gate_config.advice_cycle_assigner();
-
-        let proof = original
-            .proof
-            .iter()
-            .map(|(a, b)| {
-                Ok((
-                    assigner.assign_next_advice(region, || "proof_a", *a)?,
-                    assigner.assign_next_advice(region, || "proof_b", *b)?,
-                ))
-            })
-            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
-
-        region.next();
-
         Ok(Self {
             input_accumulator,
             incoming,
-            proof,
         })
     }
 
@@ -505,20 +528,13 @@ impl<F: PrimeField> PairedTrace<F> {
         let Self {
             input_accumulator,
             incoming,
-            proof,
         } = self;
 
-        input_accumulator
-            .iter_wrap_values()
-            .chain(
-                incoming
-                    .iter()
-                    .flat_map(|instance| instance.iter_wrap_values()),
-            )
-            .chain(proof.iter().flat_map(|(a, b)| {
-                iter::once(WrapValue::Assigned(a.clone()))
-                    .chain(std::iter::once(WrapValue::Assigned(b.clone())))
-            }))
+        input_accumulator.iter_wrap_values().chain(
+            incoming
+                .iter()
+                .flat_map(|instance| instance.iter_wrap_values()),
+        )
     }
 
     pub fn get_self_W_commitment_from_paired(&self) -> Vec<BigUintPoint<AssignedValue<F>>> {
@@ -673,7 +689,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
             self.paired_trace.incoming.iter(),
             new_acc.ins.W_commitments.iter_mut(),
         )) {
-            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1] = trace
+            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1] = trace.instance
                 .instances
                 .first()
                 .expect("`SupportCircuit` always has instances.len() == 1 and it should always be used for sfc")

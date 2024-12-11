@@ -202,9 +202,15 @@ pub(crate) fn normalize_trailing_zeros(bits: &mut Vec<bool>, bit_len: NonZeroUsi
     }
 
     let length = bits.len();
-    assert!(bit_len.get() >= length, "bit length exceed maximum value");
+    let bit_len = bit_len.get();
+    assert!(
+        bit_len >= length,
+        "bit length exceed maximum value: bit len is {}, but length is {}",
+        bit_len,
+        length
+    );
 
-    for _ in 0..(bit_len.get() - length) {
+    for _ in 0..(bit_len - length) {
         bits.push(false);
     }
 }

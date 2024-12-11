@@ -2,6 +2,7 @@ use halo2_proofs::{
     circuit::{Chip, Value},
     plonk::Error,
 };
+use tracing::debug;
 
 use crate::{
     ff::PrimeField,
@@ -183,12 +184,25 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         b: &AssignedValue<F>,
     ) -> Result<AssignedValue<F>, Error> {
         // a + b = r
-        let q_1 = Some(vec![F::ONE, F::ONE]);
-        let state = Some(vec![a.clone().into(), b.clone().into()]);
-        let state_terms = (q_1, None, state);
-        let out_val = a.value().copied() + b.value().copied();
-        let out_terms = (-F::ONE, out_val.into());
-        let out = self.apply(ctx, state_terms, None, out_terms)?;
+        let MainGateConfig {
+            state,
+            out,
+            q_1,
+            q_o,
+            ..
+        } = &self.config();
+
+        debug!("offset is {}", ctx.offset());
+        ctx.assign_fixed(|| "one", q_1[0], F::ONE)?;
+        ctx.assign_advice_from(|| "sum.lhs", state[0], a)?;
+
+        ctx.assign_fixed(|| "one", q_1[1], F::ONE)?;
+        ctx.assign_advice_from(|| "sum.rhs", state[1], b)?;
+
+        ctx.assign_fixed(|| "-one", *q_o, -F::ONE)?;
+        let out = ctx.assign_advice(|| "sum.out", *out, a.value().copied() + b.value())?;
+
+        ctx.next();
         Ok(out)
     }
 
@@ -235,17 +249,24 @@ impl<F: PrimeField, const T: usize> MainGate<F, T> {
         lhs: &AssignedValue<F>,
         rhs: F,
     ) -> Result<AssignedValue<F>, Error> {
-        let config = self.config();
+        let MainGateConfig {
+            input,
+            out,
+            q_i,
+            q_o,
+            rc,
+            ..
+        } = self.config();
 
-        ctx.assign_fixed(|| "q_i", config.q_i, F::ONE)?;
-        ctx.assign_fixed(|| "q_o", config.q_o, -F::ONE)?;
+        ctx.assign_fixed(|| "one", *q_i, F::ONE)?;
+        let _assigned_lhs = ctx.assign_advice_from(|| "sum with const.lhs", *input, lhs)?;
 
-        let assigned_lhs =
-            ctx.assign_advice_from(|| "lhs for sum with const", config.input, lhs)?;
-        ctx.assign_fixed(|| "rhs for sum with const", config.rc, rhs)?;
+        ctx.assign_fixed(|| "sum with const.rhs", *rc, rhs)?;
 
-        let sum = assigned_lhs.value().copied() + Value::known(rhs);
-        let assigned_res = ctx.assign_advice(|| "result for sum with const", config.out, sum)?;
+        ctx.assign_fixed(|| "-one", *q_o, -F::ONE)?;
+        let sum = lhs.value().copied() + Value::known(rhs);
+
+        let assigned_res = ctx.assign_advice(|| "sum with const.out", *out, sum)?;
 
         ctx.next();
         Ok(assigned_res)

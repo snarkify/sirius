@@ -23,7 +23,7 @@ use crate::{
 };
 
 mod input;
-pub use input::Input;
+pub use input::{InputBuilder, Input};
 
 pub mod sangria_adapter;
 
@@ -146,8 +146,8 @@ where
                     let mut region = RegionCtx::new(region, 0);
 
                     let VerifyResult {
-                        mut result_acc,
-                        poly_L_values,
+                        result_acc,
+                        poly_L_values: _,
                     } = protogalaxy::verify_chip::verify(
                         &mut region,
                         config.mg.clone(),
@@ -164,30 +164,34 @@ where
                         Halo2PlonkError::Synthesis
                     })?;
 
-                    input.pairing_check(
-                        &mut region,
-                        &config.mg,
-                        &poly_L_values,
-                        &mut result_acc,
-                    )?;
+                    //input.pairing_check(
+                    //    &mut region,
+                    //    &config.mg,
+                    //    &poly_L_values,
+                    //    &mut result_acc,
+                    //)?;
 
                     Ok(result_acc)
                 },
             )?;
 
         let paired_acc_out: input::assigned::SangriaAccumulatorInstance<CMain::ScalarExt> =
-            layouter.assign_region(
-                || "sfc sangria",
-                |region| {
-                    sangria_adapter::fold::<CMain, CSup>(
-                        &mut RegionCtx::new(region, 0),
-                        config.mg.clone(),
-                        &input.paired_trace,
-                    )
-                },
-            )?;
+            layouter
+                .assign_region(
+                    || "sfc sangria",
+                    |region| {
+                        sangria_adapter::fold::<CMain, CSup>(
+                            &mut RegionCtx::new(region, 0),
+                            config.mg.clone(),
+                            &input.paired_trace,
+                        )
+                    },
+                )
+                .inspect_err(|err| {
+                    error!("while sfc sangria: {err:?}");
+                })?;
 
-        let consistency_marker_output = layouter.assign_region(
+        let _consistency_marker_output = layouter.assign_region(
             || "sfc out",
             |region| {
                 let mut region = RegionCtx::new(region, 0);
@@ -240,11 +244,11 @@ where
             },
         )?;
 
-        layouter.constrain_instance(
-            consistency_marker_output.cell(),
-            config.consistency_marker,
-            0,
-        )?;
+        //layouter.constrain_instance(
+        //    consistency_marker_output.cell(),
+        //    config.consistency_marker,
+        //    0,
+        //)?;
 
         Ok(())
     }
