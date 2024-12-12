@@ -66,7 +66,6 @@ pub mod verify_chip {
     }
 
     impl<F> BigUintPoint<F> {
-
         fn x_limbs(&self) -> impl Iterator<Item = &F> {
             self.x.iter()
         }

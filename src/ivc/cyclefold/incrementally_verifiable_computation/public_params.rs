@@ -68,7 +68,7 @@ where
         k_table_size: u32,
     ) -> Self {
         // Trace in C1::Base or C2::Scalar
-        let (support_plonk_structure, initial_support_trace): (
+        let (support_S, support_initial_trace): (
             PlonkStructure<CMain::Base>,
             FoldablePlonkTrace<CSup>,
         ) = {
@@ -79,7 +79,6 @@ where
                 l0: CMain::Base::ZERO,
                 p1: CMain::identity(),
                 l1: CMain::Base::ZERO,
-                p_out: CMain::identity(),
             }
             .into_instance();
 
@@ -108,7 +107,7 @@ where
             )
         };
 
-        let (primary_plonk_structure, initial_primary_trace) = {
+        let (primary_S, primary_initial_trace) = {
             let mut mock_sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
                 sc: primary_sc,
                 input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
@@ -116,8 +115,8 @@ where
                         k: k_table_size as usize,
                         ..Default::default()
                     },
-                    &support_plonk_structure,
-                    &initial_support_trace.u,
+                    &support_S,
+                    &support_initial_trace.u,
                 ),
                 _p: PhantomData,
             };
@@ -131,8 +130,8 @@ where
                     num_io: mock_instances.iter().map(|col| col.len()).collect(),
                     ..Default::default()
                 },
-                &support_plonk_structure,
-                &initial_support_trace.u,
+                &support_S,
+                &support_initial_trace.u,
             );
 
             let mock_S = CircuitRunner::new(k_table_size, mock_sfc, mock_instances)
@@ -143,8 +142,8 @@ where
                 sc: primary_sc,
                 input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
                     &mock_S,
-                    &support_plonk_structure,
-                    &initial_support_trace.u,
+                    &support_S,
+                    &support_initial_trace.u,
                 ),
                 _p: PhantomData,
             };
@@ -173,11 +172,11 @@ where
             support_ck: ck2,
             primary_k_table_size: k_table_size,
 
-            primary_initial_trace: initial_primary_trace,
-            support_initial_trace: initial_support_trace,
+            primary_initial_trace,
+            support_initial_trace,
 
-            primary_S: primary_plonk_structure,
-            support_S: support_plonk_structure,
+            primary_S,
+            support_S,
 
             _p: PhantomData,
         }

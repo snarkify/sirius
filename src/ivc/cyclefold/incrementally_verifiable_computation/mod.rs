@@ -78,20 +78,29 @@ where
         .unwrap();
         let _gamma: CMain::ScalarExt = primary_ro.squeeze(MAX_BITS);
 
-        let (_new_acc, paired_proof) = VanillaFS::prove(
-            &pp.support_ck,
-            &nifs::sangria::ProverParam {
-                S: pp.support_S.clone(),
-                pp_digest: pp.csup_pp_digest(),
-            },
-            &mut ro(),
-            nifs::sangria::accumulator::RelaxedPlonkTrace::from_regular(
-                pp.support_initial_trace.clone(),
-                SupportCircuit::<CMain>::MIN_K_TABLE_SIZE as usize,
-            ),
-            &[pp.support_initial_trace.clone()],
-        )
-        .unwrap();
+        let mut acc_ptr = nifs::sangria::accumulator::RelaxedPlonkTrace::from_regular(
+            pp.support_initial_trace.clone(),
+            SupportCircuit::<CMain>::MIN_K_TABLE_SIZE as usize,
+        );
+        let mut paired_incoming = vec![];
+
+        for _ in 0..initial_self_acc.W_commitment_len() {
+            let (new_acc, paired_proof) = VanillaFS::prove(
+                &pp.support_ck,
+                &nifs::sangria::ProverParam {
+                    S: pp.support_S.clone(),
+                    pp_digest: pp.csup_pp_digest(),
+                },
+                &mut ro(),
+                acc_ptr,
+                &[pp.support_initial_trace.clone()],
+            )
+            .unwrap();
+
+            paired_incoming.push((pp.support_initial_trace.u.clone(), paired_proof));
+
+            acc_ptr = new_acc;
+        }
 
         let _primary_sfc = StepFoldingCircuit::<'_, ARITY, CMain, CSup, SC> {
             sc,
@@ -101,12 +110,7 @@ where
                 self_incoming: &pp.primary_initial_trace.u,
                 self_proof,
                 paired_acc: &pp.support_initial_trace.u.clone().into(),
-                paired_incoming: {
-                    &vec![
-                        (pp.support_initial_trace.u.clone(), paired_proof.clone());
-                        initial_self_acc.W_commitment_len()
-                    ]
-                },
+                paired_incoming: paired_incoming.as_slice(),
                 self_acc: &initial_self_acc.into(),
                 z_i: z_0,
                 z_0,
@@ -123,7 +127,6 @@ where
                 l0: CMain::Base::ZERO,
                 p1: CMain::identity(),
                 l1: CMain::Base::ZERO,
-                p_out: CMain::identity(),
             }
             .into_instance();
 
