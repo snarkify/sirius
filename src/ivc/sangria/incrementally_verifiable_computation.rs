@@ -1,6 +1,7 @@
 use std::{io, marker::PhantomData, num::NonZeroUsize};
 
 use halo2_proofs::dev::MockProver;
+use nifs::sangria::CONSISTENCY_MARKERS_COUNT;
 use serde::Serialize;
 use tracing::*;
 
@@ -19,7 +20,7 @@ use crate::{
         self,
         sangria::{
             accumulator::{FoldablePlonkTrace, RelaxedPlonkTrace},
-            GetConsistencyMarkers, VanillaFS, VerifyError,
+            FoldablePlonkInstance, GetConsistencyMarkers, VanillaFS, VerifyError,
         },
     },
     poseidon::{random_oracle::ROTrait, ROPair},
@@ -224,9 +225,14 @@ where
         let primary_consistency_marker = {
             let _s = info_span!("generate_instance").entered();
             [
-                C2::scalar_to_base(&secondary_pre_round_plonk_trace.u.get_consistency_markers()[1])
-                    .unwrap(),
-                ConsistencyMarkerComputation::<'_, A1, C2, RP1::OffCircuit> {
+                get_consistency_marker_output(&secondary_pre_round_plonk_trace.u),
+                ConsistencyMarkerComputation::<
+                    '_,
+                    A1,
+                    C2,
+                    RP1::OffCircuit,
+                    { CONSISTENCY_MARKERS_COUNT },
+                > {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_2(),
                     step: 1,
@@ -309,8 +315,14 @@ where
         let secondary_consistency_marker = {
             let _s = info_span!("generate_instance");
             [
-                C1::scalar_to_base(&primary_plonk_trace.u.get_consistency_markers()[1]).unwrap(),
-                ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
+                get_consistency_marker_output(&primary_plonk_trace.u),
+                ConsistencyMarkerComputation::<
+                    '_,
+                    A2,
+                    C1,
+                    RP2::OffCircuit,
+                    { CONSISTENCY_MARKERS_COUNT },
+                > {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
                     step: 1,
@@ -436,9 +448,14 @@ where
         let primary_consistency_marker = {
             let _s = info_span!("generate_instance").entered();
             [
-                C2::scalar_to_base(&self.secondary_trace[0].u.get_consistency_markers()[1])
-                    .unwrap(),
-                ConsistencyMarkerComputation::<'_, A1, C2, RP1::OffCircuit> {
+                get_consistency_marker_output(&self.secondary_trace[0].u),
+                ConsistencyMarkerComputation::<
+                    '_,
+                    A1,
+                    C2,
+                    RP1::OffCircuit,
+                    { CONSISTENCY_MARKERS_COUNT },
+                > {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_2(),
                     step: self.step + 1,
@@ -524,8 +541,14 @@ where
         let secondary_consistency_marker = {
             let _s = info_span!("generate_instance");
             [
-                C1::scalar_to_base(&primary_plonk_trace[0].u.get_consistency_markers()[1]).unwrap(),
-                ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
+                get_consistency_marker_output(&primary_plonk_trace[0].u),
+                ConsistencyMarkerComputation::<
+                    '_,
+                    A2,
+                    C1,
+                    RP2::OffCircuit,
+                    { CONSISTENCY_MARKERS_COUNT },
+                > {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
                     step: self.step + 1,
@@ -605,7 +628,13 @@ where
     {
         let mut errors = vec![];
 
-        ConsistencyMarkerComputation::<'_, A1, C2, RP1::OffCircuit> {
+        ConsistencyMarkerComputation::<
+            '_,
+            A1,
+            C2,
+            RP1::OffCircuit,
+            { CONSISTENCY_MARKERS_COUNT },
+        > {
             random_oracle_constant: pp.primary.params().ro_constant().clone(),
             public_params_hash: &pp.digest_2(),
             step: self.step,
@@ -618,7 +647,7 @@ where
         .generate_with_inspect::<C2::Scalar>(|buf| {
             debug!("primary X0 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&self.secondary_trace[0].u.get_consistency_markers()[0])
+        .ne(&get_consistency_marker_input(&self.secondary_trace[0].u))
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 0,
@@ -626,7 +655,13 @@ where
             })
         });
 
-        ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
+        ConsistencyMarkerComputation::<
+            '_,
+            A2,
+            C1,
+            RP2::OffCircuit,
+            { CONSISTENCY_MARKERS_COUNT },
+        > {
             random_oracle_constant: pp.secondary.params().ro_constant().clone(),
             public_params_hash: &pp.digest_1(),
             step: self.step,
@@ -639,7 +674,7 @@ where
         .generate_with_inspect::<C1::Scalar>(|buf| {
             debug!("primary X1 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&C2::scalar_to_base(&self.secondary_trace[0].u.get_consistency_markers()[1]).unwrap())
+        .ne(&get_consistency_marker_output(&self.secondary_trace[0].u))
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 1,
@@ -692,4 +727,15 @@ where
             Err(Error::VerifyFailed(errors))
         }
     }
+}
+
+fn get_consistency_marker_input<C: CurveAffine>(ins: &FoldablePlonkInstance<C>) -> C::ScalarExt {
+    GetConsistencyMarkers::<CONSISTENCY_MARKERS_COUNT, _>::get_consistency_markers(ins)[0]
+}
+
+fn get_consistency_marker_output<C: CurveAffine>(ins: &FoldablePlonkInstance<C>) -> C::Base {
+    C::scalar_to_base(
+        &GetConsistencyMarkers::<CONSISTENCY_MARKERS_COUNT, _>::get_consistency_markers(ins)[1],
+    )
+    .unwrap()
 }

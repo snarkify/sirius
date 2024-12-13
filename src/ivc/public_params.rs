@@ -294,9 +294,19 @@ where
             );
 
             let secondary_consistenty_markers: [C2::Scalar; 2] = [
-                C1::scalar_to_base(&secondary_initial_step_input.u.get_consistency_markers()[0])
-                    .unwrap(),
-                ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
+                C1::scalar_to_base(
+                    &GetConsistencyMarkers::<CONSISTENCY_MARKERS_COUNT, _>::get_consistency_markers(
+                        &secondary_initial_step_input.u,
+                    )[1],
+                )
+                .unwrap(),
+                ConsistencyMarkerComputation::<
+                    '_,
+                    A2,
+                    C1,
+                    RP2::OffCircuit,
+                    { CONSISTENCY_MARKERS_COUNT },
+                > {
                     random_oracle_constant: secondary.ro_constant.clone(),
                     public_params_hash: &secondary_initial_step_input.public_params_hash,
                     step: 1,

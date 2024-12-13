@@ -1,3 +1,4 @@
+
 use std::{iter, marker::PhantomData, num::NonZeroUsize};
 
 use count_to_non_zero::CountToNonZeroExt;
@@ -58,7 +59,7 @@ pub type CrossTermCommits<C> = Vec<C>;
 /// Please refer to: [notes](https://hackmd.io/@chaosma/BJvWmnw_h#31-NIFS)
 // TODO Replace links to either the documentation right here, or the official Snarkify resource
 #[derive(Clone, Debug)]
-pub struct VanillaFS<C: CurveAffine> {
+pub struct VanillaFS<C: CurveAffine, const MARKERS_LEN: usize = 2> {
     _marker: PhantomData<C>,
 }
 
@@ -68,7 +69,7 @@ pub struct ProverParam<C: CurveAffine> {
     pub pp_digest: C,
 }
 
-impl<C: CurveAffine> VanillaFS<C>
+impl<C: CurveAffine, const MARKERS_LEN: usize> VanillaFS<C, MARKERS_LEN>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
@@ -97,7 +98,7 @@ where
     pub fn commit_cross_terms(
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
-        U1: &RelaxedPlonkInstance<C>,
+        U1: &RelaxedPlonkInstance<C, MARKERS_LEN>,
         W1: &RelaxedPlonkWitness<C::ScalarExt>,
         U2: &PlonkInstance<C>,
         W2: &PlonkWitness<C::ScalarExt>,
@@ -109,7 +110,7 @@ where
                 &U1.challenges,
                 &[U1.u],
                 &U2.challenges,
-                &[RelaxedPlonkInstance::<C>::DEFAULT_u]
+                &[RelaxedPlonkInstance::<C, MARKERS_LEN>::DEFAULT_u]
             ),
             selectors: &S.selectors,
             fixed: &S.fixed_columns,
@@ -157,7 +158,7 @@ where
     pub(crate) fn generate_challenge(
         pp_digest: &C,
         ro_acc: &mut impl ROTrait<C::Base>,
-        U1: &RelaxedPlonkInstance<C>,
+        U1: &RelaxedPlonkInstance<C, MARKERS_LEN>,
         U2: &PlonkInstance<C>,
         cross_term_commits: &[C],
     ) -> Result<<C as CurveAffine>::ScalarExt, Error> {
@@ -518,21 +519,25 @@ pub const CONSISTENCY_MARKERS_COUNT: usize = 2;
 ///     or
 ///     hash of the state at the end of previous folding step
 /// - X1 is a hash of the state at the end of the current folding step
-pub trait GetConsistencyMarkers<F> {
-    fn get_consistency_markers(&self) -> [F; CONSISTENCY_MARKERS_COUNT];
+pub trait GetConsistencyMarkers<const MARKERS: usize, F> {
+    fn get_consistency_markers(&self) -> [F; MARKERS];
 }
 
-impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for FoldablePlonkInstance<C> {
-    fn get_consistency_markers(&self) -> [C::ScalarExt; 2] {
+impl<C: CurveAffine, const MARKERS: usize> GetConsistencyMarkers<MARKERS, C::ScalarExt>
+    for FoldablePlonkInstance<C>
+{
+    fn get_consistency_markers(&self) -> [C::ScalarExt; MARKERS] {
         match self.instances.first() {
-            Some(instance) if instance.len() == 2 => instance.clone().try_into().unwrap(),
+            Some(instance) if instance.len() == MARKERS => instance.clone().try_into().unwrap(),
             _ => unreachable!("folded plonk instancce always have markers"),
         }
     }
 }
 
-impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for RelaxedPlonkInstance<C> {
-    fn get_consistency_markers(&self) -> [C::ScalarExt; 2] {
+impl<C: CurveAffine, const MARKERS: usize> GetConsistencyMarkers<MARKERS, C::ScalarExt>
+    for RelaxedPlonkInstance<C, MARKERS>
+{
+    fn get_consistency_markers(&self) -> [C::ScalarExt; MARKERS] {
         self.consistency_markers
     }
 }

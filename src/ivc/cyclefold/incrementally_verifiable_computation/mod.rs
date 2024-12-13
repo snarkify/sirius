@@ -8,7 +8,6 @@ use super::{
     support_circuit::{self, SupportCircuit},
 };
 use crate::{
-    constants::MAX_BITS,
     halo2_proofs::halo2curves::{
         ff::{Field, FromUniformBytes, PrimeFieldBits},
         group::prime::PrimeCurveAffine,
@@ -23,7 +22,6 @@ use crate::{
         protogalaxy::{AccumulatorArgs, ProtoGalaxy},
         sangria::{FoldablePlonkTrace, VanillaFS},
     },
-    poseidon::ROTrait,
     table::CircuitRunner,
 };
 
@@ -64,19 +62,17 @@ where
             &mut ro(),
         );
 
-        let mut primary_ro = ro();
         let (_new_acc, self_proof) = ProtoGalaxy::prove(
             &pp.primary_ck,
             &nifs::protogalaxy::ProverParam {
                 S: pp.primary_S.clone(),
                 pp_digest: pp.cmain_pp_digest(),
             },
-            &mut primary_ro,
+            &mut ro(),
             initial_self_acc.clone(),
             &[pp.primary_initial_trace.clone()],
         )
         .unwrap();
-        let _gamma: CMain::ScalarExt = primary_ro.squeeze(MAX_BITS);
 
         let mut acc_ptr = nifs::sangria::accumulator::RelaxedPlonkTrace::from_regular(
             pp.support_initial_trace.clone(),
