@@ -21,6 +21,8 @@ type EccChip<C> = ecc::EccChip<C, tiny_gate::Gate<<C as CurveAffine>::Base>>;
 mod tiny_gate;
 use tiny_gate::{Config as GateConfig, Gate};
 
+pub const INSTANCES_LEN: usize = 8;
+
 #[derive(Default)]
 pub struct SupportCircuit<C: CurveAffine> {
     _p: PhantomData<C>,
@@ -47,7 +49,7 @@ where
             .add(&Point::from(self.p1).scalar_mul(&self.l1))
             .into_pair();
 
-        vec![vec![
+        let instance: [C::Base; INSTANCES_LEN] = [
             p_out_x,
             p_out_y,
             *p0.x(),
@@ -56,7 +58,9 @@ where
             *p1.x(),
             *p1.y(),
             self.l1,
-        ]]
+        ];
+
+        vec![instance.to_vec()]
     }
 }
 

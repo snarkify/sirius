@@ -334,13 +334,18 @@ where
             );
 
             let secondary_S = secondary_cr.try_collect_plonk_structure()?;
-            let secondary_initial_plonk_trace = VanillaFS::generate_plonk_trace(
-                secondary.commitment_key,
-                &secondary_instances,
-                &secondary_cr.try_collect_witness()?,
-                &VanillaFS::setup_params(C2::identity(), secondary_S.clone())?.0,
-                &mut RP1::OffCircuit::new(primary.ro_constant.clone()),
-            )?;
+            let secondary_initial_plonk_trace =
+                VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::generate_plonk_trace(
+                    secondary.commitment_key,
+                    &secondary_instances,
+                    &secondary_cr.try_collect_witness()?,
+                    &VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::setup_params(
+                        C2::identity(),
+                        secondary_S.clone(),
+                    )?
+                    .0,
+                    &mut RP1::OffCircuit::new(primary.ro_constant.clone()),
+                )?;
 
             Result::<_, Error>::Ok((secondary_S, secondary_initial_plonk_trace))
         }?;

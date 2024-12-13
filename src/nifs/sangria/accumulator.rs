@@ -191,13 +191,16 @@ where
 
 // TODO #31 docs
 #[derive(Debug, Clone)]
-pub struct RelaxedPlonkTrace<C: CurveAffine> {
-    pub U: RelaxedPlonkInstance<C>,
+pub struct RelaxedPlonkTrace<C: CurveAffine, const MARKERS_LEN: usize = 2> {
+    pub U: RelaxedPlonkInstance<C, MARKERS_LEN>,
     pub W: RelaxedPlonkWitness<C::Scalar>,
 }
 
-impl<C: CurveAffine> RelaxedPlonkTrace<C> {
-    pub fn from_regular(tr: FoldablePlonkTrace<C>, k_table_size: usize) -> RelaxedPlonkTrace<C>
+impl<C: CurveAffine, const MARKERS_LEN: usize> RelaxedPlonkTrace<C, MARKERS_LEN> {
+    pub fn from_regular(
+        tr: FoldablePlonkTrace<C>,
+        k_table_size: usize,
+    ) -> RelaxedPlonkTrace<C, MARKERS_LEN>
     where
         C::Base: PrimeFieldBits + FromUniformBytes<64>,
     {

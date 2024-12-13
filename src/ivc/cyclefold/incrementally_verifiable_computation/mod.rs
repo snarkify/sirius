@@ -81,17 +81,18 @@ where
         let mut paired_incoming = vec![];
 
         for _ in 0..initial_self_acc.W_commitment_len() {
-            let (new_acc, paired_proof) = VanillaFS::prove(
-                &pp.support_ck,
-                &nifs::sangria::ProverParam {
-                    S: pp.support_S.clone(),
-                    pp_digest: pp.csup_pp_digest(),
-                },
-                &mut ro(),
-                acc_ptr,
-                &[pp.support_initial_trace.clone()],
-            )
-            .unwrap();
+            let (new_acc, paired_proof) =
+                VanillaFS::<CSup, { support_circuit::INSTANCES_LEN }>::prove(
+                    &pp.support_ck,
+                    &nifs::sangria::ProverParam {
+                        S: pp.support_S.clone(),
+                        pp_digest: pp.csup_pp_digest(),
+                    },
+                    &mut ro(),
+                    acc_ptr,
+                    &[pp.support_initial_trace.clone()],
+                )
+                .unwrap();
 
             paired_incoming.push((pp.support_initial_trace.u.clone(), paired_proof));
 
@@ -132,7 +133,7 @@ where
                 support_circuit_instances.clone(),
             );
 
-            VanillaFS::<CSup>::generate_plonk_trace(
+            VanillaFS::<CSup, { support_circuit::INSTANCES_LEN }>::generate_plonk_trace(
                 &pp.support_ck,
                 &support_circuit_instances,
                 &support_cr.try_collect_witness().unwrap(),

@@ -1,4 +1,3 @@
-
 use std::{iter, marker::PhantomData, num::NonZeroUsize};
 
 use count_to_non_zero::CountToNonZeroExt;
@@ -189,7 +188,7 @@ pub enum Error {
 
 pub type VerifierParam<C> = C;
 
-impl<C: CurveAffine> VanillaFS<C>
+impl<C: CurveAffine, const MARKERS_LEN: usize> VanillaFS<C, MARKERS_LEN>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
@@ -233,9 +232,9 @@ where
         ck: &CommitmentKey<C>,
         pp: &ProverParam<C>,
         ro_acc: &mut impl ROTrait<C::Base>,
-        accumulator: RelaxedPlonkTrace<C>,
+        accumulator: RelaxedPlonkTrace<C, MARKERS_LEN>,
         incoming: &[FoldablePlonkTrace<C>; 1],
-    ) -> Result<(RelaxedPlonkTrace<C>, CrossTermCommits<C>), Error> {
+    ) -> Result<(RelaxedPlonkTrace<C, MARKERS_LEN>, CrossTermCommits<C>), Error> {
         let incoming = &incoming[0];
 
         let U1 = &accumulator.U;

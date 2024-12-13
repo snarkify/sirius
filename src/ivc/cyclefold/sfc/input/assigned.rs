@@ -539,19 +539,6 @@ impl<F: PrimeField> PairedTrace<F> {
                 .flat_map(|instance| instance.iter_wrap_values()),
         )
     }
-
-    pub fn get_self_W_commitment_from_paired(&self) -> Vec<BigUintPoint<AssignedValue<F>>> {
-        self.incoming
-            .iter()
-            .map(|tr| {
-                let (W, _other) = tr.instances[0].split_at(2);
-                BigUintPoint {
-                    x: W[0].clone(),
-                    y: W[1].clone(),
-                }
-            })
-            .collect::<Vec<_>>()
-    }
 }
 
 pub struct Input<const ARITY: usize, F: PrimeField> {

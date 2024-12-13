@@ -290,15 +290,19 @@ where
         .try_collect_witness()?;
 
         let (primary_nifs_pp, _primary_off_circuit_vp) =
-            VanillaFS::setup_params(pp.digest_1(), pp.primary.S().clone())?;
+            VanillaFS::<C1, { CONSISTENCY_MARKERS_COUNT }>::setup_params(
+                pp.digest_1(),
+                pp.primary.S().clone(),
+            )?;
 
-        let primary_plonk_trace = VanillaFS::generate_plonk_trace(
-            pp.primary.ck(),
-            &primary_instances,
-            &primary_witness,
-            &primary_nifs_pp,
-            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-        )?;
+        let primary_plonk_trace =
+            VanillaFS::<C1, { CONSISTENCY_MARKERS_COUNT }>::generate_plonk_trace(
+                pp.primary.ck(),
+                &primary_instances,
+                &primary_witness,
+                &primary_nifs_pp,
+                &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+            )?;
 
         let primary_relaxed_trace = RelaxedPlonkTrace::from_regular(
             primary_plonk_trace.clone(),
@@ -382,15 +386,19 @@ where
         .try_collect_witness()?;
 
         let (secondary_nifs_pp, _nifs_vp) =
-            VanillaFS::setup_params(pp.digest_2(), pp.secondary.S().clone())?;
+            VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::setup_params(
+                pp.digest_2(),
+                pp.secondary.S().clone(),
+            )?;
 
-        let secondary_plonk_trace = VanillaFS::generate_plonk_trace(
-            pp.secondary.ck(),
-            &secondary_instances,
-            &secondary_witness,
-            &secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-        )?;
+        let secondary_plonk_trace =
+            VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::generate_plonk_trace(
+                pp.secondary.ck(),
+                &secondary_instances,
+                &secondary_witness,
+                &secondary_nifs_pp,
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+            )?;
 
         Ok(Self {
             step: 1,
@@ -429,13 +437,14 @@ where
         let primary_span = info_span!("primary").entered();
         debug!("start fold step with folding 'secondary' by 'primary'");
 
-        let (secondary_new_trace, secondary_cross_term_commits) = VanillaFS::prove(
-            pp.secondary.ck(),
-            &self.secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-            self.secondary.relaxed_trace.clone(),
-            &self.secondary_trace,
-        )?;
+        let (secondary_new_trace, secondary_cross_term_commits) =
+            VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::prove(
+                pp.secondary.ck(),
+                &self.secondary_nifs_pp,
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+                self.secondary.relaxed_trace.clone(),
+                &self.secondary_trace,
+            )?;
         self.secondary
             .pub_instances
             .push(self.secondary_trace[0].u.instances.clone());
@@ -511,21 +520,24 @@ where
         self.primary.z_i = primary_z_next;
         self.secondary.relaxed_trace = secondary_new_trace;
 
-        let primary_plonk_trace = [VanillaFS::generate_plonk_trace(
-            pp.primary.ck(),
-            &primary_instances,
-            &primary_witness,
-            &self.primary_nifs_pp,
-            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-        )?];
+        let primary_plonk_trace = [
+            VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::generate_plonk_trace(
+                pp.primary.ck(),
+                &primary_instances,
+                &primary_witness,
+                &self.primary_nifs_pp,
+                &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+            )?,
+        ];
 
-        let (primary_new_trace, primary_cross_term_commits) = nifs::sangria::VanillaFS::prove(
-            pp.primary.ck(),
-            &self.primary_nifs_pp,
-            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-            self.primary.relaxed_trace.clone(),
-            &primary_plonk_trace,
-        )?;
+        let (primary_new_trace, primary_cross_term_commits) =
+            nifs::sangria::VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::prove(
+                pp.primary.ck(),
+                &self.primary_nifs_pp,
+                &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+                self.primary.relaxed_trace.clone(),
+                &primary_plonk_trace,
+            )?;
         self.primary
             .pub_instances
             .push(primary_plonk_trace[0].u.instances.clone());
@@ -604,13 +616,15 @@ where
         self.secondary.z_i = next_secondary_z_i;
         self.primary.relaxed_trace = primary_new_trace;
 
-        self.secondary_trace = [VanillaFS::generate_plonk_trace(
-            pp.secondary.ck(),
-            &secondary_instances,
-            &secondary_witness,
-            &self.secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-        )?];
+        self.secondary_trace = [
+            VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::generate_plonk_trace(
+                pp.secondary.ck(),
+                &secondary_instances,
+                &secondary_witness,
+                &self.secondary_nifs_pp,
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+            )?,
+        ];
 
         self.step += 1;
 
@@ -682,7 +696,7 @@ where
             });
         });
 
-        if let Err(err) = VanillaFS::is_sat(
+        if let Err(err) = VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::is_sat(
             pp.primary.ck(),
             pp.primary.S(),
             &self.primary.relaxed_trace,
@@ -695,7 +709,7 @@ where
             }));
         }
 
-        if let Err(err) = VanillaFS::is_sat(
+        if let Err(err) = VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::is_sat(
             pp.secondary.ck(),
             pp.secondary.S(),
             &self.secondary.relaxed_trace,
