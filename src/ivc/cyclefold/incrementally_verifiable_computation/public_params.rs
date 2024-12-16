@@ -24,22 +24,22 @@ use crate::{
     table::CircuitRunner,
 };
 
-pub struct PublicParams<const A1: usize, const A2: usize, C1, C2, SC>
+pub struct PublicParams<const A1: usize, const A2: usize, CMain, CSup, SC>
 where
-    C1: CurveAffine<Base = <C2 as PrimeCurveAffine>::Scalar>,
-    C2: CurveAffine<Base = <C1 as PrimeCurveAffine>::Scalar>,
-    SC: StepCircuit<A1, C1::Scalar>,
-    C1::Scalar: PrimeFieldBits + FromUniformBytes<64>,
-    C2::Scalar: PrimeFieldBits + FromUniformBytes<64>,
+    CMain: CurveAffine<Base = <CSup as PrimeCurveAffine>::Scalar>,
+    CSup: CurveAffine<Base = <CMain as PrimeCurveAffine>::Scalar>,
+    SC: StepCircuit<A1, CMain::Scalar>,
+    CMain::Scalar: PrimeFieldBits + FromUniformBytes<64>,
+    CSup::Scalar: PrimeFieldBits + FromUniformBytes<64>,
 {
-    ck1: CommitmentKey<C1>,
-    primary_S: PlonkStructure<C1::ScalarExt>,
-    primary_k_table_size: u32,
-    initial_primary_trace: PlonkTrace<C1>,
+    pub primary_ck: CommitmentKey<CMain>,
+    pub primary_S: PlonkStructure<CMain::ScalarExt>,
+    pub primary_k_table_size: u32,
+    pub primary_initial_trace: PlonkTrace<CMain>,
 
-    ck2: CommitmentKey<C2>,
-    secondary_S: PlonkStructure<C2::ScalarExt>,
-    initial_secondary_trace: FoldablePlonkTrace<C2>,
+    pub support_ck: CommitmentKey<CSup>,
+    pub support_S: PlonkStructure<CSup::ScalarExt>,
+    pub support_initial_trace: FoldablePlonkTrace<CSup>,
 
     _p: PhantomData<SC>,
 }
@@ -61,18 +61,14 @@ where
     CMain::Scalar: PrimeFieldBits + FromUniformBytes<64>,
     CSup::Scalar: PrimeFieldBits + FromUniformBytes<64>,
 {
-    /// StepFoldingCircuit {
-    ///     step == 0 => init(acc, incoming) => output_trace,
-    ///     step != 0 => fold(acc, incoming) => output_trace,
-    /// }
     pub fn new(
-        primary_sfc: &SC,
+        primary_sc: &SC,
         ck1: CommitmentKey<CMain>,
         ck2: CommitmentKey<CSup>,
         k_table_size: u32,
     ) -> Self {
         // Trace in C1::Base or C2::Scalar
-        let (support_plonk_structure, initial_support_trace): (
+        let (support_S, support_initial_trace): (
             PlonkStructure<CMain::Base>,
             FoldablePlonkTrace<CSup>,
         ) = {
@@ -111,16 +107,16 @@ where
             )
         };
 
-        let (primary_plonk_structure, initial_primary_trace) = {
+        let (primary_S, primary_initial_trace) = {
             let mut mock_sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
-                sc: primary_sfc,
+                sc: primary_sc,
                 input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
                     &PlonkStructure {
                         k: k_table_size as usize,
                         ..Default::default()
                     },
-                    &support_plonk_structure,
-                    &initial_support_trace.u,
+                    &support_S,
+                    &support_initial_trace.u,
                 ),
                 _p: PhantomData,
             };
@@ -134,8 +130,8 @@ where
                     num_io: mock_instances.iter().map(|col| col.len()).collect(),
                     ..Default::default()
                 },
-                &support_plonk_structure,
-                &initial_support_trace.u,
+                &support_S,
+                &support_initial_trace.u,
             );
 
             let mock_S = CircuitRunner::new(k_table_size, mock_sfc, mock_instances)
@@ -143,16 +139,15 @@ where
                 .unwrap();
 
             let sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
-                sc: primary_sfc,
+                sc: primary_sc,
                 input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
                     &mock_S,
-                    &support_plonk_structure,
-                    &initial_support_trace.u,
+                    &support_S,
+                    &support_initial_trace.u,
                 ),
                 _p: PhantomData,
             };
 
-            // TODO #369 Use expected out marker, instead of zero
             let primary_instances = sfc.initial_instances();
             let primary_cr = CircuitRunner::new(k_table_size, sfc, primary_instances.clone());
 
@@ -173,17 +168,40 @@ where
         };
 
         Self {
-            ck1,
-            ck2,
+            primary_ck: ck1,
+            support_ck: ck2,
             primary_k_table_size: k_table_size,
 
-            initial_primary_trace,
-            initial_secondary_trace: initial_support_trace,
+            primary_initial_trace,
+            support_initial_trace,
 
-            primary_S: primary_plonk_structure,
-            secondary_S: support_plonk_structure,
+            primary_S,
+            support_S,
 
             _p: PhantomData,
+        }
+    }
+
+    pub fn cmain_pp_digest(&self) -> CMain {
+        todo!()
+    }
+
+    pub fn csup_pp_digest(&self) -> CSup {
+        todo!()
+    }
+
+    pub fn cmain_pp_digest_coordinates(&self) -> (CMain::Scalar, CMain::Scalar) {
+        todo!()
+    }
+
+    pub fn csup_pp_digest_coordinates(&self) -> (CMain::Base, CMain::Base) {
+        todo!()
+    }
+
+    pub fn protogalaxy_prover_params(&self) -> nifs::protogalaxy::ProverParam<CMain> {
+        nifs::protogalaxy::ProverParam {
+            S: self.primary_S.clone(),
+            pp_digest: self.cmain_pp_digest(),
         }
     }
 }

@@ -1,6 +1,9 @@
 use std::iter;
 
-use halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
+use halo2_proofs::{
+    circuit::Value,
+    halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
+};
 use itertools::Itertools;
 use tracing::error;
 
@@ -52,6 +55,8 @@ impl<F: PrimeField> NativePlonkInstance<F> {
         let challenges =
             assigner.assign_all_advice(region, || "challenges", challenges.iter().cloned())?;
 
+        region.next();
+
         Ok(Self {
             W_commitments,
             instances,
@@ -73,13 +78,17 @@ impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
         let ins = NativePlonkInstance::assign_advice_from_native(region, ins, main_gate_config)?;
 
         let mut assigner = main_gate_config.advice_cycle_assigner();
-        Ok(Self {
+        let self_ = Self {
             ins,
             betas: assigner
                 .assign_all_advice(region, || "betas", betas.iter().cloned())?
                 .into_boxed_slice(),
             e: assigner.assign_next_advice(region, || "e", *e)?,
-        })
+        };
+
+        region.next();
+
+        Ok(self_)
     }
 
     pub fn conditional_select<const T: usize>(
@@ -125,14 +134,18 @@ impl<F: PrimeField> ProtogalaxyProof<F> {
         let mut assigner = main_gate_config.advice_cycle_assigner();
         let super::nifs::protogalaxy::Proof { poly_F, poly_K } = original;
 
-        Ok(Self {
+        let self_ = Self {
             poly_F: assigner
                 .assign_all_advice(region, || "poly_F", poly_F.iter().cloned())?
                 .into(),
             poly_K: assigner
                 .assign_all_advice(region, || "poly_K", poly_K.iter().cloned())?
                 .into(),
-        })
+        };
+
+        region.next();
+
+        Ok(self_)
     }
 
     fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
@@ -251,6 +264,8 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
+        region.next();
+
         Ok(Self {
             W_commitments,
             instances,
@@ -360,7 +375,7 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
 
         let mut assigner = main_gate_config.advice_cycle_assigner();
 
-        Ok(Self {
+        let self_ = Self {
             ins,
             E_commitment: (
                 assigner.assign_next_advice(
@@ -375,7 +390,11 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
                 )?,
             ),
             u: assigner.assign_next_advice(region, || "u", original.u)?,
-        })
+        };
+
+        region.next();
+
+        Ok(self_)
     }
 
     pub fn conditional_select<const T: usize>(
@@ -430,12 +449,55 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
 
 pub type SangriaCrossTermCommits<F> = Vec<(AssignedValue<F>, AssignedValue<F>)>;
 
+pub struct PairedIncoming<F: PrimeField> {
+    pub instance: PairedPlonkInstance<F>,
+    pub proof: SangriaCrossTermCommits<F>,
+}
+
+impl<F: PrimeField> PairedIncoming<F> {
+    fn assign_advice_from(
+        region: &mut RegionCtx<'_, F>,
+        original: &super::PairedIncoming<F>,
+        main_gate_config: &MainGateConfig,
+    ) -> Result<Self, Halo2PlonkError> {
+        let super::PairedIncoming { instance, proof } = original;
+
+        let instance = PairedPlonkInstance::assign_advice_from(region, instance, main_gate_config)?;
+
+        let mut assigner = main_gate_config.advice_cycle_assigner();
+
+        let proof = proof
+            .iter()
+            .copied()
+            .map(|(commit_x, commit_y)| -> Result<_, Halo2PlonkError> {
+                Ok((
+                    assigner.assign_next_advice(region, || "commit.x", commit_x)?,
+                    assigner.assign_next_advice(region, || "commit.y", commit_y)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        region.next();
+
+        Ok(Self { instance, proof })
+    }
+
+    pub fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
+        let Self { instance, proof } = self;
+        instance
+            .iter_wrap_values()
+            .chain(proof.iter().flat_map(|(a, b)| {
+                iter::once(WrapValue::Assigned(a.clone()))
+                    .chain(std::iter::once(WrapValue::Assigned(b.clone())))
+            }))
+    }
+}
+
 pub struct PairedTrace<F: PrimeField> {
     pub input_accumulator: SangriaAccumulatorInstance<F>,
     // The size from one to three
     // Depdend on `W_commitments_len`
-    pub incoming: Box<[PairedPlonkInstance<F>]>,
-    pub proof: SangriaCrossTermCommits<F>,
+    pub incoming: Box<[PairedIncoming<F>]>,
 }
 
 impl<F: PrimeField> PairedTrace<F> {
@@ -454,32 +516,14 @@ impl<F: PrimeField> PairedTrace<F> {
             .incoming
             .iter()
             .map(|paired_plonk_instance| {
-                PairedPlonkInstance::assign_advice_from(
-                    region,
-                    paired_plonk_instance,
-                    main_gate_config,
-                )
+                PairedIncoming::assign_advice_from(region, paired_plonk_instance, main_gate_config)
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?
             .into_boxed_slice();
 
-        let mut assigner = main_gate_config.advice_cycle_assigner();
-
-        let proof = original
-            .proof
-            .iter()
-            .map(|(a, b)| {
-                Ok((
-                    assigner.assign_next_advice(region, || "proof_a", *a)?,
-                    assigner.assign_next_advice(region, || "proof_b", *b)?,
-                ))
-            })
-            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
-
         Ok(Self {
             input_accumulator,
             incoming,
-            proof,
         })
     }
 
@@ -487,33 +531,13 @@ impl<F: PrimeField> PairedTrace<F> {
         let Self {
             input_accumulator,
             incoming,
-            proof,
         } = self;
 
-        input_accumulator
-            .iter_wrap_values()
-            .chain(
-                incoming
-                    .iter()
-                    .flat_map(|instance| instance.iter_wrap_values()),
-            )
-            .chain(proof.iter().flat_map(|(a, b)| {
-                iter::once(WrapValue::Assigned(a.clone()))
-                    .chain(std::iter::once(WrapValue::Assigned(b.clone())))
-            }))
-    }
-
-    pub fn get_self_W_commitment_from_paired(&self) -> Vec<BigUintPoint<AssignedValue<F>>> {
-        self.incoming
-            .iter()
-            .map(|tr| {
-                let (W, _other) = tr.instances[0].split_at(2);
-                BigUintPoint {
-                    x: W[0].clone(),
-                    y: W[1].clone(),
-                }
-            })
-            .collect::<Vec<_>>()
+        input_accumulator.iter_wrap_values().chain(
+            incoming
+                .iter()
+                .flat_map(|instance| instance.iter_wrap_values()),
+        )
     }
 }
 
@@ -554,6 +578,8 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         let z_0 = assigner.assign_all_advice(region, || "z_0", original.z_0.iter().cloned())?;
 
         let z_i = assigner.assign_all_advice(region, || "z_i", original.z_i.iter().cloned())?;
+
+        region.next();
 
         Ok(Self {
             pp_digest: (pp_digest_0, pp_digest_1),
@@ -633,15 +659,23 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
             DEFAULT_LIMBS_COUNT_LIMIT,
         );
 
+        let mg = MainGate::new(main_gate_config.clone());
+        let is_zero_term = mg.is_zero_term(region, self.step.clone())?;
+
+        let zero = region.assign_advice(|| "", main_gate_config.state[0], Value::known(F::ZERO))?;
+        region.next();
+
+        let expected_l0 = mg.conditional_select(region, &zero, &poly_L_values[0], &is_zero_term)?;
         let expected_l0 = bn_chip
-            .from_assigned_cell_to_limbs(region, &poly_L_values[0])
+            .from_assigned_cell_to_limbs(region, &expected_l0)
             .map_err(|err| {
                 error!("while make from L0 biguint form: {err:?}");
                 Halo2PlonkError::Synthesis
             })?;
 
+        let expected_l1 = mg.conditional_select(region, &zero, &poly_L_values[1], &is_zero_term)?;
         let expected_l1 = bn_chip
-            .from_assigned_cell_to_limbs(region, &poly_L_values[1])
+            .from_assigned_cell_to_limbs(region, &expected_l1)
             .map_err(|err| {
                 error!("while make from L1 biguint form: {err:?}");
                 Halo2PlonkError::Synthesis
@@ -653,8 +687,13 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
             self.paired_trace.incoming.iter(),
             new_acc.ins.W_commitments.iter_mut(),
         )) {
-            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1] =
-                trace.instances[0].clone().try_into().unwrap();
+            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1] = trace.instance
+                .instances
+                .first()
+                .expect("`SupportCircuit` always has instances.len() == 1 and it should always be used for sfc")
+                .clone()
+                .try_into()
+                .unwrap();
 
             l0.iter()
                 .zip_eq(expected_l0.iter())
