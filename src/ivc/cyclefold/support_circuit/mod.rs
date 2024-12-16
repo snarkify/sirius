@@ -21,6 +21,8 @@ type EccChip<C> = ecc::EccChip<C, tiny_gate::Gate<<C as CurveAffine>::Base>>;
 mod tiny_gate;
 use tiny_gate::{Config as GateConfig, Gate};
 
+pub const INSTANCES_LEN: usize = 8;
+
 #[derive(Default)]
 pub struct SupportCircuit<C: CurveAffine> {
     _p: PhantomData<C>,
@@ -36,13 +38,16 @@ pub struct InstanceInput<C: CurveAffine> {
     pub p_out: C,
 }
 
-impl<C: CurveAffine> InstanceInput<C> {
+impl<C: CurveAffine> InstanceInput<C>
+where
+    C::Base: PrimeFieldBits,
+{
     pub fn into_instance(self) -> Vec<Vec<C::Base>> {
         let p0 = self.p0.coordinates().unwrap();
         let p1 = self.p1.coordinates().unwrap();
         let p_out = self.p_out.coordinates().unwrap();
 
-        vec![vec![
+        let instance: [C::Base; INSTANCES_LEN] = [
             *p_out.x(),
             *p_out.y(),
             *p0.x(),
@@ -51,7 +56,9 @@ impl<C: CurveAffine> InstanceInput<C> {
             *p1.x(),
             *p1.y(),
             self.l1,
-        ]]
+        ];
+
+        vec![instance.to_vec()]
     }
 }
 
@@ -179,13 +186,13 @@ mod tests {
         let tmp = p0 * l0;
         trace!("p0 * l0_bits = {:?}", tmp);
 
+        let l0 = Base::from_repr(l0.to_repr()).unwrap();
+        let l1 = Base::from_repr(l1.to_repr()).unwrap();
+
         let p_out = Point::from(p0)
             .scalar_mul(&l0)
             .add(&Point::from(p1).scalar_mul(&l1))
             .into_curve();
-
-        let l0 = Base::from_repr(l0.to_repr()).unwrap();
-        let l1 = Base::from_repr(l1.to_repr()).unwrap();
 
         MockProver::run(
             SupportCircuit::<Curve>::MIN_K_TABLE_SIZE,

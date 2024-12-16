@@ -1,4 +1,4 @@
-use std::iter;
+use std::{iter, ops::Deref};
 
 use halo2_proofs::halo2curves::ff::PrimeField;
 
@@ -28,6 +28,13 @@ pub struct Accumulator<C: CurveAffine> {
     pub(super) e: C::ScalarExt,
 }
 
+impl<C: CurveAffine> Deref for Accumulator<C> {
+    type Target = PlonkTrace<C>;
+    fn deref(&self) -> &Self::Target {
+        &self.trace
+    }
+}
+
 impl<C: CurveAffine, F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for Accumulator<C> {
     fn absorb_into(&self, ro: &mut RO) {
         ro.absorb(&self.trace.u).absorb_field_iter(
@@ -48,6 +55,10 @@ impl<C: CurveAffine> Accumulator<C> {
             e: C::ScalarExt::ZERO,
             trace: PlonkTrace::new(args),
         }
+    }
+
+    pub fn W_commitment_len(&self) -> usize {
+        self.trace.u.W_commitments.len()
     }
 }
 

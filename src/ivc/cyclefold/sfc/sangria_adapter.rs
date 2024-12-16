@@ -14,7 +14,7 @@ use crate::{
     },
     halo2_proofs::plonk::Error as Halo2PlonkError,
     ivc::{
-        cyclefold::{ro_chip, DEFAULT_LIMBS_COUNT_LIMIT, DEFAULT_LIMB_WIDTH},
+        cyclefold::{ro_chip, support_circuit, DEFAULT_LIMBS_COUNT_LIMIT, DEFAULT_LIMB_WIDTH},
         fold_relaxed_plonk_instance_chip::{self, BigUintView, FoldRelaxedPlonkInstanceChip},
     },
     main_gate::{MainGate, MainGateConfig, RegionCtx},
@@ -88,7 +88,11 @@ where
             u: acc_u,
         } = &mut acc;
 
-        *acc_W_commitments = FoldRelaxedPlonkInstanceChip::<MAIN_GATE_T, CSup>::fold_W(
+        *acc_W_commitments = FoldRelaxedPlonkInstanceChip::<
+            MAIN_GATE_T,
+            CSup,
+            { support_circuit::INSTANCES_LEN },
+        >::fold_W(
             region,
             &config,
             &acc_W_commitments
@@ -135,7 +139,11 @@ where
                 },
             )?;
 
-        *acc_challenges = FoldRelaxedPlonkInstanceChip::<MAIN_GATE_T, CSup>::fold_challenges(
+        *acc_challenges = FoldRelaxedPlonkInstanceChip::<
+            MAIN_GATE_T,
+            CSup,
+            { support_circuit::INSTANCES_LEN },
+        >::fold_challenges(
             region,
             &bn_chip,
             input_challenges.to_vec(),

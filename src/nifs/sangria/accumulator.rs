@@ -1,5 +1,5 @@
 use std::{
-    iter,
+    array, iter,
     ops::{self, Deref, DerefMut},
 };
 
@@ -24,7 +24,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RelaxedPlonkInstance<C: CurveAffine> {
+pub struct RelaxedPlonkInstance<C: CurveAffine, const MARKERS_LEN: usize = 2> {
     /// `W_commitments = round_sizes.len()`, see [`PlonkStructure::round_sizes`]
     pub(crate) W_commitments: Vec<C>,
     /// First instance column [`crate::ivc::step_folding_circuit::StepFoldingCircuit`] reserved for
@@ -33,7 +33,7 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
     /// These are the two values that allow for proof of acceptance
     /// The null is a hash of all input parameters per folding step
     /// The first one is a hash of all output parameters for each folding step
-    pub(crate) consistency_markers: [C::ScalarExt; 2],
+    pub(crate) consistency_markers: [C::ScalarExt; MARKERS_LEN],
     /// Challenges generated in special soundness protocol (sps)
     /// we will have 0 ~ 3 challenges depending on different cases:
     /// name them as r1, r2, r3:
@@ -54,7 +54,8 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
     pub(crate) step_circuit_instances_hash_accumulator: C::ScalarExt,
 }
 
-impl<C: CurveAffine> From<FoldablePlonkInstance<C>> for RelaxedPlonkInstance<C>
+impl<C: CurveAffine, const MARKERS_LEN: usize> From<FoldablePlonkInstance<C>>
+    for RelaxedPlonkInstance<C, MARKERS_LEN>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
@@ -83,7 +84,7 @@ where
     }
 }
 
-impl<C: CurveAffine> RelaxedPlonkInstance<C>
+impl<C: CurveAffine, const MARKERS_LEN: usize> RelaxedPlonkInstance<C, MARKERS_LEN>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
@@ -92,7 +93,7 @@ where
             instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>();
 
         Self {
-            consistency_markers: [C::ScalarExt::ZERO, C::ScalarExt::ZERO],
+            consistency_markers: array::from_fn(|_| C::ScalarExt::ZERO),
             W_commitments: vec![CommitmentKey::<C>::default_value(); num_witness],
             challenges: vec![C::ScalarExt::ZERO; num_challenges],
             E_commitment: CommitmentKey::<C>::default_value(),
@@ -146,7 +147,7 @@ where
         let consistency_markers = self
             .consistency_markers
             .iter()
-            .zip_eq(&U2.get_consistency_markers())
+            .zip_eq(GetConsistencyMarkers::<MARKERS_LEN, _>::get_consistency_markers(U2))
             .map(|(a, b)| *a + *r * b)
             .collect::<Vec<C::ScalarExt>>()
             .try_into()
@@ -190,13 +191,16 @@ where
 
 // TODO #31 docs
 #[derive(Debug, Clone)]
-pub struct RelaxedPlonkTrace<C: CurveAffine> {
-    pub U: RelaxedPlonkInstance<C>,
+pub struct RelaxedPlonkTrace<C: CurveAffine, const MARKERS_LEN: usize = 2> {
+    pub U: RelaxedPlonkInstance<C, MARKERS_LEN>,
     pub W: RelaxedPlonkWitness<C::Scalar>,
 }
 
-impl<C: CurveAffine> RelaxedPlonkTrace<C> {
-    pub fn from_regular(tr: FoldablePlonkTrace<C>, k_table_size: usize) -> RelaxedPlonkTrace<C>
+impl<C: CurveAffine, const MARKERS_LEN: usize> RelaxedPlonkTrace<C, MARKERS_LEN> {
+    pub fn from_regular(
+        tr: FoldablePlonkTrace<C>,
+        k_table_size: usize,
+    ) -> RelaxedPlonkTrace<C, MARKERS_LEN>
     where
         C::Base: PrimeFieldBits + FromUniformBytes<64>,
     {
@@ -254,7 +258,9 @@ impl<C: CurveAffine> GetChallenges<C::ScalarExt> for RelaxedPlonkTrace<C> {
     }
 }
 
-impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPlonkInstance<C> {
+impl<C: CurveAffine, RO: ROTrait<C::Base>, const MARKERS_LEN: usize> AbsorbInRO<C::Base, RO>
+    for RelaxedPlonkInstance<C, MARKERS_LEN>
+{
     fn absorb_into(&self, ro: &mut RO) {
         let Self {
             W_commitments,

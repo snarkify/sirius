@@ -74,11 +74,14 @@ use crate::{
     util::{self, CellsValuesView},
 };
 
-pub(crate) struct FoldRelaxedPlonkInstanceChip<const T: usize, C: CurveAffine>
-where
+pub(crate) struct FoldRelaxedPlonkInstanceChip<
+    const T: usize,
+    C: CurveAffine,
+    const MARKERS_LEN: usize,
+> where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    relaxed: RelaxedPlonkInstance<C>,
+    relaxed: RelaxedPlonkInstance<C, MARKERS_LEN>,
     config: MainGateConfig<T>,
     bn_chip: BigUintMulModChip<C::Base>,
 
@@ -88,7 +91,7 @@ where
 
 /// Holds the assigned values and points resulting from the folding process.
 #[derive(Debug, Clone)]
-pub(crate) struct AssignedRelaxedPlonkInstance<C: CurveAffine> {
+pub(crate) struct AssignedRelaxedPlonkInstance<C: CurveAffine, const MARKERS_LEN: usize> {
     /// Assigned point representing the folded accumulator W.
     /// Derived from [`FoldRelaxedPlonkInstanceChip::W`]
     pub folded_W: Vec<AssignedPoint<C>>,
@@ -107,14 +110,14 @@ pub(crate) struct AssignedRelaxedPlonkInstance<C: CurveAffine> {
 
     /// Vector of assigned values for each limb of the folded big number X0 & X1.
     /// Derived from [`FoldRelaxedPlonkInstanceChip::consistency_markers`]
-    pub folded_consistency_markers: [Vec<AssignedValue<C::Base>>; 2],
+    pub folded_consistency_markers: [Vec<AssignedValue<C::Base>>; MARKERS_LEN],
 
     /// Assigned value of the step circuit instances hash accumulator
     /// Derived from [`FoldRelaxedPlonkInstanceChip::step_circuit_instances_hash_accumulator`]
     pub folded_step_circuit_instances_hash_accumulator: AssignedValue<C::Base>,
 }
 
-impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
+impl<C: CurveAffine, const MARKERS: usize> AssignedRelaxedPlonkInstance<C, MARKERS> {
     pub fn conditional_select<const T: usize>(
         region: &mut RegionCtx<C::Base>,
         config: &MainGateConfig<T>,
@@ -133,7 +136,7 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             folded_E: lhs_folded_E,
             folded_u: lhs_folded_u,
             folded_challenges: lhs_folded_challenges,
-            folded_consistency_markers: [lhs_folded_X0, lhs_folded_X1],
+            folded_consistency_markers: lhs_folded_consistency_markers,
             folded_step_circuit_instances_hash_accumulator:
                 lhs_step_circuit_instances_hash_accumulator,
         } = lhs;
@@ -143,7 +146,7 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             folded_E: rhs_folded_E,
             folded_u: rhs_folded_u,
             folded_challenges: rhs_folded_challenges,
-            folded_consistency_markers: [rhs_folded_X0, rhs_folded_X1],
+            folded_consistency_markers: rhs_folded_consistency_markers,
             folded_step_circuit_instances_hash_accumulator:
                 rhs_step_circuit_instances_hash_accumulator,
         } = rhs;
@@ -170,17 +173,18 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let folded_X0 = lhs_folded_X0
+        let folded_consistency_markers = lhs_folded_consistency_markers
             .iter()
-            .zip_eq(rhs_folded_X0.iter())
-            .map(|(lhs, rhs)| gate.conditional_select(region, lhs, rhs, &condition))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let folded_X1 = lhs_folded_X1
-            .iter()
-            .zip_eq(rhs_folded_X1.iter())
-            .map(|(lhs, rhs)| gate.conditional_select(region, lhs, rhs, &condition))
-            .collect::<Result<Vec<_>, _>>()?;
+            .zip_eq(rhs_folded_consistency_markers.iter())
+            .map(|(lhs, rhs)| {
+                lhs.iter()
+                    .zip_eq(rhs)
+                    .map(|(lhs, rhs)| gate.conditional_select(region, lhs, rhs, &condition))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .unwrap();
 
         let folded_step_circuit_instances_hash_accumulator = gate.conditional_select(
             region,
@@ -194,7 +198,7 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             folded_E,
             folded_u,
             folded_challenges,
-            folded_consistency_markers: [folded_X0, folded_X1],
+            folded_consistency_markers,
             folded_step_circuit_instances_hash_accumulator,
         })
     }
@@ -208,7 +212,7 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             folded_E,
             folded_u,
             folded_challenges,
-            folded_consistency_markers: [folded_X0, folded_X1],
+            folded_consistency_markers,
             folded_step_circuit_instances_hash_accumulator,
         } = self;
 
@@ -216,8 +220,12 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             .iter()
             .flat_map(|W| WrapValue::from_assigned_point(W))
             .chain(WrapValue::from_assigned_point(folded_E))
-            .chain(folded_X0.iter().map(Into::into))
-            .chain(folded_X1.iter().map(Into::into))
+            .chain(
+                folded_consistency_markers
+                    .iter()
+                    .flatten()
+                    .map(|v| v.into()),
+            )
             .chain(folded_challenges.iter().flatten().map(Into::into))
             .chain(iter::once(WrapValue::from(folded_u)))
             .chain(iter::once(
@@ -225,19 +233,19 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             ))
     }
 }
-impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
+impl<C: CurveAffine, const MARKERS_LEN: usize> AssignedRelaxedPlonkInstance<C, MARKERS_LEN> {
     #[cfg(test)]
     fn to_relaxed_plonk_instance(
         &self,
         limb_width: NonZeroUsize,
         limbs_count: NonZeroUsize,
-    ) -> Result<Option<RelaxedPlonkInstance<C>>, Error> {
+    ) -> Result<Option<RelaxedPlonkInstance<C, MARKERS_LEN>>, Error> {
         let Self {
             folded_W,
             folded_E,
             folded_u,
             folded_challenges,
-            folded_consistency_markers: [folded_X0, folded_X1],
+            folded_consistency_markers,
             folded_step_circuit_instances_hash_accumulator,
         } = self;
 
@@ -252,16 +260,13 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
             }};
         }
 
-        let folded_X0 = unwrap_result_option!(BigUint::from_assigned_cells(
-            folded_X0,
-            limb_width,
-            limbs_count
-        )?);
-        let folded_X1 = unwrap_result_option!(BigUint::from_assigned_cells(
-            folded_X1,
-            limb_width,
-            limbs_count
-        )?);
+        let folded_consistency_markers: [_; MARKERS_LEN] =
+            unwrap_result_option!(folded_consistency_markers
+                .iter()
+                .map(|val| { BigUint::from_assigned_cells(val, limb_width, limbs_count) })
+                .collect::<Result<Option<Vec<_>>, _>>()?)
+            .try_into()
+            .unwrap();
 
         let to_diff_bn =
             |bn: &[ AssignedCell<C::Base, C::Base> ]| -> Option<Result<C::ScalarExt, big_uint::Error>> {
@@ -289,7 +294,7 @@ impl<C: CurveAffine> AssignedRelaxedPlonkInstance<C> {
                 .iter()
                 .map(AssignedPoint::to_curve)
                 .collect()),
-            consistency_markers: [folded_X0, folded_X1].map(|X| {
+            consistency_markers: folded_consistency_markers.map(|X| {
                 util::fe_to_fe_safe(&X.into_f().expect(
                     "since biguint calculations are modulo the scalar field, any result must fit",
                 ))
@@ -321,13 +326,13 @@ pub(crate) struct AssignedConsistencyMarkerView<F: PrimeField> {
 
 /// Holds the assigned values and points resulting from the folding process.
 #[derive(Clone)]
-pub(crate) struct AssignedWitness<C: CurveAffine> {
+pub(crate) struct AssignedWitness<C: CurveAffine, const MARKERS: usize> {
     /// Assigned value of the public parameters commitment.
     /// Sourced directly from the `public_params_hash` argument of [`FoldRelaxedPlonkInstanceChip::fold`].
     pub public_params_hash: AssignedPoint<C>,
 
     /// Assigned [`RelaxedPlonkInstance`]
-    pub assigned_relaxed: AssignedRelaxedPlonkInstance<C>,
+    pub assigned_relaxed: AssignedRelaxedPlonkInstance<C, MARKERS>,
 
     /// Assigned point representing the commitment to the `W` value of the input PLONK instance.
     /// Sourced directly from [`PlonkInstance::W_commitments`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
@@ -338,7 +343,7 @@ pub(crate) struct AssignedWitness<C: CurveAffine> {
     ///
     /// The zero element is the input validator
     /// The first element is the output validator
-    pub input_consistency_markers: [AssignedConsistencyMarkerView<C::Base>; 2],
+    pub input_consistency_markers: [AssignedConsistencyMarkerView<C::Base>; MARKERS],
 
     /// Vector of vectors of assigned values for each limb of the input challenges.
     /// Sourced directly from [`PlonkInstance::challenges`] provided to [`FoldRelaxedPlonkInstanceChip::fold`].
@@ -352,8 +357,8 @@ pub(crate) struct AssignedWitness<C: CurveAffine> {
     pub input_step_circuit_instances: Vec<AssignedValue<C::Base>>,
 }
 
-impl<C: CurveAffine> ops::Deref for AssignedWitness<C> {
-    type Target = AssignedRelaxedPlonkInstance<C>;
+impl<C: CurveAffine, const MARKERS_LEN: usize> ops::Deref for AssignedWitness<C, MARKERS_LEN> {
+    type Target = AssignedRelaxedPlonkInstance<C, MARKERS_LEN>;
     fn deref(&self) -> &Self::Target {
         &self.assigned_relaxed
     }
@@ -391,12 +396,13 @@ impl From<Error> for halo2_proofs::plonk::Error {
     }
 }
 
-impl<const T: usize, C: CurveAffine> FoldRelaxedPlonkInstanceChip<T, C>
+impl<const T: usize, C: CurveAffine, const MARKERS_LEN: usize>
+    FoldRelaxedPlonkInstanceChip<T, C, MARKERS_LEN>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
     pub fn new(
-        relaxed: RelaxedPlonkInstance<C>,
+        relaxed: RelaxedPlonkInstance<C, MARKERS_LEN>,
         limb_width: NonZeroUsize,
         limbs_count: NonZeroUsize,
         config: MainGateConfig<T>,
@@ -476,52 +482,37 @@ where
     fn fold_consistency_markers(
         region: &mut RegionCtx<C::Base>,
         bn_chip: &BigUintMulModChip<C::Base>,
-        input_consistency_marker: [Vec<AssignedValue<C::Base>>; 2],
-        folded_consistency_marker: [Vec<AssignedValue<C::Base>>; 2],
+        input_consistency_marker: [Vec<AssignedValue<C::Base>>; MARKERS_LEN],
+        folded_consistency_marker: [Vec<AssignedValue<C::Base>>; MARKERS_LEN],
         r_as_bn: &[AssignedCell<C::Base, C::Base>],
         m_bn: &BigUint<C::Base>,
         limb_width: NonZeroUsize,
-    ) -> Result<[Vec<AssignedCell<C::Base, C::Base>>; 2], Error> {
-        let [input_X0, input_X1] = input_consistency_marker;
-        let [folded_X0, folded_X1] = folded_consistency_marker;
+    ) -> Result<[Vec<AssignedCell<C::Base, C::Base>>; MARKERS_LEN], Error> {
+        let new_folded_markers = input_consistency_marker
+            .into_iter()
+            .zip_eq(folded_consistency_marker.iter())
+            .enumerate()
+            .map(|(i, (input_marker, folded_marker))| {
+                fold_via_biguint(
+                    region,
+                    bn_chip,
+                    &input_marker,
+                    folded_marker.to_vec(),
+                    m_bn,
+                    r_as_bn,
+                    limb_width,
+                )
+                .inspect_err(|err| error!("Error while folding marker {i}: {err:?}"))
+                .inspect(|new_folded_marker| {
+                    debug!(
+                        "fold: Marker {i} folded: {:?}",
+                        CellsValuesView::from(new_folded_marker.as_slice())
+                    );
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
-        let new_folded_X0 = fold_via_biguint(
-            region, bn_chip, &input_X0, folded_X0, m_bn, r_as_bn, limb_width,
-        )
-        .inspect_err(|err| error!("Error while fold X0: {err:?}"))?;
-
-        debug!(
-            "fold: X0 folded: {:?}",
-            CellsValuesView::from(new_folded_X0.as_slice())
-        );
-
-        let new_folded_X1 = fold_via_biguint(
-            region, bn_chip, &input_X1, folded_X1, m_bn, r_as_bn, limb_width,
-        )
-        .inspect_err(|err| error!("Error while fold X1: {err:?}"))?;
-
-        debug!(
-            "fold: X1 folded: {:?}",
-            CellsValuesView::from(new_folded_X1.as_slice())
-        );
-
-        Ok([new_folded_X0, new_folded_X1])
-    }
-
-    fn fold_step_circuit_instances(
-        ctx: &mut RegionCtx<C::Base>,
-        config: MainGateConfig<T>,
-        input_instances: &[AssignedValue<C::Base>],
-        folded_instances: &AssignedValue<C::Base>,
-    ) -> Result<AssignedValue<C::Base>, Error> {
-        Ok(
-            instances_accumulator_computation::absorb_in_assign_sc_instances_accumulator(
-                ctx,
-                config.into_smaller_size().unwrap(),
-                folded_instances,
-                input_instances,
-            )?,
-        )
+        Ok(new_folded_markers.try_into().unwrap())
     }
 
     /// Fold [`RelaxedPlonkInstance::E_commitments`] & [`CrossTermCommits`]
@@ -561,6 +552,22 @@ where
             cross_term_commits,
             r,
             m_bn,
+        )
+    }
+
+    fn fold_step_circuit_instances(
+        ctx: &mut RegionCtx<C::Base>,
+        config: MainGateConfig<T>,
+        input_instances: &[AssignedValue<C::Base>],
+        folded_instances: &AssignedValue<C::Base>,
+    ) -> Result<AssignedValue<C::Base>, Error> {
+        Ok(
+            instances_accumulator_computation::absorb_in_assign_sc_instances_accumulator(
+                ctx,
+                config.into_smaller_size().unwrap(),
+                folded_instances,
+                input_instances,
+            )?,
         )
     }
 
@@ -607,9 +614,9 @@ where
     pub fn fold(
         &self,
         region: &mut RegionCtx<C::Base>,
-        w: AssignedWitness<C>,
+        w: AssignedWitness<C, MARKERS_LEN>,
         r: Vec<AssignedBit<C::Base>>,
-    ) -> Result<FoldResult<C>, Error> {
+    ) -> Result<FoldResult<C, MARKERS_LEN>, Error> {
         debug!("fold: Assigned & Generated challenge: {r:?}");
 
         let gate = MainGate::new(self.config.clone());
@@ -644,7 +651,7 @@ where
         let new_folded_u = gate.add(region, &w.folded_u, &r_value)?;
         debug!("fold: u folded: {new_folded_u:?}");
 
-        let [new_folded_X0, new_folded_X1] = Self::fold_consistency_markers(
+        let folded_consistency_markers = Self::fold_consistency_markers(
             region,
             &self.bn_chip,
             w.input_consistency_markers
@@ -681,7 +688,7 @@ where
         let assigned_result_of_fold = AssignedRelaxedPlonkInstance {
             folded_W: new_folded_W.clone(),
             folded_E: new_folded_E.clone(),
-            folded_consistency_markers: [new_folded_X0.clone(), new_folded_X1.clone()],
+            folded_consistency_markers: folded_consistency_markers.clone(),
             folded_challenges: new_folded_challenges.clone(),
             folded_u: new_folded_u.clone(),
             folded_step_circuit_instances_hash_accumulator: new_folded_instances.clone(),
@@ -699,7 +706,7 @@ where
     pub fn assign_current_relaxed(
         &self,
         region: &mut RegionCtx<C::Base>,
-    ) -> Result<AssignedRelaxedPlonkInstance<C>, Error> {
+    ) -> Result<AssignedRelaxedPlonkInstance<C, MARKERS_LEN>, Error> {
         let mut advice_columns_assigner = self.config.advice_cycle_assigner();
 
         macro_rules! assign_point {
@@ -743,9 +750,13 @@ where
             .collect::<Result<Vec<_>, _>>()?;
         let assigned_E = assign_point!(&self.relaxed.E_commitment)?;
 
-        let [X0, X1] = self.relaxed.get_consistency_markers();
-        let assigned_X0 = assign_diff_field_as_bn!(&X0, || "X0")?;
-        let assigned_X1 = assign_diff_field_as_bn!(&X1, || "X1")?;
+        let consistency_markers = self.relaxed.get_consistency_markers();
+        let assigned_consistency_markers = consistency_markers
+            .iter()
+            .map(|marker| assign_diff_field_as_bn!(marker, || "X0"))
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .unwrap();
 
         let assigned_challenges = self
             .relaxed
@@ -766,7 +777,7 @@ where
             folded_E: assigned_E,
             folded_u: assigned_u,
             folded_challenges: assigned_challenges,
-            folded_consistency_markers: [assigned_X0, assigned_X1],
+            folded_consistency_markers: assigned_consistency_markers,
             folded_step_circuit_instances_hash_accumulator: assigned_step_circuit_instances,
         })
     }
@@ -782,7 +793,7 @@ where
         input_plonk: &FoldablePlonkInstance<C>,
         cross_term_commits: &[C],
         mut ro_circuit: impl ROCircuitTrait<C::Base>,
-    ) -> Result<(AssignedWitness<C>, Vec<AssignedBit<C::Base>>), Error> {
+    ) -> Result<(AssignedWitness<C, MARKERS_LEN>, Vec<AssignedBit<C::Base>>), Error> {
         let mut advice_columns_assigner = self.config.advice_cycle_assigner();
 
         macro_rules! assign_and_absorb_point {
@@ -840,9 +851,16 @@ where
             .collect::<Result<Vec<_>, _>>()?;
         let assigned_E = assign_and_absorb_point!(&self.relaxed.E_commitment)?;
 
-        let [X0, X1] = self.relaxed.get_consistency_markers();
-        let assigned_X0 = assign_and_absorb_diff_field_as_bn!(&X0, || "X0")?.1;
-        let assigned_X1 = assign_and_absorb_diff_field_as_bn!(&X1, || "X1")?.1;
+        let consistency_markers = self.relaxed.get_consistency_markers();
+        let assigned_consistency_markers = consistency_markers
+            .iter()
+            .enumerate()
+            .map(|(i, marker)| -> Result<_, Error> {
+                Ok(assign_and_absorb_diff_field_as_bn!(marker, || format!("marker[{i}]"))?.1)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .unwrap();
 
         let assigned_challenges = self
             .relaxed
@@ -866,7 +884,7 @@ where
             folded_E: assigned_E,
             folded_u: assigned_u,
             folded_challenges: assigned_challenges,
-            folded_consistency_markers: [assigned_X0, assigned_X1],
+            folded_consistency_markers: assigned_consistency_markers,
             folded_step_circuit_instances_hash_accumulator: assigned_step_circuit_instances,
         };
 
@@ -876,8 +894,10 @@ where
             .map(|com| assign_and_absorb_point!(com))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let assigned_consistency_markers = input_plonk
-            .get_consistency_markers()
+        let consistency_markers: [C::ScalarExt; MARKERS_LEN] =
+            input_plonk.get_consistency_markers();
+
+        let assigned_consistency_markers = consistency_markers
             .iter()
             .enumerate()
             .map(|(index, instance)| {
@@ -1118,9 +1138,9 @@ fn assign_next_advice_from_diff_field<C: CurveAffine, AR: Into<String>>(
     Ok(assignor.assign_next_advice(region, annotation, val)?)
 }
 
-pub struct FoldResult<C: CurveAffine> {
-    pub(crate) assigned_input: AssignedWitness<C>,
-    pub(crate) assigned_result_of_fold: AssignedRelaxedPlonkInstance<C>,
+pub struct FoldResult<C: CurveAffine, const MARKERS_LEN: usize = 2> {
+    pub(crate) assigned_input: AssignedWitness<C, MARKERS_LEN>,
+    pub(crate) assigned_result_of_fold: AssignedRelaxedPlonkInstance<C, MARKERS_LEN>,
 }
 
 #[cfg(test)]
@@ -1139,7 +1159,7 @@ mod tests {
         constants::MAX_BITS,
         ff::Field,
         halo2curves::{bn256::G1Affine as C1, CurveAffine},
-        nifs::sangria::{VanillaFS, CONSISTENCY_MARKERS_COUNT},
+        nifs::sangria::{self, VanillaFS, CONSISTENCY_MARKERS_COUNT},
         plonk::PlonkInstance,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, ROTrait, Spec},
         table::WitnessCollector,
@@ -1262,12 +1282,13 @@ mod tests {
 
         let (mut ws, config) = get_witness_collector();
 
-        let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new(
-            relaxed.clone(),
-            LIMB_WIDTH,
-            LIMBS_COUNT,
-            config.clone(),
-        );
+        let chip =
+            FoldRelaxedPlonkInstanceChip::<T, C1, { sangria::CONSISTENCY_MARKERS_COUNT }>::new(
+                relaxed.clone(),
+                LIMB_WIDTH,
+                LIMBS_COUNT,
+                config.clone(),
+            );
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
@@ -1366,10 +1387,12 @@ mod tests {
 
                     let r = gate.le_num_to_bits(&mut ctx, assigned_r, MAX_BITS)?;
 
-                    Ok(FoldRelaxedPlonkInstanceChip::<T, C1>::fold_W(
-                        &mut ctx, &config, &folded, &input, &r,
-                    )
-                    .unwrap())
+                    Ok(FoldRelaxedPlonkInstanceChip::<
+                            T,
+                            C1,
+                            { sangria::CONSISTENCY_MARKERS_COUNT },
+                        >::fold_W(&mut ctx, &config, &folded, &input, &r)
+                        .unwrap())
                 },
             );
 
@@ -1425,12 +1448,13 @@ mod tests {
 
         let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0);
 
-        let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new(
-            RelaxedPlonkInstance::new(0, 0),
-            LIMB_WIDTH,
-            LIMBS_COUNT,
-            config.clone(),
-        );
+        let chip =
+            FoldRelaxedPlonkInstanceChip::<T, C1, { sangria::CONSISTENCY_MARKERS_COUNT }>::new(
+                RelaxedPlonkInstance::new(0, 0),
+                LIMB_WIDTH,
+                LIMBS_COUNT,
+                config.clone(),
+            );
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
             let cross_term_commits = random_curve_vec(&mut rnd);
@@ -1563,8 +1587,7 @@ mod tests {
                         .map(|instance| {
                             assign_scalar_as_bn!(&mut ctx, instance, "folded instance".to_owned())
                         })
-                        .collect::<Result<Vec<_>, _>>()
-                        .unwrap()
+                        .collect::<Result<Vec<_>, _>>()?
                         .try_into()
                         .unwrap();
 
@@ -1585,8 +1608,11 @@ mod tests {
                         .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
                         .unwrap();
 
-                    Ok(
-                        FoldRelaxedPlonkInstanceChip::<T, C1>::fold_consistency_markers(
+                    Ok(FoldRelaxedPlonkInstanceChip::<
+                            T,
+                            C1,
+                            { sangria::CONSISTENCY_MARKERS_COUNT },
+                        >::fold_consistency_markers(
                             &mut ctx,
                             &bn_chip,
                             assigned_input_instance,
@@ -1595,8 +1621,7 @@ mod tests {
                             &m_bn,
                             LIMB_WIDTH,
                         )
-                        .unwrap(),
-                    )
+                        .unwrap())
                 },
             );
 
@@ -1729,16 +1754,20 @@ mod tests {
 
                     let m_bn = scalar_module_as_bn::<C1>(LIMB_WIDTH, LIMBS_COUNT).unwrap();
 
-                    Ok(FoldRelaxedPlonkInstanceChip::<T, C1>::fold_challenges(
-                        &mut ctx,
-                        &bn_chip,
-                        assigned_input_instance,
-                        assigned_fold_challenges,
-                        &r_as_bn,
-                        &m_bn,
-                        LIMB_WIDTH,
-                    )
-                    .unwrap())
+                    Ok(FoldRelaxedPlonkInstanceChip::<
+                            T,
+                            C1,
+                            { sangria::CONSISTENCY_MARKERS_COUNT },
+                        >::fold_challenges(
+                            &mut ctx,
+                            &bn_chip,
+                            assigned_input_instance,
+                            assigned_fold_challenges,
+                            &r_as_bn,
+                            &m_bn,
+                            LIMB_WIDTH,
+                        )
+                        .unwrap())
                 },
             );
 
@@ -1810,11 +1839,12 @@ mod tests {
                     |region| {
                         let mut region = RegionCtx::new(region, 0);
 
-                        let chip = FoldRelaxedPlonkInstanceChip::<T, C1>::new(
-                            relaxed.clone(),
-                            LIMB_WIDTH,
-                            LIMBS_COUNT,
-                            config.clone(),
+                        let chip = FoldRelaxedPlonkInstanceChip::<
+                            T,
+                            C1,
+                            { sangria::CONSISTENCY_MARKERS_COUNT },
+                        >::new(
+                            relaxed.clone(), LIMB_WIDTH, LIMBS_COUNT, config.clone()
                         );
 
                         let (w, r) = chip.assign_witness_with_challenge(

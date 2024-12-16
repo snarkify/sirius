@@ -327,7 +327,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     ///
     /// 7. **Fold the Trace:**
     ///     - [`ProtoGalaxy::fold_witness`] & [`ProtoGalaxy::fold_instance`]
-    fn prove(
+    pub fn prove(
         _ck: &CommitmentKey<C>,
         pp: &ProverParam<C>,
         ro_acc: &mut impl ROTrait<C::ScalarExt>,
