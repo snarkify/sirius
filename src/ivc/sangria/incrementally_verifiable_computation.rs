@@ -1,6 +1,7 @@
 use std::{io, marker::PhantomData, num::NonZeroUsize};
 
 use halo2_proofs::dev::MockProver;
+use nifs::sangria::CONSISTENCY_MARKERS_COUNT;
 use serde::Serialize;
 use tracing::*;
 
@@ -19,7 +20,7 @@ use crate::{
         self,
         sangria::{
             accumulator::{FoldablePlonkTrace, RelaxedPlonkTrace},
-            GetConsistencyMarkers, VanillaFS, VerifyError,
+            FoldablePlonkInstance, GetConsistencyMarkers, VanillaFS, VerifyError,
         },
     },
     poseidon::{random_oracle::ROTrait, ROPair},
@@ -224,9 +225,14 @@ where
         let primary_consistency_marker = {
             let _s = info_span!("generate_instance").entered();
             [
-                C2::scalar_to_base(&secondary_pre_round_plonk_trace.u.get_consistency_markers()[1])
-                    .unwrap(),
-                ConsistencyMarkerComputation::<'_, A1, C2, RP1::OffCircuit> {
+                get_consistency_marker_output(&secondary_pre_round_plonk_trace.u),
+                ConsistencyMarkerComputation::<
+                    '_,
+                    A1,
+                    C2,
+                    RP1::OffCircuit,
+                    { CONSISTENCY_MARKERS_COUNT },
+                > {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_2(),
                     step: 1,
@@ -284,15 +290,19 @@ where
         .try_collect_witness()?;
 
         let (primary_nifs_pp, _primary_off_circuit_vp) =
-            VanillaFS::setup_params(pp.digest_1(), pp.primary.S().clone())?;
+            VanillaFS::<C1, { CONSISTENCY_MARKERS_COUNT }>::setup_params(
+                pp.digest_1(),
+                pp.primary.S().clone(),
+            )?;
 
-        let primary_plonk_trace = VanillaFS::generate_plonk_trace(
-            pp.primary.ck(),
-            &primary_instances,
-            &primary_witness,
-            &primary_nifs_pp,
-            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-        )?;
+        let primary_plonk_trace =
+            VanillaFS::<C1, { CONSISTENCY_MARKERS_COUNT }>::generate_plonk_trace(
+                pp.primary.ck(),
+                &primary_instances,
+                &primary_witness,
+                &primary_nifs_pp,
+                &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+            )?;
 
         let primary_relaxed_trace = RelaxedPlonkTrace::from_regular(
             primary_plonk_trace.clone(),
@@ -309,8 +319,14 @@ where
         let secondary_consistency_marker = {
             let _s = info_span!("generate_instance");
             [
-                C1::scalar_to_base(&primary_plonk_trace.u.get_consistency_markers()[1]).unwrap(),
-                ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
+                get_consistency_marker_output(&primary_plonk_trace.u),
+                ConsistencyMarkerComputation::<
+                    '_,
+                    A2,
+                    C1,
+                    RP2::OffCircuit,
+                    { CONSISTENCY_MARKERS_COUNT },
+                > {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
                     step: 1,
@@ -370,15 +386,19 @@ where
         .try_collect_witness()?;
 
         let (secondary_nifs_pp, _nifs_vp) =
-            VanillaFS::setup_params(pp.digest_2(), pp.secondary.S().clone())?;
+            VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::setup_params(
+                pp.digest_2(),
+                pp.secondary.S().clone(),
+            )?;
 
-        let secondary_plonk_trace = VanillaFS::generate_plonk_trace(
-            pp.secondary.ck(),
-            &secondary_instances,
-            &secondary_witness,
-            &secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-        )?;
+        let secondary_plonk_trace =
+            VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::generate_plonk_trace(
+                pp.secondary.ck(),
+                &secondary_instances,
+                &secondary_witness,
+                &secondary_nifs_pp,
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+            )?;
 
         Ok(Self {
             step: 1,
@@ -417,13 +437,14 @@ where
         let primary_span = info_span!("primary").entered();
         debug!("start fold step with folding 'secondary' by 'primary'");
 
-        let (secondary_new_trace, secondary_cross_term_commits) = VanillaFS::prove(
-            pp.secondary.ck(),
-            &self.secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-            self.secondary.relaxed_trace.clone(),
-            &self.secondary_trace,
-        )?;
+        let (secondary_new_trace, secondary_cross_term_commits) =
+            VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::prove(
+                pp.secondary.ck(),
+                &self.secondary_nifs_pp,
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+                self.secondary.relaxed_trace.clone(),
+                &self.secondary_trace,
+            )?;
         self.secondary
             .pub_instances
             .push(self.secondary_trace[0].u.instances.clone());
@@ -436,9 +457,14 @@ where
         let primary_consistency_marker = {
             let _s = info_span!("generate_instance").entered();
             [
-                C2::scalar_to_base(&self.secondary_trace[0].u.get_consistency_markers()[1])
-                    .unwrap(),
-                ConsistencyMarkerComputation::<'_, A1, C2, RP1::OffCircuit> {
+                get_consistency_marker_output(&self.secondary_trace[0].u),
+                ConsistencyMarkerComputation::<
+                    '_,
+                    A1,
+                    C2,
+                    RP1::OffCircuit,
+                    { CONSISTENCY_MARKERS_COUNT },
+                > {
                     random_oracle_constant: pp.primary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_2(),
                     step: self.step + 1,
@@ -494,21 +520,24 @@ where
         self.primary.z_i = primary_z_next;
         self.secondary.relaxed_trace = secondary_new_trace;
 
-        let primary_plonk_trace = [VanillaFS::generate_plonk_trace(
-            pp.primary.ck(),
-            &primary_instances,
-            &primary_witness,
-            &self.primary_nifs_pp,
-            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-        )?];
+        let primary_plonk_trace = [
+            VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::generate_plonk_trace(
+                pp.primary.ck(),
+                &primary_instances,
+                &primary_witness,
+                &self.primary_nifs_pp,
+                &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+            )?,
+        ];
 
-        let (primary_new_trace, primary_cross_term_commits) = nifs::sangria::VanillaFS::prove(
-            pp.primary.ck(),
-            &self.primary_nifs_pp,
-            &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
-            self.primary.relaxed_trace.clone(),
-            &primary_plonk_trace,
-        )?;
+        let (primary_new_trace, primary_cross_term_commits) =
+            nifs::sangria::VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::prove(
+                pp.primary.ck(),
+                &self.primary_nifs_pp,
+                &mut RP2::OffCircuit::new(pp.secondary.params().ro_constant().clone()),
+                self.primary.relaxed_trace.clone(),
+                &primary_plonk_trace,
+            )?;
         self.primary
             .pub_instances
             .push(primary_plonk_trace[0].u.instances.clone());
@@ -524,8 +553,14 @@ where
         let secondary_consistency_marker = {
             let _s = info_span!("generate_instance");
             [
-                C1::scalar_to_base(&primary_plonk_trace[0].u.get_consistency_markers()[1]).unwrap(),
-                ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
+                get_consistency_marker_output(&primary_plonk_trace[0].u),
+                ConsistencyMarkerComputation::<
+                    '_,
+                    A2,
+                    C1,
+                    RP2::OffCircuit,
+                    { CONSISTENCY_MARKERS_COUNT },
+                > {
                     random_oracle_constant: pp.secondary.params().ro_constant().clone(),
                     public_params_hash: &pp.digest_1(),
                     step: self.step + 1,
@@ -581,13 +616,15 @@ where
         self.secondary.z_i = next_secondary_z_i;
         self.primary.relaxed_trace = primary_new_trace;
 
-        self.secondary_trace = [VanillaFS::generate_plonk_trace(
-            pp.secondary.ck(),
-            &secondary_instances,
-            &secondary_witness,
-            &self.secondary_nifs_pp,
-            &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
-        )?];
+        self.secondary_trace = [
+            VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::generate_plonk_trace(
+                pp.secondary.ck(),
+                &secondary_instances,
+                &secondary_witness,
+                &self.secondary_nifs_pp,
+                &mut RP1::OffCircuit::new(pp.primary.params().ro_constant().clone()),
+            )?,
+        ];
 
         self.step += 1;
 
@@ -605,7 +642,13 @@ where
     {
         let mut errors = vec![];
 
-        ConsistencyMarkerComputation::<'_, A1, C2, RP1::OffCircuit> {
+        ConsistencyMarkerComputation::<
+            '_,
+            A1,
+            C2,
+            RP1::OffCircuit,
+            { CONSISTENCY_MARKERS_COUNT },
+        > {
             random_oracle_constant: pp.primary.params().ro_constant().clone(),
             public_params_hash: &pp.digest_2(),
             step: self.step,
@@ -618,7 +661,7 @@ where
         .generate_with_inspect::<C2::Scalar>(|buf| {
             debug!("primary X0 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&self.secondary_trace[0].u.get_consistency_markers()[0])
+        .ne(&get_consistency_marker_input(&self.secondary_trace[0].u))
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 0,
@@ -626,7 +669,13 @@ where
             })
         });
 
-        ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
+        ConsistencyMarkerComputation::<
+            '_,
+            A2,
+            C1,
+            RP2::OffCircuit,
+            { CONSISTENCY_MARKERS_COUNT },
+        > {
             random_oracle_constant: pp.secondary.params().ro_constant().clone(),
             public_params_hash: &pp.digest_1(),
             step: self.step,
@@ -639,7 +688,7 @@ where
         .generate_with_inspect::<C1::Scalar>(|buf| {
             debug!("primary X1 verify at {}-step: {buf:?}", self.step)
         })
-        .ne(&C2::scalar_to_base(&self.secondary_trace[0].u.get_consistency_markers()[1]).unwrap())
+        .ne(&get_consistency_marker_output(&self.secondary_trace[0].u))
         .then(|| {
             errors.push(VerificationError::InstanceNotMatch {
                 index: 1,
@@ -647,7 +696,7 @@ where
             });
         });
 
-        if let Err(err) = VanillaFS::is_sat(
+        if let Err(err) = VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::is_sat(
             pp.primary.ck(),
             pp.primary.S(),
             &self.primary.relaxed_trace,
@@ -660,7 +709,7 @@ where
             }));
         }
 
-        if let Err(err) = VanillaFS::is_sat(
+        if let Err(err) = VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::is_sat(
             pp.secondary.ck(),
             pp.secondary.S(),
             &self.secondary.relaxed_trace,
@@ -692,4 +741,15 @@ where
             Err(Error::VerifyFailed(errors))
         }
     }
+}
+
+fn get_consistency_marker_input<C: CurveAffine>(ins: &FoldablePlonkInstance<C>) -> C::ScalarExt {
+    GetConsistencyMarkers::<CONSISTENCY_MARKERS_COUNT, _>::get_consistency_markers(ins)[0]
+}
+
+fn get_consistency_marker_output<C: CurveAffine>(ins: &FoldablePlonkInstance<C>) -> C::Base {
+    C::scalar_to_base(
+        &GetConsistencyMarkers::<CONSISTENCY_MARKERS_COUNT, _>::get_consistency_markers(ins)[1],
+    )
+    .unwrap()
 }
