@@ -1,12 +1,13 @@
 use std::{cmp, marker::PhantomData};
 
+use rand_core::OsRng;
 use tracing::*;
 
 use crate::{
     halo2_proofs::{
         arithmetic::{CurveAffine, Field},
         circuit::Chip,
-        halo2curves::ff::PrimeField,
+        halo2curves::ff::{PrimeField, PrimeFieldBits},
         plonk::Error,
     },
     main_gate::{AssignedValue, RegionCtx},
@@ -343,6 +344,137 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
     }
 }
 
+/// Auxiliary class that performs the off-circuit version of ecc gadget calculations
+#[derive(Clone, Debug)]
+pub(crate) struct Point<C: CurveAffine> {
+    x: C::Base,
+    y: C::Base,
+    is_inf: bool,
+}
+impl<C: CurveAffine> From<C> for Point<C> {
+    fn from(value: C) -> Self {
+        let c = value.coordinates().unwrap();
+
+        Self {
+            x: *c.x(),
+            y: *c.y(),
+            is_inf: value.is_identity().into(),
+        }
+    }
+}
+
+impl<C: CurveAffine> Point<C> {
+    pub fn into_curve(self) -> C {
+        let Self { x, y, is_inf: _ } = self;
+        C::from_xy(x, y).unwrap()
+    }
+    pub fn into_pair(self) -> (C::Base, C::Base) {
+        (self.x, self.y)
+    }
+}
+
+impl<C: CurveAffine> Point<C> {
+    fn default() -> Self {
+        Self {
+            x: C::Base::ZERO,
+            y: C::Base::ZERO,
+            is_inf: true,
+        }
+    }
+
+    /// Add any two points
+    pub fn add(&self, other: &Point<C>) -> Self {
+        if self.x == other.x {
+            // If self == other then call double
+            if self.y == other.y {
+                self.double()
+            } else {
+                // if self.x == other.x and self.y != other.y then return infinity
+                Self {
+                    x: C::Base::ZERO,
+                    y: C::Base::ZERO,
+                    is_inf: true,
+                }
+            }
+        } else {
+            self.add_internal(other)
+        }
+    }
+
+    /// Add two different points
+    pub fn add_internal(&self, other: &Point<C>) -> Self {
+        if self.is_inf {
+            return other.clone();
+        }
+
+        if other.is_inf {
+            return self.clone();
+        }
+
+        let lambda = (other.y - self.y) * (other.x - self.x).invert().unwrap();
+        let x = lambda * lambda - self.x - other.x;
+        let y = lambda * (self.x - x) - self.y;
+        Self {
+            x,
+            y,
+            is_inf: false,
+        }
+    }
+
+    pub fn double(&self) -> Self {
+        if self.is_inf {
+            return Self {
+                x: C::Base::ZERO,
+                y: C::Base::ZERO,
+                is_inf: true,
+            };
+        }
+
+        let lambda = C::Base::from(3)
+            * self.x
+            * self.x
+            * ((C::Base::ONE + C::Base::ONE) * self.y).invert().unwrap();
+        let x = lambda * lambda - self.x - self.x;
+        let y = lambda * (self.x - x) - self.y;
+        Self {
+            x,
+            y,
+            is_inf: false,
+        }
+    }
+
+    pub fn scalar_mul<F: PrimeFieldBits>(&self, scalar: &F) -> Self {
+        let mut res = Self {
+            x: C::Base::ZERO,
+            y: C::Base::ZERO,
+            is_inf: true,
+        };
+
+        let bits = scalar.to_le_bits();
+        for i in (0..bits.len()).rev() {
+            res = res.double();
+            if bits[i] {
+                res = self.add(&res);
+            }
+        }
+        res
+    }
+
+    fn random_vartime() -> Self {
+        loop {
+            let x = C::Base::random(&mut OsRng);
+            let y = (x.square() * x + C::b()).sqrt();
+            if y.is_some().unwrap_u8() == 1 {
+                return Self {
+                    x,
+                    y: y.unwrap(),
+                    is_inf: false,
+                };
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use std::num::NonZeroUsize;
@@ -364,133 +496,6 @@ pub(crate) mod tests {
         run_mock_prover_test,
         util::ScalarToBase,
     };
-
-    #[derive(Clone, Debug)]
-    pub(crate) struct Point<C: CurveAffine> {
-        x: C::Base,
-        y: C::Base,
-        is_inf: bool,
-    }
-    impl<C: CurveAffine> From<C> for Point<C> {
-        fn from(value: C) -> Self {
-            let c = value.coordinates().unwrap();
-
-            Self {
-                x: *c.x(),
-                y: *c.y(),
-                is_inf: value.is_identity().into(),
-            }
-        }
-    }
-
-    impl<C: CurveAffine> Point<C> {
-        pub fn into_curve(self) -> C {
-            let Self { x, y, is_inf: _ } = self;
-            C::from_xy(x, y).unwrap()
-        }
-    }
-
-    impl<C: CurveAffine> Point<C> {
-        fn default() -> Self {
-            Self {
-                x: C::Base::ZERO,
-                y: C::Base::ZERO,
-                is_inf: true,
-            }
-        }
-
-        /// Add any two points
-        pub fn add(&self, other: &Point<C>) -> Self {
-            if self.x == other.x {
-                // If self == other then call double
-                if self.y == other.y {
-                    self.double()
-                } else {
-                    // if self.x == other.x and self.y != other.y then return infinity
-                    Self {
-                        x: C::Base::ZERO,
-                        y: C::Base::ZERO,
-                        is_inf: true,
-                    }
-                }
-            } else {
-                self.add_internal(other)
-            }
-        }
-
-        /// Add two different points
-        pub fn add_internal(&self, other: &Point<C>) -> Self {
-            if self.is_inf {
-                return other.clone();
-            }
-
-            if other.is_inf {
-                return self.clone();
-            }
-
-            let lambda = (other.y - self.y) * (other.x - self.x).invert().unwrap();
-            let x = lambda * lambda - self.x - other.x;
-            let y = lambda * (self.x - x) - self.y;
-            Self {
-                x,
-                y,
-                is_inf: false,
-            }
-        }
-
-        pub fn double(&self) -> Self {
-            if self.is_inf {
-                return Self {
-                    x: C::Base::ZERO,
-                    y: C::Base::ZERO,
-                    is_inf: true,
-                };
-            }
-
-            let lambda = C::Base::from(3)
-                * self.x
-                * self.x
-                * ((C::Base::ONE + C::Base::ONE) * self.y).invert().unwrap();
-            let x = lambda * lambda - self.x - self.x;
-            let y = lambda * (self.x - x) - self.y;
-            Self {
-                x,
-                y,
-                is_inf: false,
-            }
-        }
-
-        pub fn scalar_mul<F: PrimeFieldBits>(&self, scalar: &F) -> Self {
-            let mut res = Self {
-                x: C::Base::ZERO,
-                y: C::Base::ZERO,
-                is_inf: true,
-            };
-
-            let bits = scalar.to_le_bits();
-            for i in (0..bits.len()).rev() {
-                res = res.double();
-                if bits[i] {
-                    res = self.add(&res);
-                }
-            }
-            res
-        }
-
-        fn random_vartime() -> Self {
-            loop {
-                let x = C::Base::random(&mut OsRng);
-                let y = (x.square() * x + C::b()).sqrt();
-                if y.is_some().unwrap_u8() == 1 {
-                    return Self {
-                        x,
-                        y: y.unwrap(),
-                        is_inf: false,
-                    };
-                }
-            }
-        }
-    }
 
     const T: usize = 4;
     #[derive(Clone, Debug)]

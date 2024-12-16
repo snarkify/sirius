@@ -83,7 +83,6 @@ where
                 l0: CMain::Base::ZERO,
                 p1: CMain::identity(),
                 l1: CMain::Base::ZERO,
-                p_out: CMain::identity(),
             }
             .into_instance();
 
