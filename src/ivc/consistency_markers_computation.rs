@@ -21,6 +21,7 @@ pub(crate) struct AssignedConsistencyMarkersComputation<
     const A: usize,
     const T: usize,
     C: CurveAffine,
+    const MARKERS_LEN: usize,
 > where
     C::Base: FromUniformBytes<64> + PrimeFieldBits,
     RP: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
@@ -30,11 +31,11 @@ pub(crate) struct AssignedConsistencyMarkersComputation<
     pub step: &'l AssignedValue<C::Base>,
     pub z_0: &'l [AssignedValue<C::Base>; A],
     pub z_i: &'l [AssignedValue<C::Base>; A],
-    pub relaxed: &'l AssignedRelaxedPlonkInstance<C>,
+    pub relaxed: &'l AssignedRelaxedPlonkInstance<C, MARKERS_LEN>,
 }
 
-impl<const A: usize, const T: usize, C: CurveAffine, RO>
-    AssignedConsistencyMarkersComputation<'_, RO, A, T, C>
+impl<const A: usize, const T: usize, C: CurveAffine, RO, const MARKERS_LEN: usize>
+    AssignedConsistencyMarkersComputation<'_, RO, A, T, C, MARKERS_LEN>
 where
     C::Base: FromUniformBytes<64> + PrimeFieldBits,
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
@@ -65,7 +66,7 @@ where
     }
 }
 
-pub(crate) struct ConsistencyMarkerComputation<'l, const A: usize, C, RP>
+pub(crate) struct ConsistencyMarkerComputation<'l, const A: usize, C, RP, const MARKERS_LEN: usize>
 where
     RP: ROTrait<C::Base>,
     C: CurveAffine + Serialize,
@@ -75,12 +76,13 @@ where
     pub step: usize,
     pub z_0: &'l [C::Base; A],
     pub z_i: &'l [C::Base; A],
-    pub relaxed: &'l RelaxedPlonkInstance<C>,
+    pub relaxed: &'l RelaxedPlonkInstance<C, MARKERS_LEN>,
     pub limb_width: NonZeroUsize,
     pub limbs_count: NonZeroUsize,
 }
 
-impl<C, RP, const A: usize> ConsistencyMarkerComputation<'_, A, C, RP>
+impl<C, RP, const A: usize, const MARKERS_LEN: usize>
+    ConsistencyMarkerComputation<'_, A, C, RP, MARKERS_LEN>
 where
     RP: ROTrait<C::Base>,
     C: CurveAffine + Serialize,
@@ -190,6 +192,7 @@ mod tests {
     use crate::{
         ff::Field,
         halo2curves::{bn256, grumpkin},
+        nifs::sangria,
     };
 
     type C1 = <bn256::G1 as PrimeCurve>::Affine;
@@ -232,6 +235,7 @@ mod tests {
             10,
             C1,
             PoseidonHash<<C1 as CurveAffine>::Base, 10, 9>,
+            { sangria::CONSISTENCY_MARKERS_COUNT },
         > {
             random_oracle_constant: random_oracle_constant.clone(),
             public_params_hash: &public_params_hash,
@@ -288,7 +292,13 @@ mod tests {
                     .assign_current_relaxed(&mut ctx)
                     .unwrap();
 
-                    AssignedConsistencyMarkersComputation::<PoseidonChip<Base, 10, 9>, 10, 10, C1> {
+                    AssignedConsistencyMarkersComputation::<
+                        PoseidonChip<Base, 10, 9>,
+                        10,
+                        10,
+                        C1,
+                        { sangria::CONSISTENCY_MARKERS_COUNT },
+                    > {
                         random_oracle_constant: random_oracle_constant.clone(),
                         public_params_hash: &public_params_hash,
                         step: &step,
