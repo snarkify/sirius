@@ -3,7 +3,7 @@ use std::{marker::PhantomData, num::NonZeroUsize};
 use tracing::*;
 
 use crate::{
-    gadgets::ecc,
+    gadgets::ecc::{self, Point},
     halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         halo2curves::{
@@ -34,8 +34,6 @@ pub struct InstanceInput<C: CurveAffine> {
 
     pub p1: C,
     pub l1: C::Base,
-
-    pub p_out: C,
 }
 
 impl<C: CurveAffine> InstanceInput<C>
@@ -45,11 +43,15 @@ where
     pub fn into_instance(self) -> Vec<Vec<C::Base>> {
         let p0 = self.p0.coordinates().unwrap();
         let p1 = self.p1.coordinates().unwrap();
-        let p_out = self.p_out.coordinates().unwrap();
+
+        let (p_out_x, p_out_y) = Point::from(self.p0)
+            .scalar_mul(&self.l0)
+            .add(&Point::from(self.p1).scalar_mul(&self.l1))
+            .into_pair();
 
         let instance: [C::Base; INSTANCES_LEN] = [
-            *p_out.x(),
-            *p_out.y(),
+            p_out_x,
+            p_out_y,
             *p0.x(),
             *p0.y(),
             self.l0,
@@ -163,7 +165,6 @@ mod tests {
 
     use super::*;
     use crate::{
-        gadgets::ecc::tests::Point,
         halo2_proofs::dev::MockProver,
         prelude::{bn256::C1Affine as Curve, Field},
     };
@@ -189,22 +190,10 @@ mod tests {
         let l0 = Base::from_repr(l0.to_repr()).unwrap();
         let l1 = Base::from_repr(l1.to_repr()).unwrap();
 
-        let p_out = Point::from(p0)
-            .scalar_mul(&l0)
-            .add(&Point::from(p1).scalar_mul(&l1))
-            .into_curve();
-
         MockProver::run(
             SupportCircuit::<Curve>::MIN_K_TABLE_SIZE,
             &circuit,
-            InstanceInput {
-                p0,
-                l0,
-                p1,
-                l1,
-                p_out,
-            }
-            .into_instance(),
+            InstanceInput { p0, l0, p1, l1 }.into_instance(),
         )
         .unwrap()
         .verify()
