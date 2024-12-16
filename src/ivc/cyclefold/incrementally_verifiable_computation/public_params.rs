@@ -1,6 +1,11 @@
 use std::marker::PhantomData;
 
+use halo2_proofs::halo2curves::ff::PrimeField;
+use serde::Serialize;
+
 use crate::{
+    constants::NUM_HASH_BITS,
+    digest::{self, DigestToBits},
     halo2_proofs::halo2curves::{
         ff::{Field, FromUniformBytes, PrimeFieldBits},
         group::prime::PrimeCurveAffine,
@@ -41,6 +46,8 @@ where
     pub support_S: PlonkStructure<CSup::ScalarExt>,
     pub support_initial_trace: FoldablePlonkTrace<CSup>,
 
+    digest_bytes: Box<[u8]>,
+
     _p: PhantomData<SC>,
 }
 
@@ -66,7 +73,11 @@ where
         ck1: CommitmentKey<CMain>,
         ck2: CommitmentKey<CSup>,
         k_table_size: u32,
-    ) -> Self {
+    ) -> Self
+    where
+        CMain::ScalarExt: Serialize,
+        CSup::ScalarExt: Serialize,
+    {
         // Trace in C1::Base or C2::Scalar
         let (support_S, support_initial_trace): (
             PlonkStructure<CMain::Base>,
@@ -167,6 +178,28 @@ where
             )
         };
 
+        let digest_bytes = {
+            use serde::Serialize;
+
+            #[derive(Serialize)]
+            struct Meaningful<'link, CMainScalar: PrimeField, CSupScalar: PrimeField>
+            where
+                CMainScalar: Serialize,
+                CSupScalar: Serialize,
+            {
+                primary_S: &'link PlonkStructure<CMainScalar>,
+                primary_k_table_size: &'link u32,
+                support_S: &'link PlonkStructure<CSupScalar>,
+            }
+
+            digest::DefaultHasher::digest_to_bits(&Meaningful {
+                primary_S: &primary_S,
+                primary_k_table_size: &k_table_size,
+                support_S: &support_S,
+            })
+            .unwrap()
+        };
+
         Self {
             primary_ck: ck1,
             support_ck: ck2,
@@ -178,30 +211,45 @@ where
             primary_S,
             support_S,
 
+            digest_bytes,
+
             _p: PhantomData,
         }
     }
 
     pub fn cmain_pp_digest(&self) -> CMain {
-        todo!()
+        digest::into_curve_from_bits(&self.digest_bytes, NUM_HASH_BITS)
     }
 
     pub fn csup_pp_digest(&self) -> CSup {
-        todo!()
+        digest::into_curve_from_bits(&self.digest_bytes, NUM_HASH_BITS)
     }
 
-    pub fn cmain_pp_digest_coordinates(&self) -> (CMain::Scalar, CMain::Scalar) {
-        todo!()
+    pub fn cmain_pp_digest_coordinates(&self) -> (CMain::Base, CMain::Base) {
+        self.cmain_pp_digest()
+            .coordinates()
+            .map(|c| (*c.x(), *c.y()))
+            .unwrap()
     }
 
-    pub fn csup_pp_digest_coordinates(&self) -> (CMain::Base, CMain::Base) {
-        todo!()
+    pub fn csup_pp_digest_coordinates(&self) -> (CSup::Base, CSup::Base) {
+        self.csup_pp_digest()
+            .coordinates()
+            .map(|c| (*c.x(), *c.y()))
+            .unwrap()
     }
 
     pub fn protogalaxy_prover_params(&self) -> nifs::protogalaxy::ProverParam<CMain> {
         nifs::protogalaxy::ProverParam {
             S: self.primary_S.clone(),
             pp_digest: self.cmain_pp_digest(),
+        }
+    }
+
+    pub fn sangria_prover_params(&self) -> nifs::sangria::ProverParam<CSup> {
+        nifs::sangria::ProverParam {
+            S: self.support_S.clone(),
+            pp_digest: self.csup_pp_digest(),
         }
     }
 }
