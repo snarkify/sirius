@@ -1,6 +1,5 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
-use public_params::PublicParams;
 use tracing::info_span;
 
 use super::{
@@ -27,6 +26,7 @@ use crate::{
 };
 
 mod public_params;
+use public_params::PublicParams;
 
 pub struct IVC<const ARITY: usize, CMain, CSup, SC>
 where
@@ -154,5 +154,15 @@ where
             primary_trace: primary_post_initial_trace,
             _p: PhantomData,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trivial_zero_step() {
+        todo!("impl base test for zero step, check consistency etc")
     }
 }
