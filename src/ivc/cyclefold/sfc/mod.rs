@@ -39,6 +39,7 @@ pub struct Config<SCC> {
     mg: MainGateConfig<MAIN_GATE_T>,
 }
 
+#[derive(Debug)]
 pub struct StepFoldingCircuit<
     'sc,
     const ARITY: usize,
@@ -49,6 +50,24 @@ pub struct StepFoldingCircuit<
     pub sc: &'sc SC,
     pub input: Input<ARITY, CMain::ScalarExt>,
     pub _p: PhantomData<CSup>,
+}
+
+impl<
+        const ARITY: usize,
+        CMain: CurveAffine,
+        CSup: CurveAffine<Base = CMain::ScalarExt>,
+        SC: StepCircuit<ARITY, CMain::ScalarExt>,
+    > Clone for StepFoldingCircuit<'_, ARITY, CMain, CSup, SC>
+{
+    fn clone(&self) -> Self {
+        let Self { sc, input, _p } = self;
+
+        Self {
+            sc,
+            input: input.clone(),
+            _p: PhantomData,
+        }
+    }
 }
 
 impl<

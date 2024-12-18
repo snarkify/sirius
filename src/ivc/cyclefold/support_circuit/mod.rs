@@ -112,7 +112,7 @@ where
                     .assign_values_from_instance(&mut ctx, config.instance, 0)
                     .unwrap();
 
-                trace!("instances assigned");
+                trace!("instances assigned ({})", ctx.offset());
 
                 let [p0, p1] = [
                     AssignedPoint::<C> { x: x0, y: y0 },
@@ -127,23 +127,31 @@ where
                     .le_num_to_bits(&mut ctx, &l0, num_bits)
                     .unwrap();
 
+                trace!("l0 -> l0_bits, ({})", ctx.offset());
+
                 let lhs = ecc_chip.scalar_mul(&mut ctx, &p0, &l0_bits).unwrap();
 
-                trace!("p0 * l0_bits = [{:?},{:?}]", lhs.x.value(), lhs.y.value());
+                trace!(
+                    "p0 * l0_bits = [{:?},{:?}] ({})",
+                    lhs.x.value(),
+                    lhs.y.value(),
+                    ctx.offset()
+                );
 
                 let l1_bits = ecc_chip
                     .gate
                     .le_num_to_bits(&mut ctx, &l1, num_bits)
                     .unwrap();
-                trace!("l1 bits ready");
+                trace!("l1 -> l1_bits({})", ctx.offset());
+
                 let rhs = ecc_chip.scalar_mul(&mut ctx, &p1, &l1_bits).unwrap();
-                trace!("p1 * l1_bits");
+                trace!("p1 * l1_bits ({})", ctx.offset());
 
                 let AssignedPoint {
                     x: actual_x,
                     y: actual_y,
                 } = ecc_chip.add(&mut ctx, &lhs, &rhs).unwrap();
-                trace!("add finished");
+                trace!("add finished ({})", ctx.offset());
 
                 ctx.constrain_equal(expected_x.cell(), actual_x.cell())
                     .unwrap();

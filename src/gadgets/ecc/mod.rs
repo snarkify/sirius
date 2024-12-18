@@ -61,70 +61,146 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
     pub fn add(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
-        p: &AssignedPoint<C>,
-        q: &AssignedPoint<C>,
+        lhs: &AssignedPoint<C>,
+        rhs: &AssignedPoint<C>,
     ) -> Result<AssignedPoint<C>, Error> {
-        let is_p_iden = self
+        let is_lhs_inf = self
             .gate
-            .is_infinity_point(ctx, &p.x, &p.y)
+            .is_infinity_point(ctx, &lhs.x, &lhs.y)
             .inspect_err(|err| error!("while is_infinity p: {err:?}"))?;
-        let is_q_iden = self
+        trace!("after `is_infinity_point` for p offset is {}", ctx.offset());
+
+        let is_rhs_inf = self
             .gate
-            .is_infinity_point(ctx, &q.x, &q.y)
+            .is_infinity_point(ctx, &rhs.x, &rhs.y)
             .inspect_err(|err| error!("while is_infinity q: {err:?}"))?;
+        trace!("after `is_infinity_point` for q offset is {}", ctx.offset());
+
         let is_equal_x = self
             .gate
-            .is_equal_term(ctx, &p.x, &q.x)
-            .inspect_err(|err| error!("while is_equal p.q == q.x: {err:?}"))?;
+            .is_equal_term(ctx, &lhs.x, &rhs.x)
+            .inspect_err(|err| error!("while is_equal p.x == q.x: {err:?}"))?;
+        trace!(
+            "after `is_equal_term` for p.x == q.x offset is {}",
+            ctx.offset()
+        );
+
         let is_equal_y = self
             .gate
-            .is_equal_term(ctx, &p.y, &q.y)
-            .inspect_err(|err| error!("while is_infinity p.y == q.y: {err:?}"))?;
+            .is_equal_term(ctx, &lhs.y, &rhs.y)
+            .inspect_err(|err| error!("while is_equal p.y == q.y: {err:?}"))?;
+
+        trace!(
+            "after `is_equal_term` for p.y == q.y offset is {}",
+            ctx.offset()
+        );
 
         let inf = self
             .gate
             .assign_point::<C, _>(ctx, || "inf", None)
-            .inspect_err(|err| error!("while assigned point `inf`: {err:?}"))?;
-        // # Safety
-        // We check at the bottom of this fn, what p.x == q.x
-        let r = unsafe { self.gate.unchecked_add(ctx, p, q) }
-            .inspect_err(|err| error!("while unchecked add p & q: {err:?}"))?;
-        let p2 = self.double(ctx, p)?;
+            .inspect_err(|err| error!("while assigning point `inf`: {err:?}"))?;
+        trace!("after `assign_point` for `inf` offset is {}", ctx.offset());
+
+        // Нужно переделать логику
+        // Не использовать результат только если is_equal_x
+        // А вызывать функцию с правильными параметрами
+        // Для этого надо разобраться с тем как сумма точек работает
+        let unchecked_add_result = {
+            //let p_input = self.conditional_select(ctx, p, p, &is_equal_x)?;
+            //let q_input = self.conditional_select(ctx, q, p, &is_equal_x)?;
+
+            // # Safety:
+            // We check at the bottom of this fn, what p.x == q.x
+            unsafe { self.gate.unchecked_add(ctx, &lhs, &rhs) }
+                .inspect_err(|err| error!("while unchecked add p & q: {err:?}"))
+        }?;
+
+        trace!("after `unchecked_add` for p & q offset is {}", ctx.offset());
+
+        let doubled_lhs = self.double(ctx, lhs)?;
+        trace!("after `double` for p offset is {}", ctx.offset());
 
         let x1 = self
             .gate
-            .conditional_select(ctx, &p2.x, &inf.x, &is_equal_y)
+            .conditional_select(ctx, &doubled_lhs.x, &inf.x, &is_equal_y)
             .inspect_err(|err| error!("while conditional select p2.x & inf.x: {err:?}"))?;
+
+        trace!(
+            "after `conditional_select` for p2.x & inf.x offset is {}",
+            ctx.offset()
+        );
+
         let y1 = self
             .gate
-            .conditional_select(ctx, &p2.y, &inf.y, &is_equal_y)
+            .conditional_select(ctx, &doubled_lhs.y, &inf.y, &is_equal_y)
             .inspect_err(|err| error!("while conditional select p2.y & inf.y: {err:?}"))?;
+
+        trace!(
+            "after `conditional_select` for p2.y & inf.y offset is {}",
+            ctx.offset()
+        );
+
         let x2 = self
             .gate
-            .conditional_select(ctx, &x1, &r.x, &is_equal_x)
+            .conditional_select(ctx, &x1, &unchecked_add_result.x, &is_equal_x)
             .inspect_err(|err| error!("while conditional select x1 & r.x: {err:?}"))?;
+
+        trace!(
+            "after `conditional_select` for x1 & r.x offset is {}",
+            ctx.offset()
+        );
+
         let y2 = self
             .gate
-            .conditional_select(ctx, &y1, &r.y, &is_equal_x)
+            .conditional_select(ctx, &y1, &unchecked_add_result.y, &is_equal_x)
             .inspect_err(|err| error!("while conditional select y1 & r.y: {err:?}"))?;
+
+        trace!(
+            "after `conditional_select` for y1 & r.y offset is {}",
+            ctx.offset()
+        );
+
         let x3 = self
             .gate
-            .conditional_select(ctx, &p.x, &x2, &is_q_iden)
+            .conditional_select(ctx, &lhs.x, &x2, &is_rhs_inf)
             .inspect_err(|err| error!("while conditional select p.x & x2: {err:?}"))?;
+
+        trace!(
+            "after `conditional_select` for p.x & x2 offset is {}",
+            ctx.offset()
+        );
+
         let y3 = self
             .gate
-            .conditional_select(ctx, &p.y, &y2, &is_q_iden)
+            .conditional_select(ctx, &lhs.y, &y2, &is_rhs_inf)
             .inspect_err(|err| error!("while conditional select p.y & y2: {err:?}"))?;
-        let x = self
+
+        trace!(
+            "after `conditional_select` for p.y & y2 offset is {}",
+            ctx.offset()
+        );
+
+        let result_x = self
             .gate
-            .conditional_select(ctx, &q.x, &x3, &is_p_iden)
+            .conditional_select(ctx, &rhs.x, &x3, &is_lhs_inf)
             .inspect_err(|err| error!("while conditional select q.x & x3: {err:?}"))?;
-        let y = self
+
+        trace!(
+            "after `conditional_select` for q.x & x3 offset is {}",
+            ctx.offset()
+        );
+
+        let result_y = self
             .gate
-            .conditional_select(ctx, &q.y, &y3, &is_p_iden)
+            .conditional_select(ctx, &rhs.y, &y3, &is_lhs_inf)
             .inspect_err(|err| error!("while conditional select q.y & y3: {err:?}"))?;
 
-        Ok(AssignedPoint { x, y })
+        trace!(
+            "after `conditional_select` for q.y & y3 offset is {}",
+            ctx.offset()
+        );
+
+        Ok(AssignedPoint { x: result_x, y: result_y })
     }
 
     fn double(
@@ -133,14 +209,20 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
         p: &AssignedPoint<C>,
     ) -> Result<AssignedPoint<C>, Error> {
         let is_inf = self.gate.is_infinity_point(ctx, &p.x, &p.y)?;
-        let inf = self.gate.assign_point::<C, _>(ctx, || "inf", None)?;
+        let any_point =
+            self.gate
+                .assign_point(ctx, || "any point", Some((C::Base::ONE, C::Base::ONE)))?;
+
+        let input = self.conditional_select(ctx, &any_point, p, &is_inf)?;
+
         // Safety:
         // This value will be used only if `is_inf = false`
         // `is_inf` false, only if p.x & p.y not zero
-        let p2 = unsafe { self.gate.unchecked_double(ctx, p) }?;
+        let p2 = unsafe { self.gate.unchecked_double(ctx, &input) }?;
 
-        let x = self.gate.conditional_select(ctx, &inf.x, &p2.x, &is_inf)?;
-        let y = self.gate.conditional_select(ctx, &inf.y, &p2.y, &is_inf)?;
+        let x = self.gate.conditional_select(ctx, &p.x, &p2.x, &is_inf)?;
+        let y = self.gate.conditional_select(ctx, &p.y, &p2.y, &is_inf)?;
+
         Ok(AssignedPoint { x, y })
     }
 
@@ -179,21 +261,24 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
             .inspect_err(|err| {
                 error!("Failed to check if lhs is infinity in scalar_mul: {err:?}")
             })?;
+        trace!("after `is_infinity_point` offset is {}", ctx.offset());
+
         let one_point = self
             .gate
             .assign_point(ctx, || "one point", Some((C::Base::ONE, C::Base::ONE)))
             .inspect_err(|err| error!("Failed to assign one point in scalar_mul: {err:?}"))?;
+        trace!("after `assign_point` offset is {}", ctx.offset());
 
         let lhs_non_zero = self
             .conditional_select(ctx, &one_point, lhs, &is_lhs_infinity)
             .inspect_err(|err| {
                 error!("Failed to conditionally select lhs_non_zero in scalar_mul: {err:?}")
             })?;
+        trace!(
+            "after `conditional_select` for lhs_non_zero offset is {}",
+            ctx.offset()
+        );
 
-        // # Safety:
-        // (1) assume p0 is not infinity
-        // assume first bit of scalar_bits is 1 for now
-        // so we can use unsafe_add later
         let mut p = unsafe {
             self.gate
                 .unchecked_double(ctx, &lhs_non_zero)
@@ -201,104 +286,174 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
                     error!("Failed to double initial point in scalar_mul: {err:?}")
                 })?
         };
+        trace!("after `unchecked_double` offset is {}", ctx.offset());
 
-        // the size of incomplete_bits ensures a + b != 0
         for (i, bit) in incomplete_bits.iter().skip(1).enumerate() {
             let tmp = unsafe {
                 self.gate.unchecked_add(ctx, &acc, &p).inspect_err(|err| {
                     error!("Failed to add points in iteration {i} of scalar_mul: {err:?}")
                 })?
             };
+            trace!(
+                "after `unchecked_add` in iteration {i} offset is {}",
+                ctx.offset()
+            );
+
             acc = AssignedPoint {
             x: self
                 .gate
                 .conditional_select(ctx, &tmp.x, &acc.x, bit)
-                .inspect_err(|err| error!("Failed to conditionally select x-coordinate in iteration {i} of scalar_mul: {err:?}"))?,
+                .inspect_err(|err| error!(
+                    "Failed to conditionally select x-coordinate in iteration {i} of scalar_mul: {err:?}"
+                ))?,
             y: self
                 .gate
                 .conditional_select(ctx, &tmp.y, &acc.y, bit)
-                .inspect_err(|err| error!("Failed to conditionally select y-coordinate in iteration {i} of scalar_mul: {err:?}"))?,
+                .inspect_err(|err| error!(
+                    "Failed to conditionally select y-coordinate in iteration {i} of scalar_mul: {err:?}"
+                ))?,
         };
+            trace!(
+                "after `conditional_select` in iteration {i} offset is {}",
+                ctx.offset()
+            );
+
             p = unsafe {
                 self.gate.unchecked_double(ctx, &p).inspect_err(|err| {
                     error!("Failed to double point p in iteration {i} of scalar_mul: {err:?}")
                 })?
             };
+            trace!(
+                "after `unchecked_double` in iteration {i} offset is {}",
+                ctx.offset()
+            );
         }
 
-        // make correction if first bit is 0
         let res: AssignedPoint<C> = {
             let acc_minus_initial = {
                 let neg = self.negate(ctx, &lhs_non_zero).inspect_err(|err| {
                     error!("Failed to negate initial point in scalar_mul: {err:?}")
                 })?;
+                trace!("after `negate` offset is {}", ctx.offset());
+
                 self.add(ctx, &acc, &neg).inspect_err(|err| {
                     error!("Failed to add acc and negated point in scalar_mul: {err:?}")
                 })?
             };
+
+            trace!(
+                "after `add` for acc_minus_initial offset is {}",
+                ctx.offset()
+            );
+
             let x = self
-            .gate
-            .conditional_select(ctx, &acc.x, &acc_minus_initial.x, &scalar_bits[0])
-            .inspect_err(|err| error!("Failed to conditionally select x-coordinate for correction in scalar_mul: {err:?}"))?;
+                .gate
+                .conditional_select(ctx, &acc.x, &acc_minus_initial.x, &scalar_bits[0])
+                .inspect_err(|err| {
+                    error!(
+                "Failed to conditionally select x-coordinate for correction in scalar_mul: {err:?}"
+            )
+                })?;
             let y = self
-            .gate
-            .conditional_select(ctx, &acc.y, &acc_minus_initial.y, &scalar_bits[0])
-            .inspect_err(|err| error!("Failed to conditionally select y-coordinate for correction in scalar_mul: {err:?}"))?;
+                .gate
+                .conditional_select(ctx, &acc.y, &acc_minus_initial.y, &scalar_bits[0])
+                .inspect_err(|err| {
+                    error!(
+                "Failed to conditionally select y-coordinate for correction in scalar_mul: {err:?}"
+            )
+                })?;
+            trace!(
+                "after `conditional_select` for correction offset is {}",
+                ctx.offset()
+            );
+
             AssignedPoint { x, y }
         };
 
-        // (2) modify acc and p if lhs is infinity
         let infp = self
             .gate
             .assign_point::<C, _>(ctx, || "infp", None)
             .inspect_err(|err| error!("Failed to assign infinity point in scalar_mul: {err:?}"))?;
+        trace!(
+            "after `assign_point` for infinity point offset is {}",
+            ctx.offset()
+        );
+
         let is_p_iden = self
             .gate
             .is_infinity_point(ctx, &lhs_non_zero.x, &lhs_non_zero.y)
             .inspect_err(|err| {
                 error!("Failed to check if point is infinity in scalar_mul: {err:?}")
             })?;
-        let x = self
-        .gate
-        .conditional_select(ctx, &infp.x, &res.x, &is_p_iden)
-        .inspect_err(|err| error!("Failed to conditionally select x-coordinate for infinity case in scalar_mul: {err:?}"))?;
-        let y = self
-        .gate
-        .conditional_select(ctx, &infp.y, &res.y, &is_p_iden)
-        .inspect_err(|err| error!("Failed to conditionally select y-coordinate for infinity case in scalar_mul: {err:?}"))?;
-        acc = AssignedPoint { x, y };
-        let x = self
-        .gate
-        .conditional_select(ctx, &infp.x, &p.x, &is_p_iden)
-        .inspect_err(|err| error!("Failed to conditionally select x-coordinate for p in infinity case in scalar_mul: {err:?}"))?;
-        let y = self
-        .gate
-        .conditional_select(ctx, &infp.y, &p.y, &is_p_iden)
-        .inspect_err(|err| error!("Failed to conditionally select y-coordinate for p in infinity case in scalar_mul: {err:?}"))?;
-        p = AssignedPoint { x, y };
+        trace!(
+            "after `is_infinity_point` for infinity case offset is {}",
+            ctx.offset()
+        );
 
-        // (3) finish the rest bits
+        let x = self
+            .gate
+            .conditional_select(ctx, &infp.x, &res.x, &is_p_iden)
+            .inspect_err(|err| {
+                error!(
+            "Failed to conditionally select x-coordinate for infinity case in scalar_mul: {err:?}"
+        )
+            })?;
+        let y = self
+            .gate
+            .conditional_select(ctx, &infp.y, &res.y, &is_p_iden)
+            .inspect_err(|err| {
+                error!(
+            "Failed to conditionally select y-coordinate for infinity case in scalar_mul: {err:?}"
+        )
+            })?;
+        trace!(
+            "after `conditional_select` for infinity case offset is {}",
+            ctx.offset()
+        );
+
+        acc = AssignedPoint { x, y };
+
         for (i, bit) in complete_bits.iter().enumerate() {
             let tmp = self.add(ctx, &acc, &p).inspect_err(|err| {
                 error!(
                     "Failed to add acc and p in complete_bits iteration {i} of scalar_mul: {err:?}"
                 )
             })?;
+            trace!(
+                "after `add` in complete_bits iteration {i} offset is {}",
+                ctx.offset()
+            );
+
             let x = self
             .gate
             .conditional_select(ctx, &tmp.x, &acc.x, bit)
-            .inspect_err(|err| error!("Failed to conditionally select x-coordinate in complete_bits iteration {i} of scalar_mul: {err:?}"))?;
+            .inspect_err(|err| error!(
+                "Failed to conditionally select x-coordinate in complete_bits iteration {i} of scalar_mul: {err:?}"
+            ))?;
             let y = self
             .gate
             .conditional_select(ctx, &tmp.y, &acc.y, bit)
-            .inspect_err(|err| error!("Failed to conditionally select y-coordinate in complete_bits iteration {i} of scalar_mul: {err:?}"))?;
+            .inspect_err(|err| error!(
+                "Failed to conditionally select y-coordinate in complete_bits iteration {i} of scalar_mul: {err:?}"
+            ))?;
+            trace!(
+                "after `conditional_select` in complete_bits iteration {i} offset is {}",
+                ctx.offset()
+            );
+
             acc = AssignedPoint { x, y };
-            p = self
-            .double(ctx, &p)
-            .inspect_err(|err| error!("Failed to double point p in complete_bits iteration {i} of scalar_mul: {err:?}"))?;
+
+            p = self.double(ctx, &p).inspect_err(|err| {
+                error!(
+            "Failed to double point p in complete_bits iteration {i} of scalar_mul: {err:?}"
+        )
+            })?;
+            trace!(
+                "after `double` in complete_bits iteration {i} offset is {}",
+                ctx.offset()
+            );
         }
 
-        // return infinity, if `lhs` is infinity
         self.conditional_select(ctx, lhs, &acc, &is_lhs_infinity)
             .inspect_err(|err| {
                 error!(

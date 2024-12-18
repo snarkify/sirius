@@ -1,13 +1,12 @@
 use std::{iter, marker::PhantomData};
 
-use halo2_proofs::halo2curves::ff::PrimeField;
 use serde::Serialize;
 
 use crate::{
     constants::NUM_HASH_BITS,
     digest::{self, DigestToBits},
     halo2_proofs::halo2curves::{
-        ff::{Field, FromUniformBytes, PrimeFieldBits},
+        ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
         group::prime::PrimeCurveAffine,
         CurveAffine,
     },
@@ -96,6 +95,18 @@ where
             }
             .into_instance();
 
+            #[cfg(test)]
+            {
+                crate::halo2_proofs::dev::MockProver::run(
+                    SupportCircuit::<CMain>::MIN_K_TABLE_SIZE,
+                    &SupportCircuit::<CMain>::default(),
+                    support_circuit_instances.clone(),
+                )
+                .unwrap()
+                .verify()
+                .unwrap();
+            }
+
             let support_cr = CircuitRunner::<CMain::Base, _>::new(
                 SupportCircuit::<CMain>::MIN_K_TABLE_SIZE,
                 SupportCircuit::<CMain>::default(),
@@ -143,6 +154,19 @@ where
             };
 
             let mock_instances = mock_sfc.initial_instances();
+
+            #[cfg(test)]
+            {
+                crate::halo2_proofs::dev::MockProver::run(
+                    k_table_size,
+                    &mock_sfc,
+                    mock_instances.clone(),
+                )
+                .unwrap()
+                .verify()
+                .unwrap();
+            }
+
             let mock_S = CircuitRunner::new(k_table_size, mock_sfc, mock_instances)
                 .try_collect_plonk_structure()
                 .unwrap();

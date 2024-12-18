@@ -38,6 +38,7 @@ where
 {
     step: NonZeroUsize,
     primary_trace: PlonkTrace<CMain>,
+    z_next: [CMain::Scalar; ARITY],
     _p: PhantomData<(CMain, CSup, SC)>,
 }
 
@@ -54,7 +55,7 @@ where
         sc: &SC,
         z_0: [CMain::ScalarExt; ARITY],
     ) -> Self {
-        let _primary_span = info_span!("primary").entered();
+        let _primary_span = info_span!("ivc::new", step = 0).entered();
 
         let initial_self_acc = ProtoGalaxy::<CMain, 1>::new_accumulator(
             AccumulatorArgs::from(&pp.primary_S),
@@ -85,6 +86,7 @@ where
         // At this block we fold three same support-circuit initial traces (from pp) but result of
         // this folding will be not used in next step, because of zero step
         let paired_incoming = {
+            let _support = info_span!("support").entered();
             let mut proofs = Vec::with_capacity(initial_self_acc.W_commitment_len());
 
             let mut paired_acc_ptr = nifs::sangria::accumulator::RelaxedPlonkTrace::from_regular(
@@ -132,6 +134,19 @@ where
         };
 
         let primary_initial_instances = primary_sfc.initial_instances();
+
+        #[cfg(test)]
+        {
+            crate::halo2_proofs::dev::MockProver::run(
+                pp.primary_k_table_size,
+                &primary_sfc,
+                primary_initial_instances.clone(),
+            )
+            .unwrap()
+            .verify()
+            .unwrap();
+        }
+
         let primary_witness = CircuitRunner::new(
             pp.primary_k_table_size,
             primary_sfc,
@@ -151,10 +166,13 @@ where
 
         Self {
             step: NonZeroUsize::new(1).unwrap(),
+            z_next: z_0,
             primary_trace: primary_post_initial_trace,
             _p: PhantomData,
         }
     }
+
+    pub fn next(&mut self) {}
 }
 
 #[cfg(test)]
