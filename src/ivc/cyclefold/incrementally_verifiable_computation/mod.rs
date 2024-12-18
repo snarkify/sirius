@@ -26,7 +26,7 @@ use crate::{
 };
 
 mod public_params;
-use public_params::PublicParams;
+pub use public_params::PublicParams;
 
 pub struct IVC<const ARITY: usize, CMain, CSup, SC>
 where
@@ -159,10 +159,49 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::array;
 
+    use tracing::*;
+    use tracing_test::traced_test;
+
+    use crate::{
+        commitment::CommitmentKey,
+        halo2_proofs::arithmetic::Field,
+        ivc::step_circuit::trivial,
+        prelude::bn256::{C1Affine, C1Scalar, C2Affine},
+    };
+
+    /// Arity : Input/output size per fold-step for primary step-circuit
+    /// For tivial case it can be any number
+    const ARITY: usize = 5;
+
+    /// Key size for Primary Circuit
+    const PRIMARY_COMMITMENT_KEY_SIZE: usize = 18;
+    const SECONDARY_COMMITMENT_KEY_SIZE: usize = 18;
+
+    const PRIMARY_CIRCUIT_TABLE_SIZE: u32 = 17;
+
+    #[traced_test]
     #[test]
     fn trivial_zero_step() {
-        todo!("impl base test for zero step, check consistency etc")
+        let sc = trivial::Circuit::<ARITY, C1Scalar>::default();
+
+        let primary_commitment_key =
+            CommitmentKey::<C1Affine>::setup(PRIMARY_COMMITMENT_KEY_SIZE, b"bn256");
+
+        let secondary_commitment_key =
+            CommitmentKey::<C2Affine>::setup(SECONDARY_COMMITMENT_KEY_SIZE, b"grumpkin");
+
+        info!("ck generated");
+
+        let pp = super::PublicParams::new(
+            &sc,
+            primary_commitment_key,
+            secondary_commitment_key,
+            PRIMARY_CIRCUIT_TABLE_SIZE,
+        );
+        info!("pp created");
+
+        let _ivc = super::IVC::new(&pp, &sc, array::from_fn(|_| C1Scalar::ZERO));
     }
 }

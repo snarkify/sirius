@@ -5,6 +5,7 @@ pub use crate::ivc::protogalaxy::verify_chip::BigUintPoint;
 use crate::{
     gadgets::nonnative::bn::big_uint::BigUint,
     halo2_proofs::halo2curves::{ff::PrimeField, CurveAffine},
+    ivc::cyclefold::support_circuit,
     nifs, plonk,
     polynomial::univariate::UnivariatePoly,
     poseidon::{AbsorbInRO, ROTrait},
@@ -61,7 +62,7 @@ pub struct PairedPlonkInstance<F: PrimeField> {
 
 impl<F: PrimeField> PairedPlonkInstance<F> {
     pub fn new<CSup: CurveAffine<Base = F>>(
-        acc: &nifs::sangria::FoldablePlonkInstance<CSup>,
+        acc: &nifs::sangria::FoldablePlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
     ) -> Self {
         let nifs::sangria::PlonkInstance {
             W_commitments,
@@ -213,15 +214,16 @@ impl<F: PrimeField> SelfTrace<F> {
                 .collect(),
             challenges: vec![F::ZERO; challenges_len],
         };
-        let betas_len = nifs::protogalaxy::poly::get_count_of_valuation(native_plonk_structure)
-            .unwrap()
-            .get();
-        let proof_len = betas_len.ilog2() as usize;
+        let count_of_eval =
+            nifs::protogalaxy::poly::get_count_of_valuation_with_padding(native_plonk_structure)
+                .unwrap()
+                .get();
+        let proof_len = count_of_eval.ilog2() as usize;
 
         SelfTrace {
             input_accumulator: ProtoGalaxyAccumulatorInstance {
                 ins: ins.clone(),
-                betas: vec![F::ZERO; betas_len].into_boxed_slice(),
+                betas: vec![F::ZERO; proof_len].into_boxed_slice(),
                 e: F::ZERO,
             },
             incoming: ins,
@@ -246,7 +248,7 @@ pub struct SangriaAccumulatorInstance<F: PrimeField> {
 
 impl<F: PrimeField> SangriaAccumulatorInstance<F> {
     pub fn new<CSup: CurveAffine<Base = F>>(
-        acc: &nifs::sangria::RelaxedPlonkInstance<CSup>,
+        acc: &nifs::sangria::RelaxedPlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
     ) -> Self {
         let nifs::sangria::RelaxedPlonkInstance {
             W_commitments,
@@ -322,7 +324,7 @@ pub struct PairedIncoming<F: PrimeField> {
 
 impl<F: PrimeField> PairedIncoming<F> {
     pub fn new<CSup: CurveAffine<Base = F>>(
-        instance: &nifs::sangria::FoldablePlonkInstance<CSup>,
+        instance: &nifs::sangria::FoldablePlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
         proof: &nifs::sangria::CrossTermCommits<CSup>,
     ) -> Self {
         let proof = proof
@@ -369,7 +371,10 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for PairedTrace<F> {
 impl<F: PrimeField> PairedTrace<F> {
     pub fn new_initial<CSup: CurveAffine<Base = F>>(
         paired_plonk_structure: &plonk::PlonkStructure<CSup::ScalarExt>,
-        paired_plonk_instance: &nifs::sangria::FoldablePlonkInstance<CSup>,
+        paired_plonk_instance: &nifs::sangria::FoldablePlonkInstance<
+            CSup,
+            { support_circuit::INSTANCES_LEN },
+        >,
         W_commitments_len: usize,
     ) -> Self {
         let ins = PairedPlonkInstance {
@@ -698,7 +703,10 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
     pub fn new_initial<CMain: CurveAffine<ScalarExt = F>, CSup: CurveAffine<Base = F>>(
         native_plonk_structure: &plonk::PlonkStructure<CMain::ScalarExt>,
         paired_plonk_structure: &plonk::PlonkStructure<CSup::ScalarExt>,
-        paired_plonk_instance: &nifs::sangria::FoldablePlonkInstance<CSup>,
+        paired_plonk_instance: &nifs::sangria::FoldablePlonkInstance<
+            CSup,
+            { support_circuit::INSTANCES_LEN },
+        >,
     ) -> Self {
         let self_trace = SelfTrace::new_initial(native_plonk_structure);
 
@@ -730,9 +738,10 @@ pub struct InputBuilder<
     pub self_incoming: &'link plonk::PlonkInstance<CMain>,
     pub self_proof: nifs::protogalaxy::Proof<CMain::Scalar>,
 
-    pub paired_acc: &'link nifs::sangria::RelaxedPlonkInstance<CSup>,
+    pub paired_acc:
+        &'link nifs::sangria::RelaxedPlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
     pub paired_incoming: &'link [(
-        nifs::sangria::FoldablePlonkInstance<CSup>,
+        nifs::sangria::FoldablePlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
         nifs::sangria::CrossTermCommits<CSup>,
     )],
 

@@ -5,7 +5,7 @@ use halo2_proofs::{
     halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
 };
 use itertools::Itertools;
-use tracing::error;
+use tracing::{error, trace};
 
 use crate::{
     gadgets::nonnative::bn::big_uint_mul_mod_chip::BigUintMulModChip,
@@ -31,6 +31,8 @@ impl<F: PrimeField> NativePlonkInstance<F> {
         original: &super::NativePlonkInstance<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let start_offset = region.offset();
+
         let super::NativePlonkInstance {
             W_commitments,
             instances,
@@ -55,6 +57,10 @@ impl<F: PrimeField> NativePlonkInstance<F> {
         let challenges =
             assigner.assign_all_advice(region, || "challenges", challenges.iter().cloned())?;
 
+        trace!(
+            "`NativePlonkInstance` took {} rows",
+            region.offset() - start_offset
+        );
         region.next();
 
         Ok(Self {
@@ -74,9 +80,12 @@ impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
         original: &super::ProtoGalaxyAccumulatorInstance<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let start_offset = region.offset();
+
         let super::ProtoGalaxyAccumulatorInstance { ins, betas, e } = original;
         let ins = NativePlonkInstance::assign_advice_from_native(region, ins, main_gate_config)?;
 
+        trace!("Len of betas: {}", betas.len());
         let mut assigner = main_gate_config.advice_cycle_assigner();
         let self_ = Self {
             ins,
@@ -86,6 +95,10 @@ impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
             e: assigner.assign_next_advice(region, || "e", *e)?,
         };
 
+        trace!(
+            "`ProtoGalaxyAccumulatorInstance` took {} rows",
+            region.offset() - start_offset
+        );
         region.next();
 
         Ok(self_)
@@ -131,6 +144,8 @@ impl<F: PrimeField> ProtogalaxyProof<F> {
         original: &super::nifs::protogalaxy::Proof<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let start_offset = region.offset();
+
         let mut assigner = main_gate_config.advice_cycle_assigner();
         let super::nifs::protogalaxy::Proof { poly_F, poly_K } = original;
 
@@ -143,6 +158,10 @@ impl<F: PrimeField> ProtogalaxyProof<F> {
                 .into(),
         };
 
+        trace!(
+            "`ProtogalaxyProof` took {} rows",
+            region.offset() - start_offset
+        );
         region.next();
 
         Ok(self_)
@@ -173,13 +192,15 @@ impl<F: PrimeField> SelfTrace<F> {
         original: &super::SelfTrace<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let start_offset = region.offset();
+
         let super::SelfTrace {
             input_accumulator,
             incoming,
             proof,
         } = original;
 
-        Ok(Self {
+        let self_ = Self {
             input_accumulator: ProtoGalaxyAccumulatorInstance::assign_advice_from_native(
                 region,
                 input_accumulator,
@@ -191,7 +212,11 @@ impl<F: PrimeField> SelfTrace<F> {
                 main_gate_config,
             )?,
             proof: ProtogalaxyProof::assign_advice_from(region, proof, main_gate_config)?,
-        })
+        };
+
+        trace!("`SelfTrace` took {} rows", region.offset() - start_offset);
+
+        Ok(self_)
     }
 
     fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
@@ -221,6 +246,8 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
         original: &super::PairedPlonkInstance<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let start_offset = region.offset();
+
         let super::PairedPlonkInstance {
             W_commitments,
             instances,
@@ -265,6 +292,10 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
         region.next();
+        trace!(
+            "`PairedPlonkInstance` took {} rows",
+            region.offset() - start_offset
+        );
 
         Ok(Self {
             W_commitments,
@@ -371,6 +402,8 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
         original: &super::SangriaAccumulatorInstance<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let start_offset = region.offset();
+
         let ins = PairedPlonkInstance::assign_advice_from(region, &original.ins, main_gate_config)?;
 
         let mut assigner = main_gate_config.advice_cycle_assigner();
@@ -391,6 +424,11 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
             ),
             u: assigner.assign_next_advice(region, || "u", original.u)?,
         };
+
+        trace!(
+            "`SangriaAccumulatorInstance` took {} rows",
+            region.offset() - start_offset
+        );
 
         region.next();
 
@@ -460,6 +498,8 @@ impl<F: PrimeField> PairedIncoming<F> {
         original: &super::PairedIncoming<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let start_offset = region.offset();
+
         let super::PairedIncoming { instance, proof } = original;
 
         let instance = PairedPlonkInstance::assign_advice_from(region, instance, main_gate_config)?;
@@ -477,6 +517,10 @@ impl<F: PrimeField> PairedIncoming<F> {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        trace!(
+            "`PairedIncoming` took {} rows",
+            region.offset() - start_offset
+        );
         region.next();
 
         Ok(Self { instance, proof })
@@ -506,6 +550,8 @@ impl<F: PrimeField> PairedTrace<F> {
         original: &super::PairedTrace<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let start_offset = region.offset();
+
         let input_accumulator = SangriaAccumulatorInstance::assign_advice_from(
             region,
             &original.input_accumulator,
@@ -520,6 +566,8 @@ impl<F: PrimeField> PairedTrace<F> {
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?
             .into_boxed_slice();
+
+        trace!("`PairedTrace` took {} rows", region.offset() - start_offset);
 
         Ok(Self {
             input_accumulator,
@@ -558,6 +606,8 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         original: &super::Input<A, F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let start_offset = region.offset();
+
         let self_trace =
             SelfTrace::assign_advice_from(region, &original.self_trace, main_gate_config)?;
 
@@ -580,6 +630,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         let z_i = assigner.assign_all_advice(region, || "z_i", original.z_i.iter().cloned())?;
 
         region.next();
+        trace!("`Input` took {} rows", region.offset() - start_offset);
 
         Ok(Self {
             pp_digest: (pp_digest_0, pp_digest_1),

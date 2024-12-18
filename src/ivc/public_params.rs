@@ -149,7 +149,7 @@ pub struct PublicParams<
     _p: PhantomData<(SC1, SC2)>,
 
     #[serde(skip_serializing)]
-    secondary_initial_plonk_trace: FoldablePlonkTrace<C2>,
+    secondary_initial_plonk_trace: FoldablePlonkTrace<C2, { CONSISTENCY_MARKERS_COUNT }>,
 
     #[serde(skip_serializing)]
     digest_1: C1,
@@ -384,7 +384,7 @@ where
         Ok(self_)
     }
 
-    pub fn secondary_initial_plonk_trace(&self) -> &FoldablePlonkTrace<C2> {
+    pub fn secondary_initial_plonk_trace(&self) -> &FoldablePlonkTrace<C2, { CONSISTENCY_MARKERS_COUNT }> {
         &self.secondary_initial_plonk_trace
     }
 

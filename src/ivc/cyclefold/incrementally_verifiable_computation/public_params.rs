@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{iter, marker::PhantomData};
 
 use halo2_proofs::halo2curves::ff::PrimeField;
 use serde::Serialize;
@@ -24,6 +24,7 @@ use crate::{
         sangria::{FoldablePlonkTrace, VanillaFS},
     },
     plonk::{PlonkStructure, PlonkTrace},
+    polynomial::Expression,
     poseidon::{PoseidonHash, ROTrait, Spec},
     prelude::CommitmentKey,
     table::CircuitRunner,
@@ -44,7 +45,7 @@ where
 
     pub support_ck: CommitmentKey<CSup>,
     pub support_S: PlonkStructure<CSup::ScalarExt>,
-    pub support_initial_trace: FoldablePlonkTrace<CSup>,
+    pub support_initial_trace: FoldablePlonkTrace<CSup, { support_circuit::INSTANCES_LEN }>,
 
     digest_bytes: Box<[u8]>,
 
@@ -81,7 +82,7 @@ where
         // Trace in C1::Base or C2::Scalar
         let (support_S, support_initial_trace): (
             PlonkStructure<CMain::Base>,
-            FoldablePlonkTrace<CSup>,
+            FoldablePlonkTrace<CSup, { support_circuit::INSTANCES_LEN }>,
         ) = {
             // Since I want to scalar_multiply points for main::sfc, I take `CMain` as the main curve here
             // CMain::Base or CSupport::Scalar (native for suppport_circuit)
@@ -106,7 +107,7 @@ where
             // case it will be `CSup::ScalarExt` or `CMain::Base`
             (
                 S,
-                VanillaFS::<CSup>::generate_plonk_trace(
+                VanillaFS::<CSup, { support_circuit::INSTANCES_LEN }>::generate_plonk_trace(
                     &ck2,
                     &support_circuit_instances,
                     &support_cr.try_collect_witness().unwrap(),
@@ -121,11 +122,18 @@ where
         };
 
         let (primary_S, primary_initial_trace) = {
-            let mut mock_sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
+            let num_io = iter::once(1)
+                .chain(primary_sc.instances().iter().map(|col| col.len()))
+                .collect::<Box<[_]>>();
+
+            let mock_sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
                 sc: primary_sc,
                 input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
                     &PlonkStructure {
                         k: k_table_size as usize,
+                        num_io,
+                        // because with zero gates - calc count is zero - sfc panic
+                        gates: vec![Expression::Constant(CMain::ScalarExt::ZERO)],
                         ..Default::default()
                     },
                     &support_S,
@@ -135,18 +143,6 @@ where
             };
 
             let mock_instances = mock_sfc.initial_instances();
-
-            // Correct `num_io`
-            mock_sfc.input = sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
-                &PlonkStructure {
-                    k: k_table_size as usize,
-                    num_io: mock_instances.iter().map(|col| col.len()).collect(),
-                    ..Default::default()
-                },
-                &support_S,
-                &support_initial_trace.u,
-            );
-
             let mock_S = CircuitRunner::new(k_table_size, mock_sfc, mock_instances)
                 .try_collect_plonk_structure()
                 .unwrap();

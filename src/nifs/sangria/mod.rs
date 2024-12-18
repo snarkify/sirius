@@ -206,7 +206,7 @@ where
         witness: &[Vec<C::ScalarExt>],
         pp: &ProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
-    ) -> Result<FoldablePlonkTrace<C>, Error> {
+    ) -> Result<FoldablePlonkTrace<C, MARKERS_LEN>, Error> {
         pp.S.run_sps_protocol(ck, instances, witness, ro_nark)
             .map(FoldablePlonkTrace::new)?
             .ok_or(Error::NoConsistencyMarkers)
@@ -233,7 +233,7 @@ where
         pp: &ProverParam<C>,
         ro_acc: &mut impl ROTrait<C::Base>,
         accumulator: RelaxedPlonkTrace<C, MARKERS_LEN>,
-        incoming: &[FoldablePlonkTrace<C>; 1],
+        incoming: &[FoldablePlonkTrace<C, MARKERS_LEN>; 1],
     ) -> Result<(RelaxedPlonkTrace<C, MARKERS_LEN>, CrossTermCommits<C>), Error> {
         let incoming = &incoming[0];
 
@@ -523,7 +523,7 @@ pub trait GetConsistencyMarkers<const MARKERS: usize, F> {
 }
 
 impl<C: CurveAffine, const MARKERS: usize> GetConsistencyMarkers<MARKERS, C::ScalarExt>
-    for FoldablePlonkInstance<C>
+    for FoldablePlonkInstance<C, MARKERS>
 {
     fn get_consistency_markers(&self) -> [C::ScalarExt; MARKERS] {
         match self.instances.first() {

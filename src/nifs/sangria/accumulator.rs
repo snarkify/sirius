@@ -11,7 +11,7 @@ use itertools::Itertools;
 use rayon::prelude::*;
 use tracing::{debug, instrument, warn};
 
-use super::{GetConsistencyMarkers, GetStepCircuitInstances};
+use super::{GetConsistencyMarkers, GetStepCircuitInstances, CONSISTENCY_MARKERS_COUNT};
 use crate::{
     commitment::CommitmentKey,
     ff::{Field, PrimeField},
@@ -54,12 +54,12 @@ pub struct RelaxedPlonkInstance<C: CurveAffine, const MARKERS_LEN: usize = 2> {
     pub(crate) step_circuit_instances_hash_accumulator: C::ScalarExt,
 }
 
-impl<C: CurveAffine, const MARKERS_LEN: usize> From<FoldablePlonkInstance<C>>
+impl<C: CurveAffine, const MARKERS_LEN: usize> From<FoldablePlonkInstance<C, MARKERS_LEN>>
     for RelaxedPlonkInstance<C, MARKERS_LEN>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    fn from(inner: FoldablePlonkInstance<C>) -> Self {
+    fn from(inner: FoldablePlonkInstance<C, MARKERS_LEN>) -> Self {
         let step_circuit_instances_hash_accumulator =
             instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
                 &C::ScalarExt::ZERO,
@@ -125,7 +125,7 @@ where
     #[instrument(name = "fold_plonk_instance", skip_all)]
     pub fn fold(
         &self,
-        U2: &FoldablePlonkInstance<C>,
+        U2: &FoldablePlonkInstance<C, MARKERS_LEN>,
         cross_term_commits: &[C],
         r: &C::ScalarExt,
     ) -> Self {
@@ -198,7 +198,7 @@ pub struct RelaxedPlonkTrace<C: CurveAffine, const MARKERS_LEN: usize = 2> {
 
 impl<C: CurveAffine, const MARKERS_LEN: usize> RelaxedPlonkTrace<C, MARKERS_LEN> {
     pub fn from_regular(
-        tr: FoldablePlonkTrace<C>,
+        tr: FoldablePlonkTrace<C, { MARKERS_LEN }>,
         k_table_size: usize,
     ) -> RelaxedPlonkTrace<C, MARKERS_LEN>
     where
@@ -348,19 +348,23 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
 /// # Consistency Markers
 /// - Ensures that `instances.first().len() == 2` for `PlonkInstance`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FoldablePlonkInstance<C: CurveAffine>(PlonkInstance<C>);
+pub struct FoldablePlonkInstance<
+    C: CurveAffine,
+    const MARKERS_LEN: usize = CONSISTENCY_MARKERS_COUNT,
+>(PlonkInstance<C>);
 
-impl<C: CurveAffine> FoldablePlonkInstance<C> {
+impl<C: CurveAffine, const MARKERS_LEN: usize> FoldablePlonkInstance<C, MARKERS_LEN> {
     /// Creates a new `FoldablePlonkInstance` from a `PlonkInstance`.
     ///
     /// # Consistency Markers
-    /// - Ensures that `instances.first().len() == 2` for `FoldablePlonkInstance`.
+    /// - Ensures that `instances.first().len() == MARKERS_LEN` for `FoldablePlonkInstance`.
     pub fn new(pl: PlonkInstance<C>) -> Option<Self> {
-        matches!(pl.instances.first(), Some(instance) if instance.len() == 2).then_some(Self(pl))
+        matches!(pl.instances.first(), Some(instance) if instance.len() == MARKERS_LEN)
+            .then_some(Self(pl))
     }
 }
 
-impl<C: CurveAffine> Deref for FoldablePlonkInstance<C> {
+impl<C: CurveAffine, const MARKERS_LEN: usize> Deref for FoldablePlonkInstance<C, MARKERS_LEN> {
     type Target = PlonkInstance<C>;
 
     fn deref(&self) -> &Self::Target {
@@ -368,7 +372,7 @@ impl<C: CurveAffine> Deref for FoldablePlonkInstance<C> {
     }
 }
 
-impl<C: CurveAffine> DerefMut for FoldablePlonkInstance<C> {
+impl<C: CurveAffine, const MARKERS_LEN: usize> DerefMut for FoldablePlonkInstance<C, MARKERS_LEN> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -380,18 +384,20 @@ impl<C: CurveAffine> DerefMut for FoldablePlonkInstance<C> {
 /// # Consistency Markers
 /// - Contains a `FoldablePlonkInstance` and a `PlonkWitness`.
 #[derive(Debug, Clone)]
-pub struct FoldablePlonkTrace<C: CurveAffine> {
+pub struct FoldablePlonkTrace<C: CurveAffine, const MARKERS_LEN: usize = CONSISTENCY_MARKERS_COUNT> {
     /// The foldable PLONK instance, ensuring the first instance column has exactly two elements.
     ///
     /// # Consistency Markers
     /// - Holds a `FoldablePlonkInstance` to enforce first-instance column length.
-    pub u: FoldablePlonkInstance<C>,
+    pub u: FoldablePlonkInstance<C, MARKERS_LEN>,
     pub w: PlonkWitness<C::Scalar>,
 }
 
-impl<C: CurveAffine> From<FoldablePlonkTrace<C>> for PlonkTrace<C> {
+impl<C: CurveAffine, const MARKERS_LEN: usize> From<FoldablePlonkTrace<C, MARKERS_LEN>>
+    for PlonkTrace<C>
+{
     /// Converts a `FoldablePlonkTrace` into a `PlonkTrace`.
-    fn from(value: FoldablePlonkTrace<C>) -> Self {
+    fn from(value: FoldablePlonkTrace<C, MARKERS_LEN>) -> Self {
         PlonkTrace {
             u: value.u.0,
             w: value.w,
@@ -399,7 +405,7 @@ impl<C: CurveAffine> From<FoldablePlonkTrace<C>> for PlonkTrace<C> {
     }
 }
 
-impl<C: CurveAffine> FoldablePlonkTrace<C> {
+impl<C: CurveAffine, const MARKERS_LEN: usize> FoldablePlonkTrace<C, MARKERS_LEN> {
     /// Creates a new `FoldablePlonkTrace` from a `PlonkTrace`.
     ///
     /// # Consistency Markers

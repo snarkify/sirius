@@ -790,7 +790,7 @@ where
         &self,
         region: &mut RegionCtx<C::Base>,
         public_params_hash: &C,
-        input_plonk: &FoldablePlonkInstance<C>,
+        input_plonk: &FoldablePlonkInstance<C, MARKERS_LEN>,
         cross_term_commits: &[C],
         mut ro_circuit: impl ROCircuitTrait<C::Base>,
     ) -> Result<(AssignedWitness<C, MARKERS_LEN>, Vec<AssignedBit<C::Base>>), Error> {

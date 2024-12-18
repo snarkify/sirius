@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
 use itertools::Itertools;
-use tracing::error;
+use tracing::{info, error};
 
 use crate::{
     halo2_proofs::{
@@ -121,6 +121,7 @@ where
         config: Self::Config,
         mut layouter: impl Layouter<CMain::ScalarExt>,
     ) -> Result<(), Halo2PlonkError> {
+        info!("start");
         let input = layouter.assign_region(
             || "sfc input",
             |region| {
@@ -130,6 +131,7 @@ where
                     .consistency_check(&mut region, &config.mg)
             },
         )?;
+        info!("sfc input done");
 
         let z_out = self
             .sc
@@ -138,6 +140,8 @@ where
                 error!("while synthesize_step: {err:?}");
                 Halo2PlonkError::Synthesis
             })?;
+
+        info!("step circuit synthesize done");
 
         let self_acc_out: input::assigned::ProtoGalaxyAccumulatorInstance<CMain::ScalarExt> =
             layouter.assign_region(
@@ -174,6 +178,7 @@ where
                     Ok(result_acc)
                 },
             )?;
+        info!("protogalaxy done");
 
         let paired_acc_out: input::assigned::SangriaAccumulatorInstance<CMain::ScalarExt> =
             layouter
@@ -190,6 +195,8 @@ where
                 .inspect_err(|err| {
                     error!("while sfc sangria: {err:?}");
                 })?;
+
+        info!("sangria done");
 
         let _consistency_marker_output = layouter.assign_region(
             || "sfc out",
@@ -243,6 +250,8 @@ where
                     .squeeze(&mut region)
             },
         )?;
+
+        info!("out done");
 
         //layouter.constrain_instance(
         //    consistency_marker_output.cell(),

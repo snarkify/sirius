@@ -436,14 +436,14 @@ fn compute_K_from_G<F: WithSmallOrderMulGroup<3>>(
     )
 }
 
-pub fn get_count_of_valuation<F: PrimeField>(S: &PlonkStructure<F>) -> Option<NonZeroUsize> {
+fn get_count_of_valuation<F: PrimeField>(S: &PlonkStructure<F>) -> Option<NonZeroUsize> {
     let count_of_rows = 2usize.pow(S.k as u32);
     let count_of_gates = S.gates.len();
 
     NonZeroUsize::new(count_of_rows * count_of_gates)
 }
 
-fn get_count_of_valuation_with_padding<F: PrimeField>(
+pub fn get_count_of_valuation_with_padding<F: PrimeField>(
     S: &PlonkStructure<F>,
 ) -> Option<NonZeroUsize> {
     get_count_of_valuation(S).and_then(|v| v.checked_next_power_of_two())
