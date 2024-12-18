@@ -384,7 +384,8 @@ impl<C: CurveAffine, const MARKERS_LEN: usize> DerefMut for FoldablePlonkInstanc
 /// # Consistency Markers
 /// - Contains a `FoldablePlonkInstance` and a `PlonkWitness`.
 #[derive(Debug, Clone)]
-pub struct FoldablePlonkTrace<C: CurveAffine, const MARKERS_LEN: usize = CONSISTENCY_MARKERS_COUNT> {
+pub struct FoldablePlonkTrace<C: CurveAffine, const MARKERS_LEN: usize = CONSISTENCY_MARKERS_COUNT>
+{
     /// The foldable PLONK instance, ensuring the first instance column has exactly two elements.
     ///
     /// # Consistency Markers

@@ -384,7 +384,9 @@ where
         Ok(self_)
     }
 
-    pub fn secondary_initial_plonk_trace(&self) -> &FoldablePlonkTrace<C2, { CONSISTENCY_MARKERS_COUNT }> {
+    pub fn secondary_initial_plonk_trace(
+        &self,
+    ) -> &FoldablePlonkTrace<C2, { CONSISTENCY_MARKERS_COUNT }> {
         &self.secondary_initial_plonk_trace
     }
 

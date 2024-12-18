@@ -127,9 +127,7 @@ where
                     .le_num_to_bits(&mut ctx, &l0, num_bits)
                     .unwrap();
 
-                let lhs = ecc_chip
-                    .scalar_mul(&mut ctx, &p0, &l0_bits)
-                    .unwrap();
+                let lhs = ecc_chip.scalar_mul(&mut ctx, &p0, &l0_bits).unwrap();
 
                 trace!("p0 * l0_bits = [{:?},{:?}]", lhs.x.value(), lhs.y.value());
 
@@ -138,9 +136,7 @@ where
                     .le_num_to_bits(&mut ctx, &l1, num_bits)
                     .unwrap();
                 trace!("l1 bits ready");
-                let rhs = ecc_chip
-                    .scalar_mul(&mut ctx, &p1, &l1_bits)
-                    .unwrap();
+                let rhs = ecc_chip.scalar_mul(&mut ctx, &p1, &l1_bits).unwrap();
                 trace!("p1 * l1_bits");
 
                 let AssignedPoint {

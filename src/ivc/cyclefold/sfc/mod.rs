@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
 use itertools::Itertools;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::{
     halo2_proofs::{
