@@ -166,80 +166,145 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
     pub fn scalar_mul(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,
-        p0: &AssignedPoint<C>,
+        lhs: &AssignedPoint<C>,
         scalar_bits: &[AssignedValue<C::Base>],
     ) -> Result<AssignedPoint<C>, Error> {
         let split_len = cmp::min(scalar_bits.len(), (C::Base::NUM_BITS - 2) as usize);
         let (incomplete_bits, complete_bits) = scalar_bits.split_at(split_len);
 
-        let mut acc = p0.clone();
+        let mut acc = lhs.clone();
+        let is_lhs_infinity = self
+            .gate
+            .is_infinity_point(ctx, &lhs.x, &lhs.y)
+            .inspect_err(|err| {
+                error!("Failed to check if lhs is infinity in scalar_mul: {err:?}")
+            })?;
+        let one_point = self
+            .gate
+            .assign_point(ctx, || "one point", Some((C::Base::ONE, C::Base::ONE)))
+            .inspect_err(|err| error!("Failed to assign one point in scalar_mul: {err:?}"))?;
+
+        let lhs_non_zero = self
+            .conditional_select(ctx, &one_point, lhs, &is_lhs_infinity)
+            .inspect_err(|err| {
+                error!("Failed to conditionally select lhs_non_zero in scalar_mul: {err:?}")
+            })?;
+
         // # Safety:
         // (1) assume p0 is not infinity
         // assume first bit of scalar_bits is 1 for now
         // so we can use unsafe_add later
-        let mut p = unsafe { self.gate.unchecked_double(ctx, p0) }?;
+        let mut p = unsafe {
+            self.gate
+                .unchecked_double(ctx, &lhs_non_zero)
+                .inspect_err(|err| {
+                    error!("Failed to double initial point in scalar_mul: {err:?}")
+                })?
+        };
 
         // the size of incomplete_bits ensures a + b != 0
-        for bit in incomplete_bits.iter().skip(1) {
-            // # Safety:
-            // (1) assume p0 is not infinity
-            // assume first bit of scalar_bits is 1 for now
-            // so we can use unsafe_add later
-            let tmp = unsafe { self.gate.unchecked_add(ctx, &acc, &p) }?;
-            acc = AssignedPoint {
-                x: self.gate.conditional_select(ctx, &tmp.x, &acc.x, bit)?,
-                y: self.gate.conditional_select(ctx, &tmp.y, &acc.y, bit)?,
+        for (i, bit) in incomplete_bits.iter().skip(1).enumerate() {
+            let tmp = unsafe {
+                self.gate.unchecked_add(ctx, &acc, &p).inspect_err(|err| {
+                    error!("Failed to add points in iteration {i} of scalar_mul: {err:?}")
+                })?
             };
-            // # Safety:
-            // (1) assume p0 is not infinity
-            // assume first bit of scalar_bits is 1 for now
-            // so we can use unsafe_add later
-            p = unsafe { self.gate.unchecked_double(ctx, &p) }?;
+            acc = AssignedPoint {
+            x: self
+                .gate
+                .conditional_select(ctx, &tmp.x, &acc.x, bit)
+                .inspect_err(|err| error!("Failed to conditionally select x-coordinate in iteration {i} of scalar_mul: {err:?}"))?,
+            y: self
+                .gate
+                .conditional_select(ctx, &tmp.y, &acc.y, bit)
+                .inspect_err(|err| error!("Failed to conditionally select y-coordinate in iteration {i} of scalar_mul: {err:?}"))?,
+        };
+            p = unsafe {
+                self.gate.unchecked_double(ctx, &p).inspect_err(|err| {
+                    error!("Failed to double point p in iteration {i} of scalar_mul: {err:?}")
+                })?
+            };
         }
 
         // make correction if first bit is 0
         let res: AssignedPoint<C> = {
             let acc_minus_initial = {
-                let neg = self.negate(ctx, p0)?;
-                self.add(ctx, &acc, &neg)?
+                let neg = self.negate(ctx, &lhs_non_zero).inspect_err(|err| {
+                    error!("Failed to negate initial point in scalar_mul: {err:?}")
+                })?;
+                self.add(ctx, &acc, &neg).inspect_err(|err| {
+                    error!("Failed to add acc and negated point in scalar_mul: {err:?}")
+                })?
             };
-            let x =
-                self.gate
-                    .conditional_select(ctx, &acc.x, &acc_minus_initial.x, &scalar_bits[0])?;
-            let y =
-                self.gate
-                    .conditional_select(ctx, &acc.y, &acc_minus_initial.y, &scalar_bits[0])?;
+            let x = self
+            .gate
+            .conditional_select(ctx, &acc.x, &acc_minus_initial.x, &scalar_bits[0])
+            .inspect_err(|err| error!("Failed to conditionally select x-coordinate for correction in scalar_mul: {err:?}"))?;
+            let y = self
+            .gate
+            .conditional_select(ctx, &acc.y, &acc_minus_initial.y, &scalar_bits[0])
+            .inspect_err(|err| error!("Failed to conditionally select y-coordinate for correction in scalar_mul: {err:?}"))?;
             AssignedPoint { x, y }
         };
 
-        // (2) modify acc and p if p0 is infinity
-        let infp = self.gate.assign_point::<C, _>(ctx, || "infp", None)?;
-        let is_p_iden = self.gate.is_infinity_point(ctx, &p0.x, &p0.y)?;
+        // (2) modify acc and p if lhs is infinity
+        let infp = self
+            .gate
+            .assign_point::<C, _>(ctx, || "infp", None)
+            .inspect_err(|err| error!("Failed to assign infinity point in scalar_mul: {err:?}"))?;
+        let is_p_iden = self
+            .gate
+            .is_infinity_point(ctx, &lhs_non_zero.x, &lhs_non_zero.y)
+            .inspect_err(|err| {
+                error!("Failed to check if point is infinity in scalar_mul: {err:?}")
+            })?;
         let x = self
-            .gate
-            .conditional_select(ctx, &infp.x, &res.x, &is_p_iden)?;
+        .gate
+        .conditional_select(ctx, &infp.x, &res.x, &is_p_iden)
+        .inspect_err(|err| error!("Failed to conditionally select x-coordinate for infinity case in scalar_mul: {err:?}"))?;
         let y = self
-            .gate
-            .conditional_select(ctx, &infp.y, &res.y, &is_p_iden)?;
+        .gate
+        .conditional_select(ctx, &infp.y, &res.y, &is_p_iden)
+        .inspect_err(|err| error!("Failed to conditionally select y-coordinate for infinity case in scalar_mul: {err:?}"))?;
         acc = AssignedPoint { x, y };
         let x = self
-            .gate
-            .conditional_select(ctx, &infp.x, &p.x, &is_p_iden)?;
+        .gate
+        .conditional_select(ctx, &infp.x, &p.x, &is_p_iden)
+        .inspect_err(|err| error!("Failed to conditionally select x-coordinate for p in infinity case in scalar_mul: {err:?}"))?;
         let y = self
-            .gate
-            .conditional_select(ctx, &infp.y, &p.y, &is_p_iden)?;
+        .gate
+        .conditional_select(ctx, &infp.y, &p.y, &is_p_iden)
+        .inspect_err(|err| error!("Failed to conditionally select y-coordinate for p in infinity case in scalar_mul: {err:?}"))?;
         p = AssignedPoint { x, y };
 
         // (3) finish the rest bits
-        for bit in complete_bits {
-            let tmp = self.add(ctx, &acc, &p)?;
-            let x = self.gate.conditional_select(ctx, &tmp.x, &acc.x, bit)?;
-            let y = self.gate.conditional_select(ctx, &tmp.y, &acc.y, bit)?;
+        for (i, bit) in complete_bits.iter().enumerate() {
+            let tmp = self.add(ctx, &acc, &p).inspect_err(|err| {
+                error!(
+                    "Failed to add acc and p in complete_bits iteration {i} of scalar_mul: {err:?}"
+                )
+            })?;
+            let x = self
+            .gate
+            .conditional_select(ctx, &tmp.x, &acc.x, bit)
+            .inspect_err(|err| error!("Failed to conditionally select x-coordinate in complete_bits iteration {i} of scalar_mul: {err:?}"))?;
+            let y = self
+            .gate
+            .conditional_select(ctx, &tmp.y, &acc.y, bit)
+            .inspect_err(|err| error!("Failed to conditionally select y-coordinate in complete_bits iteration {i} of scalar_mul: {err:?}"))?;
             acc = AssignedPoint { x, y };
-            p = self.double(ctx, &p)?;
+            p = self
+            .double(ctx, &p)
+            .inspect_err(|err| error!("Failed to double point p in complete_bits iteration {i} of scalar_mul: {err:?}"))?;
         }
 
-        Ok(acc)
+        // return infinity, if `lhs` is infinity
+        self.conditional_select(ctx, lhs, &acc, &is_lhs_infinity)
+            .inspect_err(|err| {
+                error!(
+                    "Failed to return conditional result for infinity case in scalar_mul: {err:?}"
+                )
+            })
     }
 
     // scalar_mul for non_zero point

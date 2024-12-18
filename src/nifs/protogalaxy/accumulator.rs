@@ -51,7 +51,8 @@ pub type AccumulatorArgs = plonk::PlonkTraceArgs;
 impl<C: CurveAffine> Accumulator<C> {
     pub fn new(args: AccumulatorArgs, count_of_evaluation: usize) -> Self {
         Self {
-            betas: vec![C::ScalarExt::ZERO; count_of_evaluation].into_boxed_slice(),
+            betas: vec![C::ScalarExt::ZERO; count_of_evaluation.ilog2() as usize]
+                .into_boxed_slice(),
             e: C::ScalarExt::ZERO,
             trace: PlonkTrace::new(args),
         }

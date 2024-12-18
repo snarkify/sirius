@@ -131,6 +131,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
             .try_into()
             .unwrap()
     }
+
     pub fn new_accumulator(&self) -> Accumulator {
         let acc = ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&self.S), &self.pp, &mut ro());
 

@@ -67,11 +67,21 @@ where
 
     let r = ro_chip(config.clone())
         .absorb_iter(input.iter_wrap_values())
-        .squeeze(region)?;
-    let r_bits = mg.le_num_to_bits(region, r.clone(), MAX_BITS)?;
-    let r_as_bn = bn_chip.from_assigned_cell_to_limbs(region, &r).unwrap();
+        .squeeze(region)
+        .inspect_err(|err| error!("Error while computing 'r' in fold: {err:?}"))?;
 
-    let m_bn = module_as_bn::<CMain::ScalarExt, CMain::Base>().unwrap();
+    let r_bits = mg
+        .le_num_to_bits(region, r.clone(), MAX_BITS)
+        .inspect_err(|err| error!("Error while converting 'r' to bits in fold: {err:?}"))?;
+
+    let r_as_bn = bn_chip
+        .from_assigned_cell_to_limbs(region, &r)
+        .inspect_err(|err| error!("Error while converting 'r' to BN limbs in fold: {err:?}"))
+        .unwrap();
+
+    let m_bn = module_as_bn::<CMain::ScalarExt, CMain::Base>()
+        .inspect_err(|err| error!("Error while creating 'm_bn' in fold: {err:?}"))
+        .unwrap();
 
     let mut acc = input.input_accumulator.clone();
 
@@ -115,9 +125,7 @@ where
                 .collect::<Box<[_]>>(),
             &r_bits,
         )
-        .inspect_err(|err| {
-            error!("while fold W: {err:?}");
-        })?
+        .inspect_err(|err| error!("Error while folding W commitments in fold: {err:?}"))?
         .into_iter()
         .map(|p| (p.x, p.y))
         .collect();
@@ -139,7 +147,10 @@ where
                                 &m_bn,
                                 &r_as_bn,
                                 DEFAULT_LIMB_WIDTH,
-                            )?;
+                            )
+                            .inspect_err(|err| {
+                                error!("Error while folding instance cells in fold: {err:?}")
+                            })?;
 
                             Ok(())
                         })?;
@@ -147,9 +158,7 @@ where
                     Ok(())
                 },
             )
-            .inspect_err(|err| {
-                error!("while fold instances: {err:?}");
-            })?;
+            .inspect_err(|err| error!("Error while folding instances in fold: {err:?}"))?;
 
         acc_challenges
             .iter_mut()
@@ -163,13 +172,12 @@ where
                     &m_bn,
                     &r_as_bn,
                     DEFAULT_LIMB_WIDTH,
-                )?;
+                )
+                .inspect_err(|err| error!("Error while folding challenges in fold: {err:?}"))?;
 
                 Ok(())
             })
-            .inspect_err(|err| {
-                error!("while fold challenges: {err:?}");
-            })?;
+            .inspect_err(|err| error!("Error while folding challenges in fold: {err:?}"))?;
 
         *acc_E_commitment = fold_relaxed_plonk_instance_chip::fold_E(
             region,
@@ -190,12 +198,12 @@ where
             },
             &m_bn,
         )
-        .inspect_err(|err| {
-            error!("while fold E: {err:?}");
-        })?
+        .inspect_err(|err| error!("Error while folding E commitment in fold: {err:?}"))?
         .into();
 
-        *acc_u = mg.add(region, acc_u, &r)?;
+        *acc_u = mg
+            .add(region, acc_u, &r)
+            .inspect_err(|err| error!("Error while updating accumulator 'u' in fold: {err:?}"))?;
     }
 
     Ok(acc)

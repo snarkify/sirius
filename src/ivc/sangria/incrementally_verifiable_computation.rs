@@ -126,7 +126,7 @@ where
     step: usize,
     secondary_nifs_pp: nifs::sangria::ProverParam<C2>,
     primary_nifs_pp: nifs::sangria::ProverParam<C1>,
-    secondary_trace: [FoldablePlonkTrace<C2>; 1],
+    secondary_trace: [FoldablePlonkTrace<C2, { CONSISTENCY_MARKERS_COUNT }>; 1],
 
     debug_mode: bool,
 }

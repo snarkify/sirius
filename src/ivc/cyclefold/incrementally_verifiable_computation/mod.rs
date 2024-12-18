@@ -1,6 +1,5 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
-use public_params::PublicParams;
 use tracing::info_span;
 
 use super::{
@@ -27,6 +26,7 @@ use crate::{
 };
 
 mod public_params;
+pub use public_params::PublicParams;
 
 pub struct IVC<const ARITY: usize, CMain, CSup, SC>
 where
@@ -154,5 +154,68 @@ where
             primary_trace: primary_post_initial_trace,
             _p: PhantomData,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{array, path::Path};
+
+    use tracing::*;
+    use tracing_test::traced_test;
+
+    use crate::{
+        commitment::CommitmentKey,
+        halo2_proofs::arithmetic::Field,
+        ivc::step_circuit::trivial,
+        prelude::bn256::{C1Affine, C1Scalar, C2Affine},
+    };
+
+    /// Arity : Input/output size per fold-step for primary step-circuit
+    /// For tivial case it can be any number
+    const ARITY: usize = 5;
+
+    /// Key size for Primary Circuit
+    const PRIMARY_COMMITMENT_KEY_SIZE: usize = 21;
+    const SECONDARY_COMMITMENT_KEY_SIZE: usize = 21;
+
+    const PRIMARY_CIRCUIT_TABLE_SIZE: u32 = 18;
+
+    const FOLDER: &str = ".cache/examples";
+
+    #[traced_test]
+    #[test]
+    fn trivial_zero_step() {
+        let sc = trivial::Circuit::<ARITY, C1Scalar>::default();
+
+        let primary_commitment_key = unsafe {
+            CommitmentKey::<C1Affine>::load_or_setup_cache(
+                Path::new(FOLDER),
+                "bn256",
+                PRIMARY_COMMITMENT_KEY_SIZE,
+            )
+            .unwrap()
+        };
+
+        let secondary_commitment_key = unsafe {
+            CommitmentKey::<C2Affine>::load_or_setup_cache(
+                Path::new(FOLDER),
+                "grumpkin",
+                SECONDARY_COMMITMENT_KEY_SIZE,
+            )
+            .unwrap()
+        };
+
+        info!("ck generated");
+
+        let pp = super::PublicParams::new(
+            &sc,
+            primary_commitment_key,
+            secondary_commitment_key,
+            PRIMARY_CIRCUIT_TABLE_SIZE,
+        );
+        info!("pp created");
+
+        let _ivc = super::IVC::new(&pp, &sc, array::from_fn(|_| C1Scalar::ZERO));
     }
 }
