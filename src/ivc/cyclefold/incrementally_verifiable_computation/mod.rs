@@ -159,7 +159,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::array;
+    use std::{array, path::Path};
 
     use tracing::*;
     use tracing_test::traced_test;
@@ -176,21 +176,35 @@ mod tests {
     const ARITY: usize = 5;
 
     /// Key size for Primary Circuit
-    const PRIMARY_COMMITMENT_KEY_SIZE: usize = 18;
-    const SECONDARY_COMMITMENT_KEY_SIZE: usize = 18;
+    const PRIMARY_COMMITMENT_KEY_SIZE: usize = 21;
+    const SECONDARY_COMMITMENT_KEY_SIZE: usize = 21;
 
-    const PRIMARY_CIRCUIT_TABLE_SIZE: u32 = 17;
+    const PRIMARY_CIRCUIT_TABLE_SIZE: u32 = 18;
+
+    const FOLDER: &str = ".cache/examples";
 
     #[traced_test]
     #[test]
     fn trivial_zero_step() {
         let sc = trivial::Circuit::<ARITY, C1Scalar>::default();
 
-        let primary_commitment_key =
-            CommitmentKey::<C1Affine>::setup(PRIMARY_COMMITMENT_KEY_SIZE, b"bn256");
+        let primary_commitment_key = unsafe {
+            CommitmentKey::<C1Affine>::load_or_setup_cache(
+                Path::new(FOLDER),
+                "bn256",
+                PRIMARY_COMMITMENT_KEY_SIZE,
+            )
+            .unwrap()
+        };
 
-        let secondary_commitment_key =
-            CommitmentKey::<C2Affine>::setup(SECONDARY_COMMITMENT_KEY_SIZE, b"grumpkin");
+        let secondary_commitment_key = unsafe {
+            CommitmentKey::<C2Affine>::load_or_setup_cache(
+                Path::new(FOLDER),
+                "grumpkin",
+                SECONDARY_COMMITMENT_KEY_SIZE,
+            )
+            .unwrap()
+        };
 
         info!("ck generated");
 
