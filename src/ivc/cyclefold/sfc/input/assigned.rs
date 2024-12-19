@@ -12,7 +12,7 @@ use crate::{
     halo2_proofs::plonk::Error as Halo2PlonkError,
     ivc::{
         self,
-        cyclefold::{ro_chip, DEFAULT_LIMBS_COUNT_LIMIT, DEFAULT_LIMB_WIDTH},
+        cyclefold::{ro_chip, DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
     },
     main_gate::{self, AdviceCyclicAssignor, AssignedValue, MainGate, RegionCtx, WrapValue},
     poseidon::ROCircuitTrait,
@@ -707,7 +707,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         let bn_chip = BigUintMulModChip::new(
             main_gate_config.into_smaller_size().unwrap(),
             DEFAULT_LIMB_WIDTH,
-            DEFAULT_LIMBS_COUNT_LIMIT,
+            DEFAULT_LIMBS_COUNT,
         );
 
         let mg = MainGate::new(main_gate_config.clone());
@@ -732,6 +732,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
                 Halo2PlonkError::Synthesis
             })?;
 
+        dbg!(&self.self_trace.input_accumulator.ins.W_commitments);
         for (acc_W, incoming_W, trace, new_acc_W) in itertools::multizip((
             self.self_trace.input_accumulator.ins.W_commitments.iter(),
             self.self_trace.incoming.W_commitments.iter(),
@@ -754,12 +755,26 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
                 .zip_eq(expected_l1.iter())
                 .try_for_each(|(l, r)| region.constrain_equal(l.cell(), r.cell()))?;
 
-            BigUintPoint::constrain_equal(region, acc_W, &BigUintPoint { x: x0, y: y0 })?;
-            BigUintPoint::constrain_equal(region, incoming_W, &BigUintPoint { x: x1, y: y1 })?;
+            BigUintPoint::constrain_equal(
+                region,
+                acc_W,
+                &BigUintPoint {
+                    x: x0.try_into().unwrap(),
+                    y: y0.try_into().unwrap(),
+                },
+            )?;
+            BigUintPoint::constrain_equal(
+                region,
+                incoming_W,
+                &BigUintPoint {
+                    x: x1.try_into().unwrap(),
+                    y: y1.try_into().unwrap(),
+                },
+            )?;
 
             *new_acc_W = BigUintPoint {
-                x: expected_x,
-                y: expected_y,
+                x: expected_x.try_into().unwrap(),
+                y: expected_y.try_into().unwrap(),
             };
         }
 

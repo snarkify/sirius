@@ -172,7 +172,9 @@ where
         }
     }
 
-    pub fn next(&mut self) {}
+    pub fn next(&mut self) {
+
+    }
 }
 
 #[cfg(test)]

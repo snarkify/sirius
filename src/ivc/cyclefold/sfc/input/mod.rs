@@ -1,6 +1,6 @@
 use std::{array, ops::Deref};
 
-use super::super::{DEFAULT_LIMBS_COUNT_LIMIT, DEFAULT_LIMB_WIDTH};
+use super::super::{DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH};
 pub use crate::ivc::protogalaxy::verify_chip::BigUintPoint;
 use crate::{
     gadgets::nonnative::bn::big_uint::BigUint,
@@ -86,7 +86,7 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
                             BigUint::from_different_field(
                                 value,
                                 DEFAULT_LIMB_WIDTH,
-                                DEFAULT_LIMBS_COUNT_LIMIT,
+                                DEFAULT_LIMBS_COUNT,
                             )
                             .unwrap()
                         })
@@ -96,12 +96,8 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
             challenges: challenges
                 .iter()
                 .map(|cha| {
-                    BigUint::from_different_field(
-                        cha,
-                        DEFAULT_LIMB_WIDTH,
-                        DEFAULT_LIMBS_COUNT_LIMIT,
-                    )
-                    .unwrap()
+                    BigUint::from_different_field(cha, DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
+                        .unwrap()
                 })
                 .collect(),
         }
@@ -275,7 +271,7 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
                         BigUint::from_different_field(
                             instance,
                             DEFAULT_LIMB_WIDTH,
-                            DEFAULT_LIMBS_COUNT_LIMIT,
+                            DEFAULT_LIMBS_COUNT,
                         )
                         .unwrap()
                     })
@@ -283,12 +279,8 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
                 challenges: challenges
                     .iter()
                     .map(|cha| {
-                        BigUint::from_different_field(
-                            cha,
-                            DEFAULT_LIMB_WIDTH,
-                            DEFAULT_LIMBS_COUNT_LIMIT,
-                        )
-                        .unwrap()
+                        BigUint::from_different_field(cha, DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
+                            .unwrap()
                     })
                     .collect(),
             },
@@ -395,7 +387,7 @@ impl<F: PrimeField> PairedTrace<F> {
                             BigUint::from_different_field(
                                 value,
                                 DEFAULT_LIMB_WIDTH,
-                                DEFAULT_LIMBS_COUNT_LIMIT,
+                                DEFAULT_LIMBS_COUNT,
                             )
                             .unwrap()
                         })
@@ -406,12 +398,8 @@ impl<F: PrimeField> PairedTrace<F> {
                 .challenges
                 .iter()
                 .map(|value| {
-                    BigUint::from_different_field(
-                        value,
-                        DEFAULT_LIMB_WIDTH,
-                        DEFAULT_LIMBS_COUNT_LIMIT,
-                    )
-                    .unwrap()
+                    BigUint::from_different_field(value, DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
+                        .unwrap()
                 })
                 .collect(),
         };
@@ -472,7 +460,7 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
             BigUint::from_f(
                 &gen.next().unwrap(),
                 DEFAULT_LIMB_WIDTH,
-                DEFAULT_LIMBS_COUNT_LIMIT,
+                DEFAULT_LIMBS_COUNT,
             )
             .expect("Failed to create BigUint from limbs")
         }
@@ -485,8 +473,8 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
             input_accumulator: ProtoGalaxyAccumulatorInstance {
                 ins: NativePlonkInstance {
                     W_commitments: vec![BigUintPoint {
-                        x: random_big_uint(&mut gen).limbs().to_vec(),
-                        y: random_big_uint(&mut gen).limbs().to_vec(),
+                        x: random_big_uint(&mut gen).limbs().try_into().unwrap(),
+                        y: random_big_uint(&mut gen).limbs().try_into().unwrap(),
                     }],
                     instances: vec![
                         vec![gen.next().unwrap(); 10]; // 5 instances each with 10 field elements
@@ -499,8 +487,8 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
             },
             incoming: NativePlonkInstance {
                 W_commitments: vec![BigUintPoint {
-                    x: random_big_uint(&mut gen).limbs().to_vec(),
-                    y: random_big_uint(&mut gen).limbs().to_vec(),
+                    x: random_big_uint(&mut gen).limbs().try_into().unwrap(),
+                    y: random_big_uint(&mut gen).limbs().try_into().unwrap(),
                 }],
                 instances: vec![
                     vec![gen.next().unwrap(); 10]; // 10 instances each with 10 field elements
@@ -643,10 +631,12 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
                         .ins
                         .instances
                         .iter()
-                        .map(|v| vec![BigUint::zero(DEFAULT_LIMB_WIDTH); v.len()])
+                        .map(|v| {
+                            vec![BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT); v.len()]
+                        })
                         .collect(),
                     challenges: vec![
-                        BigUint::zero(DEFAULT_LIMB_WIDTH);
+                        BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT);
                         self.paired_trace.input_accumulator.ins.challenges.len()
                     ],
                 },
@@ -667,10 +657,15 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
                             .instance
                             .instances
                             .iter()
-                            .map(|v| vec![BigUint::zero(DEFAULT_LIMB_WIDTH); v.len()])
+                            .map(|v| {
+                                vec![
+                                    BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT);
+                                    v.len()
+                                ]
+                            })
                             .collect(),
                         challenges: vec![
-                            BigUint::zero(DEFAULT_LIMB_WIDTH);
+                            BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT);
                             incoming.instance.challenges.len()
                         ],
                     },

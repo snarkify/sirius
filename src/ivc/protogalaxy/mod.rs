@@ -14,7 +14,7 @@ pub mod verify_chip {
             },
             plonk::Error as Halo2PlonkError,
         },
-        ivc::cyclefold::DEFAULT_LIMBS_COUNT_LIMIT,
+        ivc::cyclefold::{DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
         main_gate::{
             AdviceCyclicAssignor, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue,
         },
@@ -25,7 +25,6 @@ pub mod verify_chip {
         plonk,
         polynomial::{lagrange::iter_cyclic_subgroup, univariate::UnivariatePoly},
         poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
-        prelude::DEFAULT_LIMB_WIDTH,
         util,
     };
 
@@ -57,7 +56,7 @@ pub mod verify_chip {
         SPS { err: Halo2PlonkError },
     }
 
-    pub type BigUint<F> = Vec<F>;
+    pub type BigUint<F> = [F; DEFAULT_LIMBS_COUNT.get()];
 
     #[derive(Debug, Clone)]
     pub struct BigUintPoint<F> {
@@ -127,7 +126,10 @@ pub mod verify_chip {
                 .map(|(l, r)| mg.conditional_select(region, l, r, cond))
                 .collect::<Result<Vec<_>, _>>()?;
 
-            Ok(Self { x, y })
+            Ok(Self {
+                x: x.try_into().unwrap(),
+                y: y.try_into().unwrap(),
+            })
         }
     }
 
@@ -138,18 +140,21 @@ pub mod verify_chip {
             let x = big_uint::BigUint::<C::ScalarExt>::from_different_field::<C::Base>(
                 coordinates.x(),
                 DEFAULT_LIMB_WIDTH,
-                DEFAULT_LIMBS_COUNT_LIMIT,
+                DEFAULT_LIMBS_COUNT,
             )?;
 
             let y = big_uint::BigUint::<C::ScalarExt>::from_different_field::<C::Base>(
                 coordinates.y(),
                 DEFAULT_LIMB_WIDTH,
-                DEFAULT_LIMBS_COUNT_LIMIT,
+                DEFAULT_LIMBS_COUNT,
             )?;
 
+            assert_eq!(x.limbs().len(), DEFAULT_LIMBS_COUNT.get());
+            assert_eq!(y.limbs().len(), DEFAULT_LIMBS_COUNT.get());
+
             Ok(Self {
-                x: x.limbs().to_vec(),
-                y: y.limbs().to_vec(),
+                x: x.limbs().try_into().unwrap(),
+                y: y.limbs().try_into().unwrap(),
             })
         }
 
@@ -161,8 +166,14 @@ pub mod verify_chip {
             let mut assigner = main_gate_config.advice_cycle_assigner();
 
             let p = BigUintPoint {
-                x: assigner.assign_all_advice(region, || "x", self.x.into_iter())?,
-                y: assigner.assign_all_advice(region, || "y", self.y.into_iter())?,
+                x: assigner
+                    .assign_all_advice(region, || "x", self.x.into_iter())?
+                    .try_into()
+                    .unwrap(),
+                y: assigner
+                    .assign_all_advice(region, || "y", self.y.into_iter())?
+                    .try_into()
+                    .unwrap(),
             };
 
             region.next();
@@ -174,8 +185,8 @@ pub mod verify_chip {
     impl<F: PrimeField> BigUintPoint<F> {
         pub fn identity() -> Self {
             Self {
-                x: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH).limbs().to_vec(),
-                y: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH).limbs().to_vec(),
+                x: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT).limbs().try_into().unwrap(),
+                y: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT).limbs().try_into().unwrap(),
             }
         }
     }

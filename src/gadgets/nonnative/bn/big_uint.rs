@@ -31,16 +31,20 @@ pub struct BigUint<F> {
 }
 
 impl<F: PrimeField> BigUint<F> {
-    pub fn zero(limb_width: NonZeroUsize) -> Self {
+    pub fn zero(limb_width: NonZeroUsize, limbs_count: NonZeroUsize) -> Self {
         Self {
-            limbs: vec![F::ZERO],
+            limbs: vec![F::ZERO; limbs_count.get()],
             width: limb_width,
         }
     }
 
-    pub fn one(limb_width: NonZeroUsize) -> Self {
+    pub fn one(limb_width: NonZeroUsize, limbs_count: NonZeroUsize) -> Self {
+        let limbs = iter::once(F::ONE)
+            .chain(iter::repeat(F::ZERO))
+            .take(limbs_count.get())
+            .collect();
         Self {
-            limbs: vec![F::ONE],
+            limbs,
             width: limb_width,
         }
     }
@@ -91,6 +95,8 @@ impl<F: PrimeField> BigUint<F> {
             .chain(iter::repeat(F::ZERO))
             .take(limbs_count.get())
             .collect::<Vec<_>>();
+
+        assert_eq!(limbs.len(), limbs_count.get());
 
         let tail = limbs_input.collect::<Box<[_]>>();
         if tail.len() == 0 {
@@ -193,16 +199,19 @@ impl<F: PrimeField> BigUint<F> {
 
         let mut nat = input.clone();
         let limb_mask = get_big_int_with_n_ones(limb_width.get());
+
         Self::from_limbs(
             iter::repeat_with(|| {
-                nat.is_zero().not().then(|| {
-                    let r = &nat & &limb_mask;
-                    nat >>= limb_width.get() as u32;
-                    nat_to_f(&r).expect("TODO: Check safety")
-                })
+                nat.is_zero()
+                    .not()
+                    .then(|| {
+                        let r = &nat & &limb_mask;
+                        nat >>= limb_width.get() as u32;
+                        nat_to_f(&r).expect("TODO: Check safety")
+                    })
+                    .unwrap_or(F::ZERO)
             })
-            .take(max_limbs_count)
-            .map_while(|mut o| o.take()),
+            .take(max_limbs_count),
             limb_width,
             limbs_count,
         )

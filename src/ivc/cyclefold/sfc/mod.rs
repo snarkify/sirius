@@ -169,8 +169,8 @@ where
                     let mut region = RegionCtx::new(region, 0);
 
                     let VerifyResult {
-                        result_acc,
-                        poly_L_values: _,
+                        mut result_acc,
+                        poly_L_values,
                     } = protogalaxy::verify_chip::verify(
                         &mut region,
                         config.mg.clone(),
@@ -187,12 +187,12 @@ where
                         Halo2PlonkError::Synthesis
                     })?;
 
-                    //input.pairing_check(
-                    //    &mut region,
-                    //    &config.mg,
-                    //    &poly_L_values,
-                    //    &mut result_acc,
-                    //)?;
+                    input.pairing_check(
+                        &mut region,
+                        &config.mg,
+                        &poly_L_values,
+                        &mut result_acc,
+                    )?;
 
                     Ok(result_acc)
                 },
@@ -217,7 +217,7 @@ where
 
         info!("sangria done");
 
-        let _consistency_marker_output = layouter.assign_region(
+        let consistency_marker_output = layouter.assign_region(
             || "sfc out",
             |region| {
                 let mut region = RegionCtx::new(region, 0);
@@ -272,11 +272,11 @@ where
 
         info!("out done");
 
-        //layouter.constrain_instance(
-        //    consistency_marker_output.cell(),
-        //    config.consistency_marker,
-        //    0,
-        //)?;
+        layouter.constrain_instance(
+            consistency_marker_output.cell(),
+            config.consistency_marker,
+            0,
+        )?;
 
         Ok(())
     }
