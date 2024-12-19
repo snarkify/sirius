@@ -37,8 +37,13 @@ where
     CSup::Scalar: PrimeFieldBits + FromUniformBytes<64>,
 {
     step: NonZeroUsize,
+
+    primary_acc: nifs::protogalaxy::Accumulator<CMain>,
     primary_trace: PlonkTrace<CMain>,
-    z_next: [CMain::Scalar; ARITY],
+    primary_z_next: [CMain::Scalar; ARITY],
+
+    support_acc: nifs::sangria::RelaxedPlonkTrace<CSup, { support_circuit::INSTANCES_LEN }>,
+
     _p: PhantomData<(CMain, CSup, SC)>,
 }
 
@@ -55,9 +60,9 @@ where
         sc: &SC,
         z_0: [CMain::ScalarExt; ARITY],
     ) -> Self {
-        let _primary_span = info_span!("ivc::new", step = 0).entered();
+        let _span = info_span!("ivc::new", step = 0).entered();
 
-        let initial_self_acc = ProtoGalaxy::<CMain, 1>::new_accumulator(
+        let self_initial_acc = ProtoGalaxy::<CMain, 1>::new_accumulator(
             AccumulatorArgs::from(&pp.primary_S),
             &nifs::protogalaxy::ProverParam {
                 S: pp.primary_S.clone(),
@@ -75,10 +80,15 @@ where
                 pp_digest: pp.cmain_pp_digest(),
             },
             &mut ro(),
-            initial_self_acc.clone(),
+            self_initial_acc.clone(),
             &[pp.primary_initial_trace.clone()],
         )
         .unwrap();
+
+        let support_initial_acc = nifs::sangria::accumulator::RelaxedPlonkTrace::from_regular(
+            pp.support_initial_trace.clone(),
+            SupportCircuit::<CMain>::MIN_K_TABLE_SIZE as usize,
+        );
 
         // At zero step cyclefold ivc - output sangria-accumulator is input
         // sangria-accumulator. Bug proofs still should be valid.
@@ -87,14 +97,11 @@ where
         // this folding will be not used in next step, because of zero step
         let paired_incoming = {
             let _support = info_span!("support").entered();
-            let mut proofs = Vec::with_capacity(initial_self_acc.W_commitment_len());
+            let mut proofs = Vec::with_capacity(self_initial_acc.W_commitment_len());
 
-            let mut paired_acc_ptr = nifs::sangria::accumulator::RelaxedPlonkTrace::from_regular(
-                pp.support_initial_trace.clone(),
-                SupportCircuit::<CMain>::MIN_K_TABLE_SIZE as usize,
-            );
+            let mut paired_acc_ptr = support_initial_acc.clone();
 
-            for _ in 0..initial_self_acc.W_commitment_len() {
+            for _ in 0..self_initial_acc.W_commitment_len() {
                 let (new_acc, paired_proof) =
                     SangriaFS::<CSup, { support_circuit::INSTANCES_LEN }>::prove(
                         &pp.support_ck,
@@ -125,7 +132,7 @@ where
                 self_proof,
                 paired_acc: &pp.support_initial_trace.u.clone().into(),
                 paired_incoming: paired_incoming.as_slice(),
-                self_acc: &initial_self_acc.into(),
+                self_acc: &self_initial_acc.clone().into(),
                 z_i: z_0,
                 z_0,
             }
@@ -167,14 +174,18 @@ where
 
         Self {
             step: NonZeroUsize::new(1).unwrap(),
-            z_next: z_0,
+            // Because zero step using input values for output without any folding (only formal
+            // on-circuit) - we just take initial acc-s & z_0
+            primary_z_next: z_0,
             primary_trace: primary_post_initial_trace,
+            primary_acc: self_initial_acc,
+            support_acc: support_initial_acc,
             _p: PhantomData,
         }
     }
 
     pub fn next(&mut self) {
-
+        let _span = info_span!("ivc::step", step = self.step.get()).entered();
     }
 }
 

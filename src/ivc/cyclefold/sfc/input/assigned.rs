@@ -5,7 +5,7 @@ use halo2_proofs::{
     halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
 };
 use itertools::Itertools;
-use tracing::{error, info, info_span, trace};
+use tracing::{error, info, trace};
 
 use crate::{
     gadgets::nonnative::bn::big_uint_mul_mod_chip::BigUintMulModChip,
