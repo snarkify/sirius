@@ -19,6 +19,7 @@ use crate::{
         StepCircuit,
     },
     main_gate::{MainGate, MainGateConfig, RegionCtx},
+    nifs,
     poseidon::{ROCircuitTrait, ROTrait},
 };
 
@@ -28,6 +29,8 @@ pub use input::{Input, InputBuilder};
 pub mod sangria_adapter;
 
 use crate::halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
+
+use super::support_circuit;
 
 const MAIN_GATE_T: usize = 5;
 
@@ -81,14 +84,14 @@ where
 {
     /// For the initial iteration, we will give the same accumulators that we take from the input
     pub fn initial_instances(&self) -> Vec<Vec<CMain::ScalarExt>> {
-        let mut input = self.input.clone();
+        let mut self_ = self.input.clone();
         assert_eq!(
-            input.step, 0,
+            self_.step, 0,
             "this method can only be called for step == 0"
         );
 
-        input.step = 1;
-        let out_marker = cyclefold::ro().absorb(&input).output(
+        self_.step = 1;
+        let out_marker = cyclefold::ro().absorb(&self_).output(
             NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
         );
 
@@ -97,9 +100,25 @@ where
         instances
     }
 
-    pub fn instances(&self, expected_out: CMain::ScalarExt) -> Vec<Vec<CMain::ScalarExt>> {
+    pub fn instances(
+        &self,
+        self_acc: &nifs::protogalaxy::AccumulatorInstance<CMain>,
+        paired_acc: &nifs::sangria::RelaxedPlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
+        z_out: &[CMain::ScalarExt; ARITY],
+    ) -> Vec<Vec<CMain::ScalarExt>> {
+        let mut self_ = self.input.clone();
+
+        self_.step += 1;
+        self_.self_trace.input_accumulator = input::ProtoGalaxyAccumulatorInstance::new(self_acc);
+        self_.paired_trace.input_accumulator = input::SangriaAccumulatorInstance::new(paired_acc);
+        self_.z_i = *z_out;
+
+        let out_marker = cyclefold::ro().absorb(&self_).output(
+            NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
+        );
+
         let mut instances = self.sc.instances();
-        instances.insert(0, vec![expected_out]);
+        instances.insert(0, vec![out_marker]);
         instances
     }
 }

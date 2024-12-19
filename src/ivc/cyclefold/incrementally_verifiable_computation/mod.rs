@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
+use itertools::Itertools;
 use tracing::info_span;
 
 use super::{
@@ -7,6 +8,7 @@ use super::{
     support_circuit::{self, SupportCircuit},
 };
 use crate::{
+    constants::MAX_BITS,
     halo2_proofs::halo2curves::{
         ff::{FromUniformBytes, PrimeFieldBits},
         group::prime::PrimeCurveAffine,
@@ -19,11 +21,16 @@ use crate::{
     nifs::{
         self,
         protogalaxy::{AccumulatorArgs, ProtoGalaxy},
-        sangria::VanillaFS as SangriaFS,
+        sangria::VanillaFS,
     },
     plonk::PlonkTrace,
+    polynomial::lagrange,
+    poseidon::random_oracle::ROTrait,
     table::CircuitRunner,
+    util,
 };
+
+type SangriaFS<C> = VanillaFS<C, { support_circuit::INSTANCES_LEN }>;
 
 mod public_params;
 pub use public_params::PublicParams;
@@ -40,7 +47,8 @@ where
 
     primary_acc: nifs::protogalaxy::Accumulator<CMain>,
     primary_trace: PlonkTrace<CMain>,
-    primary_z_next: [CMain::Scalar; ARITY],
+    primary_z_current: [CMain::Scalar; ARITY],
+    primary_z_0: [CMain::Scalar; ARITY],
 
     support_acc: nifs::sangria::RelaxedPlonkTrace<CSup, { support_circuit::INSTANCES_LEN }>,
 
@@ -62,12 +70,9 @@ where
     ) -> Self {
         let _span = info_span!("ivc::new", step = 0).entered();
 
-        let self_initial_acc = ProtoGalaxy::<CMain, 1>::new_accumulator(
+        let primary_initial_acc = ProtoGalaxy::<CMain, 1>::new_accumulator(
             AccumulatorArgs::from(&pp.primary_S),
-            &nifs::protogalaxy::ProverParam {
-                S: pp.primary_S.clone(),
-                pp_digest: pp.cmain_pp_digest(),
-            },
+            &pp.protogalaxy_prover_params(),
             &mut ro(),
         );
 
@@ -75,12 +80,9 @@ where
         // protogalaxy-accumulator. Bug proof still should be valid.
         let (_new_acc, self_proof) = ProtoGalaxy::prove(
             &pp.primary_ck,
-            &nifs::protogalaxy::ProverParam {
-                S: pp.primary_S.clone(),
-                pp_digest: pp.cmain_pp_digest(),
-            },
+            &pp.protogalaxy_prover_params(),
             &mut ro(),
-            self_initial_acc.clone(),
+            primary_initial_acc.clone(),
             &[pp.primary_initial_trace.clone()],
         )
         .unwrap();
@@ -97,23 +99,19 @@ where
         // this folding will be not used in next step, because of zero step
         let paired_incoming = {
             let _support = info_span!("support").entered();
-            let mut proofs = Vec::with_capacity(self_initial_acc.W_commitment_len());
+            let mut proofs = Vec::with_capacity(primary_initial_acc.W_commitment_len());
 
             let mut paired_acc_ptr = support_initial_acc.clone();
 
-            for _ in 0..self_initial_acc.W_commitment_len() {
-                let (new_acc, paired_proof) =
-                    SangriaFS::<CSup, { support_circuit::INSTANCES_LEN }>::prove(
-                        &pp.support_ck,
-                        &nifs::sangria::ProverParam {
-                            S: pp.support_S.clone(),
-                            pp_digest: pp.csup_pp_digest(),
-                        },
-                        &mut ro(),
-                        paired_acc_ptr,
-                        &[pp.support_initial_trace.clone()],
-                    )
-                    .unwrap();
+            for _ in 0..primary_initial_acc.W_commitment_len() {
+                let (new_acc, paired_proof) = SangriaFS::<CSup>::prove(
+                    &pp.support_ck,
+                    &pp.sangria_prover_params(),
+                    &mut ro(),
+                    paired_acc_ptr,
+                    &[pp.support_initial_trace.clone()],
+                )
+                .unwrap();
 
                 proofs.push((pp.support_initial_trace.u.clone(), paired_proof));
 
@@ -132,7 +130,7 @@ where
                 self_proof,
                 paired_acc: &pp.support_initial_trace.u.clone().into(),
                 paired_incoming: paired_incoming.as_slice(),
-                self_acc: &self_initial_acc.clone().into(),
+                self_acc: &primary_initial_acc.clone().into(),
                 z_i: z_0,
                 z_0,
             }
@@ -176,16 +174,182 @@ where
             step: NonZeroUsize::new(1).unwrap(),
             // Because zero step using input values for output without any folding (only formal
             // on-circuit) - we just take initial acc-s & z_0
-            primary_z_next: z_0,
+            primary_z_current: z_0,
+            primary_z_0: z_0,
             primary_trace: primary_post_initial_trace,
-            primary_acc: self_initial_acc,
+            primary_acc: primary_initial_acc,
             support_acc: support_initial_acc,
             _p: PhantomData,
         }
     }
 
-    pub fn next(&mut self) {
+    pub fn next(self, pp: &PublicParams<ARITY, ARITY, CMain, CSup, SC>, sc: &SC) -> Self {
         let _span = info_span!("ivc::step", step = self.step.get()).entered();
+
+        let Self {
+            step,
+            primary_acc,
+            primary_trace,
+            primary_z_current,
+            primary_z_0,
+            support_acc,
+            _p,
+        } = self;
+
+        let mut random_oracle = ro();
+        let (primary_next_acc, primary_proof) = ProtoGalaxy::prove(
+            &pp.primary_ck,
+            &pp.protogalaxy_prover_params(),
+            &mut random_oracle,
+            primary_acc.clone(),
+            &[primary_trace.clone()],
+        )
+        .unwrap();
+
+        let gamma = random_oracle.squeeze::<CMain::ScalarExt>(MAX_BITS);
+
+        let [l0, l1] = lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, 1)
+            .take(2)
+            .map(|v| util::fe_to_fe(&v).unwrap())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let (support_next_acc, paired_incoming) = {
+            let _support = info_span!("support").entered();
+
+            let traces = primary_acc
+                .u
+                .W_commitments
+                .iter()
+                .zip_eq(primary_trace.u.W_commitments.iter())
+                .map(|(acc_W, inc_W)| {
+                    support_circuit::InstanceInput::<CMain> {
+                        p0: *acc_W,
+                        p1: *inc_W,
+                        l0,
+                        l1,
+                    }
+                    .into_instance()
+                })
+                .map(|instances| {
+                    #[cfg(test)]
+                    {
+                        let _mock = info_span!("mock-debug").entered();
+                        crate::halo2_proofs::dev::MockProver::run(
+                            SupportCircuit::<CMain>::MIN_K_TABLE_SIZE,
+                            &SupportCircuit::<CMain>::default(),
+                            instances.clone(),
+                        )
+                        .unwrap()
+                        .verify()
+                        .unwrap();
+                    }
+
+                    let witness = CircuitRunner::<CMain::Base, _>::new(
+                        SupportCircuit::<CMain>::MIN_K_TABLE_SIZE,
+                        SupportCircuit::<CMain>::default(),
+                        instances.clone(),
+                    )
+                    .try_collect_witness()
+                    .unwrap();
+
+                    SangriaFS::<CSup>::generate_plonk_trace(
+                        &pp.support_ck,
+                        &instances,
+                        &witness,
+                        &pp.sangria_prover_params(),
+                        &mut ro(),
+                    )
+                    .unwrap()
+                });
+
+            let mut new_acc = support_acc.clone();
+            let mut paired_incoming = vec![];
+            for trace in traces {
+                let (next_acc, proof) = SangriaFS::<CSup>::prove(
+                    &pp.support_ck,
+                    &pp.sangria_prover_params(),
+                    &mut ro(),
+                    new_acc,
+                    &[trace.clone()],
+                )
+                .unwrap();
+
+                paired_incoming.push((trace.u, proof));
+
+                new_acc = next_acc;
+            }
+
+            (new_acc, paired_incoming)
+        };
+
+        let primary_z_next = sc
+            .process_step(&primary_z_current, pp.primary_k_table_size)
+            .unwrap();
+
+        let primary_sfc = StepFoldingCircuit::<'_, ARITY, CMain, CSup, SC> {
+            sc,
+            input: sfc::InputBuilder {
+                step: 0,
+                pp_digest: pp.csup_pp_digest(),
+                z_i: primary_z_current,
+                z_0: primary_z_0,
+                self_incoming: &primary_trace.u,
+                self_proof: primary_proof,
+                paired_acc: &support_acc.U,
+                paired_incoming: paired_incoming.as_slice(),
+                self_acc: &primary_acc.into(),
+            }
+            .build(),
+            _p: PhantomData,
+        };
+
+        let primary_instances = primary_sfc.instances(
+            &primary_next_acc.clone().into(),
+            &support_next_acc.U,
+            &primary_z_next,
+        );
+
+        #[cfg(test)]
+        {
+            let _mock = info_span!("mock-debug").entered();
+            crate::halo2_proofs::dev::MockProver::run(
+                pp.primary_k_table_size,
+                &primary_sfc,
+                primary_instances.clone(),
+            )
+            .unwrap()
+            .verify()
+            .unwrap();
+        }
+
+        let primary_witness = CircuitRunner::new(
+            pp.primary_k_table_size,
+            primary_sfc,
+            primary_instances.clone(),
+        )
+        .try_collect_witness()
+        .unwrap();
+
+        let primary_next_trace = ProtoGalaxy::<CMain, 1>::generate_plonk_trace(
+            &pp.primary_ck,
+            &primary_instances,
+            &primary_witness,
+            &pp.protogalaxy_prover_params(),
+            &mut ro(),
+        )
+        .unwrap();
+
+        Self {
+            step: step.saturating_add(1),
+            primary_acc: primary_next_acc,
+            primary_trace: primary_next_trace,
+            primary_z_current: primary_z_next,
+            primary_z_0,
+            support_acc: support_next_acc,
+            _p,
+        }
     }
 }
 
@@ -248,6 +412,7 @@ mod tests {
         );
         info!("pp created");
 
-        let _ivc = super::IVC::new(&pp, &sc, array::from_fn(|_| C1Scalar::ZERO));
+        let ivc = super::IVC::new(&pp, &sc, array::from_fn(|_| C1Scalar::ZERO));
+        ivc.next(&pp, &sc);
     }
 }

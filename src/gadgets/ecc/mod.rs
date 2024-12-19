@@ -230,10 +230,6 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
             .inspect_err(|err| {
                 error!("Failed to conditionally select lhs_non_zero in scalar_mul: {err:?}")
             })?;
-        trace!(
-            "after `conditional_select` for lhs_non_zero offset is {}",
-            ctx.offset()
-        );
 
         let mut p = unsafe {
             self.gate
@@ -249,39 +245,27 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
                     error!("Failed to add points in iteration {i} of scalar_mul: {err:?}")
                 })?
             };
-            trace!(
-                "after `unchecked_add` in iteration {i} offset is {}",
-                ctx.offset()
-            );
 
             acc = AssignedPoint {
-            x: self
-                .gate
-                .conditional_select(ctx, &tmp.x, &acc.x, bit)
-                .inspect_err(|err| error!(
-                    "Failed to conditionally select x-coordinate in iteration {i} of scalar_mul: {err:?}"
-                ))?,
-            y: self
-                .gate
-                .conditional_select(ctx, &tmp.y, &acc.y, bit)
-                .inspect_err(|err| error!(
-                    "Failed to conditionally select y-coordinate in iteration {i} of scalar_mul: {err:?}"
-                ))?,
-        };
-            trace!(
-                "after `conditional_select` in iteration {i} offset is {}",
-                ctx.offset()
-            );
+                x: self
+                    .gate
+                    .conditional_select(ctx, &tmp.x, &acc.x, bit)
+                    .inspect_err(|err| error!(
+                        "Failed to conditionally select x-coordinate in iteration {i} of scalar_mul: {err:?}"
+                    ))?,
+                y: self
+                    .gate
+                    .conditional_select(ctx, &tmp.y, &acc.y, bit)
+                    .inspect_err(|err| error!(
+                        "Failed to conditionally select y-coordinate in iteration {i} of scalar_mul: {err:?}"
+                    ))?,
+            };
 
             p = unsafe {
                 self.gate.unchecked_double(ctx, &p).inspect_err(|err| {
                     error!("Failed to double point p in iteration {i} of scalar_mul: {err:?}")
                 })?
             };
-            trace!(
-                "after `unchecked_double` in iteration {i} offset is {}",
-                ctx.offset()
-            );
         }
 
         let res: AssignedPoint<C> = {
