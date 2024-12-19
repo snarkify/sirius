@@ -6,7 +6,9 @@ use rayon::prelude::*;
 use some_to_err::ErrOr;
 use tracing::*;
 
-pub use self::accumulator::{FoldablePlonkInstance, FoldablePlonkTrace, RelaxedPlonkInstance};
+pub use self::accumulator::{
+    FoldablePlonkInstance, FoldablePlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace,
+};
 pub use crate::plonk::PlonkInstance;
 use crate::{
     commitment::{self, CommitmentKey},
@@ -19,7 +21,7 @@ use crate::{
         plonk::Error as Halo2Error,
     },
     ivc::{instances_accumulator_computation, Instances},
-    nifs::sangria::accumulator::{RelaxedPlonkTrace, RelaxedPlonkWitness},
+    nifs::sangria::accumulator::RelaxedPlonkWitness,
     plonk::{
         self,
         eval::{Error as EvalError, GetDataForEval, PlonkEvalDomain},

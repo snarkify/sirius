@@ -357,6 +357,7 @@ impl<F: PrimeField> Gate<F> {
         ctx.assign_fixed(|| "one", *rc, F::ZERO)?;
 
         ctx.next();
+
         Ok(out)
     }
 
@@ -498,6 +499,7 @@ impl<F: PrimeField> Gate<F> {
         assert_eq!(num.value().unwrap(), input.value().unwrap());
 
         ctx.constrain_equal(input.cell(), num.cell())?;
+        assert_eq!(input.value(), num.value());
 
         Ok(bits)
     }

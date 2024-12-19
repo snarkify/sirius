@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
 use itertools::Itertools;
-use tracing::{error, info};
+use tracing::{error, info, info_span, instrument};
 
 use crate::{
     halo2_proofs::{
@@ -19,6 +19,7 @@ use crate::{
         StepCircuit,
     },
     main_gate::{MainGate, MainGateConfig, RegionCtx},
+    nifs,
     poseidon::{ROCircuitTrait, ROTrait},
 };
 
@@ -28,6 +29,8 @@ pub use input::{Input, InputBuilder};
 pub mod sangria_adapter;
 
 use crate::halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
+
+use super::support_circuit;
 
 const MAIN_GATE_T: usize = 5;
 
@@ -39,6 +42,7 @@ pub struct Config<SCC> {
     mg: MainGateConfig<MAIN_GATE_T>,
 }
 
+#[derive(Debug)]
 pub struct StepFoldingCircuit<
     'sc,
     const ARITY: usize,
@@ -56,20 +60,38 @@ impl<
         CMain: CurveAffine,
         CSup: CurveAffine<Base = CMain::ScalarExt>,
         SC: StepCircuit<ARITY, CMain::ScalarExt>,
+    > Clone for StepFoldingCircuit<'_, ARITY, CMain, CSup, SC>
+{
+    fn clone(&self) -> Self {
+        let Self { sc, input, _p } = self;
+
+        Self {
+            sc,
+            input: input.clone(),
+            _p: PhantomData,
+        }
+    }
+}
+
+impl<
+        const ARITY: usize,
+        CMain: CurveAffine,
+        CSup: CurveAffine<Base = CMain::ScalarExt>,
+        SC: StepCircuit<ARITY, CMain::ScalarExt>,
     > StepFoldingCircuit<'_, ARITY, CMain, CSup, SC>
 where
     CMain::ScalarExt: PrimeFieldBits + FromUniformBytes<64>,
 {
     /// For the initial iteration, we will give the same accumulators that we take from the input
     pub fn initial_instances(&self) -> Vec<Vec<CMain::ScalarExt>> {
-        let mut input = self.input.clone();
+        let mut self_ = self.input.clone();
         assert_eq!(
-            input.step, 0,
+            self_.step, 0,
             "this method can only be called for step == 0"
         );
 
-        input.step = 1;
-        let out_marker = cyclefold::ro().absorb(&input).output(
+        self_.step = 1;
+        let out_marker = cyclefold::ro().absorb(&self_).output(
             NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
         );
 
@@ -78,9 +100,25 @@ where
         instances
     }
 
-    pub fn instances(&self, expected_out: CMain::ScalarExt) -> Vec<Vec<CMain::ScalarExt>> {
+    pub fn instances(
+        &self,
+        self_acc: &nifs::protogalaxy::AccumulatorInstance<CMain>,
+        paired_acc: &nifs::sangria::RelaxedPlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
+        z_out: &[CMain::ScalarExt; ARITY],
+    ) -> Vec<Vec<CMain::ScalarExt>> {
+        let mut self_ = self.input.clone();
+
+        self_.step += 1;
+        self_.self_trace.input_accumulator = input::ProtoGalaxyAccumulatorInstance::new(self_acc);
+        self_.paired_trace.input_accumulator = input::SangriaAccumulatorInstance::new(paired_acc);
+        self_.z_i = *z_out;
+
+        let out_marker = cyclefold::ro().absorb(&self_).output(
+            NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
+        );
+
         let mut instances = self.sc.instances();
-        instances.insert(0, vec![expected_out]);
+        instances.insert(0, vec![out_marker]);
         instances
     }
 }
@@ -116,15 +154,19 @@ where
         }
     }
 
+    #[instrument(skip_all)]
     fn synthesize(
         &self,
         config: Self::Config,
         mut layouter: impl Layouter<CMain::ScalarExt>,
     ) -> Result<(), Halo2PlonkError> {
         info!("start");
+
         let input = layouter.assign_region(
             || "sfc input",
             |region| {
+                let _span = info_span!("input").entered();
+
                 let mut region = RegionCtx::new(region, 0);
 
                 input::assigned::Input::assign_advice_from(&mut region, &self.input, &config.mg)?
@@ -133,13 +175,16 @@ where
         )?;
         info!("sfc input done");
 
-        let z_out = self
-            .sc
-            .synthesize_step(config.sc, &mut layouter, &input.z_i)
-            .map_err(|err| {
-                error!("while synthesize_step: {err:?}");
-                Halo2PlonkError::Synthesis
-            })?;
+        let z_out = {
+            let _span = info_span!("sc").entered();
+
+            self.sc
+                .synthesize_step(config.sc, &mut layouter, &input.z_i)
+                .map_err(|err| {
+                    error!("while synthesize_step: {err:?}");
+                    Halo2PlonkError::Synthesis
+                })
+        }?;
 
         info!("step circuit synthesize done");
 
@@ -147,11 +192,12 @@ where
             layouter.assign_region(
                 || "sfc protogalaxy",
                 |region| {
+                    let _span = info_span!("protogalaxy").entered();
                     let mut region = RegionCtx::new(region, 0);
 
                     let VerifyResult {
-                        result_acc,
-                        poly_L_values: _,
+                        mut result_acc,
+                        poly_L_values,
                     } = protogalaxy::verify_chip::verify(
                         &mut region,
                         config.mg.clone(),
@@ -168,16 +214,17 @@ where
                         Halo2PlonkError::Synthesis
                     })?;
 
-                    //input.pairing_check(
-                    //    &mut region,
-                    //    &config.mg,
-                    //    &poly_L_values,
-                    //    &mut result_acc,
-                    //)?;
+                    input.pairing_check(
+                        &mut region,
+                        &config.mg,
+                        &poly_L_values,
+                        &mut result_acc,
+                    )?;
 
                     Ok(result_acc)
                 },
             )?;
+
         info!("protogalaxy done");
 
         let paired_acc_out: input::assigned::SangriaAccumulatorInstance<CMain::ScalarExt> =
@@ -185,6 +232,7 @@ where
                 .assign_region(
                     || "sfc sangria",
                     |region| {
+                        let _span = info_span!("sangria").entered();
                         sangria_adapter::fold::<CMain, CSup>(
                             &mut RegionCtx::new(region, 0),
                             config.mg.clone(),
@@ -198,9 +246,10 @@ where
 
         info!("sangria done");
 
-        let _consistency_marker_output = layouter.assign_region(
-            || "sfc out",
+        let consistency_marker_output = layouter.assign_region(
+            || "sfc out consistency marker",
             |region| {
+                let _span = info_span!("out consistency marker").entered();
                 let mut region = RegionCtx::new(region, 0);
 
                 let mg = MainGate::new(config.mg.clone());
@@ -253,11 +302,11 @@ where
 
         info!("out done");
 
-        //layouter.constrain_instance(
-        //    consistency_marker_output.cell(),
-        //    config.consistency_marker,
-        //    0,
-        //)?;
+        layouter.constrain_instance(
+            consistency_marker_output.cell(),
+            config.consistency_marker,
+            0,
+        )?;
 
         Ok(())
     }

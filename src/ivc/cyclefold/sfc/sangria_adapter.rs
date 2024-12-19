@@ -17,7 +17,7 @@ use crate::{
         plonk::Error as Halo2PlonkError,
     },
     ivc::{
-        cyclefold::{ro_chip, DEFAULT_LIMBS_COUNT_LIMIT, DEFAULT_LIMB_WIDTH},
+        cyclefold::{ro_chip, DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
         fold_relaxed_plonk_instance_chip::{self, BigUintView, FoldRelaxedPlonkInstanceChip},
     },
     main_gate::{MainGate, MainGateConfig, RegionCtx},
@@ -29,7 +29,7 @@ fn bn_chip<F: PrimeField>(main_gate_config: MainGateConfig<MAIN_GATE_T>) -> BigU
     BigUintMulModChip::new(
         main_gate_config.into_smaller_size().unwrap(),
         DEFAULT_LIMB_WIDTH,
-        DEFAULT_LIMBS_COUNT_LIMIT,
+        DEFAULT_LIMBS_COUNT,
     )
 }
 
@@ -49,7 +49,7 @@ fn module_as_bn<F1: PrimeField, F2: PrimeField>() -> Result<BigUint<F1>, big_uin
         )
         .unwrap(),
         DEFAULT_LIMB_WIDTH,
-        DEFAULT_LIMBS_COUNT_LIMIT,
+        DEFAULT_LIMBS_COUNT,
     )
 }
 
@@ -150,7 +150,9 @@ where
                             )
                             .inspect_err(|err| {
                                 error!("Error while folding instance cells in fold: {err:?}")
-                            })?;
+                            })?
+                            .try_into()
+                            .unwrap();
 
                             Ok(())
                         })?;
@@ -173,7 +175,9 @@ where
                     &r_as_bn,
                     DEFAULT_LIMB_WIDTH,
                 )
-                .inspect_err(|err| error!("Error while folding challenges in fold: {err:?}"))?;
+                .inspect_err(|err| error!("Error while folding challenges in fold: {err:?}"))?
+                .try_into()
+                .unwrap();
 
                 Ok(())
             })
