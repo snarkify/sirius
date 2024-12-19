@@ -68,139 +68,97 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
             .gate
             .is_infinity_point(ctx, &lhs.x, &lhs.y)
             .inspect_err(|err| error!("while is_infinity p: {err:?}"))?;
-        trace!("after `is_infinity_point` for p offset is {}", ctx.offset());
 
         let is_rhs_inf = self
             .gate
             .is_infinity_point(ctx, &rhs.x, &rhs.y)
             .inspect_err(|err| error!("while is_infinity q: {err:?}"))?;
-        trace!("after `is_infinity_point` for q offset is {}", ctx.offset());
 
-        let is_equal_x = self
+        let is_x_equal = self
             .gate
             .is_equal_term(ctx, &lhs.x, &rhs.x)
             .inspect_err(|err| error!("while is_equal p.x == q.x: {err:?}"))?;
-        trace!(
-            "after `is_equal_term` for p.x == q.x offset is {}",
-            ctx.offset()
-        );
 
-        let is_equal_y = self
+        let is_y_equal = self
             .gate
             .is_equal_term(ctx, &lhs.y, &rhs.y)
             .inspect_err(|err| error!("while is_equal p.y == q.y: {err:?}"))?;
-
-        trace!(
-            "after `is_equal_term` for p.y == q.y offset is {}",
-            ctx.offset()
-        );
 
         let inf = self
             .gate
             .assign_point::<C, _>(ctx, || "inf", None)
             .inspect_err(|err| error!("while assigning point `inf`: {err:?}"))?;
-        trace!("after `assign_point` for `inf` offset is {}", ctx.offset());
 
-        // Нужно переделать логику
-        // Не использовать результат только если is_equal_x
-        // А вызывать функцию с правильными параметрами
-        // Для этого надо разобраться с тем как сумма точек работает
         let unchecked_add_result = {
-            //let p_input = self.conditional_select(ctx, p, p, &is_equal_x)?;
-            //let q_input = self.conditional_select(ctx, q, p, &is_equal_x)?;
+            let one_one_p = self.gate.assign_point::<C, _>(
+                ctx,
+                || "one-one",
+                Some((C::Base::ONE, C::Base::ONE)),
+            )?;
+
+            let two = C::Base::ONE + C::Base::ONE;
+            let two_two_p = self
+                .gate
+                .assign_point::<C, _>(ctx, || "two-two", Some((two, two)))?;
+
+            let lhs_input = self.conditional_select(ctx, &one_one_p, lhs, &is_x_equal)?;
+            let rhs_input = self.conditional_select(ctx, &two_two_p, rhs, &is_x_equal)?;
 
             // # Safety:
             // We check at the bottom of this fn, what p.x == q.x
-            unsafe { self.gate.unchecked_add(ctx, &lhs, &rhs) }
+            //
+            // If they are equal, we add the points one_one & two_two so that the safety
+            // condition is satisfied
+            unsafe { self.gate.unchecked_add(ctx, &lhs_input, &rhs_input) }
                 .inspect_err(|err| error!("while unchecked add p & q: {err:?}"))
         }?;
 
-        trace!("after `unchecked_add` for p & q offset is {}", ctx.offset());
-
         let doubled_lhs = self.double(ctx, lhs)?;
-        trace!("after `double` for p offset is {}", ctx.offset());
 
         let x1 = self
             .gate
-            .conditional_select(ctx, &doubled_lhs.x, &inf.x, &is_equal_y)
+            .conditional_select(ctx, &doubled_lhs.x, &inf.x, &is_y_equal)
             .inspect_err(|err| error!("while conditional select p2.x & inf.x: {err:?}"))?;
-
-        trace!(
-            "after `conditional_select` for p2.x & inf.x offset is {}",
-            ctx.offset()
-        );
 
         let y1 = self
             .gate
-            .conditional_select(ctx, &doubled_lhs.y, &inf.y, &is_equal_y)
+            .conditional_select(ctx, &doubled_lhs.y, &inf.y, &is_y_equal)
             .inspect_err(|err| error!("while conditional select p2.y & inf.y: {err:?}"))?;
-
-        trace!(
-            "after `conditional_select` for p2.y & inf.y offset is {}",
-            ctx.offset()
-        );
 
         let x2 = self
             .gate
-            .conditional_select(ctx, &x1, &unchecked_add_result.x, &is_equal_x)
+            .conditional_select(ctx, &x1, &unchecked_add_result.x, &is_x_equal)
             .inspect_err(|err| error!("while conditional select x1 & r.x: {err:?}"))?;
-
-        trace!(
-            "after `conditional_select` for x1 & r.x offset is {}",
-            ctx.offset()
-        );
 
         let y2 = self
             .gate
-            .conditional_select(ctx, &y1, &unchecked_add_result.y, &is_equal_x)
+            .conditional_select(ctx, &y1, &unchecked_add_result.y, &is_x_equal)
             .inspect_err(|err| error!("while conditional select y1 & r.y: {err:?}"))?;
-
-        trace!(
-            "after `conditional_select` for y1 & r.y offset is {}",
-            ctx.offset()
-        );
 
         let x3 = self
             .gate
             .conditional_select(ctx, &lhs.x, &x2, &is_rhs_inf)
             .inspect_err(|err| error!("while conditional select p.x & x2: {err:?}"))?;
 
-        trace!(
-            "after `conditional_select` for p.x & x2 offset is {}",
-            ctx.offset()
-        );
-
         let y3 = self
             .gate
             .conditional_select(ctx, &lhs.y, &y2, &is_rhs_inf)
             .inspect_err(|err| error!("while conditional select p.y & y2: {err:?}"))?;
-
-        trace!(
-            "after `conditional_select` for p.y & y2 offset is {}",
-            ctx.offset()
-        );
 
         let result_x = self
             .gate
             .conditional_select(ctx, &rhs.x, &x3, &is_lhs_inf)
             .inspect_err(|err| error!("while conditional select q.x & x3: {err:?}"))?;
 
-        trace!(
-            "after `conditional_select` for q.x & x3 offset is {}",
-            ctx.offset()
-        );
-
         let result_y = self
             .gate
             .conditional_select(ctx, &rhs.y, &y3, &is_lhs_inf)
             .inspect_err(|err| error!("while conditional select q.y & y3: {err:?}"))?;
 
-        trace!(
-            "after `conditional_select` for q.y & y3 offset is {}",
-            ctx.offset()
-        );
-
-        Ok(AssignedPoint { x: result_x, y: result_y })
+        Ok(AssignedPoint {
+            x: result_x,
+            y: result_y,
+        })
     }
 
     fn double(

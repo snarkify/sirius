@@ -171,7 +171,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        halo2_proofs::dev::MockProver,
+        halo2_proofs::{dev::MockProver, halo2curves::group::prime::PrimeCurveAffine},
         prelude::{bn256::C1Affine as Curve, Field},
     };
 
@@ -200,6 +200,25 @@ mod tests {
             SupportCircuit::<Curve>::MIN_K_TABLE_SIZE,
             &circuit,
             InstanceInput { p0, l0, p1, l1 }.into_instance(),
+        )
+        .unwrap()
+        .verify()
+        .unwrap();
+    }
+
+    #[traced_test]
+    #[test]
+    fn e2e_zero() {
+        MockProver::run(
+            SupportCircuit::<Curve>::MIN_K_TABLE_SIZE,
+            &SupportCircuit::<Curve>::default(),
+            InstanceInput::<Curve> {
+                p0: Curve::identity(),
+                l0: Field::ZERO,
+                p1: Curve::identity(),
+                l1: Field::ZERO,
+            }
+            .into_instance(),
         )
         .unwrap()
         .verify()
