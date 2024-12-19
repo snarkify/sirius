@@ -5,14 +5,14 @@ use halo2_proofs::{
     halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
 };
 use itertools::Itertools;
-use tracing::{error, trace};
+use tracing::{error, info, info_span, trace};
 
 use crate::{
     gadgets::nonnative::bn::big_uint_mul_mod_chip::BigUintMulModChip,
     halo2_proofs::plonk::Error as Halo2PlonkError,
     ivc::{
         self,
-        cyclefold::{ro_chip, DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
+        cyclefold::{ro_chip, support_circuit, DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
     },
     main_gate::{self, AdviceCyclicAssignor, AssignedValue, MainGate, RegionCtx, WrapValue},
     poseidon::ROCircuitTrait,
@@ -20,7 +20,7 @@ use crate::{
 
 pub type MainGateConfig = main_gate::MainGateConfig<{ super::super::MAIN_GATE_T }>;
 
-pub type BigUint<F> = Vec<F>;
+pub type BigUint<F> = [F; DEFAULT_LIMBS_COUNT.get()];
 
 pub type BigUintPoint<F> = ivc::protogalaxy::verify_chip::BigUintPoint<F>;
 pub type NativePlonkInstance<F> = ivc::protogalaxy::verify_chip::AssignedPlonkInstance<F>;
@@ -270,11 +270,14 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
                 instance
                     .iter()
                     .map(|value| {
-                        assigner.assign_all_advice(
-                            region,
-                            || "instances",
-                            value.limbs().iter().copied(),
-                        )
+                        Ok(assigner
+                            .assign_all_advice(
+                                region,
+                                || "instances",
+                                value.limbs().iter().copied(),
+                            )?
+                            .try_into()
+                            .unwrap())
                     })
                     .collect::<Result<Vec<_>, _>>()
             })
@@ -283,11 +286,10 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
         let challenges = challenges
             .iter()
             .map(|challenge| {
-                assigner.assign_all_advice(
-                    region,
-                    || "challenges",
-                    challenge.limbs().iter().cloned(),
-                )
+                Ok(assigner
+                    .assign_all_advice(region, || "challenges", challenge.limbs().iter().cloned())?
+                    .try_into()
+                    .unwrap())
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
@@ -341,11 +343,13 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
                     .iter()
                     .zip_eq(r_instance.iter())
                     .map(|(l_val, r_val)| {
-                        l_val
+                        Ok(l_val
                             .iter()
                             .zip_eq(r_val.iter())
                             .map(|(l, r)| mg.conditional_select(region, l, r, cond))
-                            .collect()
+                            .collect::<Result<Vec<_>, _>>()?
+                            .try_into()
+                            .unwrap())
                     })
                     .collect::<Result<Vec<_>, _>>()
             })
@@ -355,10 +359,13 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
             .iter()
             .zip(rhs_challenges.iter())
             .map(|(lbn, rbn)| {
-                lbn.iter()
+                Ok(lbn
+                    .iter()
                     .zip_eq(rbn.iter())
                     .map(|(l, r)| mg.conditional_select(region, l, r, cond))
-                    .collect()
+                    .collect::<Result<Vec<_>, _>>()?
+                    .try_into()
+                    .unwrap())
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
@@ -711,35 +718,37 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         );
 
         let mg = MainGate::new(main_gate_config.clone());
-        let is_zero_term = mg.is_zero_term(region, self.step.clone())?;
+        let is_zero_step = mg.is_zero_term(region, self.step.clone())?;
 
         let zero = region.assign_advice(|| "", main_gate_config.state[0], Value::known(F::ZERO))?;
         region.next();
 
-        let expected_l0 = mg.conditional_select(region, &zero, &poly_L_values[0], &is_zero_term)?;
-        let expected_l0 = bn_chip
+        let expected_l0 = mg.conditional_select(region, &zero, &poly_L_values[0], &is_zero_step)?;
+        let expected_l0_limbs = bn_chip
             .from_assigned_cell_to_limbs(region, &expected_l0)
             .map_err(|err| {
                 error!("while make from L0 biguint form: {err:?}");
                 Halo2PlonkError::Synthesis
             })?;
 
-        let expected_l1 = mg.conditional_select(region, &zero, &poly_L_values[1], &is_zero_term)?;
-        let expected_l1 = bn_chip
+        let expected_l1 = mg.conditional_select(region, &zero, &poly_L_values[1], &is_zero_step)?;
+        let expected_l1_limbs = bn_chip
             .from_assigned_cell_to_limbs(region, &expected_l1)
             .map_err(|err| {
                 error!("while make from L1 biguint form: {err:?}");
                 Halo2PlonkError::Synthesis
             })?;
 
-        dbg!(&self.self_trace.input_accumulator.ins.W_commitments);
-        for (acc_W, incoming_W, trace, new_acc_W) in itertools::multizip((
+        for (acc_W, incoming_W, trace, new_acc_W, index) in itertools::multizip((
             self.self_trace.input_accumulator.ins.W_commitments.iter(),
             self.self_trace.incoming.W_commitments.iter(),
             self.paired_trace.incoming.iter(),
             new_acc.ins.W_commitments.iter_mut(),
+            0..,
         )) {
-            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1] = trace.instance
+            info!("start {index} commitment check");
+
+            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1]: [_; support_circuit::INSTANCES_LEN] = trace.instance
                 .instances
                 .first()
                 .expect("`SupportCircuit` always has instances.len() == 1 and it should always be used for sfc")
@@ -748,33 +757,19 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
                 .unwrap();
 
             l0.iter()
-                .zip_eq(expected_l0.iter())
+                .zip_eq(expected_l0_limbs.iter())
                 .try_for_each(|(l, r)| region.constrain_equal(l.cell(), r.cell()))?;
 
             l1.iter()
-                .zip_eq(expected_l1.iter())
+                .zip_eq(expected_l1_limbs.iter())
                 .try_for_each(|(l, r)| region.constrain_equal(l.cell(), r.cell()))?;
 
-            BigUintPoint::constrain_equal(
-                region,
-                acc_W,
-                &BigUintPoint {
-                    x: x0.try_into().unwrap(),
-                    y: y0.try_into().unwrap(),
-                },
-            )?;
-            BigUintPoint::constrain_equal(
-                region,
-                incoming_W,
-                &BigUintPoint {
-                    x: x1.try_into().unwrap(),
-                    y: y1.try_into().unwrap(),
-                },
-            )?;
+            BigUintPoint::constrain_equal(region, acc_W, &BigUintPoint { x: x0, y: y0 })?;
+            BigUintPoint::constrain_equal(region, incoming_W, &BigUintPoint { x: x1, y: y1 })?;
 
             *new_acc_W = BigUintPoint {
-                x: expected_x.try_into().unwrap(),
-                y: expected_y.try_into().unwrap(),
+                x: expected_x,
+                y: expected_y,
             };
         }
 

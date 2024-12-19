@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
 use itertools::Itertools;
-use tracing::{error, info};
+use tracing::{error, info, info_span, instrument};
 
 use crate::{
     halo2_proofs::{
@@ -135,15 +135,19 @@ where
         }
     }
 
+    #[instrument(skip_all)]
     fn synthesize(
         &self,
         config: Self::Config,
         mut layouter: impl Layouter<CMain::ScalarExt>,
     ) -> Result<(), Halo2PlonkError> {
         info!("start");
+
         let input = layouter.assign_region(
             || "sfc input",
             |region| {
+                let _span = info_span!("input").entered();
+
                 let mut region = RegionCtx::new(region, 0);
 
                 input::assigned::Input::assign_advice_from(&mut region, &self.input, &config.mg)?
@@ -152,13 +156,16 @@ where
         )?;
         info!("sfc input done");
 
-        let z_out = self
-            .sc
-            .synthesize_step(config.sc, &mut layouter, &input.z_i)
-            .map_err(|err| {
-                error!("while synthesize_step: {err:?}");
-                Halo2PlonkError::Synthesis
-            })?;
+        let z_out = {
+            let _span = info_span!("sc").entered();
+
+            self.sc
+                .synthesize_step(config.sc, &mut layouter, &input.z_i)
+                .map_err(|err| {
+                    error!("while synthesize_step: {err:?}");
+                    Halo2PlonkError::Synthesis
+                })
+        }?;
 
         info!("step circuit synthesize done");
 
@@ -166,6 +173,7 @@ where
             layouter.assign_region(
                 || "sfc protogalaxy",
                 |region| {
+                    let _span = info_span!("protogalaxy").entered();
                     let mut region = RegionCtx::new(region, 0);
 
                     let VerifyResult {
@@ -197,6 +205,7 @@ where
                     Ok(result_acc)
                 },
             )?;
+
         info!("protogalaxy done");
 
         let paired_acc_out: input::assigned::SangriaAccumulatorInstance<CMain::ScalarExt> =
@@ -204,6 +213,7 @@ where
                 .assign_region(
                     || "sfc sangria",
                     |region| {
+                        let _span = info_span!("sangria").entered();
                         sangria_adapter::fold::<CMain, CSup>(
                             &mut RegionCtx::new(region, 0),
                             config.mg.clone(),
@@ -218,8 +228,9 @@ where
         info!("sangria done");
 
         let consistency_marker_output = layouter.assign_region(
-            || "sfc out",
+            || "sfc out consistency marker",
             |region| {
+                let _span = info_span!("out consistency marker").entered();
                 let mut region = RegionCtx::new(region, 0);
 
                 let mg = MainGate::new(config.mg.clone());

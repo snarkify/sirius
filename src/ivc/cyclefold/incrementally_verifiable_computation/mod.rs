@@ -137,6 +137,7 @@ where
 
         #[cfg(test)]
         {
+            let _mock = info_span!("mock-debug").entered();
             crate::halo2_proofs::dev::MockProver::run(
                 pp.primary_k_table_size,
                 &primary_sfc,

@@ -150,7 +150,9 @@ where
                             )
                             .inspect_err(|err| {
                                 error!("Error while folding instance cells in fold: {err:?}")
-                            })?;
+                            })?
+                            .try_into()
+                            .unwrap();
 
                             Ok(())
                         })?;
@@ -173,7 +175,9 @@ where
                     &r_as_bn,
                     DEFAULT_LIMB_WIDTH,
                 )
-                .inspect_err(|err| error!("Error while folding challenges in fold: {err:?}"))?;
+                .inspect_err(|err| error!("Error while folding challenges in fold: {err:?}"))?
+                .try_into()
+                .unwrap();
 
                 Ok(())
             })

@@ -1,6 +1,7 @@
 use std::{iter, marker::PhantomData};
 
 use serde::Serialize;
+use tracing::info_span;
 
 use crate::{
     constants::NUM_HASH_BITS,
@@ -83,6 +84,7 @@ where
             PlonkStructure<CMain::Base>,
             FoldablePlonkTrace<CSup, { support_circuit::INSTANCES_LEN }>,
         ) = {
+            let _support = info_span!("support").entered();
             // Since I want to scalar_multiply points for main::sfc, I take `CMain` as the main curve here
             // CMain::Base or CSupport::Scalar (native for suppport_circuit)
             //
@@ -97,6 +99,7 @@ where
 
             #[cfg(test)]
             {
+                let _mock = info_span!("mock-debug").entered();
                 crate::halo2_proofs::dev::MockProver::run(
                     SupportCircuit::<CMain>::MIN_K_TABLE_SIZE,
                     &SupportCircuit::<CMain>::default(),
@@ -132,7 +135,9 @@ where
             )
         };
 
-        let (primary_S, primary_initial_trace) = {
+        let _primary = info_span!("primary").entered();
+
+        let (primary_S, mut primary_initial_trace) = {
             let num_io = iter::once(1)
                 .chain(primary_sc.instances().iter().map(|col| col.len()))
                 .collect::<Box<[_]>>();
@@ -157,6 +162,7 @@ where
 
             #[cfg(test)]
             {
+                let _mock = info_span!("mock-debug").entered();
                 crate::halo2_proofs::dev::MockProver::run(
                     k_table_size,
                     &mock_sfc,
@@ -200,7 +206,14 @@ where
             )
         };
 
+        // These values will not be used, only formally collapsed in step zero So we can nullify
+        // `W_commitment`, for simplicity of calling `support_circuit` at step zero
+        primary_initial_trace.u.W_commitments.iter_mut().for_each(|W| {
+            *W = CMain::identity();
+        });
+
         let digest_bytes = {
+            let _digest = info_span!("digest").entered();
             use serde::Serialize;
 
             #[derive(Serialize)]

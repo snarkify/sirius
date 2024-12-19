@@ -219,13 +219,11 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
             .inspect_err(|err| {
                 error!("Failed to check if lhs is infinity in scalar_mul: {err:?}")
             })?;
-        trace!("after `is_infinity_point` offset is {}", ctx.offset());
 
         let one_point = self
             .gate
             .assign_point(ctx, || "one point", Some((C::Base::ONE, C::Base::ONE)))
             .inspect_err(|err| error!("Failed to assign one point in scalar_mul: {err:?}"))?;
-        trace!("after `assign_point` offset is {}", ctx.offset());
 
         let lhs_non_zero = self
             .conditional_select(ctx, &one_point, lhs, &is_lhs_infinity)
@@ -244,7 +242,6 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
                     error!("Failed to double initial point in scalar_mul: {err:?}")
                 })?
         };
-        trace!("after `unchecked_double` offset is {}", ctx.offset());
 
         for (i, bit) in incomplete_bits.iter().skip(1).enumerate() {
             let tmp = unsafe {
@@ -292,38 +289,28 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
                 let neg = self.negate(ctx, &lhs_non_zero).inspect_err(|err| {
                     error!("Failed to negate initial point in scalar_mul: {err:?}")
                 })?;
-                trace!("after `negate` offset is {}", ctx.offset());
 
                 self.add(ctx, &acc, &neg).inspect_err(|err| {
                     error!("Failed to add acc and negated point in scalar_mul: {err:?}")
                 })?
             };
 
-            trace!(
-                "after `add` for acc_minus_initial offset is {}",
-                ctx.offset()
-            );
-
             let x = self
                 .gate
                 .conditional_select(ctx, &acc.x, &acc_minus_initial.x, &scalar_bits[0])
                 .inspect_err(|err| {
                     error!(
-                "Failed to conditionally select x-coordinate for correction in scalar_mul: {err:?}"
-            )
+                        "Failed to conditionally select x-coordinate for correction in scalar_mul: {err:?}"
+                    )
                 })?;
             let y = self
                 .gate
                 .conditional_select(ctx, &acc.y, &acc_minus_initial.y, &scalar_bits[0])
                 .inspect_err(|err| {
                     error!(
-                "Failed to conditionally select y-coordinate for correction in scalar_mul: {err:?}"
-            )
+                        "Failed to conditionally select y-coordinate for correction in scalar_mul: {err:?}"
+                    )
                 })?;
-            trace!(
-                "after `conditional_select` for correction offset is {}",
-                ctx.offset()
-            );
 
             AssignedPoint { x, y }
         };
@@ -332,10 +319,6 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
             .gate
             .assign_point::<C, _>(ctx, || "infp", None)
             .inspect_err(|err| error!("Failed to assign infinity point in scalar_mul: {err:?}"))?;
-        trace!(
-            "after `assign_point` for infinity point offset is {}",
-            ctx.offset()
-        );
 
         let is_p_iden = self
             .gate
@@ -343,31 +326,23 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
             .inspect_err(|err| {
                 error!("Failed to check if point is infinity in scalar_mul: {err:?}")
             })?;
-        trace!(
-            "after `is_infinity_point` for infinity case offset is {}",
-            ctx.offset()
-        );
 
         let x = self
             .gate
             .conditional_select(ctx, &infp.x, &res.x, &is_p_iden)
             .inspect_err(|err| {
                 error!(
-            "Failed to conditionally select x-coordinate for infinity case in scalar_mul: {err:?}"
-        )
+                    "Failed to conditionally select x-coordinate for infinity case in scalar_mul: {err:?}"
+                )
             })?;
         let y = self
             .gate
             .conditional_select(ctx, &infp.y, &res.y, &is_p_iden)
             .inspect_err(|err| {
                 error!(
-            "Failed to conditionally select y-coordinate for infinity case in scalar_mul: {err:?}"
-        )
+                    "Failed to conditionally select y-coordinate for infinity case in scalar_mul: {err:?}"
+                )
             })?;
-        trace!(
-            "after `conditional_select` for infinity case offset is {}",
-            ctx.offset()
-        );
 
         acc = AssignedPoint { x, y };
 
@@ -377,10 +352,6 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
                     "Failed to add acc and p in complete_bits iteration {i} of scalar_mul: {err:?}"
                 )
             })?;
-            trace!(
-                "after `add` in complete_bits iteration {i} offset is {}",
-                ctx.offset()
-            );
 
             let x = self
             .gate
@@ -394,22 +365,14 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
             .inspect_err(|err| error!(
                 "Failed to conditionally select y-coordinate in complete_bits iteration {i} of scalar_mul: {err:?}"
             ))?;
-            trace!(
-                "after `conditional_select` in complete_bits iteration {i} offset is {}",
-                ctx.offset()
-            );
 
             acc = AssignedPoint { x, y };
 
             p = self.double(ctx, &p).inspect_err(|err| {
                 error!(
-            "Failed to double point p in complete_bits iteration {i} of scalar_mul: {err:?}"
-        )
+                    "Failed to double point p in complete_bits iteration {i} of scalar_mul: {err:?}"
+                )
             })?;
-            trace!(
-                "after `double` in complete_bits iteration {i} offset is {}",
-                ctx.offset()
-            );
         }
 
         self.conditional_select(ctx, lhs, &acc, &is_lhs_infinity)
