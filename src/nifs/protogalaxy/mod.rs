@@ -243,23 +243,35 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
 pub struct ProverParam<C: CurveAffine> {
     pub(crate) S: PlonkStructure<C::ScalarExt>,
     /// Digest of public parameter of IVC circuit
-    pub(crate) pp_digest: C,
+    pub(crate) pp_digest: (C::Base, C::Base),
 }
 
 impl<C: CurveAffine, RO: ROTrait<C::ScalarExt>> AbsorbInRO<C::ScalarExt, RO> for ProverParam<C> {
     fn absorb_into(&self, ro: &mut RO) {
-        ro.absorb_point(&self.pp_digest);
+        let Self {
+            S: _,
+            pp_digest: (x, y),
+        } = self;
+
+        let pp_digest = [util::fe_to_fe(x).unwrap(), util::fe_to_fe(y).unwrap()];
+
+        ro.absorb_field_iter(pp_digest.into_iter());
     }
 }
 
 pub struct VerifierParam<C: CurveAffine> {
     /// Digest of public parameter of IVC circuit
-    pub(crate) pp_digest: C,
+    pub(crate) pp_digest: (C::Base, C::Base),
 }
 
 impl<C: CurveAffine, RO: ROTrait<C::ScalarExt>> AbsorbInRO<C::ScalarExt, RO> for VerifierParam<C> {
     fn absorb_into(&self, ro: &mut RO) {
-        ro.absorb_point(&self.pp_digest);
+        let (x, y) = (
+            util::fe_to_fe(&self.pp_digest.0).unwrap(),
+            util::fe_to_fe(&self.pp_digest.0).unwrap(),
+        );
+
+        ro.absorb_field(x).absorb_field(y);
     }
 }
 
@@ -284,6 +296,8 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         pp_digest: C,
         S: PlonkStructure<C::ScalarExt>,
     ) -> Result<(ProverParam<C>, VerifierParam<C>), Error> {
+        let pp_digest = pp_digest.coordinates().map(|c| (*c.x(), *c.y())).unwrap();
+
         Ok((ProverParam { S, pp_digest }, VerifierParam { pp_digest }))
     }
 

@@ -28,6 +28,7 @@ use crate::{
     poseidon::{PoseidonHash, ROTrait, Spec},
     prelude::CommitmentKey,
     table::CircuitRunner,
+    util,
 };
 
 pub struct PublicParams<const A1: usize, const A2: usize, CMain, CSup, SC>
@@ -127,7 +128,7 @@ where
                     &support_cr.try_collect_witness().unwrap(),
                     &nifs::sangria::ProverParam {
                         S: support_cr.try_collect_plonk_structure().unwrap(),
-                        pp_digest: CSup::identity(),
+                        pp_digest: (CSup::Base::ZERO, CSup::Base::ZERO),
                     },
                     &mut ro(),
                 )
@@ -198,7 +199,7 @@ where
                     &primary_cr.try_collect_witness().unwrap(),
                     &nifs::protogalaxy::ProverParam {
                         S: primary_cr.try_collect_plonk_structure().unwrap(),
-                        pp_digest: CMain::identity(),
+                        pp_digest: (CMain::Base::ZERO, CMain::Base::ZERO),
                     },
                     &mut ro(),
                 )
@@ -260,35 +261,29 @@ where
         digest::into_curve_from_bits(&self.digest_bytes, NUM_HASH_BITS)
     }
 
-    pub fn csup_pp_digest(&self) -> CSup {
-        digest::into_curve_from_bits(&self.digest_bytes, NUM_HASH_BITS)
-    }
-
-    pub fn cmain_pp_digest_coordinates(&self) -> (CMain::Base, CMain::Base) {
+    pub fn pp_digest_coordinates<F: PrimeField>(&self) -> (F, F) {
         self.cmain_pp_digest()
             .coordinates()
-            .map(|c| (*c.x(), *c.y()))
-            .unwrap()
-    }
-
-    pub fn csup_pp_digest_coordinates(&self) -> (CSup::Base, CSup::Base) {
-        self.csup_pp_digest()
-            .coordinates()
-            .map(|c| (*c.x(), *c.y()))
+            .map(|c| {
+                (
+                    util::fe_to_fe(c.x()).unwrap(),
+                    util::fe_to_fe(c.y()).unwrap(),
+                )
+            })
             .unwrap()
     }
 
     pub fn protogalaxy_prover_params(&self) -> nifs::protogalaxy::ProverParam<CMain> {
         nifs::protogalaxy::ProverParam {
             S: self.primary_S.clone(),
-            pp_digest: self.cmain_pp_digest(),
+            pp_digest: self.pp_digest_coordinates(),
         }
     }
 
     pub fn sangria_prover_params(&self) -> nifs::sangria::ProverParam<CSup> {
         nifs::sangria::ProverParam {
             S: self.support_S.clone(),
-            pp_digest: self.csup_pp_digest(),
+            pp_digest: self.pp_digest_coordinates(),
         }
     }
 }

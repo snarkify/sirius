@@ -726,7 +726,7 @@ pub struct InputBuilder<
     CSup: CurveAffine,
     const ARITY: usize,
 > {
-    pub pp_digest: CSup,
+    pub pp_digest: (CSup::Base, CSup::Base),
     pub step: usize,
 
     pub self_acc: &'link nifs::protogalaxy::AccumulatorInstance<CMain>,
@@ -761,10 +761,7 @@ impl<CMain: CurveAffine<ScalarExt = CSup::Base>, CSup: CurveAffine, const ARITY:
         } = self;
 
         Input {
-            pp_digest: {
-                let c = pp_digest.coordinates().unwrap();
-                (*c.x(), *c.y())
-            },
+            pp_digest,
             step,
             z_0,
             z_i,

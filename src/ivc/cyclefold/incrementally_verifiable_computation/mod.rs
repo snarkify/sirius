@@ -125,7 +125,7 @@ where
             sc,
             input: sfc::InputBuilder {
                 step: 0,
-                pp_digest: pp.csup_pp_digest(),
+                pp_digest: pp.pp_digest_coordinates(),
                 self_incoming: &pp.primary_initial_trace.u,
                 self_proof,
                 paired_acc: &pp.support_initial_trace.u.clone().into(),
@@ -292,7 +292,7 @@ where
             sc,
             input: sfc::InputBuilder {
                 step: 0,
-                pp_digest: pp.csup_pp_digest(),
+                pp_digest: pp.pp_digest_coordinates(),
                 z_i: primary_z_current,
                 z_0: primary_z_0,
                 self_incoming: &primary_trace.u,

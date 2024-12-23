@@ -67,7 +67,7 @@ pub struct VanillaFS<C: CurveAffine, const MARKERS_LEN: usize = 2> {
 pub struct ProverParam<C: CurveAffine> {
     pub(crate) S: PlonkStructure<C::ScalarExt>,
     /// digest of public parameter of IVC circuit
-    pub pp_digest: C,
+    pub pp_digest: (C::Base, C::Base),
 }
 
 impl<C: CurveAffine, const MARKERS_LEN: usize> VanillaFS<C, MARKERS_LEN>
@@ -157,14 +157,15 @@ where
     /// Absorb all fields into RandomOracle `RO` & generate challenge based on that
     #[instrument(skip_all)]
     pub(crate) fn generate_challenge(
-        pp_digest: &C,
+        pp_digest: &(C::Base, C::Base),
         ro_acc: &mut impl ROTrait<C::Base>,
         U1: &RelaxedPlonkInstance<C, MARKERS_LEN>,
         U2: &PlonkInstance<C>,
         cross_term_commits: &[C],
     ) -> Result<<C as CurveAffine>::ScalarExt, Error> {
         Ok(ro_acc
-            .absorb_point(pp_digest)
+            .absorb_field(pp_digest.0)
+            .absorb_field(pp_digest.1)
             .absorb(U1)
             .absorb(U2)
             .absorb_point_iter(cross_term_commits.iter())
@@ -188,7 +189,15 @@ pub enum Error {
     NoConsistencyMarkers,
 }
 
-pub type VerifierParam<C> = C;
+pub struct VerifierParam<C: CurveAffine> {
+    pp_digest: (C::Base, C::Base),
+}
+
+impl<C: CurveAffine> From<(C::Base, C::Base)> for VerifierParam<C> {
+    fn from(pp_digest: (C::Base, C::Base)) -> Self {
+        Self { pp_digest }
+    }
+}
 
 impl<C: CurveAffine, const MARKERS_LEN: usize> VanillaFS<C, MARKERS_LEN>
 where
@@ -198,7 +207,12 @@ where
         pp_digest: C,
         S: PlonkStructure<C::ScalarExt>,
     ) -> Result<(ProverParam<C>, VerifierParam<C>), Error> {
-        Ok((ProverParam { S, pp_digest }, pp_digest))
+        let pp_digest = {
+            let c = pp_digest.coordinates().unwrap();
+            (*c.x(), *c.y())
+        };
+
+        Ok((ProverParam { S, pp_digest }, VerifierParam { pp_digest }))
     }
 
     #[instrument(skip_all)]
@@ -284,7 +298,7 @@ where
 
         U2.sps_verify(ro_nark)?;
 
-        let r = VanillaFS::generate_challenge(vp, ro_acc, U1, U2, cross_term_commits)?;
+        let r = VanillaFS::generate_challenge(&vp.pp_digest, ro_acc, U1, U2, cross_term_commits)?;
 
         Ok(U1.fold(U2, cross_term_commits, &r))
     }

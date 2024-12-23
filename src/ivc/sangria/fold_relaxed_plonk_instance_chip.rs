@@ -1177,7 +1177,7 @@ mod tests {
     /// as the number of required rows in the table grows.
     const NUM_OF_FOLD_ROUNDS: usize = 3;
     /// 2 ^ K is count of table rows in [`TableData`]
-    const K: u32 = 20;
+    const K: u32 = 21;
 
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(64) };
     const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
@@ -1828,9 +1828,9 @@ mod tests {
 
         let mut relaxed = RelaxedPlonkInstance::new(NUM_CHALLENGES, NUM_WITNESS);
 
+        let pp_hash = C1::random(&mut rnd);
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
             let input_plonk = generate_random_plonk_instance(&mut rnd);
-            let pp_hash = C1::random(&mut rnd);
             let cross_term_commits = random_curve_vec(&mut rnd);
 
             let on_circuit_relaxed = layouter
@@ -1888,6 +1888,8 @@ mod tests {
         const K: usize = 5;
 
         let mut ro = PoseidonHash::new(spec.clone());
+
+        let pp_hash = pp_hash.coordinates().map(|c| (*c.x(), *c.y())).unwrap();
 
         VanillaFS::generate_challenge(&pp_hash, &mut ro, relaxed, input, cross_term_commits)
             .unwrap()

@@ -660,9 +660,8 @@ pub mod verify_chip {
             vp: &protogalaxy::VerifierParam<C>,
         ) -> Result<Self, Error> {
             let protogalaxy::VerifierParam { pp_digest } = vp;
-            let c = pp_digest.coordinates().unwrap();
-            let x = util::fe_to_fe(c.x()).unwrap();
-            let y = util::fe_to_fe(c.y()).unwrap();
+            let x = util::fe_to_fe(&pp_digest.0).unwrap();
+            let y = util::fe_to_fe(&pp_digest.1).unwrap();
 
             let mut assigner = main_gate_config.advice_cycle_assigner::<C::ScalarExt>();
             Ok(Self {
@@ -1103,7 +1102,7 @@ pub mod verify_chip {
                 dev::MockProver,
                 plonk::{Circuit, ConstraintSystem},
             },
-            halo2curves::{bn256::G1Affine as Affine1, group::prime::PrimeCurveAffine},
+            halo2curves::bn256::G1Affine as Affine1,
             ivc::cyclefold::{ro, ro_chip},
             main_gate::MainGate,
             nifs::{
@@ -1119,6 +1118,7 @@ pub mod verify_chip {
         const RATE: usize = T - 1;
         const K: usize = 14;
 
+        type Base = <Affine1 as CurveAffine>::Base;
         type Scalar = <Affine1 as CurveAffine>::ScalarExt;
 
         fn get_witness_collector() -> (WitnessCollector<Scalar>, MainGateConfig<T>) {
@@ -1141,7 +1141,7 @@ pub mod verify_chip {
         impl Mock {
             fn new() -> Self {
                 let params = VerifierParam::<Affine1> {
-                    pp_digest: Affine1::identity(),
+                    pp_digest: (Base::ZERO, Base::ZERO),
                 };
 
                 let acc = nifs::protogalaxy::Accumulator::<Affine1>::new(
