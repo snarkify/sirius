@@ -218,7 +218,7 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::plonk::PlonkInstance`]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct AssignedPlonkInstance<F: PrimeField> {
         pub W_commitments: Vec<BigUintPoint<AssignedValue<F>>>,
         pub instances: Vec<Vec<AssignedValue<F>>>,
@@ -348,7 +348,7 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::nifs::protogalaxy::accumulator::AccumulatorInstance`]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct AssignedAccumulatorInstance<F: PrimeField> {
         pub ins: AssignedPlonkInstance<F>,
         pub betas: Box<[AssignedValue<F>]>,
@@ -719,15 +719,25 @@ pub mod verify_chip {
                 .absorb_iter(vp.iter_wrap_value())
                 .absorb_iter(accumulator.iter_wrap_values())
                 .absorb_iter(incoming.iter().flat_map(|tr| tr.iter_wrap_values()))
+                .inspect(|buf| trace!("buf before delta: {buf:?}"))
                 .squeeze(region)?;
 
             let alpha = ro_circuit
                 .absorb_iter(proof.poly_F.iter_wrap_value())
+                .inspect(|buf| trace!("buf before alpha: {buf:?}"))
                 .squeeze(region)?;
 
             let gamma = ro_circuit
                 .absorb_iter(proof.poly_K.iter_wrap_value())
+                .inspect(|buf| trace!("buf before gamma: {buf:?}"))
                 .squeeze(region)?;
+
+            debug!(
+                "delta: {delta:?}, alpha: {alpha:?}, gamma: {gamma:?}",
+                delta = delta.value(),
+                alpha = alpha.value(),
+                gamma = gamma.value(),
+            );
 
             Ok(AssignedChallanges {
                 delta,

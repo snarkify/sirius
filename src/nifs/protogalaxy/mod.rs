@@ -1,13 +1,14 @@
 use std::{iter, marker::PhantomData};
 
 use itertools::Itertools;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, instrument, trace, warn};
 
 use crate::{
     commitment::CommitmentKey,
     constants::MAX_BITS,
     ff::PrimeField,
     halo2_proofs::arithmetic::{self, CurveAffine, Field},
+    ivc::protogalaxy::verify_chip::BigUintPoint,
     nifs::protogalaxy::poly::PolyContext,
     plonk::{self, PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness},
     polynomial::{lagrange, sparse, univariate::UnivariatePoly},
@@ -42,18 +43,51 @@ pub(crate) struct Challenges<F: PrimeField> {
     pub gamma: F,
 }
 
+/// Wrap to properly (consistent with on-circuit) absorb inside ro
+struct PlonkInstanceWrapper<'l, C: CurveAffine>(&'l PlonkInstance<C>);
+
+impl<C: CurveAffine, D: PrimeField, RO: ROTrait<D>> AbsorbInRO<D, RO> for PlonkInstanceWrapper<'_, C> {
+    fn absorb_into(&self, ro: &mut RO) {
+        let PlonkInstance {
+            W_commitments,
+            instances,
+            challenges,
+        } = &self.0;
+
+        ro.absorb_field_iter(
+            W_commitments
+                .iter()
+                .flat_map(|W_commitment| {
+                    let BigUintPoint { x, y } = BigUintPoint::new(W_commitment).unwrap();
+                    x.into_iter().chain(y)
+                })
+                .chain(
+                    instances
+                        .iter()
+                        .flat_map(|instance| instance.iter())
+                        .copied(),
+                )
+                .chain(challenges.iter().copied())
+                .map(|b| crate::util::fe_to_fe(&b).unwrap()),
+        );
+    }
+}
+
 impl<F: PrimeField> Challenges<F> {
     #[instrument(skip_all)]
-    pub(crate) fn generate_one<'i, D: PrimeField, RO: ROTrait<D>, C: CurveAffine>(
+    fn generate_one<'i, D: PrimeField, RO: ROTrait<D>, C: CurveAffine>(
         params: &impl AbsorbInRO<D, RO>,
         ro_acc: &mut RO,
         accumulator: &impl AbsorbInRO<D, RO>,
         instances: impl Iterator<Item = &'i PlonkInstance<C>>,
     ) -> <C as CurveAffine>::ScalarExt {
+        let instances = instances.map(|i| PlonkInstanceWrapper(i)).collect::<Box<[_]>>();
+
         ro_acc
             .absorb(params)
             .absorb(accumulator)
-            .absorb_iter(instances)
+            .absorb_iter(instances.iter())
+            .inspect(|buf| trace!("buf before delta: {buf:?}"))
             .squeeze::<C::ScalarExt>(MAX_BITS)
     }
 
@@ -366,6 +400,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
 
         let alpha = ro_acc
             .absorb_field_iter(poly_F.iter().map(|v| util::fe_to_fe(v).unwrap()))
+            .inspect(|buf| trace!("buf before alpha: {buf:?}"))
             .squeeze::<C::ScalarExt>(MAX_BITS);
 
         let betas_stroke = poly::PolyChallenges {
@@ -386,15 +421,10 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
 
         let gamma = ro_acc
             .absorb_field_iter(poly_K.iter().map(|v| util::fe_to_fe(v).unwrap()))
+            .inspect(|buf| trace!("buf before gamma: {buf:?}"))
             .squeeze::<C::ScalarExt>(MAX_BITS);
 
-        debug!(
-            "
-            delta: {delta:?},
-            alpha: {alpha:?},
-            gamma: {gamma:?},
-        "
-        );
+        debug!("delta: {delta:?}, alpha: {alpha:?}, gamma: {gamma:?}");
 
         let polys_L_in_gamma =
             lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, ctx.lagrange_domain())

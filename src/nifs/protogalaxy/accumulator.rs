@@ -1,10 +1,9 @@
 use std::{iter, ops::Deref};
 
-use halo2_proofs::halo2curves::ff::PrimeField;
-
 use crate::{
     ff::Field,
     halo2curves::CurveAffine,
+    ivc::protogalaxy::verify_chip::BigUintPoint,
     plonk::{self, PlonkInstance, PlonkTrace, PlonkWitness},
     poseidon::{AbsorbInRO, ROTrait},
 };
@@ -35,14 +34,9 @@ impl<C: CurveAffine> Deref for Accumulator<C> {
     }
 }
 
-impl<C: CurveAffine, F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for Accumulator<C> {
+impl<C: CurveAffine, RO: ROTrait<C::ScalarExt>> AbsorbInRO<C::ScalarExt, RO> for Accumulator<C> {
     fn absorb_into(&self, ro: &mut RO) {
-        ro.absorb(&self.trace.u).absorb_field_iter(
-            self.betas
-                .iter()
-                .chain(iter::once(&self.e))
-                .map(|b| crate::util::fe_to_fe(b).unwrap()),
-        );
+        AccumulatorInstance::from(self.clone()).absorb_into(ro);
     }
 }
 
@@ -107,7 +101,29 @@ impl<C: CurveAffine, RO: ROTrait<C::ScalarExt>> AbsorbInRO<C::ScalarExt, RO>
     for AccumulatorInstance<C>
 {
     fn absorb_into(&self, ro: &mut RO) {
-        ro.absorb(&self.ins)
-            .absorb_field_iter(self.betas.iter().chain(iter::once(&self.e)).copied());
+        let PlonkInstance {
+            W_commitments,
+            instances,
+            challenges,
+        } = &self.ins;
+
+        ro.absorb_field_iter(
+            W_commitments
+                .iter()
+                .flat_map(|W_commitment| {
+                    let BigUintPoint { x, y } = BigUintPoint::new(W_commitment).unwrap();
+                    x.into_iter().chain(y)
+                })
+                .chain(
+                    instances
+                        .iter()
+                        .flat_map(|instance| instance.iter())
+                        .copied(),
+                )
+                .chain(challenges.iter().copied())
+                .chain(self.betas.iter().copied())
+                .chain(iter::once(self.e))
+                .map(|b| crate::util::fe_to_fe(&b).unwrap()),
+        );
     }
 }
