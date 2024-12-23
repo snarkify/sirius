@@ -291,7 +291,7 @@ where
         let primary_sfc = StepFoldingCircuit::<'_, ARITY, CMain, CSup, SC> {
             sc,
             input: sfc::InputBuilder {
-                step: 0,
+                step: step.get(),
                 pp_digest: pp.pp_digest_coordinates(),
                 z_i: primary_z_current,
                 z_0: primary_z_0,
