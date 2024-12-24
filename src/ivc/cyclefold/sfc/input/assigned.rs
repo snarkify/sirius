@@ -1,4 +1,4 @@
-use std::iter;
+use std::{fmt, iter};
 
 use halo2_proofs::{
     circuit::Value,
@@ -240,6 +240,41 @@ pub struct PairedPlonkInstance<F: PrimeField> {
     pub(crate) challenges: Vec<BigUint<AssignedValue<F>>>,
 }
 
+impl<F: PrimeField + fmt::Debug> fmt::Debug for PairedPlonkInstance<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[derive(Debug)]
+        pub struct PairedPlonkInstanceValue<'l, F: PrimeField> {
+            pub(crate) W_commitments: Vec<(Value<&'l F>, Value<&'l F>)>,
+            pub(crate) instances: Vec<Vec<BigUint<Value<F>>>>,
+            pub(crate) challenges: Vec<BigUint<Value<F>>>,
+        }
+
+        PairedPlonkInstanceValue {
+            W_commitments: self
+                .W_commitments
+                .iter()
+                .map(|(x, y)| (x.value(), y.value()))
+                .collect(),
+            instances: self
+                .instances
+                .iter()
+                .map(|instance| {
+                    instance
+                        .iter()
+                        .map(|v| v.clone().map(|v| v.value().copied()))
+                        .collect()
+                })
+                .collect(),
+            challenges: self
+                .challenges
+                .iter()
+                .map(|cha| cha.clone().map(|v| v.value().copied()))
+                .collect(),
+        }
+        .fmt(f)
+    }
+}
+
 impl<F: PrimeField> PairedPlonkInstance<F> {
     fn assign_advice_from(
         region: &mut RegionCtx<'_, F>,
@@ -396,7 +431,7 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SangriaAccumulatorInstance<F: PrimeField> {
     pub(crate) ins: PairedPlonkInstance<F>,
     pub(crate) E_commitment: (AssignedValue<F>, AssignedValue<F>),
@@ -494,6 +529,7 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
 
 pub type SangriaCrossTermCommits<F> = Vec<(AssignedValue<F>, AssignedValue<F>)>;
 
+#[derive(Debug)]
 pub struct PairedIncoming<F: PrimeField> {
     pub instance: PairedPlonkInstance<F>,
     pub proof: SangriaCrossTermCommits<F>,
@@ -544,6 +580,7 @@ impl<F: PrimeField> PairedIncoming<F> {
     }
 }
 
+#[derive(Debug)]
 pub struct PairedTrace<F: PrimeField> {
     pub input_accumulator: SangriaAccumulatorInstance<F>,
     // The size from one to three
@@ -758,11 +795,23 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
 
             l0.iter()
                 .zip_eq(expected_l0_limbs.iter())
-                .try_for_each(|(l, r)| region.constrain_equal(l.cell(), r.cell()))?;
+                .enumerate()
+                .try_for_each(|(i, (l, r))| {
+                    if l.value() != r.value() {
+                        error!("l0 limb[{i}] not equal: {:?} != {:?}", l.value(), r.value());
+                    }
+                    region.constrain_equal(l.cell(), r.cell())
+                })?;
 
             l1.iter()
                 .zip_eq(expected_l1_limbs.iter())
-                .try_for_each(|(l, r)| region.constrain_equal(l.cell(), r.cell()))?;
+                .enumerate()
+                .try_for_each(|(i, (l, r))| {
+                    if l.value() != r.value() {
+                        error!("l1 limb[{i}] not equal: {:?} != {:?}", l.value(), r.value());
+                    }
+                    region.constrain_equal(l.cell(), r.cell())
+                })?;
 
             BigUintPoint::constrain_equal(region, acc_W, &BigUintPoint { x: x0, y: y0 })?;
             BigUintPoint::constrain_equal(region, incoming_W, &BigUintPoint { x: x1, y: y1 })?;
@@ -786,6 +835,11 @@ pub fn iter_consistency_marker_wrap_values<'l, const ARITY: usize, F: PrimeField
     z_i: &'l [AssignedValue<F>; ARITY],
 ) -> impl 'l + Iterator<Item = WrapValue<F>> {
     let (pp0, pp1) = pp_digest;
+
+    trace!(
+        "oncircuit input protogalaxy accumulator: {:?}",
+        self_accumulator
+    );
 
     self_accumulator
         .iter_wrap_values()

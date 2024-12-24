@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use num_traits::Num;
-use tracing::error;
+use tracing::{debug, error};
 
 use super::{input, MAIN_GATE_T};
 use crate::{
@@ -20,7 +20,7 @@ use crate::{
         cyclefold::{ro_chip, DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
         fold_relaxed_plonk_instance_chip::{self, BigUintView, FoldRelaxedPlonkInstanceChip},
     },
-    main_gate::{MainGate, MainGateConfig, RegionCtx},
+    main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx},
     nifs::sangria,
     poseidon::ROCircuitTrait,
 };
@@ -56,6 +56,10 @@ fn module_as_bn<F1: PrimeField, F2: PrimeField>() -> Result<BigUint<F1>, big_uin
 pub fn fold<CMain: CurveAffine, CSup: CurveAffine<Base = CMain::ScalarExt>>(
     region: &mut RegionCtx<CMain::ScalarExt>,
     config: MainGateConfig<MAIN_GATE_T>,
+    pp_digest: &(
+        AssignedValue<CMain::ScalarExt>,
+        AssignedValue<CMain::ScalarExt>,
+    ),
     input: &input::assigned::PairedTrace<CMain::ScalarExt>,
 ) -> Result<input::assigned::SangriaAccumulatorInstance<CMain::ScalarExt>, Halo2PlonkError>
 where
@@ -65,10 +69,17 @@ where
     let ecc_chip = ecc_chip::<CSup>(config.clone());
     let mg = MainGate::new(config.clone());
 
+    debug!("sangria input is: input: {input:?}");
+
     let r = ro_chip(config.clone())
+        .absorb_base(pp_digest.0.clone().into())
+        .absorb_base(pp_digest.1.clone().into())
         .absorb_iter(input.iter_wrap_values())
         .squeeze(region)
+        .inspect(|buf| debug!("before sangria cha: {buf:?}"))
         .inspect_err(|err| error!("Error while computing 'r' in fold: {err:?}"))?;
+
+    debug!("sangria cha: {:?}", r.value());
 
     let r_bits = mg
         .le_num_to_bits(region, r.clone(), MAX_BITS)

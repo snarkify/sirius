@@ -13,7 +13,7 @@ pub use crate::plonk::PlonkInstance;
 use crate::{
     commitment::{self, CommitmentKey},
     concat_vec,
-    constants::NUM_CHALLENGE_BITS,
+    constants::{NUM_CHALLENGE_BITS, MAX_BITS},
     ff::Field,
     halo2_proofs::{
         arithmetic::CurveAffine,
@@ -163,13 +163,18 @@ where
         U2: &PlonkInstance<C>,
         cross_term_commits: &[C],
     ) -> Result<<C as CurveAffine>::ScalarExt, Error> {
+
+        let input = (&U1, &U2, &cross_term_commits);
+        debug!("sangria input is: input: {input:?}");
+
         Ok(ro_acc
             .absorb_field(pp_digest.0)
             .absorb_field(pp_digest.1)
             .absorb(U1)
             .absorb(U2)
             .absorb_point_iter(cross_term_commits.iter())
-            .squeeze::<C::ScalarExt>(NUM_CHALLENGE_BITS))
+            .inspect(|buf| debug!("before sangria cha: {buf:?}"))
+            .squeeze::<C::ScalarExt>(MAX_BITS))
     }
 }
 
@@ -262,6 +267,7 @@ where
             Self::commit_cross_terms(ck, &pp.S, U1, W1, U2, W2)?;
 
         let r = VanillaFS::generate_challenge(&pp.pp_digest, ro_acc, U1, U2, &cross_term_commits)?;
+        debug!("sangria cha: {r:?}");
 
         let U = U1.fold(U2, &cross_term_commits, &r);
         let W = W1.fold(W2, &cross_terms, &r);

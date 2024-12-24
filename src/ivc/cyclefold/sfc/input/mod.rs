@@ -1,5 +1,7 @@
 use std::{array, ops::Deref};
 
+use tracing::trace;
+
 use super::super::{DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH};
 pub use crate::ivc::protogalaxy::verify_chip::BigUintPoint;
 use crate::{
@@ -556,6 +558,11 @@ impl<const ARITY: usize, F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for In
             z_0,
             z_i,
         } = self;
+
+        trace!(
+            "offcircuit input protogalaxy accumulator: {:?}",
+            self_trace.input_accumulator
+        );
 
         ro.absorb(&self_trace.input_accumulator)
             .absorb(&paired_trace.input_accumulator)

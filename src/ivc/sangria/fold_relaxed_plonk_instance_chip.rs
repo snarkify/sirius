@@ -2,7 +2,7 @@
 //!
 //! This module implements the folding mechanism for a relaxed PLONK instance from a PLONKish circuit,
 //! specifically designed to work within the halo2 proof framework. The folding process is
-//! crucial in constructing recursive SNARKs, enabling the combination of multiple instances into
+//! crucial in constructing recursive SNARKs, enabling the combination of multiple innstances into
 //! a single proof.
 //!
 //! ## Overview

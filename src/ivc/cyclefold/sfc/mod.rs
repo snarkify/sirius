@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
 use itertools::Itertools;
-use tracing::{error, info, info_span, instrument};
+use tracing::{error, info, info_span, instrument, trace};
 
 use crate::{
     halo2_proofs::{
@@ -28,9 +28,8 @@ pub use input::{Input, InputBuilder};
 
 pub mod sangria_adapter;
 
-use crate::halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
-
 use super::support_circuit;
+use crate::halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 
 const MAIN_GATE_T: usize = 5;
 
@@ -106,6 +105,8 @@ where
         paired_acc: &nifs::sangria::RelaxedPlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
         z_out: &[CMain::ScalarExt; ARITY],
     ) -> Vec<Vec<CMain::ScalarExt>> {
+        let _span = info_span!("consistency marker").entered();
+
         let mut self_ = self.input.clone();
 
         self_.step += 1;
@@ -113,9 +114,12 @@ where
         self_.paired_trace.input_accumulator = input::SangriaAccumulatorInstance::new(paired_acc);
         self_.z_i = *z_out;
 
-        let out_marker = cyclefold::ro().absorb(&self_).output(
-            NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
-        );
+        let out_marker = cyclefold::ro()
+            .absorb(&self_)
+            .inspect(|buf| trace!("buf before sfc::out: {buf:?}"))
+            .output(
+                NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
+            );
 
         let mut instances = self.sc.instances();
         instances.insert(0, vec![out_marker]);
@@ -236,6 +240,7 @@ where
                         sangria_adapter::fold::<CMain, CSup>(
                             &mut RegionCtx::new(region, 0),
                             config.mg.clone(),
+                            &input.pp_digest,
                             &input.paired_trace,
                         )
                     },
@@ -249,7 +254,7 @@ where
         let consistency_marker_output = layouter.assign_region(
             || "sfc out consistency marker",
             |region| {
-                let _span = info_span!("out consistency marker").entered();
+                let _span = info_span!("consistency marker").entered();
                 let mut region = RegionCtx::new(region, 0);
 
                 let mg = MainGate::new(config.mg.clone());
@@ -296,6 +301,7 @@ where
                         &input.z_0,
                         &z_out,
                     ))
+                    .inspect(|buf| trace!("buf before sfc::out: {buf:?}"))
                     .squeeze(&mut region)
             },
         )?;

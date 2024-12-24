@@ -184,7 +184,7 @@ where
     }
 
     pub fn next(self, pp: &PublicParams<ARITY, ARITY, CMain, CSup, SC>, sc: &SC) -> Self {
-        let _span = info_span!("ivc::step", step = self.step.get()).entered();
+        let _span = info_span!("ivc::next", step = self.step.get()).entered();
 
         let Self {
             step,
