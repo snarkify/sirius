@@ -1154,6 +1154,33 @@ impl<F: PrimeField> BigUintMulModChip<F> {
         Ok(limbs)
     }
 
+    pub fn from_libms_cells_to_value(
+        &self,
+        ctx: &mut RegionCtx<'_, F>,
+        limbs: &[AssignedCell<F, F>],
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let value = match big_uint::BigUint::from_assigned_cells(
+            limbs,
+            self.limb_width,
+            self.limbs_count,
+        ) {
+            Ok(Some(value)) => Value::known(value.into_f().unwrap()),
+            _ => Value::unknown(),
+        };
+
+        let assigned_value = ctx.assign_advice(|| "", self.config().state[0], value)?;
+        ctx.next();
+
+        let assigned_limbs = self.from_assigned_cell_to_limbs(ctx, &assigned_value)?;
+
+        limbs
+            .iter()
+            .zip_eq(assigned_limbs)
+            .try_for_each(|(lhs, rhs)| ctx.constrain_equal(lhs.cell(), rhs.cell()))?;
+
+        Ok(assigned_value)
+    }
+
     /// Performs the multiplication of `lhs` and `rhs` taking into account the `modulus`.
     ///
     /// This method serves as an implementation of modular multiplication in the context

@@ -2,13 +2,17 @@ use std::{array, ops::Deref};
 
 use tracing::trace;
 
-use super::super::{DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH};
 pub use crate::ivc::protogalaxy::verify_chip::BigUintPoint;
+#[cfg(test)]
 use crate::{
     gadgets::nonnative::bn::big_uint::BigUint,
+    ivc::cyclefold::{DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
+};
+use crate::{
     halo2_proofs::halo2curves::{ff::PrimeField, CurveAffine},
     ivc::cyclefold::support_circuit,
-    nifs, plonk,
+    nifs::{self, sangria::accumulator::SCInstancesHashAcc},
+    plonk,
     polynomial::univariate::UnivariatePoly,
     poseidon::{AbsorbInRO, ROTrait},
     util,
@@ -58,8 +62,10 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for NativePlonkInstance<F>
 #[derive(Debug, Clone)]
 pub struct PairedPlonkInstance<F: PrimeField> {
     pub(crate) W_commitments: Vec<(F, F)>,
-    pub(crate) instances: Vec<Vec<BigUint<F>>>,
-    pub(crate) challenges: Vec<BigUint<F>>,
+    // should be bn, but for absorb use original value and make bn oncircuit
+    pub(crate) instances: Vec<Vec<F>>,
+    // should be bn, but for absorb use original value and make bn oncircuit
+    pub(crate) challenges: Vec<F>,
 }
 
 impl<F: PrimeField> PairedPlonkInstance<F> {
@@ -84,23 +90,13 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
                 .map(|instance| {
                     instance
                         .iter()
-                        .map(|value| {
-                            BigUint::from_different_field(
-                                value,
-                                DEFAULT_LIMB_WIDTH,
-                                DEFAULT_LIMBS_COUNT,
-                            )
-                            .unwrap()
-                        })
+                        .map(|value| util::fe_to_fe(value).unwrap())
                         .collect()
                 })
                 .collect(),
             challenges: challenges
                 .iter()
-                .map(|cha| {
-                    BigUint::from_different_field(cha, DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
-                        .unwrap()
-                })
+                .map(|cha| util::fe_to_fe(cha).unwrap())
                 .collect(),
         }
     }
@@ -115,8 +111,13 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for PairedPlonkInstance<F>
         } = self;
 
         ro.absorb_field_iter(W_commitments.iter().flat_map(|(x, y)| [x, y]).copied())
-            .absorb_iter(instances.iter().flatten())
-            .absorb_iter(challenges.iter());
+            .absorb_field_iter(
+                instances
+                    .iter()
+                    .flat_map(|instance| instance.iter())
+                    .chain(challenges.iter())
+                    .copied(),
+            );
     }
 }
 
@@ -254,8 +255,13 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
             challenges,
             E_commitment,
             u,
-            step_circuit_instances_hash_accumulator: _,
+            step_circuit_instances_hash_accumulator,
         } = acc;
+
+        assert_eq!(
+            step_circuit_instances_hash_accumulator,
+            &SCInstancesHashAcc::None
+        );
 
         Self {
             ins: PairedPlonkInstance {
@@ -266,24 +272,13 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
                         (*c.x(), *c.y())
                     })
                     .collect(),
-                // TODO #369 Make markers
                 instances: vec![consistency_markers
                     .iter()
-                    .map(|instance| {
-                        BigUint::from_different_field(
-                            instance,
-                            DEFAULT_LIMB_WIDTH,
-                            DEFAULT_LIMBS_COUNT,
-                        )
-                        .unwrap()
-                    })
+                    .map(|value| util::fe_to_fe(value).unwrap())
                     .collect()],
                 challenges: challenges
                     .iter()
-                    .map(|cha| {
-                        BigUint::from_different_field(cha, DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
-                            .unwrap()
-                    })
+                    .map(|cha| util::fe_to_fe(cha).unwrap())
                     .collect(),
             },
             E_commitment: {
@@ -306,7 +301,8 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SangriaAccumulatorInst
         ro.absorb(ins)
             .absorb_field(*ex)
             .absorb_field(*ey)
-            .absorb_field(*u);
+            .absorb_field(*u)
+            .absorb_field(F::ZERO);
     }
 }
 
@@ -385,24 +381,14 @@ impl<F: PrimeField> PairedTrace<F> {
                 .iter()
                 .map(|col| {
                     col.iter()
-                        .map(|value| {
-                            BigUint::from_different_field(
-                                value,
-                                DEFAULT_LIMB_WIDTH,
-                                DEFAULT_LIMBS_COUNT,
-                            )
-                            .unwrap()
-                        })
+                        .map(|value| util::fe_to_fe(value).unwrap())
                         .collect()
                 })
                 .collect(),
             challenges: paired_plonk_instance
                 .challenges
                 .iter()
-                .map(|value| {
-                    BigUint::from_different_field(value, DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
-                        .unwrap()
-                })
+                .map(|cha| util::fe_to_fe(cha).unwrap())
                 .collect(),
         };
 
@@ -513,8 +499,8 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
             input_accumulator: SangriaAccumulatorInstance {
                 ins: PairedPlonkInstance {
                     W_commitments: vec![(gen.next().unwrap(), gen.next().unwrap()); 1],
-                    instances: vec![vec![random_big_uint(&mut gen); 8]; 1],
-                    challenges: vec![random_big_uint(&mut gen); 1],
+                    instances: vec![vec![gen.next().unwrap(); 8]; 1],
+                    challenges: vec![gen.next().unwrap(); 1],
                 },
                 E_commitment: (gen.next().unwrap(), gen.next().unwrap()),
                 u: gen.next().unwrap(),
@@ -523,8 +509,8 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
                 PairedIncoming {
                     instance: PairedPlonkInstance {
                         W_commitments: vec![(gen.next().unwrap(), gen.next().unwrap()); 1],
-                        instances: vec![vec![random_big_uint(&mut gen); 8]; 1],
-                        challenges: vec![random_big_uint(&mut gen); 1],
+                        instances: vec![vec![gen.next().unwrap(); 8]; 1],
+                        challenges: vec![gen.next().unwrap(); 1],
                     },
                     proof: vec![(gen.next().unwrap(), gen.next().unwrap()); 1],
                 };
@@ -638,12 +624,10 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
                         .ins
                         .instances
                         .iter()
-                        .map(|v| {
-                            vec![BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT); v.len()]
-                        })
+                        .map(|v| vec![F::ZERO; v.len()])
                         .collect(),
                     challenges: vec![
-                        BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT);
+                        F::ZERO;
                         self.paired_trace.input_accumulator.ins.challenges.len()
                     ],
                 },
@@ -664,17 +648,9 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
                             .instance
                             .instances
                             .iter()
-                            .map(|v| {
-                                vec![
-                                    BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT);
-                                    v.len()
-                                ]
-                            })
+                            .map(|v| vec![F::ZERO; v.len()])
                             .collect(),
-                        challenges: vec![
-                            BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT);
-                            incoming.instance.challenges.len()
-                        ],
+                        challenges: vec![F::ZERO; incoming.instance.challenges.len()],
                     },
                     proof: vec![(F::ZERO, F::ZERO); incoming.proof.len()],
                 })

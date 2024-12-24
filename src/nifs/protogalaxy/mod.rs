@@ -46,7 +46,9 @@ pub(crate) struct Challenges<F: PrimeField> {
 /// Wrap to properly (consistent with on-circuit) absorb inside ro
 struct PlonkInstanceWrapper<'l, C: CurveAffine>(&'l PlonkInstance<C>);
 
-impl<C: CurveAffine, D: PrimeField, RO: ROTrait<D>> AbsorbInRO<D, RO> for PlonkInstanceWrapper<'_, C> {
+impl<C: CurveAffine, D: PrimeField, RO: ROTrait<D>> AbsorbInRO<D, RO>
+    for PlonkInstanceWrapper<'_, C>
+{
     fn absorb_into(&self, ro: &mut RO) {
         let PlonkInstance {
             W_commitments,
@@ -81,7 +83,9 @@ impl<F: PrimeField> Challenges<F> {
         accumulator: &impl AbsorbInRO<D, RO>,
         instances: impl Iterator<Item = &'i PlonkInstance<C>>,
     ) -> <C as CurveAffine>::ScalarExt {
-        let instances = instances.map(|i| PlonkInstanceWrapper(i)).collect::<Box<[_]>>();
+        let instances = instances
+            .map(|i| PlonkInstanceWrapper(i))
+            .collect::<Box<[_]>>();
 
         ro_acc
             .absorb(params)

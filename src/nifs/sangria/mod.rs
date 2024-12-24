@@ -13,7 +13,7 @@ pub use crate::plonk::PlonkInstance;
 use crate::{
     commitment::{self, CommitmentKey},
     concat_vec,
-    constants::{NUM_CHALLENGE_BITS, MAX_BITS},
+    constants::NUM_CHALLENGE_BITS,
     ff::Field,
     halo2_proofs::{
         arithmetic::CurveAffine,
@@ -163,9 +163,11 @@ where
         U2: &PlonkInstance<C>,
         cross_term_commits: &[C],
     ) -> Result<<C as CurveAffine>::ScalarExt, Error> {
-
-        let input = (&U1, &U2, &cross_term_commits);
-        debug!("sangria input is: input: {input:?}");
+        let _span = info_span!("sangia cha").entered();
+        debug!("pp: {pp_digest:?}");
+        debug!("U1: {U1:?}");
+        debug!("U2: {U2:?}");
+        debug!("ctc: {cross_term_commits:?}");
 
         Ok(ro_acc
             .absorb_field(pp_digest.0)
@@ -173,8 +175,8 @@ where
             .absorb(U1)
             .absorb(U2)
             .absorb_point_iter(cross_term_commits.iter())
-            .inspect(|buf| debug!("before sangria cha: {buf:?}"))
-            .squeeze::<C::ScalarExt>(MAX_BITS))
+            .inspect(|buf| debug!("buf before: {buf:?}"))
+            .squeeze::<C::ScalarExt>(NUM_CHALLENGE_BITS))
     }
 }
 
@@ -476,20 +478,28 @@ where
         acc: &RelaxedPlonkTrace<C>,
         pub_instances: &[Vec<Vec<<C as CurveAffine>::ScalarExt>>],
     ) -> Result<(), VerifyError> {
-        pub_instances
-            .iter()
-            .fold(
-                instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
-                |acc, instances| {
-                    instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
-                        &acc,
-                        instances.get_step_circuit_instances(),
+        match acc.U.step_circuit_instances_hash_accumulator {
+            accumulator::SCInstancesHashAcc::None => {
+                assert!(pub_instances.iter().all(|instances| instances.get_step_circuit_instances().is_empty()));
+                Ok(())
+            }
+            accumulator::SCInstancesHashAcc::Hash(step_circuit_instances_hash_accumulator) => {
+                pub_instances
+                    .iter()
+                    .fold(
+                        instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
+                        |acc, instances| {
+                            instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
+                                &acc,
+                                instances.get_step_circuit_instances(),
+                            )
+                        },
                     )
-                },
-            )
-            .ne(&acc.U.step_circuit_instances_hash_accumulator)
-            .then_some(VerifyError::InstanceMismatch)
-            .err_or(())
+                    .ne(&step_circuit_instances_hash_accumulator)
+                    .then_some(VerifyError::InstanceMismatch)
+                    .err_or(())
+            }
+        }
     }
 
     /// Comprehensive satisfaction check for an accumulator.

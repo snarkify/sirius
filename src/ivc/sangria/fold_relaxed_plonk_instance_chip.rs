@@ -45,7 +45,6 @@
 
 use std::{iter, num::NonZeroUsize, ops};
 
-use halo2_proofs::circuit::AssignedCell;
 use itertools::Itertools;
 use num_traits::Num;
 use tracing::*;
@@ -61,13 +60,14 @@ use crate::{
             big_uint_mul_mod_chip::{self, BigUintMulModChip, OverflowingBigUint},
         },
     },
+    halo2_proofs::circuit::AssignedCell,
     halo2curves::CurveAffine,
     main_gate::{
         AdviceCyclicAssignor, AssignedBit, AssignedValue, MainGate, MainGateConfig, RegionCtx,
         WrapValue,
     },
     nifs::sangria::{
-        accumulator::{FoldablePlonkInstance, RelaxedPlonkInstance},
+        accumulator::{FoldablePlonkInstance, RelaxedPlonkInstance, SCInstancesHashAcc},
         GetConsistencyMarkers, GetStepCircuitInstances,
     },
     poseidon::ROCircuitTrait,
@@ -114,7 +114,7 @@ pub(crate) struct AssignedRelaxedPlonkInstance<C: CurveAffine, const MARKERS_LEN
 
     /// Assigned value of the step circuit instances hash accumulator
     /// Derived from [`FoldRelaxedPlonkInstanceChip::step_circuit_instances_hash_accumulator`]
-    pub folded_step_circuit_instances_hash_accumulator: AssignedValue<C::Base>,
+    pub folded_step_circuit_instances_hash_accumulator: SCInstancesHashAcc<AssignedValue<C::Base>>,
 }
 
 impl<C: CurveAffine, const MARKERS: usize> AssignedRelaxedPlonkInstance<C, MARKERS> {
@@ -186,12 +186,15 @@ impl<C: CurveAffine, const MARKERS: usize> AssignedRelaxedPlonkInstance<C, MARKE
             .try_into()
             .unwrap();
 
-        let folded_step_circuit_instances_hash_accumulator = gate.conditional_select(
-            region,
+        let folded_step_circuit_instances_hash_accumulator = match SCInstancesHashAcc::zip(
             lhs_step_circuit_instances_hash_accumulator,
             rhs_step_circuit_instances_hash_accumulator,
-            &condition,
-        )?;
+        ) {
+            SCInstancesHashAcc::Hash((lhs, rhs)) => {
+                SCInstancesHashAcc::Hash(gate.conditional_select(region, lhs, rhs, &condition)?)
+            }
+            SCInstancesHashAcc::None => SCInstancesHashAcc::None,
+        };
 
         Ok(Self {
             folded_W,
@@ -307,13 +310,14 @@ impl<C: CurveAffine, const MARKERS_LEN: usize> AssignedRelaxedPlonkInstance<C, M
             E_commitment: unwrap_result_option!(folded_E.to_curve()),
             u: util::fe_to_fe_safe(&unwrap_result_option!(folded_u.value().unwrap().copied()))
                 .expect("fields same bytes len"),
-            step_circuit_instances_hash_accumulator: util::fe_to_fe_safe(&unwrap_result_option!(
-                folded_step_circuit_instances_hash_accumulator
-                    .value()
-                    .unwrap()
-                    .copied()
-            ))
-            .expect("fields same bytes len"),
+            step_circuit_instances_hash_accumulator:
+                match folded_step_circuit_instances_hash_accumulator {
+                    SCInstancesHashAcc::None => SCInstancesHashAcc::None,
+                    SCInstancesHashAcc::Hash(hash) => SCInstancesHashAcc::Hash({
+                        util::fe_to_fe_safe(&unwrap_result_option!(hash.value().unwrap().copied()))
+                            .expect("fields same bytes len")
+                    }),
+                },
         }))
     }
 }
@@ -559,16 +563,22 @@ where
         ctx: &mut RegionCtx<C::Base>,
         config: MainGateConfig<T>,
         input_instances: &[AssignedValue<C::Base>],
-        folded_instances: &AssignedValue<C::Base>,
-    ) -> Result<AssignedValue<C::Base>, Error> {
-        Ok(
-            instances_accumulator_computation::absorb_in_assign_sc_instances_accumulator(
-                ctx,
-                config.into_smaller_size().unwrap(),
-                folded_instances,
-                input_instances,
-            )?,
-        )
+        folded_instances: &SCInstancesHashAcc<AssignedValue<C::Base>>,
+    ) -> Result<SCInstancesHashAcc<AssignedValue<C::Base>>, Error> {
+        Ok(match folded_instances {
+            SCInstancesHashAcc::None => {
+                assert!(input_instances.is_empty());
+                SCInstancesHashAcc::None
+            }
+            SCInstancesHashAcc::Hash(folded_instances) => SCInstancesHashAcc::Hash(
+                instances_accumulator_computation::absorb_in_assign_sc_instances_accumulator(
+                    ctx,
+                    config.into_smaller_size().unwrap(),
+                    folded_instances,
+                    input_instances,
+                )?,
+            ),
+        })
     }
 
     /// Fold [`RelaxedPlonkInstance::challenges`] & [`PlonkInstance::challenges`]
@@ -622,6 +632,8 @@ where
         let gate = MainGate::new(self.config.clone());
 
         let r_value = gate.le_bits_to_num(region, &r)?;
+        debug!("sangria on-circuir r: {:?}", r_value.value());
+
         let r = BigUintView {
             as_bn_limbs: self.bn_chip.from_assigned_cell_to_limbs(region, &r_value)?,
             as_bits: r.clone(),
@@ -767,10 +779,15 @@ where
 
         let assigned_u = assign_diff_field!(&self.relaxed.u, || "relaxed u")?;
 
-        let assigned_step_circuit_instances = assign_diff_field!(
-            &self.relaxed.step_circuit_instances_hash_accumulator,
-            || "relaxed u"
-        )?;
+        let assigned_step_circuit_instances =
+            match self.relaxed.step_circuit_instances_hash_accumulator {
+                SCInstancesHashAcc::None => SCInstancesHashAcc::None,
+                SCInstancesHashAcc::Hash(hash) => {
+                    SCInstancesHashAcc::Hash(assign_diff_field!(&hash, || {
+                        "step_circuit_instances_hash_accumulator"
+                    })?)
+                }
+            };
 
         Ok(AssignedRelaxedPlonkInstance {
             folded_W: assigned_W,
@@ -874,10 +891,15 @@ where
 
         let assigned_u = assign_and_absorb_diff_field!(&self.relaxed.u, || "relaxed u")?;
 
-        let assigned_step_circuit_instances = assign_and_absorb_diff_field!(
-            &self.relaxed.step_circuit_instances_hash_accumulator,
-            || { "step_circuit_instances" }
-        )?;
+        let assigned_step_circuit_instances =
+            match self.relaxed.step_circuit_instances_hash_accumulator {
+                SCInstancesHashAcc::None => SCInstancesHashAcc::None,
+                SCInstancesHashAcc::Hash(hash) => {
+                    SCInstancesHashAcc::Hash(assign_and_absorb_diff_field!(&hash, || {
+                        "step_circuit_instances"
+                    })?)
+                }
+            };
 
         let assigned_relaxed = AssignedRelaxedPlonkInstance {
             folded_W: assigned_W,
@@ -1156,7 +1178,6 @@ mod tests {
     use super::*;
     use crate::{
         commitment::CommitmentKey,
-        constants::MAX_BITS,
         ff::Field,
         halo2curves::{bn256::G1Affine as C1, CurveAffine},
         nifs::sangria::{self, VanillaFS, CONSISTENCY_MARKERS_COUNT},
@@ -1171,7 +1192,8 @@ mod tests {
 
     const T: usize = 6;
     const NUM_WITNESS: usize = 5;
-    const NUM_INSTANCES: usize = CONSISTENCY_MARKERS_COUNT;
+    const NUM_MARKERS: usize = CONSISTENCY_MARKERS_COUNT;
+    const NUM_INSTANCES: usize = 10;
     const NUM_CHALLENGES: usize = 5;
     /// When the number of fold rounds increases, `K` must be increased too
     /// as the number of required rows in the table grows.
@@ -1254,14 +1276,14 @@ mod tests {
                 .collect(),
             instances: iter::once(
                 iter::repeat_with(|| ScalarExt::random(&mut rnd))
-                    .take(NUM_INSTANCES)
+                    .take(NUM_MARKERS)
                     .collect_vec(),
             )
             .chain(
                 iter::repeat_with(|| ScalarExt::random(&mut rnd))
                     .chunks(10)
                     .into_iter()
-                    .take(10)
+                    .take(NUM_INSTANCES)
                     .map(|ch| ch.into_iter().collect_vec())
                     .collect_vec(),
             )
@@ -1366,7 +1388,7 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut plonk = RelaxedPlonkInstance::<C1>::new(0, NUM_WITNESS);
+        let mut plonk = RelaxedPlonkInstance::<C1>::new(0, NUM_WITNESS, 0);
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
             let input_W = random_curve_vec(&mut rnd);
@@ -1385,7 +1407,7 @@ mod tests {
                         Value::known(C1::scalar_to_base(&r).unwrap()),
                     )?;
 
-                    let r = gate.le_num_to_bits(&mut ctx, assigned_r, MAX_BITS)?;
+                    let r = gate.le_num_to_bits(&mut ctx, assigned_r, NUM_CHALLENGE_BITS)?;
 
                     Ok(FoldRelaxedPlonkInstanceChip::<
                             T,
@@ -1446,11 +1468,11 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0);
+        let mut plonk = RelaxedPlonkInstance::<C1>::new(0, 0, 0);
 
         let chip =
             FoldRelaxedPlonkInstanceChip::<T, C1, { sangria::CONSISTENCY_MARKERS_COUNT }>::new(
-                RelaxedPlonkInstance::new(0, 0),
+                RelaxedPlonkInstance::new(0, 0, 0),
                 LIMB_WIDTH,
                 LIMBS_COUNT,
                 config.clone(),
@@ -1532,7 +1554,7 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(0, 0);
+        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(0, 0, 0);
 
         let bn_chip = BigUintMulModChip::<Base>::new(
             config
@@ -1678,7 +1700,7 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(NUM_CHALLENGES, 0);
+        let mut relaxed_plonk = RelaxedPlonkInstance::<C1>::new(NUM_CHALLENGES, 0, 0);
 
         let bn_chip = BigUintMulModChip::<Base>::new(
             config
@@ -1826,7 +1848,7 @@ mod tests {
 
         let spec = Spec::<Base, T, { T - 1 }>::new(10, 10);
 
-        let mut relaxed = RelaxedPlonkInstance::new(NUM_CHALLENGES, NUM_WITNESS);
+        let mut relaxed = RelaxedPlonkInstance::new(NUM_CHALLENGES, NUM_WITNESS, NUM_INSTANCES);
 
         let pp_hash = C1::random(&mut rnd);
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
@@ -1871,6 +1893,7 @@ mod tests {
                 &input_plonk,
                 &cross_term_commits,
             );
+            debug!("sangria off-circuir r: {off_circuit_r:?}");
 
             relaxed = relaxed.fold(&input_plonk, &cross_term_commits, &off_circuit_r);
 

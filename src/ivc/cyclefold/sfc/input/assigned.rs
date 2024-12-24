@@ -1,15 +1,15 @@
 use std::{fmt, iter};
 
-use halo2_proofs::{
-    circuit::Value,
-    halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
-};
 use itertools::Itertools;
 use tracing::{error, info, trace};
 
 use crate::{
     gadgets::nonnative::bn::big_uint_mul_mod_chip::BigUintMulModChip,
-    halo2_proofs::plonk::Error as Halo2PlonkError,
+    halo2_proofs::{
+        circuit::Value,
+        halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
+        plonk::Error as Halo2PlonkError,
+    },
     ivc::{
         self,
         cyclefold::{ro_chip, support_circuit, DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
@@ -233,11 +233,13 @@ impl<F: PrimeField> SelfTrace<F> {
     }
 }
 
+type BigUintView<F> = (AssignedValue<F>, BigUint<AssignedValue<F>>);
+
 #[derive(Clone)]
 pub struct PairedPlonkInstance<F: PrimeField> {
     pub(crate) W_commitments: Vec<(AssignedValue<F>, AssignedValue<F>)>,
-    pub(crate) instances: Vec<Vec<BigUint<AssignedValue<F>>>>,
-    pub(crate) challenges: Vec<BigUint<AssignedValue<F>>>,
+    pub(crate) instances: Vec<Vec<BigUintView<F>>>,
+    pub(crate) challenges: Vec<BigUintView<F>>,
 }
 
 impl<F: PrimeField + fmt::Debug> fmt::Debug for PairedPlonkInstance<F> {
@@ -245,8 +247,8 @@ impl<F: PrimeField + fmt::Debug> fmt::Debug for PairedPlonkInstance<F> {
         #[derive(Debug)]
         pub struct PairedPlonkInstanceValue<'l, F: PrimeField> {
             pub(crate) W_commitments: Vec<(Value<&'l F>, Value<&'l F>)>,
-            pub(crate) instances: Vec<Vec<BigUint<Value<F>>>>,
-            pub(crate) challenges: Vec<BigUint<Value<F>>>,
+            pub(crate) instances: Vec<Vec<(Value<F>, BigUint<Value<F>>)>>,
+            pub(crate) challenges: Vec<(Value<F>, BigUint<Value<F>>)>,
         }
 
         PairedPlonkInstanceValue {
@@ -261,14 +263,14 @@ impl<F: PrimeField + fmt::Debug> fmt::Debug for PairedPlonkInstance<F> {
                 .map(|instance| {
                     instance
                         .iter()
-                        .map(|v| v.clone().map(|v| v.value().copied()))
+                        .map(|(v, bn)| (v.value().copied(), bn.clone().map(|v| v.value().copied())))
                         .collect()
                 })
                 .collect(),
             challenges: self
                 .challenges
                 .iter()
-                .map(|cha| cha.clone().map(|v| v.value().copied()))
+                .map(|(cha, bn)| (cha.value().copied(), bn.clone().map(|v| v.value().copied())))
                 .collect(),
         }
         .fmt(f)
@@ -299,36 +301,59 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
+        let bn_chip = super::super::bn_chip(main_gate_config.clone());
+
         let instances = instances
             .iter()
             .map(|instance| {
+                assigner.assign_all_advice(region, || "instance", instance.iter().copied())
+            })
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+
+        let challenges =
+            assigner.assign_all_advice(region, || "instance", challenges.iter().copied())?;
+
+        region.next();
+
+        let instances: Vec<Vec<BigUintView<F>>> = instances
+            .into_iter()
+            .map(|instance| {
                 instance
-                    .iter()
+                    .into_iter()
                     .map(|value| {
-                        Ok(assigner
-                            .assign_all_advice(
-                                region,
-                                || "instances",
-                                value.limbs().iter().copied(),
-                            )?
-                            .try_into()
-                            .unwrap())
+                        Ok((
+                            value.clone(),
+                            bn_chip
+                                .from_assigned_cell_to_limbs(region, &value)
+                                .map_err(|err| {
+                                    error!("bn error: {err:?}");
+                                    Halo2PlonkError::Synthesis
+                                })?
+                                .try_into()
+                                .unwrap(),
+                        ))
                     })
-                    .collect::<Result<Vec<_>, _>>()
+                    .collect::<Result<Vec<_>, Halo2PlonkError>>()
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
         let challenges = challenges
-            .iter()
-            .map(|challenge| {
-                Ok(assigner
-                    .assign_all_advice(region, || "challenges", challenge.limbs().iter().cloned())?
-                    .try_into()
-                    .unwrap())
+            .into_iter()
+            .map(|value| {
+                Ok((
+                    value.clone(),
+                    bn_chip
+                        .from_assigned_cell_to_limbs(region, &value)
+                        .map_err(|err| {
+                            error!("bn error: {err:?}");
+                            Halo2PlonkError::Synthesis
+                        })?
+                        .try_into()
+                        .unwrap(),
+                ))
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
-        region.next();
         trace!(
             "`PairedPlonkInstance` took {} rows",
             region.offset() - start_offset
@@ -377,14 +402,18 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
                 l_instance
                     .iter()
                     .zip_eq(r_instance.iter())
-                    .map(|(l_val, r_val)| {
-                        Ok(l_val
+                    .map(|((l_val, l_bn), (r_val, r_bn))| {
+                        let bn = l_bn
                             .iter()
-                            .zip_eq(r_val.iter())
+                            .zip_eq(r_bn.iter())
                             .map(|(l, r)| mg.conditional_select(region, l, r, cond))
                             .collect::<Result<Vec<_>, _>>()?
                             .try_into()
-                            .unwrap())
+                            .unwrap();
+
+                        let val = mg.conditional_select(region, l_val, r_val, cond)?;
+
+                        Ok((val, bn))
                     })
                     .collect::<Result<Vec<_>, _>>()
             })
@@ -393,14 +422,18 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
         let challenges = lhs_challenges
             .iter()
             .zip(rhs_challenges.iter())
-            .map(|(lbn, rbn)| {
-                Ok(lbn
+            .map(|((l_val, l_bn), (r_val, r_bn))| {
+                let bn = l_bn
                     .iter()
-                    .zip_eq(rbn.iter())
+                    .zip_eq(r_bn.iter())
                     .map(|(l, r)| mg.conditional_select(region, l, r, cond))
                     .collect::<Result<Vec<_>, _>>()?
                     .try_into()
-                    .unwrap())
+                    .unwrap();
+
+                let val = mg.conditional_select(region, l_val, r_val, cond)?;
+
+                Ok((val, bn))
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
@@ -424,9 +457,9 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
             .chain(
                 instances
                     .iter()
-                    .flat_map(|big_uint| big_uint.iter().flatten()),
+                    .flat_map(|instance| instance.iter().map(|(value, _bn)| value)),
             )
-            .chain(challenges.iter().flat_map(|big_uint| big_uint.iter()))
+            .chain(challenges.iter().map(|(value, _bn)| value))
             .map(|v| WrapValue::Assigned(v.clone()))
     }
 }
@@ -436,6 +469,8 @@ pub struct SangriaAccumulatorInstance<F: PrimeField> {
     pub(crate) ins: PairedPlonkInstance<F>,
     pub(crate) E_commitment: (AssignedValue<F>, AssignedValue<F>),
     pub(crate) u: AssignedValue<F>,
+    // always zero for the support circuit
+    pub(crate) step_circuit_instances_hash_accumulator: AssignedValue<F>,
 }
 
 impl<F: PrimeField> SangriaAccumulatorInstance<F> {
@@ -449,6 +484,9 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
         let ins = PairedPlonkInstance::assign_advice_from(region, &original.ins, main_gate_config)?;
 
         let mut assigner = main_gate_config.advice_cycle_assigner();
+
+        let step_circuit_instances_hash_accumulator =
+            assigner.assign_next_advice(region, || "", F::ZERO)?;
 
         let self_ = Self {
             ins,
@@ -465,6 +503,7 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
                 )?,
             ),
             u: assigner.assign_next_advice(region, || "u", original.u)?,
+            step_circuit_instances_hash_accumulator,
         };
 
         trace!(
@@ -488,11 +527,13 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
             ins: lhs_ins,
             E_commitment: lhs_E_commitment,
             u: lhs_u,
+            step_circuit_instances_hash_accumulator,
         } = lhs;
         let Self {
             ins: rhs_ins,
             E_commitment: rhs_E_commitment,
             u: rhs_u,
+            step_circuit_instances_hash_accumulator: _,
         } = rhs;
 
         let ins = PairedPlonkInstance::conditional_select(region, mg, lhs_ins, rhs_ins, cond)?;
@@ -508,6 +549,8 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
             ins,
             E_commitment,
             u,
+            step_circuit_instances_hash_accumulator: step_circuit_instances_hash_accumulator
+                .clone(),
         })
     }
 
@@ -516,12 +559,14 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
             ins,
             E_commitment,
             u,
+            step_circuit_instances_hash_accumulator,
         } = self;
 
         ins.iter_wrap_values().chain(
             [E_commitment.0.clone(), E_commitment.1.clone()]
                 .into_iter()
                 .chain(iter::once(u.clone()))
+                .chain(iter::once(step_circuit_instances_hash_accumulator.clone()))
                 .map(|v| WrapValue::Assigned(v)),
         )
     }
@@ -594,8 +639,6 @@ impl<F: PrimeField> PairedTrace<F> {
         original: &super::PairedTrace<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
-        let start_offset = region.offset();
-
         let input_accumulator = SangriaAccumulatorInstance::assign_advice_from(
             region,
             &original.input_accumulator,
@@ -610,8 +653,6 @@ impl<F: PrimeField> PairedTrace<F> {
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?
             .into_boxed_slice();
-
-        trace!("`PairedTrace` took {} rows", region.offset() - start_offset);
 
         Ok(Self {
             input_accumulator,
@@ -793,7 +834,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
                 .try_into()
                 .unwrap();
 
-            l0.iter()
+            l0.1.iter()
                 .zip_eq(expected_l0_limbs.iter())
                 .enumerate()
                 .try_for_each(|(i, (l, r))| {
@@ -803,7 +844,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
                     region.constrain_equal(l.cell(), r.cell())
                 })?;
 
-            l1.iter()
+            l1.1.iter()
                 .zip_eq(expected_l1_limbs.iter())
                 .enumerate()
                 .try_for_each(|(i, (l, r))| {
@@ -813,12 +854,12 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
                     region.constrain_equal(l.cell(), r.cell())
                 })?;
 
-            BigUintPoint::constrain_equal(region, acc_W, &BigUintPoint { x: x0, y: y0 })?;
-            BigUintPoint::constrain_equal(region, incoming_W, &BigUintPoint { x: x1, y: y1 })?;
+            BigUintPoint::constrain_equal(region, acc_W, &BigUintPoint { x: x0.1, y: y0.1 })?;
+            BigUintPoint::constrain_equal(region, incoming_W, &BigUintPoint { x: x1.1, y: y1.1 })?;
 
             *new_acc_W = BigUintPoint {
-                x: expected_x,
-                y: expected_y,
+                x: expected_x.1,
+                y: expected_y.1,
             };
         }
 

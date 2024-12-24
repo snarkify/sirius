@@ -16,12 +16,64 @@ use crate::{
     commitment::CommitmentKey,
     ff::{Field, PrimeField},
     ivc::instances_accumulator_computation,
+    main_gate::{AssignedValue, WrapValue},
     plonk::{
         self, GetChallenges, GetWitness, PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness,
     },
     poseidon::{AbsorbInRO, ROTrait},
     util::ScalarToBase,
 };
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SCInstancesHashAcc<F> {
+    /// If StepCircuit does not possess sc_instances will be None
+    None,
+    Hash(F),
+}
+
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SCInstancesHashAcc<F> {
+    fn absorb_into(&self, ro: &mut RO) {
+        match self {
+            Self::None => {
+                ro.absorb_field(F::ZERO);
+            }
+            Self::Hash(hash) => {
+                ro.absorb_field(*hash);
+            }
+        }
+    }
+}
+
+impl<'l, F: PrimeField> From<&'l SCInstancesHashAcc<AssignedValue<F>>> for WrapValue<F> {
+    fn from(val: &'l SCInstancesHashAcc<AssignedValue<F>>) -> Self {
+        match &val {
+            SCInstancesHashAcc::None => WrapValue::Zero,
+            SCInstancesHashAcc::Hash(hash) => WrapValue::Assigned(hash.clone()),
+        }
+    }
+}
+
+impl<F> SCInstancesHashAcc<F> {
+    pub fn as_ref(&self) -> SCInstancesHashAcc<&F> {
+        match self {
+            SCInstancesHashAcc::None => SCInstancesHashAcc::None,
+            SCInstancesHashAcc::Hash(h) => SCInstancesHashAcc::Hash(h),
+        }
+    }
+
+    pub fn zip<'l>(lhs: &'l Self, rhs: &'l Self) -> SCInstancesHashAcc<(&'l F, &'l F)> {
+        match (lhs, rhs) {
+            (Self::Hash(l), Self::Hash(r)) => SCInstancesHashAcc::Hash((l, r)),
+            _ => SCInstancesHashAcc::None,
+        }
+    }
+    pub fn map<O>(self, f: impl FnOnce(F) -> O) -> SCInstancesHashAcc<O> {
+        match self {
+            SCInstancesHashAcc::None => SCInstancesHashAcc::None,
+            SCInstancesHashAcc::Hash(h) => SCInstancesHashAcc::Hash(f(h)),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RelaxedPlonkInstance<C: CurveAffine, const MARKERS_LEN: usize = 2> {
@@ -51,7 +103,7 @@ pub struct RelaxedPlonkInstance<C: CurveAffine, const MARKERS_LEN: usize = 2> {
     ///
     /// Unlike consistency markers, instance columns belonging to the step circuit itself are not
     /// folded, but are accumulated using the hash function.
-    pub(crate) step_circuit_instances_hash_accumulator: C::ScalarExt,
+    pub(crate) step_circuit_instances_hash_accumulator: SCInstancesHashAcc<C::ScalarExt>,
 }
 
 impl<C: CurveAffine, const MARKERS_LEN: usize> From<FoldablePlonkInstance<C, MARKERS_LEN>>
@@ -60,11 +112,17 @@ where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
     fn from(inner: FoldablePlonkInstance<C, MARKERS_LEN>) -> Self {
-        let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
-                &C::ScalarExt::ZERO,
-                inner.get_step_circuit_instances(),
-            );
+        let step_circuit_instances = inner.get_step_circuit_instances();
+        let step_circuit_instances_hash_accumulator = if step_circuit_instances.is_empty() {
+            SCInstancesHashAcc::None
+        } else {
+            SCInstancesHashAcc::Hash(
+                instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
+                    &C::ScalarExt::ZERO,
+                    step_circuit_instances,
+                ),
+            )
+        };
 
         let consistency_markers = inner.get_consistency_markers();
         let FoldablePlonkInstance(PlonkInstance {
@@ -88,9 +146,13 @@ impl<C: CurveAffine, const MARKERS_LEN: usize> RelaxedPlonkInstance<C, MARKERS_L
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    pub fn new(num_challenges: usize, num_witness: usize) -> Self {
-        let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>();
+    pub fn new(num_challenges: usize, num_witness: usize, num_sc_instances: usize) -> Self {
+        let step_circuit_instances_hash_accumulator = match num_sc_instances {
+            0 => SCInstancesHashAcc::None,
+            _any => SCInstancesHashAcc::Hash(
+                instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
+            ),
+        };
 
         Self {
             consistency_markers: array::from_fn(|_| C::ScalarExt::ZERO),
@@ -168,11 +230,15 @@ where
             .map(|(tk, power_of_r)| best_multiexp(&[power_of_r], &[*tk]).into())
             .fold(self.E_commitment, |acc, x| (acc + x).into());
 
-        let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
-                &self.step_circuit_instances_hash_accumulator,
-                U2.get_step_circuit_instances(),
-            );
+        let step_circuit_instances_hash_accumulator = self
+            .step_circuit_instances_hash_accumulator
+            .as_ref()
+            .map(|acc| {
+                instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
+                    acc,
+                    U2.get_step_circuit_instances(),
+                )
+            });
 
         RelaxedPlonkInstance {
             W_commitments,
@@ -219,7 +285,11 @@ where
 {
     pub fn new(args: RelaxedPlonkTraceArgs) -> Self {
         Self {
-            U: RelaxedPlonkInstance::new(args.num_challenges, args.num_witness),
+            U: RelaxedPlonkInstance::new(
+                args.num_challenges,
+                args.num_witness,
+                args.num_io.len() - 1, // instances
+            ),
             W: RelaxedPlonkWitness::new(args.k_table_size, &args.round_sizes),
         }
     }
@@ -278,8 +348,12 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>, const MARKERS_LEN: usize> AbsorbInRO<
                     .iter()
                     .chain(challenges.iter())
                     .chain(iter::once(u))
-                    .chain(iter::once(step_circuit_instances_hash_accumulator))
                     .map(|m| C::scalar_to_base(m).unwrap()),
+            )
+            .absorb(
+                &step_circuit_instances_hash_accumulator
+                    .as_ref()
+                    .map(|acc| C::scalar_to_base(acc).unwrap()),
             );
     }
 }

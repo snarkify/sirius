@@ -43,6 +43,7 @@ impl<F: PrimeField> BigUint<F> {
             .chain(iter::repeat(F::ZERO))
             .take(limbs_count.get())
             .collect();
+
         Self {
             limbs,
             width: limb_width,
