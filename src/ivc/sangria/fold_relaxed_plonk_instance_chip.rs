@@ -866,7 +866,6 @@ where
             .iter()
             .map(|W| assign_and_absorb_point!(W))
             .collect::<Result<Vec<_>, _>>()?;
-        let assigned_E = assign_and_absorb_point!(&self.relaxed.E_commitment)?;
 
         let consistency_markers = self.relaxed.get_consistency_markers();
         let assigned_consistency_markers = consistency_markers
@@ -890,6 +889,8 @@ where
             .collect::<Result<Vec<_>, _>>()?;
 
         let assigned_u = assign_and_absorb_diff_field!(&self.relaxed.u, || "relaxed u")?;
+
+        let assigned_E = assign_and_absorb_point!(&self.relaxed.E_commitment)?;
 
         let assigned_step_circuit_instances =
             match self.relaxed.step_circuit_instances_hash_accumulator {

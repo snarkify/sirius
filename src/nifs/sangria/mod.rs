@@ -163,8 +163,7 @@ where
         U2: &PlonkInstance<C>,
         cross_term_commits: &[C],
     ) -> Result<<C as CurveAffine>::ScalarExt, Error> {
-        let _span = info_span!("sangia cha").entered();
-        debug!("pp: {pp_digest:?}");
+        let _span = info_span!("sangria_cha").entered();
         debug!("U1: {U1:?}");
         debug!("U2: {U2:?}");
         debug!("ctc: {cross_term_commits:?}");
@@ -269,7 +268,7 @@ where
             Self::commit_cross_terms(ck, &pp.S, U1, W1, U2, W2)?;
 
         let r = VanillaFS::generate_challenge(&pp.pp_digest, ro_acc, U1, U2, &cross_term_commits)?;
-        debug!("sangria cha: {r:?}");
+        debug!("sangria_cha: {r:?}");
 
         let U = U1.fold(U2, &cross_term_commits, &r);
         let W = W1.fold(W2, &cross_terms, &r);

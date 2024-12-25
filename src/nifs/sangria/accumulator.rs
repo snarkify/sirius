@@ -342,7 +342,6 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>, const MARKERS_LEN: usize> AbsorbInRO<
         } = self;
 
         ro.absorb_point_iter(W_commitments.iter())
-            .absorb_point(E_commitment)
             .absorb_field_iter(
                 consistency_markers
                     .iter()
@@ -350,6 +349,7 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>, const MARKERS_LEN: usize> AbsorbInRO<
                     .chain(iter::once(u))
                     .map(|m| C::scalar_to_base(m).unwrap()),
             )
+            .absorb_point(E_commitment)
             .absorb(
                 &step_circuit_instances_hash_accumulator
                     .as_ref()

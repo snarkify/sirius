@@ -61,7 +61,7 @@ where
     let ecc_chip = ecc_chip::<CSup>(config.clone());
     let mg = MainGate::new(config.clone());
 
-    let sangria_cha_span = info_span!("sangia cha").entered();
+    let sangria_cha_span = info_span!("sangria_cha").entered();
     debug!("U1: {:?}", input.input_accumulator);
     debug!("U2: {:?}", input.incoming[0].instance);
     debug!("ctc: {:?}", input.incoming[0].proof);
@@ -70,8 +70,8 @@ where
         .absorb_base(pp_digest.0.clone().into())
         .absorb_base(pp_digest.1.clone().into())
         .absorb_iter(input.iter_wrap_values())
-        .squeeze_n_bits(region, NUM_CHALLENGE_BITS)
         .inspect(|buf| debug!("buf before: {buf:?}"))
+        .squeeze_n_bits(region, NUM_CHALLENGE_BITS)
         .inspect_err(|err| error!("Error while computing 'r' in fold: {err:?}"))?;
 
     sangria_cha_span.exit();
@@ -80,7 +80,7 @@ where
         .le_bits_to_num(region, &r_bits)
         .inspect_err(|err| error!("Error while converting 'r' to bits in fold: {err:?}"))?;
 
-    debug!("sangria cha: {:?}", r.value());
+    debug!("sangria_cha: {:?}", r.value());
 
     let r_as_bn = bn_chip
         .from_assigned_cell_to_limbs(region, &r)

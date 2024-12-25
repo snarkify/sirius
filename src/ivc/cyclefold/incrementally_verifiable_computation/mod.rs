@@ -413,6 +413,6 @@ mod tests {
         info!("pp created");
 
         let ivc = super::IVC::new(&pp, &sc, array::from_fn(|_| C1Scalar::ZERO));
-        ivc.next(&pp, &sc);
+        ivc.next(&pp, &sc).next(&pp, &sc);
     }
 }

@@ -299,9 +299,9 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SangriaAccumulatorInst
         } = self;
 
         ro.absorb(ins)
+            .absorb_field(*u)
             .absorb_field(*ex)
             .absorb_field(*ey)
-            .absorb_field(*u)
             .absorb_field(F::ZERO);
     }
 }

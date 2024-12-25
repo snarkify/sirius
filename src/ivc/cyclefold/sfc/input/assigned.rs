@@ -563,11 +563,14 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
         } = self;
 
         ins.iter_wrap_values().chain(
-            [E_commitment.0.clone(), E_commitment.1.clone()]
-                .into_iter()
-                .chain(iter::once(u.clone()))
-                .chain(iter::once(step_circuit_instances_hash_accumulator.clone()))
-                .map(|v| WrapValue::Assigned(v)),
+            [
+                u.clone(),
+                E_commitment.0.clone(),
+                E_commitment.1.clone(),
+                step_circuit_instances_hash_accumulator.clone(),
+            ]
+            .into_iter()
+            .map(|v| WrapValue::Assigned(v)),
         )
     }
 }
