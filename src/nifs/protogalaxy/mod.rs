@@ -304,12 +304,11 @@ pub struct VerifierParam<C: CurveAffine> {
 
 impl<C: CurveAffine, RO: ROTrait<C::ScalarExt>> AbsorbInRO<C::ScalarExt, RO> for VerifierParam<C> {
     fn absorb_into(&self, ro: &mut RO) {
-        let (x, y) = (
-            util::fe_to_fe(&self.pp_digest.0).unwrap(),
-            util::fe_to_fe(&self.pp_digest.0).unwrap(),
-        );
+        let Self { pp_digest: (x, y) } = self;
 
-        ro.absorb_field(x).absorb_field(y);
+        let pp_digest = [util::fe_to_fe(x).unwrap(), util::fe_to_fe(y).unwrap()];
+
+        ro.absorb_field_iter(pp_digest.into_iter());
     }
 }
 
@@ -388,6 +387,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     ///
     /// 7. **Fold the Trace:**
     ///     - [`ProtoGalaxy::fold_witness`] & [`ProtoGalaxy::fold_instance`]
+    #[instrument(skip_all)]
     pub fn prove(
         _ck: &CommitmentKey<C>,
         pp: &ProverParam<C>,
@@ -437,7 +437,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
             .inspect(|buf| trace!("buf before gamma: {buf:?}"))
             .squeeze::<C::ScalarExt>(MAX_BITS);
 
-        debug!("delta: {delta:?}, alpha: {alpha:?}, gamma: {gamma:?}");
+        debug!("challenges: delta: {delta:?}, alpha: {alpha:?}, gamma: {gamma:?}");
 
         let polys_L_in_gamma =
             lagrange::iter_eval_lagrange_poly_for_cyclic_group(gamma, ctx.lagrange_domain())
@@ -497,7 +497,8 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     ///
     /// 6. **Fold the Instance:**
     ///     - [`ProtoGalaxy::fold_instance`]
-    fn verify(
+    #[instrument(skip_all)]
+    pub fn verify(
         vp: &VerifierParam<C>,
         ro_nark: &mut impl ROTrait<C::ScalarExt>,
         ro_acc: &mut impl ROTrait<C::ScalarExt>,
@@ -520,13 +521,8 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
             incoming.iter(),
             proof,
         );
-        debug!(
-            "
-            delta: {delta:?},
-            alpha: {alpha:?},
-            gamma: {gamma:?},
-        "
-        );
+
+        debug!("challenges: delta: {delta:?}, alpha: {alpha:?}, gamma: {gamma:?}");
 
         let betas_stroke = poly::PolyChallenges {
             betas: accumulator.betas.clone(),
@@ -560,17 +556,17 @@ pub enum VerifyError<F: PrimeField> {
     WitnessCommitmentMismatch(Box<[usize]>),
 }
 
-impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
-    fn is_sat_accumulation(
-        S: &PlonkStructure<C::ScalarExt>,
-        acc: &Accumulator<C>,
-    ) -> Result<(), VerifyError<C::ScalarExt>> {
-        struct Node<F: PrimeField> {
-            value: F,
-            height: usize,
-        }
+pub fn evaluate_e_from_trace<C: CurveAffine>(
+    plonk_structure_S: &PlonkStructure<C::ScalarExt>,
+    trace: &PlonkTrace<C>,
+    betas: &[C::ScalarExt],
+) -> Result<C::ScalarExt, VerifyError<C::ScalarExt>> {
+    struct Node<F: PrimeField> {
+        value: F,
+        height: usize,
+    }
 
-        let evaluated_e = plonk::iter_evaluate_witness::<C::ScalarExt>(S, &acc.trace)
+    Ok(plonk::iter_evaluate_witness::<C::ScalarExt>(plonk_structure_S, trace)
             .map(|result_with_evaluated_gate| {
                 result_with_evaluated_gate.map(|value| Node { value, height: 0 })
             })
@@ -587,7 +583,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
                     )
                 }
 
-                left_n.value += right_n.value * acc.betas[right_n.height];
+                left_n.value += right_n.value * betas[right_n.height];
                 left_n.height += 1;
 
                 Ok(left_n)
@@ -595,7 +591,15 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
             .transpose()
             .map_err(VerifyError::PlonkEval)?
             .map(|n| n.value)
-            .unwrap_or_default();
+            .unwrap())
+}
+
+impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
+    fn is_sat_accumulation(
+        S: &PlonkStructure<C::ScalarExt>,
+        acc: &Accumulator<C>,
+    ) -> Result<(), VerifyError<C::ScalarExt>> {
+        let evaluated_e = evaluate_e_from_trace(S, &acc.trace, &acc.betas)?;
 
         if evaluated_e == acc.e {
             Ok(())
@@ -662,13 +666,6 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         }
     }
 
-    fn is_sat_pub_instances(
-        _acc: &Accumulator<C>,
-        _pub_instances: &[Vec<Vec<<C as CurveAffine>::ScalarExt>>],
-    ) -> Result<(), VerifyError<C::ScalarExt>> {
-        Ok(())
-    }
-
     /// Comprehensive satisfaction check for an accumulator.
     ///
     /// This method runs multiple checks ([`IsSatAccumulation::is_sat_accumulation`],
@@ -678,7 +675,6 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
         acc: &Accumulator<C>,
-        pub_instances: &[Vec<Vec<C::ScalarExt>>],
     ) -> Result<(), Vec<VerifyError<C::ScalarExt>>> {
         let mut errors = vec![];
 
@@ -691,10 +687,6 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         }
 
         if let Err(err) = Self::is_sat_witness_commit(ck, acc) {
-            errors.push(err);
-        }
-
-        if let Err(err) = Self::is_sat_pub_instances(acc, pub_instances) {
             errors.push(err);
         }
 
