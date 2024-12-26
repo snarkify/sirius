@@ -319,6 +319,15 @@ pub struct Proof<F: PrimeField> {
     pub poly_K: UnivariatePoly<F>,
 }
 
+impl<F: PrimeField> Default for Proof<F> {
+    fn default() -> Self {
+        Self {
+            poly_F: UnivariatePoly::new_zeroed(0),
+            poly_K: UnivariatePoly::new_zeroed(0),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]

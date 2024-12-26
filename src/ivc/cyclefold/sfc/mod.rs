@@ -123,7 +123,7 @@ where
 
         let out_marker = cyclefold::ro()
             .absorb(&self_)
-            .inspect(|buf| trace!("buf before sfc::out: {buf:?}"))
+            .inspect(|buf| trace!("buf before sfc_out: {buf:?}"))
             .output(
                 NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
             );
@@ -323,7 +323,7 @@ where
                             &input.z_0,
                             &z_out,
                         ))
-                        .inspect(|buf| trace!("buf before sfc::out: {buf:?}"))
+                        .inspect(|buf| trace!("buf before marker: {buf:?}"))
                         .squeeze(&mut region)
                 },
             )

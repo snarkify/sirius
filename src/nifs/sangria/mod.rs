@@ -327,13 +327,13 @@ pub enum VerifyError {
     InstanceMismatch,
 }
 
-impl<C: CurveAffine> VanillaFS<C>
+impl<C: CurveAffine, const MARKERS_LEN: usize> VanillaFS<C, MARKERS_LEN>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
     pub fn is_sat_accumulation(
         S: &PlonkStructure<C::ScalarExt>,
-        acc: &RelaxedPlonkTrace<C>,
+        acc: &RelaxedPlonkTrace<C, MARKERS_LEN>,
     ) -> Result<(), VerifyError> {
         let RelaxedPlonkTrace { U, W } = acc;
 
@@ -384,7 +384,7 @@ where
 
     pub fn is_sat_permutation(
         S: &PlonkStructure<C::ScalarExt>,
-        acc: &RelaxedPlonkTrace<C>,
+        acc: &RelaxedPlonkTrace<C, MARKERS_LEN>,
     ) -> Result<(), VerifyError> {
         /// Under this collapsing scheme, `instance` columns other than consistency markers are not
         /// foldeded, but accumulated using hash. Therefore, they need to be cut out for
@@ -404,8 +404,8 @@ where
         /// While checking permutations, we need to line up all instance columns one after the other, but
         /// since we cut out all instance columns except the null column (consistency_marker) for the
         /// `Relaxed*` version we need to augment them based on [`PlonkStructure::num_io`].
-        fn iter_flat_instances_with_padding<'b, C: CurveAffine>(
-            U: &'b RelaxedPlonkInstance<C>,
+        fn iter_flat_instances_with_padding<'b, C: CurveAffine, const MARKERS_LEN: usize>(
+            U: &'b RelaxedPlonkInstance<C, MARKERS_LEN>,
             S: &'b PlonkStructure<C::ScalarExt>,
         ) -> impl 'b + Iterator<Item = C::ScalarExt> {
             U.consistency_markers.iter().copied().chain(
@@ -454,7 +454,7 @@ where
 
     pub fn is_sat_witness_commit(
         ck: &CommitmentKey<C>,
-        acc: &RelaxedPlonkTrace<C>,
+        acc: &RelaxedPlonkTrace<C, MARKERS_LEN>,
     ) -> Result<(), VerifyError> {
         let RelaxedPlonkTrace { U, W } = acc;
 
@@ -474,7 +474,7 @@ where
     }
 
     pub fn is_sat_pub_instances(
-        acc: &RelaxedPlonkTrace<C>,
+        acc: &RelaxedPlonkTrace<C, MARKERS_LEN>,
         pub_instances: &[Vec<Vec<<C as CurveAffine>::ScalarExt>>],
     ) -> Result<(), VerifyError> {
         match acc.U.step_circuit_instances_hash_accumulator {
@@ -509,7 +509,7 @@ where
     pub fn is_sat(
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
-        acc: &RelaxedPlonkTrace<C>,
+        acc: &RelaxedPlonkTrace<C, MARKERS_LEN>,
         pub_instances: &[Vec<Vec<C::ScalarExt>>],
     ) -> Result<(), Vec<VerifyError>> {
         let mut errors = vec![];

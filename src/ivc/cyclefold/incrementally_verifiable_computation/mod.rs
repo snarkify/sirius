@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
 use itertools::Itertools;
-use tracing::info_span;
+use tracing::{info_span, trace};
 
 use super::{
     ro,
@@ -10,7 +10,7 @@ use super::{
 use crate::{
     constants::MAX_BITS,
     halo2_proofs::halo2curves::{
-        ff::{FromUniformBytes, PrimeFieldBits},
+        ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
         group::prime::PrimeCurveAffine,
         CurveAffine,
     },
@@ -68,13 +68,17 @@ where
         sc: &SC,
         z_0: [CMain::ScalarExt; ARITY],
     ) -> Self {
-        let _span = info_span!("ivc::new", step = 0).entered();
+        let _span = info_span!("ivc_new", step = 0).entered();
 
         let primary_initial_acc = ProtoGalaxy::<CMain, 1>::new_accumulator(
             AccumulatorArgs::from(&pp.primary_S),
             &pp.protogalaxy_prover_params(),
             &mut ro(),
         );
+
+        #[cfg(test)]
+        ProtoGalaxy::<CMain, 1>::is_sat(&pp.primary_ck, &pp.primary_S, &primary_initial_acc, &[])
+            .expect("initial primary accumulator not corrent");
 
         // At zero step cyclefold ivc - output protogalaxy-accumulator is input
         // protogalaxy-accumulator. Bug proof still should be valid.
@@ -142,7 +146,7 @@ where
 
         #[cfg(test)]
         {
-            let _mock = info_span!("mock-debug").entered();
+            let _mock = info_span!("mock_debug").entered();
             crate::halo2_proofs::dev::MockProver::run(
                 pp.primary_k_table_size,
                 &primary_sfc,
@@ -184,7 +188,7 @@ where
     }
 
     pub fn next(self, pp: &PublicParams<ARITY, ARITY, CMain, CSup, SC>, sc: &SC) -> Self {
-        let _span = info_span!("ivc::next", step = self.step.get()).entered();
+        let _span = info_span!("ivc_next", step = self.step.get()).entered();
 
         let Self {
             step,
@@ -235,7 +239,7 @@ where
                 .map(|instances| {
                     #[cfg(test)]
                     {
-                        let _mock = info_span!("mock-debug").entered();
+                        let _mock = info_span!("mock_debug").entered();
                         crate::halo2_proofs::dev::MockProver::run(
                             SupportCircuit::<CMain>::MIN_K_TABLE_SIZE,
                             &SupportCircuit::<CMain>::default(),
@@ -313,7 +317,7 @@ where
 
         #[cfg(test)]
         {
-            let _mock = info_span!("mock-debug").entered();
+            let _mock = info_span!("mock_debug").entered();
             crate::halo2_proofs::dev::MockProver::run(
                 pp.primary_k_table_size,
                 &primary_sfc,
@@ -349,6 +353,98 @@ where
             primary_z_0,
             support_acc: support_next_acc,
             _p,
+        }
+    }
+
+    pub fn verify(
+        self,
+        pp: &PublicParams<ARITY, ARITY, CMain, CSup, SC>,
+    ) -> Result<Self, Error<CMain>> {
+        let _span = info_span!("ivc_verify").entered();
+        let Self {
+            step,
+            primary_acc,
+            primary_trace,
+            primary_z_current,
+            primary_z_0,
+            support_acc,
+            _p,
+        } = &self;
+
+        let mut errors: Vec<VerifyError<CMain>> = vec![];
+
+        if let Err(err) = VerifyError::is_mismatch_proto_galaxy_consistency_marker(
+            ro().absorb(
+                &sfc::InputBuilder {
+                    step: step.get(),
+                    pp_digest: pp.pp_digest_coordinates(),
+                    self_incoming: &primary_trace.u,
+                    self_proof: nifs::protogalaxy::Proof::default(),
+                    paired_acc: &support_acc.U,
+                    paired_incoming: &[],
+                    self_acc: &primary_acc.clone().into(),
+                    z_i: *primary_z_current,
+                    z_0: *primary_z_0,
+                }
+                .build(),
+            )
+            .inspect(|buf| trace!("buf before marker: {buf:?}"))
+            .output(
+                NonZeroUsize::new(<CMain::ScalarExt as PrimeField>::NUM_BITS as usize).unwrap(),
+            ),
+            primary_trace.u.instances[0][0],
+        ) {
+            errors.push(err);
+        }
+
+        if let Err(err) =
+            ProtoGalaxy::<CMain, 1>::is_sat(&pp.primary_ck, &pp.primary_S, primary_acc, &[])
+        {
+            errors.push(VerifyError::WhileProtoGalaxyIsSat(err))
+        }
+
+        if let Err(err) = SangriaFS::<CSup>::is_sat(&pp.support_ck, &pp.support_S, support_acc, &[])
+        {
+            errors.push(VerifyError::WhileSangriaIsSat(err))
+        }
+
+        if errors.is_empty() {
+            Ok(self)
+        } else {
+            Err(Error::Verify(errors.into_boxed_slice()))
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error<CMain: CurveAffine> {
+    #[error("Error while verify: {0:?}")]
+    Verify(Box<[VerifyError<CMain>]>),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum VerifyError<CMain: CurveAffine> {
+    #[error("Mismatch proto galaxy consistency marker: {expected:?} != {actual:?}")]
+    MismatchProtoGalaxyConsistencyMarker {
+        expected: CMain::ScalarExt,
+        actual: CMain::ScalarExt,
+    },
+    #[error("While is sat protogalaxy acc: {0:?}")]
+    WhileProtoGalaxyIsSat(Vec<nifs::protogalaxy::VerifyError<CMain::ScalarExt>>),
+
+    #[error("While is sat protogalaxy acc: {0:?}")]
+    WhileSangriaIsSat(Vec<nifs::sangria::VerifyError>),
+}
+
+impl<CMain: CurveAffine> VerifyError<CMain> {
+    fn is_mismatch_proto_galaxy_consistency_marker(
+        expected: CMain::ScalarExt,
+        actual: CMain::ScalarExt,
+    ) -> Result<(), Self> {
+        if expected != actual {
+            Err(Self::MismatchProtoGalaxyConsistencyMarker { expected, actual })
+        } else {
+            Ok(())
         }
     }
 }
@@ -413,6 +509,6 @@ mod tests {
         info!("pp created");
 
         let ivc = super::IVC::new(&pp, &sc, array::from_fn(|_| C1Scalar::ZERO));
-        ivc.next(&pp, &sc).next(&pp, &sc);
+        ivc.next(&pp, &sc).next(&pp, &sc).verify(&pp).unwrap();
     }
 }

@@ -743,7 +743,7 @@ impl<CMain: CurveAffine<ScalarExt = CSup::Base>, CSup: CurveAffine, const ARITY:
             z_i,
         } = self;
 
-        Input {
+        let input = Input {
             pp_digest,
             step,
             z_0,
@@ -760,6 +760,10 @@ impl<CMain: CurveAffine<ScalarExt = CSup::Base>, CSup: CurveAffine, const ARITY:
                     .map(|(instance, proof)| PairedIncoming::new(instance, proof))
                     .collect(),
             },
-        }
+        };
+
+        trace!("builded input is: {input:?}");
+
+        input
     }
 }

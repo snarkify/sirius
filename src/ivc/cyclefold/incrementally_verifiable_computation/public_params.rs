@@ -48,7 +48,7 @@ where
     pub support_S: PlonkStructure<CSup::ScalarExt>,
     pub support_initial_trace: FoldablePlonkTrace<CSup, { support_circuit::INSTANCES_LEN }>,
 
-    digest_bytes: Box<[u8]>,
+    hash_bytes: CMain,
 
     _p: PhantomData<SC>,
 }
@@ -217,7 +217,7 @@ where
                 *W = CMain::identity();
             });
 
-        let digest_bytes = {
+        let hash_bytes = {
             let _digest = info_span!("digest").entered();
             use serde::Serialize;
 
@@ -232,12 +232,14 @@ where
                 support_S: &'link PlonkStructure<CSupScalar>,
             }
 
-            digest::DefaultHasher::digest_to_bits(&Meaningful {
+            let bytes = digest::DefaultHasher::digest_to_bits(&Meaningful {
                 primary_S: &primary_S,
                 primary_k_table_size: &k_table_size,
                 support_S: &support_S,
             })
-            .unwrap()
+            .unwrap();
+
+            digest::into_curve_from_bits::<CMain>(&bytes, NUM_HASH_BITS)
         };
 
         Self {
@@ -251,18 +253,14 @@ where
             primary_S,
             support_S,
 
-            digest_bytes,
+            hash_bytes,
 
             _p: PhantomData,
         }
     }
 
-    pub fn cmain_pp_digest(&self) -> CMain {
-        digest::into_curve_from_bits(&self.digest_bytes, NUM_HASH_BITS)
-    }
-
     pub fn pp_digest_coordinates<F: PrimeField>(&self) -> (F, F) {
-        self.cmain_pp_digest()
+        self.hash_bytes
             .coordinates()
             .map(|c| {
                 (
