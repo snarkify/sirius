@@ -278,6 +278,12 @@ where
         }
     }
 
+    pub fn protogalaxy_verifier_params(&self) -> nifs::protogalaxy::VerifierParam<CMain> {
+        nifs::protogalaxy::VerifierParam {
+            pp_digest: self.pp_digest_coordinates(),
+        }
+    }
+
     pub fn sangria_prover_params(&self) -> nifs::sangria::ProverParam<CSup> {
         nifs::sangria::ProverParam {
             S: self.support_S.clone(),

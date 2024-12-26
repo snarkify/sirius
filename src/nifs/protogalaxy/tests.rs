@@ -138,6 +138,9 @@ impl<C: Circuit<Scalar>> Mock<C> {
         ProtoGalaxy::is_sat_accumulation(&self.S, &acc)
             .expect("The newly created accumulator is not satisfactory");
 
+        ProtoGalaxy::is_sat_permutation(&self.S, &acc)
+            .expect("The newly created accumulator is not satisfactory");
+
         acc
     }
 
@@ -155,13 +158,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
         )
         .expect("`protogalaxy::prove` failed");
 
-        let instances = self
-            .circuits_ctx
-            .iter()
-            .map(|ctx| ctx.instances.clone())
-            .collect::<Box<[_]>>();
-
-        ProtoGalaxy::is_sat(&self.ck, &self.S, &accumulator_from_prove, &instances)
+        ProtoGalaxy::is_sat(&self.ck, &self.S, &accumulator_from_prove)
             .expect("The accumulator after calling `prove` is not satisfactory");
 
         let accumulator_from_verify = ProtoGalaxy::verify(

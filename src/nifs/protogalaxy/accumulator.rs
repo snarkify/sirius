@@ -20,11 +20,11 @@ pub struct Accumulator<C: CurveAffine> {
 
     /// `β`: A random value used in the folding process. It helps ensure the unique
     /// and secure combination of instances, preventing manipulation.
-    pub(super) betas: Box<[C::ScalarExt]>,
+    pub(crate) betas: Box<[C::ScalarExt]>,
 
     /// `e`: an accumulated value that encapsulates the result of the folding operation. it serves
     /// as a concise representation of the correctness and properties of the folded instances.
-    pub(super) e: C::ScalarExt,
+    pub(crate) e: C::ScalarExt,
 }
 
 impl<C: CurveAffine> Deref for Accumulator<C> {

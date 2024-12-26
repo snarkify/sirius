@@ -20,7 +20,7 @@ use crate::{
     },
     nifs::{
         self,
-        protogalaxy::{AccumulatorArgs, ProtoGalaxy},
+        protogalaxy::{evaluate_e_from_trace, AccumulatorArgs, ProtoGalaxy},
         sangria::VanillaFS,
     },
     plonk::PlonkTrace,
@@ -70,14 +70,21 @@ where
     ) -> Self {
         let _span = info_span!("ivc_new", step = 0).entered();
 
-        let primary_initial_acc = ProtoGalaxy::<CMain, 1>::new_accumulator(
+        let mut primary_initial_acc = ProtoGalaxy::<CMain, 1>::new_accumulator(
             AccumulatorArgs::from(&pp.primary_S),
             &pp.protogalaxy_prover_params(),
             &mut ro(),
         );
 
+        primary_initial_acc.e = evaluate_e_from_trace(
+            &pp.primary_S,
+            &primary_initial_acc,
+            &primary_initial_acc.betas,
+        )
+        .unwrap();
+
         #[cfg(test)]
-        ProtoGalaxy::<CMain, 1>::is_sat(&pp.primary_ck, &pp.primary_S, &primary_initial_acc, &[])
+        ProtoGalaxy::<CMain, 1>::is_sat(&pp.primary_ck, &pp.primary_S, &primary_initial_acc)
             .expect("initial primary accumulator not corrent");
 
         // At zero step cyclefold ivc - output protogalaxy-accumulator is input
@@ -90,6 +97,20 @@ where
             &[pp.primary_initial_trace.clone()],
         )
         .unwrap();
+
+        #[cfg(test)]
+        assert_eq!(
+            ProtoGalaxy::verify(
+                &pp.protogalaxy_verifier_params(),
+                &mut ro(),
+                &mut ro(),
+                &primary_initial_acc.clone().into(),
+                &[pp.primary_initial_trace.u.clone()],
+                &self_proof,
+            )
+            .unwrap(),
+            _new_acc.into()
+        );
 
         let support_initial_acc = nifs::sangria::accumulator::RelaxedPlonkTrace::from_regular(
             pp.support_initial_trace.clone(),
@@ -209,6 +230,24 @@ where
             &[primary_trace.clone()],
         )
         .unwrap();
+
+        #[cfg(test)]
+        assert_eq!(
+            ProtoGalaxy::verify(
+                &pp.protogalaxy_verifier_params(),
+                &mut ro(),
+                &mut ro(),
+                &primary_acc.clone().into(),
+                &[primary_trace.u.clone()],
+                &primary_proof,
+            )
+            .unwrap(),
+            primary_next_acc.clone().into()
+        );
+
+        #[cfg(test)]
+        ProtoGalaxy::<CMain, 1>::is_sat(&pp.primary_ck, &pp.primary_S, &primary_next_acc)
+            .expect("initial primary accumulator not corrent");
 
         let gamma = random_oracle.squeeze::<CMain::ScalarExt>(MAX_BITS);
 
@@ -378,13 +417,15 @@ where
                 &sfc::InputBuilder {
                     step: step.get(),
                     pp_digest: pp.pp_digest_coordinates(),
-                    self_incoming: &primary_trace.u,
-                    self_proof: nifs::protogalaxy::Proof::default(),
-                    paired_acc: &support_acc.U,
-                    paired_incoming: &[],
                     self_acc: &primary_acc.clone().into(),
+                    paired_acc: &support_acc.U,
                     z_i: *primary_z_current,
                     z_0: *primary_z_0,
+
+                    // next fields not used in absorb
+                    self_incoming: &primary_trace.u,
+                    self_proof: nifs::protogalaxy::Proof::default(),
+                    paired_incoming: &[],
                 }
                 .build(),
             )
@@ -398,7 +439,7 @@ where
         }
 
         if let Err(err) =
-            ProtoGalaxy::<CMain, 1>::is_sat(&pp.primary_ck, &pp.primary_S, primary_acc, &[])
+            ProtoGalaxy::<CMain, 1>::is_sat(&pp.primary_ck, &pp.primary_S, primary_acc)
         {
             errors.push(VerifyError::WhileProtoGalaxyIsSat(err))
         }
@@ -509,6 +550,6 @@ mod tests {
         info!("pp created");
 
         let ivc = super::IVC::new(&pp, &sc, array::from_fn(|_| C1Scalar::ZERO));
-        ivc.next(&pp, &sc).next(&pp, &sc).verify(&pp).unwrap();
+        ivc.next(&pp, &sc).verify(&pp).unwrap();
     }
 }
