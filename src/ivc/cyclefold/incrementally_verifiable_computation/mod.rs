@@ -76,6 +76,17 @@ where
             &mut ro(),
         );
 
+        #[cfg(test)]
+        pp.primary_S
+            .is_sat(
+                &pp.primary_ck,
+                &mut ro::<CMain::ScalarExt>(),
+                &pp.primary_initial_trace.u,
+                &pp.primary_initial_trace.w,
+            )
+            .unwrap();
+
+        primary_initial_acc.trace = pp.primary_initial_trace.clone();
         primary_initial_acc.e = evaluate_e_from_trace(
             &pp.primary_S,
             &primary_initial_acc,
@@ -99,18 +110,23 @@ where
         .unwrap();
 
         #[cfg(test)]
-        assert_eq!(
-            ProtoGalaxy::verify(
-                &pp.protogalaxy_verifier_params(),
-                &mut ro(),
-                &mut ro(),
-                &primary_initial_acc.clone().into(),
-                &[pp.primary_initial_trace.u.clone()],
-                &self_proof,
-            )
-            .unwrap(),
-            _new_acc.into()
-        );
+        {
+            ProtoGalaxy::<CMain, 1>::is_sat(&pp.primary_ck, &pp.primary_S, &_new_acc)
+                .expect("initial primary accumulator not corrent");
+
+            assert_eq!(
+                ProtoGalaxy::verify(
+                    &pp.protogalaxy_verifier_params(),
+                    &mut ro(),
+                    &mut ro(),
+                    &primary_initial_acc.clone().into(),
+                    &[pp.primary_initial_trace.u.clone()],
+                    &self_proof,
+                )
+                .unwrap(),
+                _new_acc.into()
+            );
+        }
 
         let support_initial_acc = nifs::sangria::accumulator::RelaxedPlonkTrace::from_regular(
             pp.support_initial_trace.clone(),
@@ -221,6 +237,16 @@ where
             _p,
         } = self;
 
+        #[cfg(test)]
+        pp.primary_S
+            .is_sat(
+                &pp.primary_ck,
+                &mut ro::<CMain::ScalarExt>(),
+                &primary_trace.u,
+                &primary_trace.w,
+            )
+            .unwrap();
+
         let mut random_oracle = ro();
         let (primary_next_acc, primary_proof) = ProtoGalaxy::prove(
             &pp.primary_ck,
@@ -232,22 +258,23 @@ where
         .unwrap();
 
         #[cfg(test)]
-        assert_eq!(
-            ProtoGalaxy::verify(
-                &pp.protogalaxy_verifier_params(),
-                &mut ro(),
-                &mut ro(),
-                &primary_acc.clone().into(),
-                &[primary_trace.u.clone()],
-                &primary_proof,
-            )
-            .unwrap(),
-            primary_next_acc.clone().into()
-        );
+        {
+            assert_eq!(
+                ProtoGalaxy::verify(
+                    &pp.protogalaxy_verifier_params(),
+                    &mut ro(),
+                    &mut ro(),
+                    &primary_acc.clone().into(),
+                    &[primary_trace.u.clone()],
+                    &primary_proof,
+                )
+                .unwrap(),
+                primary_next_acc.clone().into()
+            );
 
-        #[cfg(test)]
-        ProtoGalaxy::<CMain, 1>::is_sat(&pp.primary_ck, &pp.primary_S, &primary_next_acc)
-            .expect("initial primary accumulator not corrent");
+            ProtoGalaxy::<CMain, 1>::is_sat(&pp.primary_ck, &pp.primary_S, &primary_next_acc)
+                .expect("initial primary accumulator not corrent");
+        }
 
         let gamma = random_oracle.squeeze::<CMain::ScalarExt>(MAX_BITS);
 

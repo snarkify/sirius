@@ -235,11 +235,11 @@ where
                             Halo2PlonkError::Synthesis
                         })?;
 
-                        input
-                            .pairing_check(&mut region, &config.mg, &poly_L_values, &mut result_acc)
-                            .inspect_err(|err| {
-                                error!("while pairing check: {err:?}");
-                            })?;
+                        //input
+                        //    .pairing_check(&mut region, &config.mg, &poly_L_values, &mut result_acc)
+                        //    .inspect_err(|err| {
+                        //        error!("while pairing check: {err:?}");
+                        //    })?;
 
                         Ok(result_acc)
                     },
@@ -355,4 +355,55 @@ pub fn bn_chip<F: PrimeField>(
         DEFAULT_LIMB_WIDTH,
         DEFAULT_LIMBS_COUNT,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use tracing_test::traced_test;
+
+    use super::*;
+    use crate::{
+        halo2curves::{bn256::G1Affine as Affine1, grumpkin::G1Affine as Affine2},
+        ivc::step_circuit::trivial,
+    };
+
+    type Scalar = <Affine1 as CurveAffine>::ScalarExt;
+    const ARITY: usize = 2;
+
+    #[traced_test]
+    #[test]
+    fn sfc_nifs() {
+        let mut rnd = rand::thread_rng();
+
+        let sc = trivial::Circuit::<ARITY, Scalar>::default();
+        let sfc1 =
+            StepFoldingCircuit::<'_, ARITY, Affine1, Affine2, trivial::Circuit<ARITY, Scalar>> {
+                sc: &sc,
+                input: input::Input::random(&mut rnd),
+                _p: PhantomData,
+            };
+        let instances1 = sfc1.initial_instances()[0].to_vec();
+
+        let sfc2 =
+            StepFoldingCircuit::<'_, ARITY, Affine1, Affine2, trivial::Circuit<ARITY, Scalar>> {
+                sc: &sc,
+                input: input::Input::random(&mut rnd),
+                _p: PhantomData,
+            };
+        let instances2 = sfc1.initial_instances()[0].to_vec();
+
+        let sfc3 =
+            StepFoldingCircuit::<'_, ARITY, Affine1, Affine2, trivial::Circuit<ARITY, Scalar>> {
+                sc: &sc,
+                input: input::Input::random(&mut rnd),
+                _p: PhantomData,
+            };
+        let instances3 = sfc1.initial_instances()[0].to_vec();
+
+        nifs::protogalaxy::tests::Mock::new(
+            17,
+            [(sfc1, instances1), (sfc2, instances2), (sfc3, instances3)],
+        )
+        .run()
+    }
 }

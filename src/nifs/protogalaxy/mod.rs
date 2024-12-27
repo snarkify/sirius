@@ -389,7 +389,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
     ///     - [`ProtoGalaxy::fold_witness`] & [`ProtoGalaxy::fold_instance`]
     #[instrument(skip_all)]
     pub fn prove(
-        _ck: &CommitmentKey<C>,
+        ck: &CommitmentKey<C>,
         pp: &ProverParam<C>,
         ro_acc: &mut impl ROTrait<C::ScalarExt>,
         accumulator: Accumulator<C>,

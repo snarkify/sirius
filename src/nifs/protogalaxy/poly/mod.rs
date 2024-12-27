@@ -128,7 +128,6 @@ pub(crate) fn compute_F<F: PrimeField>(
         .chain(iter::repeat(Ok(F::ZERO)))
         .take(count_of_evaluation.get())
         .map(|result_with_evaluated_gate| {
-            debug!("witness row: {:?}", result_with_evaluated_gate);
             result_with_evaluated_gate.map(Node::Leaf)
         })
         // TODO #324 Migrate to a parallel algorithm

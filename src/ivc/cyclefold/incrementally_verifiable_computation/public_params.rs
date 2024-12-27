@@ -209,13 +209,13 @@ where
 
         // These values will not be used, only formally collapsed in step zero So we can nullify
         // `W_commitment`, for simplicity of calling `support_circuit` at step zero
-        primary_initial_trace
-            .u
-            .W_commitments
-            .iter_mut()
-            .for_each(|W| {
-                *W = CMain::identity();
-            });
+        //primary_initial_trace
+        //    .u
+        //    .W_commitments
+        //    .iter_mut()
+        //    .for_each(|W| {
+        //        *W = CMain::identity();
+        //    });
 
         let hash_bytes = {
             let _digest = info_span!("digest").entered();

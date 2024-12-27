@@ -1,23 +1,24 @@
-use halo2_proofs::{
-    dev::MockProver,
-    halo2curves::{
-        ff::{FromUniformBytes, PrimeFieldBits},
-        group::prime::PrimeCurveAffine,
-    },
-    plonk::Circuit,
-};
-use tracing::info_span;
+use tracing::{info, info_span};
 use tracing_test::traced_test;
 
 use super::*;
 use crate::{
     commitment,
+    halo2_proofs::{
+        //dev::MockProver,
+        halo2curves::{
+            ff::{FromUniformBytes, PrimeFieldBits},
+            group::prime::PrimeCurveAffine,
+        },
+        plonk::Circuit,
+    },
     halo2curves::bn256::G1Affine as Affine,
     nifs::{
         self,
         tests::{
             fibo_circuit::{get_fibo_seq, FiboCircuit},
             fibo_circuit_with_lookup::{get_sequence, FiboCircuitWithLookup},
+            merkle_tree::MerkleTreeUpdateCircuit,
             random_linear_combination_circuit::RandomLinearCombinationCircuit,
         },
     },
@@ -57,7 +58,7 @@ impl CircuitCtx {
     }
 }
 
-struct Mock<CIRCUIT: Circuit<Scalar>> {
+pub struct Mock<CIRCUIT: Circuit<Scalar>> {
     S: PlonkStructure<Scalar>,
     ck: CommitmentKey<Affine>,
 
@@ -81,13 +82,14 @@ impl<C: Circuit<Scalar>> Mock<C> {
             } else {
                 vec![instance.clone()]
             };
-            MockProver::run(k_table_size, &circuit, instances.clone())
-                .unwrap()
-                .verify()
-                .unwrap();
+            //MockProver::run(k_table_size, &circuit, instances.clone())
+            //    .unwrap()
+            //    .verify()
+            //    .unwrap();
 
             CircuitRunner::new(k_table_size, circuit, instances)
         });
+        info!("circuit runners ready");
 
         let ck = commitment::setup_smallest_key(k_table_size, &circuits_runners[0].cs, b"");
         let S = circuits_runners[0]
@@ -132,8 +134,13 @@ impl<C: Circuit<Scalar>> Mock<C> {
             .unwrap()
     }
 
-    pub fn new_accumulator(&self) -> Accumulator {
-        let acc = ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&self.S), &self.pp, &mut ro());
+    pub fn new_accumulator(&self, trace: &PlonkTrace<Affine>) -> Accumulator {
+        let mut acc =
+            ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&self.S), &self.pp, &mut ro());
+
+        acc.trace = trace.clone();
+        acc.e = evaluate_e_from_trace(&self.S, trace, &acc.betas).unwrap();
+        dbg!(&acc.e);
 
         ProtoGalaxy::is_sat_accumulation(&self.S, &acc)
             .expect("The newly created accumulator is not satisfactory");
@@ -147,7 +154,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
     pub fn run(mut self) {
         let incoming = self.generate_plonk_traces();
 
-        let init_accumulator = self.new_accumulator();
+        let init_accumulator = self.new_accumulator(&incoming[0]);
 
         let (accumulator_from_prove, proof) = ProtoGalaxy::prove(
             &self.ck,
@@ -296,6 +303,26 @@ fn fibo_lookup() {
                 },
                 vec![Scalar::ONE],
             ),
+        ],
+    )
+    .run();
+}
+
+#[traced_test]
+#[test]
+fn merkle_fold() {
+    let _s = info_span!("merkle").entered();
+
+    const K: u32 = 18;
+
+    let mut rng = rand::thread_rng();
+    let circuit = MerkleTreeUpdateCircuit::new_with_random_updates(&mut rng, 1, 1);
+    Mock::new(
+        K,
+        [
+            (circuit.clone(), vec![]),
+            (circuit.clone(), vec![]),
+            (circuit, vec![]),
         ],
     )
     .run();

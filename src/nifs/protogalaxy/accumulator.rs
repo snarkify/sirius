@@ -16,7 +16,7 @@ use crate::{
 pub struct Accumulator<C: CurveAffine> {
     /// `φ`: Represents the combined state of all instances & witnesses. It is a summary that
     /// captures the essential data and relationships from the instances being merged.
-    pub(super) trace: PlonkTrace<C>,
+    pub(crate) trace: PlonkTrace<C>,
 
     /// `β`: A random value used in the folding process. It helps ensure the unique
     /// and secure combination of instances, preventing manipulation.

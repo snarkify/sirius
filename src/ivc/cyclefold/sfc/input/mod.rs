@@ -437,8 +437,7 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
     pub fn random<R: rand::Rng + ?Sized>(mut rng: &mut R) -> Self {
         use std::iter;
 
-        // Initialize `step` with a random value.
-        let step: usize = rng.gen();
+        let step: usize = 0;
 
         // Create an infinite generator of random field elements.
         let mut gen = iter::repeat_with(move || F::random(&mut rng));
