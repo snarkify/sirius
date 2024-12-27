@@ -458,7 +458,7 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::polynomial::univariate::UnivariatePoly`]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct AssignedUnivariatePoly<F: PrimeField>(pub UnivariatePoly<AssignedValue<F>>);
 
     impl<F: PrimeField> From<UnivariatePoly<AssignedValue<F>>> for AssignedUnivariatePoly<F> {
@@ -611,7 +611,7 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::nifs::protogalaxy::Proof]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct AssignedProof<F: PrimeField> {
         pub poly_F: AssignedUnivariatePoly<F>,
         pub poly_K: AssignedUnivariatePoly<F>,

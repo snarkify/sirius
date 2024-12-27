@@ -180,6 +180,7 @@ impl<F: PrimeField> ProtogalaxyProof<F> {
 }
 
 /// Recursive trace of the circuit itself
+#[derive(Debug)]
 pub struct SelfTrace<F: PrimeField> {
     pub input_accumulator: ProtoGalaxyAccumulatorInstance<F>,
     pub incoming: NativePlonkInstance<F>,
@@ -193,6 +194,7 @@ impl<F: PrimeField> SelfTrace<F> {
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
         let start_offset = region.offset();
+        trace!("start `SelfTrace` assign at {start_offset}");
 
         let super::SelfTrace {
             input_accumulator,
@@ -285,12 +287,17 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
     ) -> Result<Self, Halo2PlonkError> {
         let start_offset = region.offset();
 
+        trace!("start `PairedPlonkInstance` assign at {}", start_offset);
+
         let super::PairedPlonkInstance {
             W_commitments,
             instances,
             challenges,
         } = original;
+
         let mut assigner = main_gate_config.advice_cycle_assigner();
+
+        trace!("begin cycle is {}", region.offset());
 
         let W_commitments = W_commitments
             .iter()
@@ -300,8 +307,6 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
                 Ok((x_assigned, y_assigned))
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
-
-        let bn_chip = super::super::bn_chip(main_gate_config.clone());
 
         let instances = instances
             .iter()
@@ -313,7 +318,10 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
         let challenges =
             assigner.assign_all_advice(region, || "instance", challenges.iter().copied())?;
 
+        trace!("after cycle is {}", region.offset());
         region.next();
+
+        let bn_chip = super::super::bn_chip(main_gate_config.clone());
 
         let instances: Vec<Vec<BigUintView<F>>> = instances
             .into_iter()
@@ -480,6 +488,10 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
         let start_offset = region.offset();
+        trace!(
+            "start `SangriaAccumulatorInstance` assign at {}",
+            region.offset()
+        );
 
         let ins = PairedPlonkInstance::assign_advice_from(region, &original.ins, main_gate_config)?;
 
@@ -642,6 +654,8 @@ impl<F: PrimeField> PairedTrace<F> {
         original: &super::PairedTrace<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        trace!("start `PairedTrace` assign at {}", region.offset());
+
         let input_accumulator = SangriaAccumulatorInstance::assign_advice_from(
             region,
             &original.input_accumulator,
@@ -677,6 +691,7 @@ impl<F: PrimeField> PairedTrace<F> {
     }
 }
 
+#[derive(Debug)]
 pub struct Input<const ARITY: usize, F: PrimeField> {
     pub pp_digest: (AssignedValue<F>, AssignedValue<F>),
 

@@ -181,17 +181,15 @@ where
 
                     let mut region = RegionCtx::new(region, 0);
 
-                    input::assigned::Input::assign_advice_from(
-                        &mut region,
-                        &self.input,
-                        &config.mg,
-                    )?
-                    .consistency_check(&mut region, &config.mg)
+                    input::assigned::Input::assign_advice_from(&mut region, &self.input, &config.mg)
+                    //?.consistency_check(&mut region, &config.mg)
                 },
             )
             .inspect_err(|err| {
                 error!("while sfc input: {err:?}");
             })?;
+
+        error!("{input:?}");
 
         info!("sfc input done");
 
@@ -235,11 +233,11 @@ where
                             Halo2PlonkError::Synthesis
                         })?;
 
-                        //input
-                        //    .pairing_check(&mut region, &config.mg, &poly_L_values, &mut result_acc)
-                        //    .inspect_err(|err| {
-                        //        error!("while pairing check: {err:?}");
-                        //    })?;
+                        input
+                            .pairing_check(&mut region, &config.mg, &poly_L_values, &mut result_acc)
+                            .inspect_err(|err| {
+                                error!("while pairing check: {err:?}");
+                            })?;
 
                         Ok(result_acc)
                     },

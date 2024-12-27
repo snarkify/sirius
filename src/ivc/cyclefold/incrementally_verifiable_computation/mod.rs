@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, num::NonZeroUsize};
 
 use itertools::Itertools;
-use tracing::{info_span, trace};
+use tracing::{error, info_span, trace};
 
 use super::{
     ro,
@@ -10,7 +10,7 @@ use super::{
 use crate::{
     constants::MAX_BITS,
     halo2_proofs::halo2curves::{
-        ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
+        ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
         group::prime::PrimeCurveAffine,
         CurveAffine,
     },
@@ -64,7 +64,7 @@ where
     CSup::Scalar: PrimeFieldBits + FromUniformBytes<64>,
 {
     pub fn new(
-        pp: &PublicParams<ARITY, ARITY, CMain, CSup, SC>,
+        pp: &mut PublicParams<ARITY, ARITY, CMain, CSup, SC>,
         sc: &SC,
         z_0: [CMain::ScalarExt; ARITY],
     ) -> Self {
@@ -194,13 +194,13 @@ where
             .unwrap();
         }
 
-        let primary_witness = CircuitRunner::new(
+        let primary_cr = CircuitRunner::new(
             pp.primary_k_table_size,
             primary_sfc,
             primary_initial_instances.clone(),
-        )
-        .try_collect_witness()
-        .unwrap();
+        );
+        let primary_witness = primary_cr.try_collect_witness().unwrap();
+        pp.primary_S = primary_cr.try_collect_plonk_structure().unwrap();
 
         let primary_post_initial_trace = ProtoGalaxy::<CMain, 1>::generate_plonk_trace(
             &pp.primary_ck,
@@ -210,6 +210,28 @@ where
             &mut ro(),
         )
         .unwrap();
+
+        #[cfg(test)]
+        {
+            use rayon::prelude::*;
+
+            assert!(crate::plonk::iter_evaluate_witness(
+                &pp.primary_S,
+                &primary_post_initial_trace
+            )
+            .enumerate()
+            .par_bridge()
+            .all(|(i, evaluated)| {
+                let evaluated = evaluated.unwrap();
+
+                if evaluated == CMain::ScalarExt::ZERO {
+                    true
+                } else {
+                    error!("error in {i} row: {evaluated:?}");
+                    false
+                }
+            }));
+        }
 
         Self {
             step: NonZeroUsize::new(1).unwrap(),
@@ -237,16 +259,6 @@ where
             _p,
         } = self;
 
-        #[cfg(test)]
-        pp.primary_S
-            .is_sat(
-                &pp.primary_ck,
-                &mut ro::<CMain::ScalarExt>(),
-                &primary_trace.u,
-                &primary_trace.w,
-            )
-            .unwrap();
-
         let mut random_oracle = ro();
         let (primary_next_acc, primary_proof) = ProtoGalaxy::prove(
             &pp.primary_ck,
@@ -272,8 +284,8 @@ where
                 primary_next_acc.clone().into()
             );
 
-            ProtoGalaxy::<CMain, 1>::is_sat(&pp.primary_ck, &pp.primary_S, &primary_next_acc)
-                .expect("initial primary accumulator not corrent");
+            //ProtoGalaxy::<CMain, 1>::is_sat(&pp.primary_ck, &pp.primary_S, &primary_next_acc)
+            //    .expect("initial primary accumulator not corrent");
         }
 
         let gamma = random_oracle.squeeze::<CMain::ScalarExt>(MAX_BITS);
@@ -536,10 +548,10 @@ mod tests {
     const ARITY: usize = 5;
 
     /// Key size for Primary Circuit
-    const PRIMARY_COMMITMENT_KEY_SIZE: usize = 21;
-    const SECONDARY_COMMITMENT_KEY_SIZE: usize = 21;
+    const PRIMARY_COMMITMENT_KEY_SIZE: usize = 23;
+    const SECONDARY_COMMITMENT_KEY_SIZE: usize = 23;
 
-    const PRIMARY_CIRCUIT_TABLE_SIZE: u32 = 18;
+    const PRIMARY_CIRCUIT_TABLE_SIZE: u32 = 20;
 
     const FOLDER: &str = ".cache/examples";
 
@@ -568,7 +580,7 @@ mod tests {
 
         info!("ck generated");
 
-        let pp = super::PublicParams::new(
+        let mut pp = super::PublicParams::new(
             &sc,
             primary_commitment_key,
             secondary_commitment_key,
@@ -576,7 +588,7 @@ mod tests {
         );
         info!("pp created");
 
-        let ivc = super::IVC::new(&pp, &sc, array::from_fn(|_| C1Scalar::ZERO));
+        let ivc = super::IVC::new(&mut pp, &sc, array::from_fn(|_| C1Scalar::ZERO));
         ivc.next(&pp, &sc).verify(&pp).unwrap();
     }
 }

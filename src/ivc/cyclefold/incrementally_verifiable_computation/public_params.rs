@@ -151,6 +151,7 @@ where
                         num_io,
                         // because with zero gates - calc count is zero - sfc panic
                         gates: vec![Expression::Constant(CMain::ScalarExt::ZERO)],
+                        num_challenges: 3,
                         ..Default::default()
                     },
                     &support_S,
