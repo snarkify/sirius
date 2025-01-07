@@ -37,9 +37,9 @@ const MAIN_GATE_T: usize = 5;
 /// 'SCC' here is 'Step Circuit Config'
 #[derive(Debug, Clone)]
 pub struct Config<SCC> {
-    consistency_marker: Column<Instance>,
-    sc: SCC,
-    mg: MainGateConfig<MAIN_GATE_T>,
+    pub consistency_marker: Column<Instance>,
+    pub sc: SCC,
+    pub mg: MainGateConfig<MAIN_GATE_T>,
 }
 
 #[derive(Debug)]
@@ -175,14 +175,18 @@ where
 
         let input = layouter
             .assign_region(
-                || "sfc input",
+                || "sfc_input",
                 |region| {
                     let _span = info_span!("input").entered();
 
                     let mut region = RegionCtx::new(region, 0);
 
-                    input::assigned::Input::assign_advice_from(&mut region, &self.input, &config.mg)
-                    //?.consistency_check(&mut region, &config.mg)
+                    input::assigned::Input::assign_advice_from(
+                        &mut region,
+                        &self.input,
+                        &config.mg,
+                    )?
+                    .consistency_check(&mut region, &config.mg)
                 },
             )
             .inspect_err(|err| {
@@ -331,15 +335,15 @@ where
 
         info!("out done");
 
-        layouter
-            .constrain_instance(
-                consistency_marker_output.cell(),
-                config.consistency_marker,
-                0,
-            )
-            .inspect_err(|err| {
-                error!("while sfc out constraint instance: {err:?}");
-            })?;
+        //layouter
+        //    .constrain_instance(
+        //        consistency_marker_output.cell(),
+        //        config.consistency_marker,
+        //        0,
+        //    )
+        //    .inspect_err(|err| {
+        //        error!("while sfc out constraint instance: {err:?}");
+        //    })?;
 
         Ok(())
     }
