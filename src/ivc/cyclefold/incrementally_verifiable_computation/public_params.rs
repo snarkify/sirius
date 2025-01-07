@@ -138,7 +138,7 @@ where
 
         let _primary = info_span!("primary").entered();
 
-        let (primary_S, mut primary_initial_trace) = {
+        let (primary_S, primary_initial_trace) = {
             let num_io = iter::once(1)
                 .chain(primary_sc.instances().iter().map(|col| col.len()))
                 .collect::<Box<[_]>>();
