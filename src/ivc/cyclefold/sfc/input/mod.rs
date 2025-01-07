@@ -1,6 +1,6 @@
 use std::{array, ops::Deref};
 
-use tracing::trace;
+use tracing::{instrument, trace};
 
 pub use crate::ivc::protogalaxy::verify_chip::BigUintPoint;
 #[cfg(test)]
@@ -194,13 +194,14 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SelfTrace<F> {
 }
 
 impl<F: PrimeField> SelfTrace<F> {
+    #[instrument(skip_all)]
     pub fn new_initial(native_plonk_structure: &plonk::PlonkStructure<F>) -> Self {
         // SPS protocol setup
-        let (W_commitments_len, challenges_len) = match native_plonk_structure.num_challenges {
-            0 => (1, 0),
-            1 => (1, 1),
-            2 => (2, 2),
-            3 => (3, 3),
+        let W_commitments_len = match native_plonk_structure.num_challenges {
+            0 => 1,
+            1 => 1,
+            2 => 2,
+            3 => 3,
             _ => unreachable!(">3 challenges can't be"),
         };
 
@@ -211,24 +212,25 @@ impl<F: PrimeField> SelfTrace<F> {
                 .iter()
                 .map(|len| vec![F::ZERO; *len])
                 .collect(),
-            challenges: vec![F::ZERO; challenges_len],
+            challenges: vec![F::ZERO; native_plonk_structure.num_challenges],
         };
-        let count_of_eval =
-            nifs::protogalaxy::poly::get_count_of_valuation_with_padding(native_plonk_structure)
-                .unwrap()
-                .get();
-        let proof_len = count_of_eval.ilog2() as usize;
+        let ctx = nifs::protogalaxy::poly::PolyContext::new(native_plonk_structure, 1);
+
+        let betas_len = ctx.betas_count();
+        let poly_F_len = ctx.fft_points_count_F();
+        let poly_K_len = ctx.fft_points_count_K();
+        trace!("betas len: {betas_len}, poly_F_len: {poly_F_len}, poly_K_len: {poly_K_len}");
 
         SelfTrace {
             input_accumulator: ProtoGalaxyAccumulatorInstance {
                 ins: ins.clone(),
-                betas: vec![F::ZERO; proof_len].into_boxed_slice(),
+                betas: vec![F::ZERO; betas_len].into_boxed_slice(),
                 e: F::ZERO,
             },
             incoming: ins,
             proof: nifs::protogalaxy::Proof {
-                poly_F: UnivariatePoly::new_zeroed(proof_len),
-                poly_K: UnivariatePoly::new_zeroed(proof_len),
+                poly_F: UnivariatePoly::new_zeroed(poly_F_len),
+                poly_K: UnivariatePoly::new_zeroed(poly_K_len),
             },
         }
     }

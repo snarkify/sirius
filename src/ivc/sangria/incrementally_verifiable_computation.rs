@@ -445,6 +445,7 @@ where
                 self.secondary.relaxed_trace.clone(),
                 &self.secondary_trace,
             )?;
+
         self.secondary
             .pub_instances
             .push(self.secondary_trace[0].u.instances.clone());

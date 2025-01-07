@@ -395,7 +395,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         accumulator: Accumulator<C>,
         incoming: &[PlonkTrace<C>; L],
     ) -> Result<(Accumulator<C>, Proof<C::ScalarExt>), Error> {
-        let ctx = PolyContext::new(&pp.S, incoming);
+        let ctx = PolyContext::new(&pp.S, incoming.len());
 
         let delta = Challenges::<C::ScalarExt>::generate_one::<_, _, C>(
             pp,

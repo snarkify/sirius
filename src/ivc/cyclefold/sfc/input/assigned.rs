@@ -1,7 +1,7 @@
 use std::{fmt, iter};
 
 use itertools::Itertools;
-use tracing::{error, info, info_span, trace};
+use tracing::{error, info, info_span, instrument, trace};
 
 use crate::{
     gadgets::nonnative::bn::big_uint_mul_mod_chip::BigUintMulModChip,
@@ -58,10 +58,9 @@ impl<F: PrimeField> NativePlonkInstance<F> {
             .map(|p| p.assign(region, main_gate_config))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let _stock = iter::repeat(BigUintPoint::identity())
-            .take(W_COMMITMENTS_MAX_LEN - W_commitments.len())
-            .map(|p| p.assign(region, main_gate_config))
-            .collect::<Result<Vec<_>, _>>()?;
+        iter::repeat(BigUintPoint::identity())
+            .take(W_COMMITMENTS_MAX_LEN.saturating_sub(W_commitments.len()))
+            .try_for_each(|p| p.assign(region, main_gate_config).map(|_| ()))?;
 
         let mut assigner = main_gate_config.advice_cycle_assigner();
 
@@ -70,15 +69,15 @@ impl<F: PrimeField> NativePlonkInstance<F> {
             .map(|instance| {
                 assigner.assign_all_advice(region, || "instance", instance.iter().cloned())
             })
-        .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
 
         let challenges =
             assigner.assign_all_advice(region, || "challenges", challenges.iter().cloned())?;
 
         assigner.assign_all_advice(
             region,
-            || "",
-            iter::repeat(F::ZERO).take(W_CHALLENGES_MAX_LEN - challenges.len()),
+            || "zero",
+            iter::repeat(F::ZERO).take(W_CHALLENGES_MAX_LEN.saturating_sub(challenges.len())),
         )?;
 
         trace!(
@@ -97,7 +96,7 @@ impl<F: PrimeField> NativePlonkInstance<F> {
 }
 
 pub type ProtoGalaxyAccumulatorInstance<F> =
-ivc::protogalaxy::verify_chip::AssignedAccumulatorInstance<F>;
+    ivc::protogalaxy::verify_chip::AssignedAccumulatorInstance<F>;
 
 impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
     fn assign_advice_from_native(
@@ -105,7 +104,7 @@ impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
         original: &super::ProtoGalaxyAccumulatorInstance<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
-        let _s = info_span!("proto_galaxy_accumulator_instance").entered();
+        let _s = info_span!("protogalaxy_accumulator_instance").entered();
         let start_offset = region.offset();
 
         trace!("start assign at {start_offset}");
@@ -120,7 +119,7 @@ impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
             betas: assigner
                 .assign_all_advice(region, || "betas", betas.iter().cloned())?
                 .into_boxed_slice(),
-                e: assigner.assign_next_advice(region, || "e", *e)?,
+            e: assigner.assign_next_advice(region, || "e", *e)?,
         };
 
         trace!("took {} rows total", region.offset() - start_offset);
@@ -156,7 +155,7 @@ impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
                 .map(|(l, r)| mg.conditional_select(region, l, r, cond))
                 .collect::<Result<Vec<_>, _>>()?
                 .into_boxed_slice(),
-                e: mg.conditional_select(region, lhs_e, rhs_e, cond)?,
+            e: mg.conditional_select(region, lhs_e, rhs_e, cond)?,
         })
     }
 }
@@ -177,13 +176,15 @@ impl<F: PrimeField> ProtogalaxyProof<F> {
         let mut assigner = main_gate_config.advice_cycle_assigner();
         let super::nifs::protogalaxy::Proof { poly_F, poly_K } = original;
 
+        trace!("poly_F_len: {}, poly_K_len: {}", poly_F.len(), poly_K.len());
+
         let self_ = Self {
             poly_F: assigner
                 .assign_all_advice(region, || "poly_F", poly_F.iter().cloned())?
                 .into(),
-                poly_K: assigner
-                    .assign_all_advice(region, || "poly_K", poly_K.iter().cloned())?
-                    .into(),
+            poly_K: assigner
+                .assign_all_advice(region, || "poly_K", poly_K.iter().cloned())?
+                .into(),
         };
 
         trace!(
@@ -234,16 +235,16 @@ impl<F: PrimeField> SelfTrace<F> {
 
         let self_ = Self {
             input_accumulator: ProtoGalaxyAccumulatorInstance::assign_advice_from_native(
-                                   region,
-                                   input_accumulator,
-                                   main_gate_config,
-                               )?,
-                               incoming: NativePlonkInstance::assign_advice_from_native(
-                                   region,
-                                   incoming,
-                                   main_gate_config,
-                               )?,
-                               proof: ProtogalaxyProof::assign_advice_from(region, proof, main_gate_config)?,
+                region,
+                input_accumulator,
+                main_gate_config,
+            )?,
+            incoming: NativePlonkInstance::assign_advice_from_native(
+                region,
+                incoming,
+                main_gate_config,
+            )?,
+            proof: ProtogalaxyProof::assign_advice_from(region, proof, main_gate_config)?,
         };
 
         trace!("`SelfTrace` took {} rows", region.offset() - start_offset);
@@ -289,16 +290,16 @@ impl<F: PrimeField + fmt::Debug> fmt::Debug for PairedPlonkInstance<F> {
                 .iter()
                 .map(|(x, y)| (x.value(), y.value()))
                 .collect(),
-                instances: self
-                    .instances
-                    .iter()
-                    .map(|instance| {
-                        instance
-                            .iter()
-                            .map(|(v, bn)| (v.value().copied(), bn.clone().map(|v| v.value().copied())))
-                            .collect()
-                    })
-            .collect(),
+            instances: self
+                .instances
+                .iter()
+                .map(|instance| {
+                    instance
+                        .iter()
+                        .map(|(v, bn)| (v.value().copied(), bn.clone().map(|v| v.value().copied())))
+                        .collect()
+                })
+                .collect(),
             challenges: self
                 .challenges
                 .iter()
@@ -337,7 +338,7 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
                 let y_assigned = assigner.assign_next_advice(region, || "W_commitments_y", *y)?;
                 Ok((x_assigned, y_assigned))
             })
-        .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
         let _stock = iter::repeat((F::ZERO, F::ZERO))
             .take(W_COMMITMENTS_MAX_LEN - W_commitments.len())
@@ -353,7 +354,7 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
             .map(|instance| {
                 assigner.assign_all_advice(region, || "instance", instance.iter().copied())
             })
-        .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
         let challenges =
             assigner.assign_all_advice(region, || "instance", challenges.iter().copied())?;
@@ -376,8 +377,8 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
                     .into_iter()
                     .map(|value| {
                         Ok((
-                                value.clone(),
-                                bn_chip
+                            value.clone(),
+                            bn_chip
                                 .from_assigned_cell_to_limbs(region, &value)
                                 .map_err(|err| {
                                     error!("bn error: {err:?}");
@@ -387,16 +388,16 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
                                 .unwrap(),
                         ))
                     })
-                .collect::<Result<Vec<_>, Halo2PlonkError>>()
+                    .collect::<Result<Vec<_>, Halo2PlonkError>>()
             })
-        .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
         let challenges = challenges
             .into_iter()
             .map(|value| {
                 Ok((
-                        value.clone(),
-                        bn_chip
+                    value.clone(),
+                    bn_chip
                         .from_assigned_cell_to_limbs(region, &value)
                         .map_err(|err| {
                             error!("bn error: {err:?}");
@@ -406,7 +407,7 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
                         .unwrap(),
                 ))
             })
-        .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
         trace!(
             "`PairedPlonkInstance` took {} rows",
@@ -443,11 +444,11 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
             .zip_eq(rhs_W_commitments.iter())
             .map(|((lx, ly), (rx, ry))| {
                 Ok((
-                        mg.conditional_select(region, lx, rx, cond)?,
-                        mg.conditional_select(region, ly, ry, cond)?,
+                    mg.conditional_select(region, lx, rx, cond)?,
+                    mg.conditional_select(region, ly, ry, cond)?,
                 ))
             })
-        .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
         let instances = lhs_instances
             .iter()
@@ -469,9 +470,9 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
 
                         Ok((val, bn))
                     })
-                .collect::<Result<Vec<_>, _>>()
+                    .collect::<Result<Vec<_>, _>>()
             })
-        .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
         let challenges = lhs_challenges
             .iter()
@@ -489,7 +490,7 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
 
                 Ok((val, bn))
             })
-        .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
         Ok(Self {
             W_commitments,
@@ -510,8 +511,8 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
             .flat_map(|(x, y)| [x, y])
             .chain(
                 instances
-                .iter()
-                .flat_map(|instance| instance.iter().map(|(value, _bn)| value)),
+                    .iter()
+                    .flat_map(|instance| instance.iter().map(|(value, _bn)| value)),
             )
             .chain(challenges.iter().map(|(value, _bn)| value))
             .map(|v| WrapValue::Assigned(v.clone()))
@@ -621,10 +622,10 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
 
         ins.iter_wrap_values().chain(
             [
-            u.clone(),
-            E_commitment.0.clone(),
-            E_commitment.1.clone(),
-            step_circuit_instances_hash_accumulator.clone(),
+                u.clone(),
+                E_commitment.0.clone(),
+                E_commitment.1.clone(),
+                step_circuit_instances_hash_accumulator.clone(),
             ]
             .into_iter()
             .map(|v| WrapValue::Assigned(v)),
@@ -659,11 +660,11 @@ impl<F: PrimeField> PairedIncoming<F> {
             .copied()
             .map(|(commit_x, commit_y)| -> Result<_, Halo2PlonkError> {
                 Ok((
-                        assigner.assign_next_advice(region, || "commit.x", commit_x)?,
-                        assigner.assign_next_advice(region, || "commit.y", commit_y)?,
+                    assigner.assign_next_advice(region, || "commit.x", commit_x)?,
+                    assigner.assign_next_advice(region, || "commit.y", commit_y)?,
                 ))
             })
-        .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
 
         trace!(
             "`PairedIncoming` took {} rows",
@@ -715,7 +716,7 @@ impl<F: PrimeField> PairedTrace<F> {
             .map(|paired_plonk_instance| {
                 PairedIncoming::assign_advice_from(region, paired_plonk_instance, main_gate_config)
             })
-        .collect::<Result<Vec<_>, Halo2PlonkError>>()?
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?
             .into_boxed_slice();
 
         iter::repeat_with(|| &original.incoming[0])
@@ -743,8 +744,8 @@ impl<F: PrimeField> PairedTrace<F> {
 
         input_accumulator.iter_wrap_values().chain(
             incoming
-            .iter()
-            .flat_map(|instance| instance.iter_wrap_values()),
+                .iter()
+                .flat_map(|instance| instance.iter_wrap_values()),
         )
     }
 }
@@ -860,6 +861,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         Ok(self)
     }
 
+    #[instrument(skip_all)]
     pub fn pairing_check(
         &self,
         region: &mut RegionCtx<F>,
@@ -896,11 +898,11 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
             })?;
 
         for (acc_W, incoming_W, trace, new_acc_W, index) in itertools::multizip((
-                self.self_trace.input_accumulator.ins.W_commitments.iter(),
-                self.self_trace.incoming.W_commitments.iter(),
-                self.paired_trace.incoming.iter(),
-                new_acc.ins.W_commitments.iter_mut(),
-                0..,
+            self.self_trace.input_accumulator.ins.W_commitments.iter(),
+            self.self_trace.incoming.W_commitments.iter(),
+            self.paired_trace.incoming.iter(),
+            new_acc.ins.W_commitments.iter_mut(),
+            0..,
         )) {
             info!("start {index} commitment check");
 
@@ -965,10 +967,10 @@ pub fn iter_consistency_marker_wrap_values<'l, const ARITY: usize, F: PrimeField
         .chain(paried_accumulator.iter_wrap_values())
         .chain(
             [pp0, pp1, step]
-            .into_iter()
-            .chain(z_0.iter())
-            .chain(z_i.iter())
-            .map(|v| WrapValue::Assigned(v.clone())),
+                .into_iter()
+                .chain(z_0.iter())
+                .chain(z_i.iter())
+                .map(|v| WrapValue::Assigned(v.clone())),
         )
 }
 

@@ -127,9 +127,7 @@ pub(crate) fn compute_F<F: PrimeField>(
     let evaluated = plonk::iter_evaluate_witness::<F>(ctx.S, trace)
         .chain(iter::repeat(Ok(F::ZERO)))
         .take(count_of_evaluation.get())
-        .map(|result_with_evaluated_gate| {
-            result_with_evaluated_gate.map(Node::Leaf)
-        })
+        .map(|result_with_evaluated_gate| result_with_evaluated_gate.map(Node::Leaf))
         // TODO #324 Migrate to a parallel algorithm
         // TODO #324 Implement `try_tree_reduce` to stop on the first error
         .tree_reduce(|left_w, right_w| {
@@ -194,16 +192,13 @@ pub struct PolyContext<'s, F: PrimeField> {
 }
 
 impl<'s, F: PrimeField> PolyContext<'s, F> {
-    pub fn new(
-        S: &'s PlonkStructure<F>,
-        traces: &[(impl Sync + GetChallenges<F> + GetWitness<F>)],
-    ) -> Self {
+    pub fn new(S: &'s PlonkStructure<F>, traces_len: usize) -> Self {
         let count_of_evaluation = get_count_of_valuation_with_padding(S).unwrap().get();
 
-        let instances_to_fold = traces.len() + 1;
+        let instances_to_fold = traces_len + 1;
         assert!(instances_to_fold.is_power_of_two());
 
-        let fft_points_count_G = get_points_count(S, traces.len());
+        let fft_points_count_G = get_points_count(S, traces_len);
 
         Self {
             S,
@@ -219,6 +214,10 @@ impl<'s, F: PrimeField> PolyContext<'s, F> {
 
     pub fn fft_points_count_F(&self) -> usize {
         (self.betas_count() + 1).next_power_of_two()
+    }
+
+    pub fn fft_points_count_K(&self) -> usize {
+        1 << self.fft_log_domain_size_K()
     }
 
     pub fn fft_log_domain_size_G(&self) -> u32 {
@@ -566,7 +565,7 @@ mod test {
         });
 
         let traces = [trace];
-        let ctx = PolyContext::new(&S, &traces);
+        let ctx = PolyContext::new(&S, traces.len());
 
         let delta = gen.by_ref().next().unwrap();
         let betas = gen.by_ref().take(ctx.betas_count()).collect::<Box<[_]>>();
@@ -622,7 +621,7 @@ mod test {
         .take(3)
         .collect::<Box<[_]>>();
 
-        let ctx = PolyContext::new(&S, &traces);
+        let ctx = PolyContext::new(&S, traces.len());
 
         let beta_stroke = gen.by_ref().take(ctx.betas_count()).collect::<Box<[_]>>();
 
@@ -687,7 +686,7 @@ mod test {
 
         debug!("start compute F");
         assert!(super::compute_F(
-            &super::PolyContext::new(&S, &traces),
+            &super::PolyContext::new(&S, traces.len()),
             iter::repeat_with(move || Field::random(&mut rnd)),
             delta,
             &traces[0],
@@ -714,7 +713,7 @@ mod test {
 
         assert_ne!(
             super::compute_F(
-                &super::PolyContext::new(&S, &traces),
+                &super::PolyContext::new(&S, traces.len()),
                 iter::repeat_with(|| Field::random(&mut rnd)),
                 delta,
                 &traces[0],
@@ -733,7 +732,7 @@ mod test {
 
         let traces = [trace];
         assert!(super::compute_G(
-            &super::PolyContext::new(&S, &traces),
+            &super::PolyContext::new(&S, traces.len()),
             iter::repeat_with(|| Field::random(&mut rnd)),
             &traces[0].clone(),
             &traces
@@ -757,7 +756,7 @@ mod test {
         let traces = [trace];
         assert_ne!(
             super::compute_G(
-                &super::PolyContext::new(&S, &traces),
+                &super::PolyContext::new(&S, traces.len()),
                 iter::repeat_with(|| Field::random(&mut rnd)),
                 &traces[0].clone(),
                 &traces

@@ -733,7 +733,7 @@ pub mod verify_chip {
                 .squeeze(region)?;
 
             debug!(
-                "delta: {delta:?}, alpha: {alpha:?}, gamma: {gamma:?}",
+                "challanges: delta: {delta:?}, alpha: {alpha:?}, gamma: {gamma:?}",
                 delta = delta.value(),
                 alpha = alpha.value(),
                 gamma = gamma.value(),
@@ -1020,6 +1020,7 @@ pub mod verify_chip {
     ///
     /// 5. **Fold the Instance:**
     ///     - [`ProtoGalaxy::fold_instance`]
+    #[instrument(skip_all)]
     pub fn verify<F, const L: usize, const T: usize>(
         region: &mut RegionCtx<F>,
         main_gate_config: MainGateConfig<T>,

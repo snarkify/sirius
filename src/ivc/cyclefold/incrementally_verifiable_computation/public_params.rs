@@ -139,45 +139,49 @@ where
         let _primary = info_span!("primary").entered();
 
         let (primary_S, primary_initial_trace) = {
-            let num_io = iter::once(1)
-                .chain(primary_sc.instances().iter().map(|col| col.len()))
-                .collect::<Box<[_]>>();
+            let mock_S = {
+                let _s = info_span!("pre_run_mock").entered();
 
-            let mock_sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
-                sc: primary_sc,
-                input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
-                    &PlonkStructure {
-                        k: k_table_size as usize,
-                        num_io,
-                        // because with zero gates - calc count is zero - sfc panic
-                        gates: vec![Expression::Constant(CMain::ScalarExt::ZERO)],
-                        num_challenges: 3,
-                        ..Default::default()
-                    },
-                    &support_S,
-                    &support_initial_trace.u,
-                ),
-                _p: PhantomData,
+                let num_io = iter::once(1)
+                    .chain(primary_sc.instances().iter().map(|col| col.len()))
+                    .collect::<Box<[_]>>();
+
+                let mock_sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
+                    sc: primary_sc,
+                    input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
+                        &PlonkStructure {
+                            k: k_table_size as usize,
+                            num_io,
+                            // because with zero gates - calc count is zero - sfc panic
+                            gates: vec![Expression::Constant(CMain::ScalarExt::ZERO)],
+                            num_challenges: 3,
+                            ..Default::default()
+                        },
+                        &support_S,
+                        &support_initial_trace.u,
+                    ),
+                    _p: PhantomData,
+                };
+
+                let mock_instances = mock_sfc.initial_instances();
+
+                #[cfg(test)]
+                {
+                    let _mock = info_span!("mock-debug").entered();
+                    crate::halo2_proofs::dev::MockProver::run(
+                        k_table_size,
+                        &mock_sfc,
+                        mock_instances.clone(),
+                    )
+                    .unwrap()
+                    .verify()
+                    .unwrap();
+                }
+
+                CircuitRunner::new(k_table_size, mock_sfc, mock_instances)
+                    .try_collect_plonk_structure()
+                    .unwrap()
             };
-
-            let mock_instances = mock_sfc.initial_instances();
-
-            #[cfg(test)]
-            {
-                let _mock = info_span!("mock-debug").entered();
-                crate::halo2_proofs::dev::MockProver::run(
-                    k_table_size,
-                    &mock_sfc,
-                    mock_instances.clone(),
-                )
-                .unwrap()
-                .verify()
-                .unwrap();
-            }
-
-            let mock_S = CircuitRunner::new(k_table_size, mock_sfc, mock_instances)
-                .try_collect_plonk_structure()
-                .unwrap();
 
             let sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
                 sc: primary_sc,
@@ -190,6 +194,20 @@ where
             };
 
             let primary_instances = sfc.initial_instances();
+
+            #[cfg(test)]
+            {
+                let _mock = info_span!("mock-debug").entered();
+                crate::halo2_proofs::dev::MockProver::run(
+                    k_table_size,
+                    &sfc,
+                    primary_instances.clone(),
+                )
+                .unwrap()
+                .verify()
+                .unwrap();
+            }
+
             let primary_cr = CircuitRunner::new(k_table_size, sfc, primary_instances.clone());
 
             (
