@@ -95,31 +95,11 @@ pub mod verify_chip {
         ) -> Result<(), Halo2PlonkError> {
             lhs.x_limbs()
                 .zip_eq(rhs.x_limbs())
-                .enumerate()
-                .try_for_each(|(i, (lhs, rhs))| {
-                    if lhs.value() != rhs.value() {
-                        warn!(
-                            "`x` limb {i} not equal: {:?} != {:?}",
-                            &lhs.value(),
-                            &rhs.value()
-                        );
-                    }
-                    region.constrain_equal(lhs.cell(), rhs.cell())
-                })?;
+                .try_for_each(|(lhs, rhs)| region.constrain_equal(lhs.cell(), rhs.cell()))?;
 
             lhs.y_limbs()
                 .zip_eq(rhs.y_limbs())
-                .enumerate()
-                .try_for_each(|(i, (lhs, rhs))| {
-                    if lhs.value() != rhs.value() {
-                        warn!(
-                            "`y` limb {i} not equal: {:?} != {:?}",
-                            &lhs.value(),
-                            &rhs.value()
-                        );
-                    }
-                    region.constrain_equal(lhs.cell(), rhs.cell())
-                })?;
+                .try_for_each(|(lhs, rhs)| region.constrain_equal(lhs.cell(), rhs.cell()))?;
 
             Ok(())
         }

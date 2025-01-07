@@ -916,23 +916,11 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
 
             l0.1.iter()
                 .zip_eq(expected_l0_limbs.iter())
-                .enumerate()
-                .try_for_each(|(i, (l, r))| {
-                    if l.value() != r.value() {
-                        error!("l0 limb[{i}] not equal: {:?} != {:?}", l.value(), r.value());
-                    }
-                    region.constrain_equal(l.cell(), r.cell())
-                })?;
+                .try_for_each(|(l, r)| region.constrain_equal(l.cell(), r.cell()))?;
 
             l1.1.iter()
                 .zip_eq(expected_l1_limbs.iter())
-                .enumerate()
-                .try_for_each(|(i, (l, r))| {
-                    if l.value() != r.value() {
-                        error!("l1 limb[{i}] not equal: {:?} != {:?}", l.value(), r.value());
-                    }
-                    region.constrain_equal(l.cell(), r.cell())
-                })?;
+                .try_for_each(|(l, r)| region.constrain_equal(l.cell(), r.cell()))?;
 
             BigUintPoint::constrain_equal(region, acc_W, &BigUintPoint { x: x0.1, y: y0.1 })?;
             BigUintPoint::constrain_equal(region, incoming_W, &BigUintPoint { x: x1.1, y: y1.1 })?;
