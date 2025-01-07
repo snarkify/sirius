@@ -10,7 +10,7 @@ use super::{
 use crate::{
     constants::MAX_BITS,
     halo2_proofs::halo2curves::{
-        ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
+        ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
         group::prime::PrimeCurveAffine,
         CurveAffine,
     },
@@ -224,7 +224,7 @@ where
             .all(|(i, evaluated)| {
                 let evaluated = evaluated.unwrap();
 
-                if evaluated == CMain::ScalarExt::ZERO {
+                if evaluated == <CMain::ScalarExt as crate::halo2_proofs::arithmetic::Field>::ZERO {
                     true
                 } else {
                     error!("error in {i} row: {evaluated:?}");
