@@ -1,9 +1,9 @@
-use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error, FloorPlanner};
 use tracing::*;
 
 use super::{circuit_data::CircuitData, ConstraintSystemMetainfo, WitnessCollector};
 use crate::{
     ff::PrimeField,
+    halo2_proofs::plonk::{Circuit, ConstraintSystem, Error, FloorPlanner},
     plonk::{self, permutation::PermutationData, PlonkStructure},
     util::batch_invert_assigned,
 };

@@ -1,4 +1,4 @@
-use std::{iter, marker::PhantomData};
+use std::{io, iter, marker::PhantomData};
 
 use serde::Serialize;
 use tracing::info_span;
@@ -6,10 +6,13 @@ use tracing::info_span;
 use crate::{
     constants::NUM_HASH_BITS,
     digest::{self, DigestToBits},
-    halo2_proofs::halo2curves::{
-        ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
-        group::prime::PrimeCurveAffine,
-        CurveAffine,
+    halo2_proofs::{
+        halo2curves::{
+            ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits},
+            group::prime::PrimeCurveAffine,
+            CurveAffine,
+        },
+        plonk::Error as Halo2PlonkError,
     },
     ivc::{
         cyclefold::{
@@ -62,6 +65,24 @@ fn ro<F: PrimeFieldBits + FromUniformBytes<64>>() -> PoseidonHash<F, T, RATE> {
     PoseidonHash::<F, T, RATE>::new(Spec::<F, T, RATE>::new(R_F, R_P))
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("While collect plonk structure: {0:?}")]
+    WhileCollectS(Halo2PlonkError),
+
+    #[error("While collect witness: {0:?}")]
+    WhileCollectWitness(Halo2PlonkError),
+
+    #[error("While nifs::protogalaxy: {0:?}")]
+    ProtoGalaxy(#[from] nifs::protogalaxy::Error),
+
+    #[error("While nifs::sangria: {0:?}")]
+    Sangria(#[from] nifs::sangria::Error),
+
+    #[error("While calculate digest: {0:?}")]
+    Digest(io::Error),
+}
+
 impl<const ARITY: usize, CMain, CSup, SC> PublicParams<ARITY, CMain, CSup, SC>
 where
     CMain: CurveAffine<Base = <CSup as PrimeCurveAffine>::Scalar>,
@@ -75,7 +96,7 @@ where
         ck1: CommitmentKey<CMain>,
         ck2: CommitmentKey<CSup>,
         k_table_size: u32,
-    ) -> Self
+    ) -> Result<Self, Error>
     where
         CMain::ScalarExt: Serialize,
         CSup::ScalarExt: Serialize,
@@ -116,7 +137,9 @@ where
                 SupportCircuit::<CMain>::default(),
                 support_circuit_instances.clone(),
             );
-            let S = support_cr.try_collect_plonk_structure().unwrap();
+            let S = support_cr
+                .try_collect_plonk_structure()
+                .map_err(Error::WhileCollectS)?;
 
             // The trace is generated for `CSup`, since all result types use `C::ScalarExt` in our
             // case it will be `CSup::ScalarExt` or `CMain::Base`
@@ -125,14 +148,17 @@ where
                 VanillaFS::<CSup, { support_circuit::INSTANCES_LEN }>::generate_plonk_trace(
                     &ck2,
                     &support_circuit_instances,
-                    &support_cr.try_collect_witness().unwrap(),
+                    &support_cr
+                        .try_collect_witness()
+                        .map_err(Error::WhileCollectWitness)?,
                     &nifs::sangria::ProverParam {
-                        S: support_cr.try_collect_plonk_structure().unwrap(),
+                        S: support_cr
+                            .try_collect_plonk_structure()
+                            .map_err(Error::WhileCollectS)?,
                         pp_digest: (CSup::Base::ZERO, CSup::Base::ZERO),
                     },
                     &mut ro(),
-                )
-                .unwrap(),
+                )?,
             )
         };
 
@@ -180,7 +206,7 @@ where
 
                 CircuitRunner::new(k_table_size, mock_sfc, mock_instances)
                     .try_collect_plonk_structure()
-                    .unwrap()
+                    .map_err(Error::WhileCollectS)?
             };
 
             let sfc = StepFoldingCircuit::<ARITY, CMain, CSup, SC> {
@@ -211,30 +237,25 @@ where
             let primary_cr = CircuitRunner::new(k_table_size, sfc, primary_instances.clone());
 
             (
-                primary_cr.try_collect_plonk_structure().unwrap(),
+                primary_cr
+                    .try_collect_plonk_structure()
+                    .map_err(Error::WhileCollectS)?,
                 ProtoGalaxy::<CMain, 1>::generate_plonk_trace(
                     &ck1,
                     &primary_instances,
-                    &primary_cr.try_collect_witness().unwrap(),
+                    &primary_cr
+                        .try_collect_witness()
+                        .map_err(Error::WhileCollectWitness)?,
                     &nifs::protogalaxy::ProverParam {
-                        S: primary_cr.try_collect_plonk_structure().unwrap(),
+                        S: primary_cr
+                            .try_collect_plonk_structure()
+                            .map_err(Error::WhileCollectS)?,
                         pp_digest: (CMain::Base::ZERO, CMain::Base::ZERO),
                     },
                     &mut ro(),
-                )
-                .unwrap(),
+                )?,
             )
         };
-
-        // These values will not be used, only formally collapsed in step zero So we can nullify
-        // `W_commitment`, for simplicity of calling `support_circuit` at step zero
-        //primary_initial_trace
-        //    .u
-        //    .W_commitments
-        //    .iter_mut()
-        //    .for_each(|W| {
-        //        *W = CMain::identity();
-        //    });
 
         let hash_bytes = {
             let _digest = info_span!("digest").entered();
@@ -256,12 +277,12 @@ where
                 primary_k_table_size: &k_table_size,
                 support_S: &support_S,
             })
-            .unwrap();
+            .map_err(Error::Digest)?;
 
             digest::into_curve_from_bits::<CMain>(&bytes, NUM_HASH_BITS)
         };
 
-        Self {
+        Ok(Self {
             primary_ck: ck1,
             support_ck: ck2,
             primary_k_table_size: k_table_size,
@@ -275,7 +296,7 @@ where
             hash_bytes,
 
             _p: PhantomData,
-        }
+        })
     }
 
     pub fn pp_digest_coordinates<F: PrimeField>(&self) -> (F, F) {

@@ -579,7 +579,8 @@ mod tests {
             primary_commitment_key,
             secondary_commitment_key,
             PRIMARY_CIRCUIT_TABLE_SIZE,
-        );
+        )
+        .unwrap();
         info!("pp created");
 
         super::IVC::new(&mut pp, &sc, array::from_fn(|_| C1Scalar::ZERO))
