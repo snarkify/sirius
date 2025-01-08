@@ -31,11 +31,11 @@ use crate::{
     util,
 };
 
-pub struct PublicParams<const A1: usize, const A2: usize, CMain, CSup, SC>
+pub struct PublicParams<const ARITY: usize, CMain, CSup, SC>
 where
     CMain: CurveAffine<Base = <CSup as PrimeCurveAffine>::Scalar>,
     CSup: CurveAffine<Base = <CMain as PrimeCurveAffine>::Scalar>,
-    SC: StepCircuit<A1, CMain::Scalar>,
+    SC: StepCircuit<ARITY, CMain::Scalar>,
     CMain::Scalar: PrimeFieldBits + FromUniformBytes<64>,
     CSup::Scalar: PrimeFieldBits + FromUniformBytes<64>,
 {
@@ -62,11 +62,11 @@ fn ro<F: PrimeFieldBits + FromUniformBytes<64>>() -> PoseidonHash<F, T, RATE> {
     PoseidonHash::<F, T, RATE>::new(Spec::<F, T, RATE>::new(R_F, R_P))
 }
 
-impl<const A1: usize, const A2: usize, CMain, CSup, SC> PublicParams<A1, A2, CMain, CSup, SC>
+impl<const ARITY: usize, CMain, CSup, SC> PublicParams<ARITY, CMain, CSup, SC>
 where
     CMain: CurveAffine<Base = <CSup as PrimeCurveAffine>::Scalar>,
     CSup: CurveAffine<Base = <CMain as PrimeCurveAffine>::Scalar>,
-    SC: StepCircuit<A1, CMain::Scalar>,
+    SC: StepCircuit<ARITY, CMain::Scalar>,
     CMain::Scalar: PrimeFieldBits + FromUniformBytes<64>,
     CSup::Scalar: PrimeFieldBits + FromUniformBytes<64>,
 {
@@ -146,9 +146,9 @@ where
                     .chain(primary_sc.instances().iter().map(|col| col.len()))
                     .collect::<Box<[_]>>();
 
-                let mock_sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
+                let mock_sfc = StepFoldingCircuit::<ARITY, CMain, CSup, SC> {
                     sc: primary_sc,
-                    input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
+                    input: sfc::Input::<ARITY, CMain::ScalarExt>::new_initial::<CMain, CSup>(
                         &PlonkStructure {
                             k: k_table_size as usize,
                             num_io,
@@ -183,9 +183,9 @@ where
                     .unwrap()
             };
 
-            let sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
+            let sfc = StepFoldingCircuit::<ARITY, CMain, CSup, SC> {
                 sc: primary_sc,
-                input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
+                input: sfc::Input::<ARITY, CMain::ScalarExt>::new_initial::<CMain, CSup>(
                     &mock_S,
                     &support_S,
                     &support_initial_trace.u,

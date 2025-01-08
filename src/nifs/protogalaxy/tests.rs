@@ -135,12 +135,13 @@ impl<C: Circuit<Scalar>> Mock<C> {
     }
 
     pub fn new_accumulator(&self, trace: &PlonkTrace<Affine>) -> Accumulator {
-        let mut acc =
-            ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&self.S), &self.pp, &mut ro());
-
-        acc.trace = trace.clone();
-        acc.e = evaluate_e_from_trace(&self.S, trace, &acc.betas).unwrap();
-        dbg!(&acc.e);
+        let acc = ProtoGalaxy::new_accumulator(
+            AccumulatorArgs::from(&self.S),
+            &self.pp,
+            &mut ro(),
+            trace.clone(),
+        )
+        .unwrap();
 
         ProtoGalaxy::is_sat_accumulation(&self.S, &acc)
             .expect("The newly created accumulator is not satisfactory");

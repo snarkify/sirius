@@ -717,9 +717,9 @@ pub struct InputBuilder<
     pub self_incoming: &'link plonk::PlonkInstance<CMain>,
     pub self_proof: nifs::protogalaxy::Proof<CMain::Scalar>,
 
-    pub paired_acc:
+    pub support_acc:
         &'link nifs::sangria::RelaxedPlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
-    pub paired_incoming: &'link [(
+    pub support_incoming: &'link [(
         nifs::sangria::FoldablePlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
         nifs::sangria::CrossTermCommits<CSup>,
     )],
@@ -738,8 +738,8 @@ impl<CMain: CurveAffine<ScalarExt = CSup::Base>, CSup: CurveAffine, const ARITY:
             self_acc,
             self_incoming,
             self_proof,
-            paired_acc,
-            paired_incoming,
+            support_acc: paired_acc,
+            support_incoming: paired_incoming,
             z_0,
             z_i,
         } = self;

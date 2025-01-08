@@ -10,7 +10,7 @@ use crate::{
     halo2_proofs::arithmetic::{self, CurveAffine, Field},
     ivc::protogalaxy::verify_chip::BigUintPoint,
     nifs::protogalaxy::poly::PolyContext,
-    plonk::{self, PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness},
+    plonk::{self, eval, PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness},
     polynomial::{lagrange, sparse, univariate::UnivariatePoly},
     poseidon::{AbsorbInRO, ROTrait},
     sps::{self, SpecialSoundnessVerifier},
@@ -145,7 +145,8 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         args: AccumulatorArgs,
         params: &ProverParam<C>,
         ro_acc: &mut impl ROTrait<C::ScalarExt>,
-    ) -> Accumulator<C> {
+        plonk_trace: PlonkTrace<C>,
+    ) -> Result<Accumulator<C>, eval::Error> {
         let mut accumulator = Accumulator::new(args, Self::get_count_of_valuation(&params.S));
 
         let beta = Challenges::<C::ScalarExt>::generate_one::<C::ScalarExt, _, C>(
@@ -161,7 +162,10 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
             .zip(iter::successors(Some(beta), |acc| Some(acc.double())))
             .for_each(|(b, beta_pow)| *b = beta_pow);
 
-        accumulator
+        accumulator.e = evaluate_e_from_trace(&params.S, &plonk_trace, &accumulator.betas)?;
+        accumulator.trace = plonk_trace;
+
+        Ok(accumulator)
     }
 
     fn fold_witness<'i>(
@@ -554,13 +558,15 @@ pub enum VerifyError<F: PrimeField> {
     PermCheckFailed { mismatch_count: usize },
     #[error("Commitment of")]
     WitnessCommitmentMismatch(Box<[usize]>),
+    #[error("While calculate E: {0:?}")]
+    WhileCalcE(eval::Error),
 }
 
 pub fn evaluate_e_from_trace<C: CurveAffine>(
     plonk_structure_S: &PlonkStructure<C::ScalarExt>,
     trace: &PlonkTrace<C>,
     betas: &[C::ScalarExt],
-) -> Result<C::ScalarExt, VerifyError<C::ScalarExt>> {
+) -> Result<C::ScalarExt, eval::Error> {
     struct Node<F: PrimeField> {
         value: F,
         height: usize,
@@ -588,8 +594,7 @@ pub fn evaluate_e_from_trace<C: CurveAffine>(
 
                 Ok(left_n)
             })
-            .transpose()
-            .map_err(VerifyError::PlonkEval)?
+            .transpose()?
             .map(|n| n.value)
             .unwrap())
 }
@@ -599,7 +604,8 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         S: &PlonkStructure<C::ScalarExt>,
         acc: &Accumulator<C>,
     ) -> Result<(), VerifyError<C::ScalarExt>> {
-        let evaluated_e = evaluate_e_from_trace(S, &acc.trace, &acc.betas)?;
+        let evaluated_e =
+            evaluate_e_from_trace(S, &acc.trace, &acc.betas).map_err(VerifyError::WhileCalcE)?;
 
         if evaluated_e == acc.e {
             Ok(())
