@@ -638,10 +638,15 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
                         .ins
                         .instances
                         .iter()
-                        .map(|v| vec![BigUint::zero(DEFAULT_LIMB_WIDTH); v.len()])
+                        .map(|v| {
+                            vec![
+                                BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT_LIMIT);
+                                v.len()
+                            ]
+                        })
                         .collect(),
                     challenges: vec![
-                        BigUint::zero(DEFAULT_LIMB_WIDTH);
+                        BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT_LIMIT);
                         self.paired_trace.input_accumulator.ins.challenges.len()
                     ],
                 },
@@ -662,10 +667,18 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
                             .instance
                             .instances
                             .iter()
-                            .map(|v| vec![BigUint::zero(DEFAULT_LIMB_WIDTH); v.len()])
+                            .map(|v| {
+                                vec![
+                                    BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT_LIMIT);
+                                    v.len()
+                                ]
+                            })
                             .collect(),
                         challenges: vec![
-                            BigUint::zero(DEFAULT_LIMB_WIDTH);
+                            BigUint::zero(
+                                DEFAULT_LIMB_WIDTH,
+                                DEFAULT_LIMBS_COUNT_LIMIT
+                            );
                             incoming.instance.challenges.len()
                         ],
                     },

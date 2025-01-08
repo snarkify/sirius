@@ -1036,7 +1036,7 @@ impl<F: PrimeField> BigUintMulModChip<F> {
     ///     - `s_k` partial sum of [0..k] limbs
     ///
     /// The `s_n` it's equal with original input and check by copy constraint
-    pub fn from_assigned_cell_to_limbs(
+    pub fn from_assigned_value_to_limbs(
         &self,
         ctx: &mut RegionCtx<'_, F>,
         input: &AssignedCell<F, F>,
@@ -1152,6 +1152,31 @@ impl<F: PrimeField> BigUintMulModChip<F> {
 
         limbs.reverse();
         Ok(limbs)
+    }
+
+    pub fn from_assigned_limbs_to_value(
+        &self,
+        ctx: &mut RegionCtx<'_, F>,
+        input_limbs: &[AssignedCell<F, F>],
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let value = match big_uint::BigUint::from_assigned_cells(
+            input_limbs,
+            self.limb_width,
+            self.limbs_count,
+        )? {
+            Some(value) => Value::known(value.into_f().unwrap()),
+            _ => Value::unknown(),
+        };
+
+        let assigned_value = ctx.assign_advice(|| "", self.config().state[0], value)?;
+        ctx.next();
+
+        self.from_assigned_value_to_limbs(ctx, &assigned_value)?
+            .iter()
+            .zip_eq(input_limbs)
+            .try_for_each(|(lhs, rhs)| ctx.constrain_equal(lhs.cell(), rhs.cell()))?;
+
+        Ok(assigned_value)
     }
 
     /// Performs the multiplication of `lhs` and `rhs` taking into account the `modulus`.

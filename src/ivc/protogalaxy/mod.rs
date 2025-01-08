@@ -174,8 +174,12 @@ pub mod verify_chip {
     impl<F: PrimeField> BigUintPoint<F> {
         pub fn identity() -> Self {
             Self {
-                x: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH).limbs().to_vec(),
-                y: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH).limbs().to_vec(),
+                x: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT_LIMIT)
+                    .limbs()
+                    .to_vec(),
+                y: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT_LIMIT)
+                    .limbs()
+                    .to_vec(),
             }
         }
     }
