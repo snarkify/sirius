@@ -1,11 +1,18 @@
 use std::{array, ops::Deref};
 
-use super::super::{DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH};
+use tracing::{instrument, trace};
+
 pub use crate::ivc::protogalaxy::verify_chip::BigUintPoint;
+#[cfg(test)]
 use crate::{
     gadgets::nonnative::bn::big_uint::BigUint,
+    ivc::cyclefold::{DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
+};
+use crate::{
     halo2_proofs::halo2curves::{ff::PrimeField, CurveAffine},
-    nifs, plonk,
+    ivc::cyclefold::support_circuit,
+    nifs::{self, sangria::accumulator::SCInstancesHashAcc},
+    plonk,
     polynomial::univariate::UnivariatePoly,
     poseidon::{AbsorbInRO, ROTrait},
     util,
@@ -53,15 +60,17 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for NativePlonkInstance<F>
 }
 
 #[derive(Debug, Clone)]
-pub struct PairedPlonkInstance<F: PrimeField> {
+pub struct SupportPlonkInstance<F: PrimeField> {
     pub(crate) W_commitments: Vec<(F, F)>,
-    pub(crate) instances: Vec<Vec<BigUint<F>>>,
-    pub(crate) challenges: Vec<BigUint<F>>,
+    // should be bn, but for absorb use original value and make bn oncircuit
+    pub(crate) instances: Vec<Vec<F>>,
+    // should be bn, but for absorb use original value and make bn oncircuit
+    pub(crate) challenges: Vec<F>,
 }
 
-impl<F: PrimeField> PairedPlonkInstance<F> {
+impl<F: PrimeField> SupportPlonkInstance<F> {
     pub fn new<CSup: CurveAffine<Base = F>>(
-        acc: &nifs::sangria::FoldablePlonkInstance<CSup>,
+        acc: &nifs::sangria::FoldablePlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
     ) -> Self {
         let nifs::sangria::PlonkInstance {
             W_commitments,
@@ -81,29 +90,19 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
                 .map(|instance| {
                     instance
                         .iter()
-                        .map(|value| {
-                            BigUint::from_different_field(
-                                value,
-                                DEFAULT_LIMB_WIDTH,
-                                DEFAULT_LIMBS_COUNT,
-                            )
-                            .unwrap()
-                        })
+                        .map(|value| util::fe_to_fe(value).unwrap())
                         .collect()
                 })
                 .collect(),
             challenges: challenges
                 .iter()
-                .map(|cha| {
-                    BigUint::from_different_field(cha, DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
-                        .unwrap()
-                })
+                .map(|cha| util::fe_to_fe(cha).unwrap())
                 .collect(),
         }
     }
 }
 
-impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for PairedPlonkInstance<F> {
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SupportPlonkInstance<F> {
     fn absorb_into(&self, ro: &mut RO) {
         let Self {
             W_commitments,
@@ -112,8 +111,13 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for PairedPlonkInstance<F>
         } = self;
 
         ro.absorb_field_iter(W_commitments.iter().flat_map(|(x, y)| [x, y]).copied())
-            .absorb_iter(instances.iter().flatten())
-            .absorb_iter(challenges.iter());
+            .absorb_field_iter(
+                instances
+                    .iter()
+                    .flat_map(|instance| instance.iter())
+                    .chain(challenges.iter())
+                    .copied(),
+            );
     }
 }
 
@@ -190,13 +194,14 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SelfTrace<F> {
 }
 
 impl<F: PrimeField> SelfTrace<F> {
+    #[instrument(skip_all)]
     pub fn new_initial(native_plonk_structure: &plonk::PlonkStructure<F>) -> Self {
         // SPS protocol setup
-        let (W_commitments_len, challenges_len) = match native_plonk_structure.num_challenges {
-            0 => (1, 0),
-            1 => (1, 1),
-            2 => (2, 2),
-            3 => (3, 3),
+        let W_commitments_len = match native_plonk_structure.num_challenges {
+            0 => 1,
+            1 => 1,
+            2 => 2,
+            3 => 3,
             _ => unreachable!(">3 challenges can't be"),
         };
 
@@ -207,13 +212,14 @@ impl<F: PrimeField> SelfTrace<F> {
                 .iter()
                 .map(|len| vec![F::ZERO; *len])
                 .collect(),
-            challenges: vec![F::ZERO; challenges_len],
+            challenges: vec![F::ZERO; native_plonk_structure.num_challenges],
         };
-        let betas_len =
-            nifs::protogalaxy::poly::get_count_of_valuation_with_padding(native_plonk_structure)
-                .unwrap()
-                .get();
-        let proof_len = betas_len.ilog2() as usize;
+        let ctx = nifs::protogalaxy::poly::PolyContext::new(native_plonk_structure, 1);
+
+        let betas_len = ctx.betas_count();
+        let poly_F_len = ctx.fft_points_count_F();
+        let poly_K_len = ctx.fft_points_count_K();
+        trace!("betas len: {betas_len}, poly_F_len: {poly_F_len}, poly_K_len: {poly_K_len}");
 
         SelfTrace {
             input_accumulator: ProtoGalaxyAccumulatorInstance {
@@ -223,8 +229,8 @@ impl<F: PrimeField> SelfTrace<F> {
             },
             incoming: ins,
             proof: nifs::protogalaxy::Proof {
-                poly_F: UnivariatePoly::new_zeroed(proof_len),
-                poly_K: UnivariatePoly::new_zeroed(proof_len),
+                poly_F: UnivariatePoly::new_zeroed(poly_F_len),
+                poly_K: UnivariatePoly::new_zeroed(poly_K_len),
             },
         }
     }
@@ -236,14 +242,14 @@ impl<F: PrimeField> SelfTrace<F> {
 
 #[derive(Debug, Clone)]
 pub struct SangriaAccumulatorInstance<F: PrimeField> {
-    pub(crate) ins: PairedPlonkInstance<F>,
+    pub(crate) ins: SupportPlonkInstance<F>,
     pub(crate) E_commitment: (F, F),
     pub(crate) u: F,
 }
 
 impl<F: PrimeField> SangriaAccumulatorInstance<F> {
     pub fn new<CSup: CurveAffine<Base = F>>(
-        acc: &nifs::sangria::RelaxedPlonkInstance<CSup>,
+        acc: &nifs::sangria::RelaxedPlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
     ) -> Self {
         let nifs::sangria::RelaxedPlonkInstance {
             W_commitments,
@@ -251,11 +257,16 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
             challenges,
             E_commitment,
             u,
-            step_circuit_instances_hash_accumulator: _,
+            step_circuit_instances_hash_accumulator,
         } = acc;
 
+        assert_eq!(
+            step_circuit_instances_hash_accumulator,
+            &SCInstancesHashAcc::None
+        );
+
         Self {
-            ins: PairedPlonkInstance {
+            ins: SupportPlonkInstance {
                 W_commitments: W_commitments
                     .iter()
                     .map(|commitment| {
@@ -263,24 +274,13 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
                         (*c.x(), *c.y())
                     })
                     .collect(),
-                // TODO #369 Make markers
                 instances: vec![consistency_markers
                     .iter()
-                    .map(|instance| {
-                        BigUint::from_different_field(
-                            instance,
-                            DEFAULT_LIMB_WIDTH,
-                            DEFAULT_LIMBS_COUNT,
-                        )
-                        .unwrap()
-                    })
+                    .map(|value| util::fe_to_fe(value).unwrap())
                     .collect()],
                 challenges: challenges
                     .iter()
-                    .map(|cha| {
-                        BigUint::from_different_field(cha, DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
-                            .unwrap()
-                    })
+                    .map(|cha| util::fe_to_fe(cha).unwrap())
                     .collect(),
             },
             E_commitment: {
@@ -301,21 +301,22 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SangriaAccumulatorInst
         } = self;
 
         ro.absorb(ins)
+            .absorb_field(*u)
             .absorb_field(*ex)
             .absorb_field(*ey)
-            .absorb_field(*u);
+            .absorb_field(F::ZERO);
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct PairedIncoming<F: PrimeField> {
-    instance: PairedPlonkInstance<F>,
+pub struct SupportIncoming<F: PrimeField> {
+    instance: SupportPlonkInstance<F>,
     proof: nifs::sangria::CrossTermCommits<(F, F)>,
 }
 
-impl<F: PrimeField> PairedIncoming<F> {
+impl<F: PrimeField> SupportIncoming<F> {
     pub fn new<CSup: CurveAffine<Base = F>>(
-        instance: &nifs::sangria::FoldablePlonkInstance<CSup>,
+        instance: &nifs::sangria::FoldablePlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
         proof: &nifs::sangria::CrossTermCommits<CSup>,
     ) -> Self {
         let proof = proof
@@ -325,13 +326,13 @@ impl<F: PrimeField> PairedIncoming<F> {
                 (*c.x(), *c.y())
             })
             .collect::<Vec<_>>();
-        let instance = PairedPlonkInstance::new(instance);
+        let instance = SupportPlonkInstance::new(instance);
 
         Self { instance, proof }
     }
 }
 
-impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for PairedIncoming<F> {
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SupportIncoming<F> {
     fn absorb_into(&self, ro: &mut RO) {
         let Self { instance, proof } = self;
         let proof_iter = proof.iter().flat_map(|(a, b)| [a, b]).copied();
@@ -341,14 +342,14 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for PairedIncoming<F> {
 }
 
 #[derive(Debug, Clone)]
-pub struct PairedTrace<F: PrimeField> {
+pub struct SupportTrace<F: PrimeField> {
     pub input_accumulator: SangriaAccumulatorInstance<F>,
     // The size from one to three
     // Depdend on `W_commitments_len`
-    pub incoming: Box<[PairedIncoming<F>]>,
+    pub incoming: Box<[SupportIncoming<F>]>,
 }
 
-impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for PairedTrace<F> {
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SupportTrace<F> {
     fn absorb_into(&self, ro: &mut RO) {
         let Self {
             input_accumulator,
@@ -359,14 +360,17 @@ impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for PairedTrace<F> {
     }
 }
 
-impl<F: PrimeField> PairedTrace<F> {
+impl<F: PrimeField> SupportTrace<F> {
     pub fn new_initial<CSup: CurveAffine<Base = F>>(
-        paired_plonk_structure: &plonk::PlonkStructure<CSup::ScalarExt>,
-        paired_plonk_instance: &nifs::sangria::FoldablePlonkInstance<CSup>,
+        support_plonk_structure: &plonk::PlonkStructure<CSup::ScalarExt>,
+        support_plonk_instance: &nifs::sangria::FoldablePlonkInstance<
+            CSup,
+            { support_circuit::INSTANCES_LEN },
+        >,
         W_commitments_len: usize,
     ) -> Self {
-        let ins = PairedPlonkInstance {
-            W_commitments: paired_plonk_instance
+        let ins = SupportPlonkInstance {
+            W_commitments: support_plonk_instance
                 .W_commitments
                 .iter()
                 .map(|p| {
@@ -374,37 +378,27 @@ impl<F: PrimeField> PairedTrace<F> {
                     (*c.x(), *c.y())
                 })
                 .collect(),
-            instances: paired_plonk_instance
+            instances: support_plonk_instance
                 .instances
                 .iter()
                 .map(|col| {
                     col.iter()
-                        .map(|value| {
-                            BigUint::from_different_field(
-                                value,
-                                DEFAULT_LIMB_WIDTH,
-                                DEFAULT_LIMBS_COUNT,
-                            )
-                            .unwrap()
-                        })
+                        .map(|value| util::fe_to_fe(value).unwrap())
                         .collect()
                 })
                 .collect(),
-            challenges: paired_plonk_instance
+            challenges: support_plonk_instance
                 .challenges
                 .iter()
-                .map(|value| {
-                    BigUint::from_different_field(value, DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
-                        .unwrap()
-                })
+                .map(|cha| util::fe_to_fe(cha).unwrap())
                 .collect(),
         };
 
-        let pairing = PairedIncoming {
+        let pairing = SupportIncoming {
             instance: ins.clone(),
             proof: vec![
                 (F::ZERO, F::ZERO);
-                paired_plonk_structure
+                support_plonk_structure
                     .get_degree_for_folding()
                     .saturating_sub(1)
             ],
@@ -427,13 +421,13 @@ pub struct Input<const ARITY: usize, F: PrimeField> {
     /// We should check-consistency with delegated part
     pub self_trace: SelfTrace<F>,
 
-    /// One to three traces of support_circuit from paired curve
+    /// One to three traces of support_circuit from support curve
     /// We should fold challenge (r) as BigUint
     ///
     /// Circuit Field is `C::ScalarExt`
     ///
     /// [instances, challenges] fields will be BigUint
-    pub paired_trace: PairedTrace<F>,
+    pub support_trace: SupportTrace<F>,
 
     pub step: usize,
     pub z_0: [F; ARITY],
@@ -445,8 +439,7 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
     pub fn random<R: rand::Rng + ?Sized>(mut rng: &mut R) -> Self {
         use std::iter;
 
-        // Initialize `step` with a random value.
-        let step: usize = rng.gen();
+        let step: usize = 0;
 
         // Create an infinite generator of random field elements.
         let mut gen = iter::repeat_with(move || F::random(&mut rng));
@@ -502,23 +495,23 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
             },
         };
 
-        // Initialize `paired_trace` with random values.
-        let paired_trace = PairedTrace {
+        // Initialize `support_trace` with random values.
+        let support_trace = SupportTrace {
             input_accumulator: SangriaAccumulatorInstance {
-                ins: PairedPlonkInstance {
+                ins: SupportPlonkInstance {
                     W_commitments: vec![(gen.next().unwrap(), gen.next().unwrap()); 1],
-                    instances: vec![vec![random_big_uint(&mut gen); 8]; 1],
-                    challenges: vec![random_big_uint(&mut gen); 1],
+                    instances: vec![vec![gen.next().unwrap(); 8]; 1],
+                    challenges: vec![gen.next().unwrap(); 1],
                 },
                 E_commitment: (gen.next().unwrap(), gen.next().unwrap()),
                 u: gen.next().unwrap(),
             },
             incoming: vec![
-                PairedIncoming {
-                    instance: PairedPlonkInstance {
+                SupportIncoming {
+                    instance: SupportPlonkInstance {
                         W_commitments: vec![(gen.next().unwrap(), gen.next().unwrap()); 1],
-                        instances: vec![vec![random_big_uint(&mut gen); 8]; 1],
-                        challenges: vec![random_big_uint(&mut gen); 1],
+                        instances: vec![vec![gen.next().unwrap(); 8]; 1],
+                        challenges: vec![gen.next().unwrap(); 1],
                     },
                     proof: vec![(gen.next().unwrap(), gen.next().unwrap()); 1],
                 };
@@ -534,7 +527,7 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
         Self {
             pp_digest,
             self_trace,
-            paired_trace,
+            support_trace,
             step,
             z_0,
             z_i,
@@ -547,14 +540,19 @@ impl<const ARITY: usize, F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for In
         let Self {
             pp_digest: (pp0, pp1),
             self_trace,
-            paired_trace,
+            support_trace,
             step,
             z_0,
             z_i,
         } = self;
 
+        trace!(
+            "offcircuit input protogalaxy accumulator: {:?}",
+            self_trace.input_accumulator
+        );
+
         ro.absorb(&self_trace.input_accumulator)
-            .absorb(&paired_trace.input_accumulator)
+            .absorb(&support_trace.input_accumulator)
             .absorb_field(*pp0)
             .absorb_field(*pp1)
             .absorb_field(F::from(*step as u64))
@@ -613,38 +611,36 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
             },
         };
 
-        // Zero out `paired_trace`.
-        let paired_trace = PairedTrace {
+        // Zero out `support_trace`.
+        let support_trace = SupportTrace {
             input_accumulator: SangriaAccumulatorInstance {
-                ins: PairedPlonkInstance {
+                ins: SupportPlonkInstance {
                     W_commitments: vec![
                         (F::ZERO, F::ZERO);
-                        self.paired_trace.input_accumulator.ins.W_commitments.len()
+                        self.support_trace.input_accumulator.ins.W_commitments.len()
                     ],
                     instances: self
-                        .paired_trace
+                        .support_trace
                         .input_accumulator
                         .ins
                         .instances
                         .iter()
-                        .map(|v| {
-                            vec![BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT); v.len()]
-                        })
+                        .map(|v| vec![F::ZERO; v.len()])
                         .collect(),
                     challenges: vec![
-                        BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT);
-                        self.paired_trace.input_accumulator.ins.challenges.len()
+                        F::ZERO;
+                        self.support_trace.input_accumulator.ins.challenges.len()
                     ],
                 },
                 E_commitment: (F::ZERO, F::ZERO),
                 u: F::ZERO,
             },
             incoming: self
-                .paired_trace
+                .support_trace
                 .incoming
                 .iter()
-                .map(|incoming| PairedIncoming {
-                    instance: PairedPlonkInstance {
+                .map(|incoming| SupportIncoming {
+                    instance: SupportPlonkInstance {
                         W_commitments: vec![
                             (F::ZERO, F::ZERO);
                             incoming.instance.W_commitments.len()
@@ -653,17 +649,9 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
                             .instance
                             .instances
                             .iter()
-                            .map(|v| {
-                                vec![
-                                    BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT);
-                                    v.len()
-                                ]
-                            })
+                            .map(|v| vec![F::ZERO; v.len()])
                             .collect(),
-                        challenges: vec![
-                            BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT);
-                            incoming.instance.challenges.len()
-                        ],
+                        challenges: vec![F::ZERO; incoming.instance.challenges.len()],
                     },
                     proof: vec![(F::ZERO, F::ZERO); incoming.proof.len()],
                 })
@@ -682,7 +670,7 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
         Self {
             pp_digest,
             self_trace,
-            paired_trace,
+            support_trace,
             step,
             z_0,
             z_i,
@@ -693,16 +681,19 @@ impl<const ARITY: usize, F: PrimeField> Input<ARITY, F> {
     /// correct size of fields
     pub fn new_initial<CMain: CurveAffine<ScalarExt = F>, CSup: CurveAffine<Base = F>>(
         native_plonk_structure: &plonk::PlonkStructure<CMain::ScalarExt>,
-        paired_plonk_structure: &plonk::PlonkStructure<CSup::ScalarExt>,
-        paired_plonk_instance: &nifs::sangria::FoldablePlonkInstance<CSup>,
+        support_plonk_structure: &plonk::PlonkStructure<CSup::ScalarExt>,
+        support_plonk_instance: &nifs::sangria::FoldablePlonkInstance<
+            CSup,
+            { support_circuit::INSTANCES_LEN },
+        >,
     ) -> Self {
         let self_trace = SelfTrace::new_initial(native_plonk_structure);
 
         Self {
             pp_digest: (F::ZERO, F::ZERO),
-            paired_trace: PairedTrace::new_initial::<CSup>(
-                paired_plonk_structure,
-                paired_plonk_instance,
+            support_trace: SupportTrace::new_initial::<CSup>(
+                support_plonk_structure,
+                support_plonk_instance,
                 self_trace.W_commitments_len(),
             ),
             self_trace,
@@ -719,16 +710,17 @@ pub struct InputBuilder<
     CSup: CurveAffine,
     const ARITY: usize,
 > {
-    pub pp_digest: CSup,
+    pub pp_digest: (CSup::Base, CSup::Base),
     pub step: usize,
 
     pub self_acc: &'link nifs::protogalaxy::AccumulatorInstance<CMain>,
     pub self_incoming: &'link plonk::PlonkInstance<CMain>,
     pub self_proof: nifs::protogalaxy::Proof<CMain::Scalar>,
 
-    pub paired_acc: &'link nifs::sangria::RelaxedPlonkInstance<CSup>,
-    pub paired_incoming: &'link [(
-        nifs::sangria::FoldablePlonkInstance<CSup>,
+    pub support_acc:
+        &'link nifs::sangria::RelaxedPlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
+    pub support_incoming: &'link [(
+        nifs::sangria::FoldablePlonkInstance<CSup, { support_circuit::INSTANCES_LEN }>,
         nifs::sangria::CrossTermCommits<CSup>,
     )],
 
@@ -746,17 +738,14 @@ impl<CMain: CurveAffine<ScalarExt = CSup::Base>, CSup: CurveAffine, const ARITY:
             self_acc,
             self_incoming,
             self_proof,
-            paired_acc,
-            paired_incoming,
+            support_acc,
+            support_incoming,
             z_0,
             z_i,
         } = self;
 
-        Input {
-            pp_digest: {
-                let c = pp_digest.coordinates().unwrap();
-                (*c.x(), *c.y())
-            },
+        let input = Input {
+            pp_digest,
             step,
             z_0,
             z_i,
@@ -765,13 +754,17 @@ impl<CMain: CurveAffine<ScalarExt = CSup::Base>, CSup: CurveAffine, const ARITY:
                 incoming: NativePlonkInstance::new(self_incoming),
                 proof: self_proof,
             },
-            paired_trace: PairedTrace {
-                input_accumulator: SangriaAccumulatorInstance::new(paired_acc),
-                incoming: paired_incoming
+            support_trace: SupportTrace {
+                input_accumulator: SangriaAccumulatorInstance::new(support_acc),
+                incoming: support_incoming
                     .iter()
-                    .map(|(instance, proof)| PairedIncoming::new(instance, proof))
+                    .map(|(instance, proof)| SupportIncoming::new(instance, proof))
                     .collect(),
             },
-        }
+        };
+
+        trace!("builded input is: {input:?}");
+
+        input
     }
 }
