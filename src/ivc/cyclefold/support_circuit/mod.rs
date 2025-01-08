@@ -112,7 +112,7 @@ where
                     .assign_values_from_instance(&mut ctx, config.instance, 0)
                     .unwrap();
 
-                trace!("instances assigned");
+                trace!("instances assigned ({})", ctx.offset());
 
                 let [p0, p1] = [
                     AssignedPoint::<C> { x: x0, y: y0 },
@@ -126,26 +126,32 @@ where
                     .gate
                     .le_num_to_bits(&mut ctx, &l0, num_bits)
                     .unwrap();
-                let lhs = ecc_chip
-                    .scalar_mul_non_zero(&mut ctx, &p0, &l0_bits)
-                    .unwrap();
-                trace!("p0 * l0_bits = [{:?},{:?}]", lhs.x.value(), lhs.y.value());
+
+                trace!("l0 -> l0_bits, ({})", ctx.offset());
+
+                let lhs = ecc_chip.scalar_mul(&mut ctx, &p0, &l0_bits).unwrap();
+
+                trace!(
+                    "p0 * l0_bits = [{:?},{:?}] ({})",
+                    lhs.x.value(),
+                    lhs.y.value(),
+                    ctx.offset()
+                );
 
                 let l1_bits = ecc_chip
                     .gate
                     .le_num_to_bits(&mut ctx, &l1, num_bits)
                     .unwrap();
-                trace!("l1 bits ready");
-                let rhs = ecc_chip
-                    .scalar_mul_non_zero(&mut ctx, &p1, &l1_bits)
-                    .unwrap();
-                trace!("p1 * l1_bits");
+                trace!("l1 -> l1_bits({})", ctx.offset());
+
+                let rhs = ecc_chip.scalar_mul(&mut ctx, &p1, &l1_bits).unwrap();
+                trace!("p1 * l1_bits ({})", ctx.offset());
 
                 let AssignedPoint {
                     x: actual_x,
                     y: actual_y,
                 } = ecc_chip.add(&mut ctx, &lhs, &rhs).unwrap();
-                trace!("add finished");
+                trace!("add finished ({})", ctx.offset());
 
                 ctx.constrain_equal(expected_x.cell(), actual_x.cell())
                     .unwrap();
@@ -165,7 +171,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        halo2_proofs::dev::MockProver,
+        halo2_proofs::{dev::MockProver, halo2curves::group::prime::PrimeCurveAffine},
         prelude::{bn256::C1Affine as Curve, Field},
     };
 
@@ -194,6 +200,25 @@ mod tests {
             SupportCircuit::<Curve>::MIN_K_TABLE_SIZE,
             &circuit,
             InstanceInput { p0, l0, p1, l1 }.into_instance(),
+        )
+        .unwrap()
+        .verify()
+        .unwrap();
+    }
+
+    #[traced_test]
+    #[test]
+    fn e2e_zero() {
+        MockProver::run(
+            SupportCircuit::<Curve>::MIN_K_TABLE_SIZE,
+            &SupportCircuit::<Curve>::default(),
+            InstanceInput::<Curve> {
+                p0: Curve::identity(),
+                l0: Field::ZERO,
+                p1: Curve::identity(),
+                l1: Field::ZERO,
+            }
+            .into_instance(),
         )
         .unwrap()
         .verify()

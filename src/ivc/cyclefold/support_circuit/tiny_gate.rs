@@ -130,25 +130,58 @@ impl<F: PrimeField> Gate<F> {
             mul,
         } = self.config();
 
-        ctx.enable_selector(s)?;
-        ctx.assign_fixed(|| "add_with_const.lhs_coeff", *sum0, *lhs_coeff)?;
+        // Enable the selector
+        ctx.enable_selector(s)
+            .inspect_err(|err| error!("Failed to enable selector in add_with_const: {err:?}"))?;
 
-        let l = ctx.assign_advice_from(|| "add_with_const.lhs", *state0, lhs)?;
-        let r = ctx.assign_fixed(|| "add_with_const.rc", *rc, *rhs)?;
+        // Assign the coefficient for lhs
+        ctx.assign_fixed(|| "add_with_const.lhs_coeff", *sum0, *lhs_coeff)
+            .inspect_err(|err| {
+                error!("Failed to assign lhs coefficient in add_with_const: {err:?}")
+            })?;
 
-        let res = ctx.assign_advice(
-            || "add_with_const.out",
-            *output,
-            (l.value().copied() * Value::known(lhs_coeff)) + r.value(),
-        );
+        // Assign the lhs value to advice column
+        let l = ctx
+            .assign_advice_from(|| "add_with_const.lhs", *state0, lhs)
+            .inspect_err(|err| {
+                error!("Failed to assign lhs value to advice column in add_with_const: {err:?}")
+            })?;
 
-        ctx.assign_fixed(|| "", *mul, F::ZERO)?;
-        ctx.assign_fixed(|| "", *sum1, F::ZERO)?;
-        ctx.assign_advice(|| "", *state1, Value::known(F::ZERO))?;
+        // Assign the rhs value to fixed column
+        ctx.assign_fixed(|| "add_with_const.rc", *rc, *rhs)
+            .inspect_err(|err| {
+                error!("Failed to assign rhs constant value in add_with_const: {err:?}")
+            })?;
+
+        // Assign the result to output column
+        let res = (l.value().copied() * Value::known(lhs_coeff)) + Value::known(rhs);
+        let res = ctx
+            .assign_advice(|| "add_with_const.out", *output, res)
+            .inspect_err(|err| {
+                error!("Failed to assign result output ({res:?}) in `add_with_const`: {err:?}")
+            })?;
+
+        // Assign fixed columns for zero values
+        ctx.assign_fixed(|| "add_with_const.mul", *mul, F::ZERO)
+            .inspect_err(|err| {
+                error!("Failed to assign fixed zero value to mul column in add_with_const: {err:?}")
+            })?;
+        ctx.assign_fixed(|| "add_with_const.sum1", *sum1, F::ZERO)
+            .inspect_err(|err| {
+                error!(
+                    "Failed to assign fixed zero value to sum1 column in add_with_const: {err:?}"
+                )
+            })?;
+
+        // Assign zero to state1
+        ctx.assign_advice(|| "add_with_const.state1", *state1, Value::known(F::ZERO))
+            .inspect_err(|err| {
+                error!("Failed to assign fixed zero value to state1 in add_with_const: {err:?}")
+            })?;
 
         ctx.next();
 
-        res
+        Ok(res)
     }
 
     fn add(
@@ -324,6 +357,7 @@ impl<F: PrimeField> Gate<F> {
         ctx.assign_fixed(|| "one", *rc, F::ZERO)?;
 
         ctx.next();
+
         Ok(out)
     }
 
@@ -332,21 +366,56 @@ impl<F: PrimeField> Gate<F> {
         ctx: &mut RegionCtx<'_, F>,
         a: &AssignedValue<F>,
     ) -> Result<(AssignedValue<F>, AssignedValue<F>), Halo2PlonkError> {
+        // Compute the inverse of 'a' if it is non-zero
         let a_inv = a.value().unwrap().and_then(|v| v.invert().into());
 
-        let is_zero = self.assign_bit(ctx, if a_inv.is_some() { F::ZERO } else { F::ONE })?;
-        let [a_inv] = self.assign_values(ctx, &[a_inv.unwrap_or(F::ONE)])?;
+        // Assign a bit to indicate if 'a' is zero or non-zero
+        let is_zero = self
+            .assign_bit(ctx, if a_inv.is_some() { F::ZERO } else { F::ONE })
+            .inspect_err(|err| {
+                error!("Failed to assign zero-flag bit in invert_with_flag: {err:?}")
+            })?;
 
-        // a * a' = 1 - r
-        let left = self.mul(ctx, a, &a_inv)?.cell();
-        let right = self
-            .add_with_const(ctx, &is_zero, &-F::ONE, &F::ONE)?
+        // Assign the value of the inverse or ONE if no inverse exists
+        let [a_inv] = self
+            .assign_values(ctx, &[a_inv.unwrap_or(F::ONE)])
+            .inspect_err(|err| {
+                error!("Failed to assign inverse value in invert_with_flag: {err:?}")
+            })?;
+
+        // Constrain: a * a_inv = 1 - is_zero
+        let left = self
+            .mul(ctx, a, &a_inv)
+            .inspect_err(|err| {
+                error!("Failed to multiply 'a' and its inverse in invert_with_flag: {err:?}")
+            })?
             .cell();
-        ctx.constrain_equal(left, right)?;
 
-        // r * a' = r
-        let left = self.mul(ctx, &is_zero, &a_inv)?.cell();
-        ctx.constrain_equal(left, is_zero.cell())?;
+        let right = self
+            .add_with_const(ctx, &is_zero, &-F::ONE, &F::ONE)
+            .inspect_err(|err| {
+                error!("Failed to compute 1 - is_zero in invert_with_flag: {err:?}")
+            })?
+            .cell();
+
+        ctx.constrain_equal(left, right).inspect_err(|err| {
+            error!("Failed to constrain 'a * a_inv = 1 - is_zero' in invert_with_flag: {err:?}")
+        })?;
+
+        // Constrain: is_zero * a_inv = is_zero
+        let left = self
+            .mul(ctx, &is_zero, &a_inv)
+            .inspect_err(|err| {
+                error!("Failed to multiply is_zero and a_inv in invert_with_flag: {err:?}")
+            })?
+            .cell();
+
+        ctx.constrain_equal(left, is_zero.cell())
+            .inspect_err(|err| {
+                error!(
+                    "Failed to constrain 'is_zero * a_inv = is_zero' in invert_with_flag: {err:?}"
+                )
+            })?;
 
         Ok((is_zero, a_inv))
     }
