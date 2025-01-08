@@ -667,7 +667,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
 
         let expected_l0 = mg.conditional_select(region, &zero, &poly_L_values[0], &is_zero_term)?;
         let expected_l0 = bn_chip
-            .from_assigned_cell_to_limbs(region, &expected_l0)
+            .from_assigned_value_to_limbs(region, &expected_l0)
             .map_err(|err| {
                 error!("while make from L0 biguint form: {err:?}");
                 Halo2PlonkError::Synthesis
@@ -675,7 +675,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
 
         let expected_l1 = mg.conditional_select(region, &zero, &poly_L_values[1], &is_zero_term)?;
         let expected_l1 = bn_chip
-            .from_assigned_cell_to_limbs(region, &expected_l1)
+            .from_assigned_value_to_limbs(region, &expected_l1)
             .map_err(|err| {
                 error!("while make from L1 biguint form: {err:?}");
                 Halo2PlonkError::Synthesis

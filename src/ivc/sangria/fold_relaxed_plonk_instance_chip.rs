@@ -623,7 +623,9 @@ where
 
         let r_value = gate.le_bits_to_num(region, &r)?;
         let r = BigUintView {
-            as_bn_limbs: self.bn_chip.from_assigned_cell_to_limbs(region, &r_value)?,
+            as_bn_limbs: self
+                .bn_chip
+                .from_assigned_value_to_limbs(region, &r_value)?,
             as_bits: r.clone(),
         };
 
@@ -736,7 +738,7 @@ where
 
                 let assigned_bn = self
                     .bn_chip
-                    .from_assigned_cell_to_limbs(region, &assigned_cell)?;
+                    .from_assigned_value_to_limbs(region, &assigned_cell)?;
 
                 Result::<_, Error>::Ok(assigned_bn)
             }};
@@ -835,7 +837,7 @@ where
                 region.next();
                 let assigned_bn = self
                     .bn_chip
-                    .from_assigned_cell_to_limbs(region, &assigned_cell)?;
+                    .from_assigned_value_to_limbs(region, &assigned_cell)?;
 
                 Result::<_, Error>::Ok((assigned_cell, assigned_bn))
             }};
@@ -1479,7 +1481,7 @@ mod tests {
                     let r_vv = BigUintView {
                         as_bn_limbs: chip
                             .bn_chip
-                            .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
+                            .from_assigned_value_to_limbs(&mut ctx, &assigned_r)
                             .unwrap(),
                         as_bits: r,
                     };
@@ -1605,7 +1607,7 @@ mod tests {
                     ctx.next();
 
                     let r_as_bn = bn_chip
-                        .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
+                        .from_assigned_value_to_limbs(&mut ctx, &assigned_r)
                         .unwrap();
 
                     Ok(FoldRelaxedPlonkInstanceChip::<
@@ -1749,7 +1751,7 @@ mod tests {
                     ctx.next();
 
                     let r_as_bn = bn_chip
-                        .from_assigned_cell_to_limbs(&mut ctx, &assigned_r)
+                        .from_assigned_value_to_limbs(&mut ctx, &assigned_r)
                         .unwrap();
 
                     let m_bn = scalar_module_as_bn::<C1>(LIMB_WIDTH, LIMBS_COUNT).unwrap();

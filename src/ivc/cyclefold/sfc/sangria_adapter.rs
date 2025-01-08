@@ -69,7 +69,7 @@ where
         .absorb_iter(input.iter_wrap_values())
         .squeeze(region)?;
     let r_bits = mg.le_num_to_bits(region, r.clone(), MAX_BITS)?;
-    let r_as_bn = bn_chip.from_assigned_cell_to_limbs(region, &r).unwrap();
+    let r_as_bn = bn_chip.from_assigned_value_to_limbs(region, &r).unwrap();
 
     let m_bn = module_as_bn::<CMain::ScalarExt, CMain::Base>().unwrap();
 

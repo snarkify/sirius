@@ -874,7 +874,9 @@ mod decompose_tests {
 
                         region.next();
 
-                        let limbs = chip.from_assigned_cell_to_limbs(&mut region, &val).unwrap();
+                        let limbs = chip
+                            .from_assigned_value_to_limbs(&mut region, &val)
+                            .unwrap();
 
                         for val in [
                             F::from_u128(0u128),
@@ -890,7 +892,7 @@ mod decompose_tests {
 
                             region.next();
 
-                            chip.from_assigned_cell_to_limbs(&mut region, &new_val)
+                            chip.from_assigned_value_to_limbs(&mut region, &new_val)
                                 .unwrap();
                         }
 
