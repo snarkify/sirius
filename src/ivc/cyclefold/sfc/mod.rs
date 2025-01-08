@@ -25,7 +25,7 @@ use crate::{
 };
 
 mod input;
-pub use input::Input;
+pub use input::{Input, InputBuilder};
 
 pub mod sangria_adapter;
 
