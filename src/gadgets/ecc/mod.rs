@@ -231,7 +231,8 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
                 error!("Failed to conditionally select lhs_non_zero in scalar_mul: {err:?}")
             })?;
 
-        let mut p = unsafe {
+        // Safety: Check for non-null before
+        let mut doubled_non_zero_lhs = unsafe {
             self.gate
                 .unchecked_double(ctx, &lhs_non_zero)
                 .inspect_err(|err| {
@@ -240,10 +241,16 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
         };
 
         for (i, bit) in incomplete_bits.iter().skip(1).enumerate() {
+            // Safety: The left parameter is lhs, the right parameter is the same (if it is not
+            // zero) but doubled.
+            //
+            // TODO: Additionally check the safety of the this
             let tmp = unsafe {
-                self.gate.unchecked_add(ctx, &acc, &p).inspect_err(|err| {
-                    error!("Failed to add points in iteration {i} of scalar_mul: {err:?}")
-                })?
+                self.gate
+                    .unchecked_add(ctx, &acc, &doubled_non_zero_lhs)
+                    .inspect_err(|err| {
+                        error!("Failed to add points in iteration {i} of scalar_mul: {err:?}")
+                    })?
             };
 
             acc = AssignedPoint {
@@ -261,10 +268,13 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
                     ))?,
             };
 
-            p = unsafe {
-                self.gate.unchecked_double(ctx, &p).inspect_err(|err| {
-                    error!("Failed to double point p in iteration {i} of scalar_mul: {err:?}")
-                })?
+            // Safety: a non-zero check was performed earlier
+            doubled_non_zero_lhs = unsafe {
+                self.gate
+                    .unchecked_double(ctx, &doubled_non_zero_lhs)
+                    .inspect_err(|err| {
+                        error!("Failed to double point p in iteration {i} of scalar_mul: {err:?}")
+                    })?
             };
         }
 
@@ -331,11 +341,13 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
         acc = AssignedPoint { x, y };
 
         for (i, bit) in complete_bits.iter().enumerate() {
-            let tmp = self.add(ctx, &acc, &p).inspect_err(|err| {
-                error!(
+            let tmp = self
+                .add(ctx, &acc, &doubled_non_zero_lhs)
+                .inspect_err(|err| {
+                    error!(
                     "Failed to add acc and p in complete_bits iteration {i} of scalar_mul: {err:?}"
                 )
-            })?;
+                })?;
 
             let x = self
             .gate
@@ -352,7 +364,7 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
 
             acc = AssignedPoint { x, y };
 
-            p = self.double(ctx, &p).inspect_err(|err| {
+            doubled_non_zero_lhs = self.double(ctx, &doubled_non_zero_lhs).inspect_err(|err| {
                 error!(
                     "Failed to double point p in complete_bits iteration {i} of scalar_mul: {err:?}"
                 )
