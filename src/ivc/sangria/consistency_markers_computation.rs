@@ -10,7 +10,7 @@ use crate::{
     gadgets::{ecc::AssignedPoint, nonnative::bn::big_uint::BigUint},
     halo2curves::CurveAffine,
     main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
-    nifs::sangria::accumulator::RelaxedPlonkInstance,
+    nifs::sangria::accumulator::{RelaxedPlonkInstance, SCInstancesHashAcc},
     poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
     util::{self, ScalarToBase},
 };
@@ -94,7 +94,8 @@ where
             pub(crate) consistency_markers: Vec<BigUint<C::Base>>,
             pub(crate) challenges: Vec<BigUint<C::Base>>,
             pub(crate) u: &'l C::ScalarExt,
-            pub(crate) step_circuit_instances_hash_accumulator: &'l C::ScalarExt,
+            pub(crate) step_circuit_instances_hash_accumulator:
+                SCInstancesHashAcc<&'l C::ScalarExt>,
         }
 
         impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO>
@@ -116,8 +117,11 @@ where
                             .copied(),
                     )
                     .absorb_field(C::scalar_to_base(self.u).unwrap())
-                    .absorb_field(
-                        C::scalar_to_base(self.step_circuit_instances_hash_accumulator).unwrap(),
+                    .absorb(
+                        &self
+                            .step_circuit_instances_hash_accumulator
+                            .as_ref()
+                            .map(|v| C::scalar_to_base(v).unwrap()),
                     );
             }
         }
@@ -156,7 +160,8 @@ where
                     .unwrap()
                 })
                 .collect(),
-            step_circuit_instances_hash_accumulator,
+            step_circuit_instances_hash_accumulator: step_circuit_instances_hash_accumulator
+                .as_ref(),
             u,
         };
 
@@ -227,7 +232,9 @@ mod tests {
             challenges: vec![Scalar::from_u128(0x123456); 10],
             E_commitment: CommitmentKey::<C1>::default_value(),
             u: Scalar::from_u128(u128::MAX),
-            step_circuit_instances_hash_accumulator: Scalar::from_u128(0xaaaaaaaaaaaaa),
+            step_circuit_instances_hash_accumulator: SCInstancesHashAcc::Hash(Scalar::from_u128(
+                0xaaaaaaaaaaaaa,
+            )),
         };
 
         let off_circuit_hash: Base = ConsistencyMarkerComputation::<

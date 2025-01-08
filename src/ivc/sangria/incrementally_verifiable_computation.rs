@@ -11,8 +11,10 @@ use crate::{
     group::prime::PrimeCurveAffine,
     halo2curves::CurveAffine,
     ivc::{
-        consistency_markers_computation::ConsistencyMarkerComputation,
-        public_params::PublicParams,
+        sangria::{
+            consistency_markers_computation::ConsistencyMarkerComputation,
+            public_params::PublicParams,
+        },
         step_folding_circuit::{StepFoldingCircuit, StepInputs},
     },
     main_gate::MainGateConfig,
@@ -126,7 +128,7 @@ where
     step: usize,
     secondary_nifs_pp: nifs::sangria::ProverParam<C2>,
     primary_nifs_pp: nifs::sangria::ProverParam<C1>,
-    secondary_trace: [FoldablePlonkTrace<C2>; 1],
+    secondary_trace: [FoldablePlonkTrace<C2, { CONSISTENCY_MARKERS_COUNT }>; 1],
 
     debug_mode: bool,
 }
@@ -445,6 +447,7 @@ where
                 self.secondary.relaxed_trace.clone(),
                 &self.secondary_trace,
             )?;
+
         self.secondary
             .pub_instances
             .push(self.secondary_trace[0].u.instances.clone());
