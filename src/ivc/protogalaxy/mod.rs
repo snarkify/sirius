@@ -14,7 +14,7 @@ pub mod verify_chip {
             },
             plonk::Error as Halo2PlonkError,
         },
-        ivc::cyclefold::DEFAULT_LIMBS_COUNT_LIMIT,
+        ivc::cyclefold::{DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
         main_gate::{
             AdviceCyclicAssignor, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue,
         },
@@ -25,7 +25,6 @@ pub mod verify_chip {
         plonk,
         polynomial::{lagrange::iter_cyclic_subgroup, univariate::UnivariatePoly},
         poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
-        prelude::DEFAULT_LIMB_WIDTH,
         util,
     };
 
@@ -57,7 +56,7 @@ pub mod verify_chip {
         SPS { err: Halo2PlonkError },
     }
 
-    pub type BigUint<F> = Vec<F>;
+    pub type BigUint<F> = [F; DEFAULT_LIMBS_COUNT.get()];
 
     #[derive(Debug, Clone)]
     pub struct BigUintPoint<F> {
@@ -127,7 +126,10 @@ pub mod verify_chip {
                 .map(|(l, r)| mg.conditional_select(region, l, r, cond))
                 .collect::<Result<Vec<_>, _>>()?;
 
-            Ok(Self { x, y })
+            Ok(Self {
+                x: x.try_into().unwrap(),
+                y: y.try_into().unwrap(),
+            })
         }
     }
 
@@ -138,18 +140,21 @@ pub mod verify_chip {
             let x = big_uint::BigUint::<C::ScalarExt>::from_different_field::<C::Base>(
                 coordinates.x(),
                 DEFAULT_LIMB_WIDTH,
-                DEFAULT_LIMBS_COUNT_LIMIT,
+                DEFAULT_LIMBS_COUNT,
             )?;
 
             let y = big_uint::BigUint::<C::ScalarExt>::from_different_field::<C::Base>(
                 coordinates.y(),
                 DEFAULT_LIMB_WIDTH,
-                DEFAULT_LIMBS_COUNT_LIMIT,
+                DEFAULT_LIMBS_COUNT,
             )?;
 
+            assert_eq!(x.limbs().len(), DEFAULT_LIMBS_COUNT.get());
+            assert_eq!(y.limbs().len(), DEFAULT_LIMBS_COUNT.get());
+
             Ok(Self {
-                x: x.limbs().to_vec(),
-                y: y.limbs().to_vec(),
+                x: x.limbs().try_into().unwrap(),
+                y: y.limbs().try_into().unwrap(),
             })
         }
 
@@ -161,8 +166,14 @@ pub mod verify_chip {
             let mut assigner = main_gate_config.advice_cycle_assigner();
 
             let p = BigUintPoint {
-                x: assigner.assign_all_advice(region, || "x", self.x.into_iter())?,
-                y: assigner.assign_all_advice(region, || "y", self.y.into_iter())?,
+                x: assigner
+                    .assign_all_advice(region, || "x", self.x.into_iter())?
+                    .try_into()
+                    .unwrap(),
+                y: assigner
+                    .assign_all_advice(region, || "y", self.y.into_iter())?
+                    .try_into()
+                    .unwrap(),
             };
 
             region.next();
@@ -174,18 +185,20 @@ pub mod verify_chip {
     impl<F: PrimeField> BigUintPoint<F> {
         pub fn identity() -> Self {
             Self {
-                x: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT_LIMIT)
+                x: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
                     .limbs()
-                    .to_vec(),
-                y: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT_LIMIT)
+                    .try_into()
+                    .unwrap(),
+                y: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
                     .limbs()
-                    .to_vec(),
+                    .try_into()
+                    .unwrap(),
             }
         }
     }
 
     /// Assigned version of [`crate::plonk::PlonkInstance`]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct AssignedPlonkInstance<F: PrimeField> {
         pub W_commitments: Vec<BigUintPoint<AssignedValue<F>>>,
         pub instances: Vec<Vec<AssignedValue<F>>>,
@@ -315,7 +328,7 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::nifs::protogalaxy::accumulator::AccumulatorInstance`]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct AssignedAccumulatorInstance<F: PrimeField> {
         pub ins: AssignedPlonkInstance<F>,
         pub betas: Box<[AssignedValue<F>]>,
@@ -425,7 +438,7 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::polynomial::univariate::UnivariatePoly`]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct AssignedUnivariatePoly<F: PrimeField>(pub UnivariatePoly<AssignedValue<F>>);
 
     impl<F: PrimeField> From<UnivariatePoly<AssignedValue<F>>> for AssignedUnivariatePoly<F> {
@@ -578,7 +591,7 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::nifs::protogalaxy::Proof]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct AssignedProof<F: PrimeField> {
         pub poly_F: AssignedUnivariatePoly<F>,
         pub poly_K: AssignedUnivariatePoly<F>,
@@ -627,9 +640,8 @@ pub mod verify_chip {
             vp: &protogalaxy::VerifierParam<C>,
         ) -> Result<Self, Error> {
             let protogalaxy::VerifierParam { pp_digest } = vp;
-            let c = pp_digest.coordinates().unwrap();
-            let x = util::fe_to_fe(c.x()).unwrap();
-            let y = util::fe_to_fe(c.y()).unwrap();
+            let x = util::fe_to_fe(&pp_digest.0).unwrap();
+            let y = util::fe_to_fe(&pp_digest.1).unwrap();
 
             let mut assigner = main_gate_config.advice_cycle_assigner::<C::ScalarExt>();
             Ok(Self {
@@ -687,15 +699,25 @@ pub mod verify_chip {
                 .absorb_iter(vp.iter_wrap_value())
                 .absorb_iter(accumulator.iter_wrap_values())
                 .absorb_iter(incoming.iter().flat_map(|tr| tr.iter_wrap_values()))
+                .inspect(|buf| trace!("buf before delta: {buf:?}"))
                 .squeeze(region)?;
 
             let alpha = ro_circuit
                 .absorb_iter(proof.poly_F.iter_wrap_value())
+                .inspect(|buf| trace!("buf before alpha: {buf:?}"))
                 .squeeze(region)?;
 
             let gamma = ro_circuit
                 .absorb_iter(proof.poly_K.iter_wrap_value())
+                .inspect(|buf| trace!("buf before gamma: {buf:?}"))
                 .squeeze(region)?;
+
+            debug!(
+                "challanges: delta: {delta:?}, alpha: {alpha:?}, gamma: {gamma:?}",
+                delta = delta.value(),
+                alpha = alpha.value(),
+                gamma = gamma.value(),
+            );
 
             Ok(AssignedChallanges {
                 delta,
@@ -978,6 +1000,7 @@ pub mod verify_chip {
     ///
     /// 5. **Fold the Instance:**
     ///     - [`ProtoGalaxy::fold_instance`]
+    #[instrument(skip_all)]
     pub fn verify<F, const L: usize, const T: usize>(
         region: &mut RegionCtx<F>,
         main_gate_config: MainGateConfig<T>,
@@ -1070,7 +1093,7 @@ pub mod verify_chip {
                 dev::MockProver,
                 plonk::{Circuit, ConstraintSystem},
             },
-            halo2curves::{bn256::G1Affine as Affine1, group::prime::PrimeCurveAffine},
+            halo2curves::bn256::G1Affine as Affine1,
             ivc::cyclefold::{ro, ro_chip},
             main_gate::MainGate,
             nifs::{
@@ -1086,6 +1109,7 @@ pub mod verify_chip {
         const RATE: usize = T - 1;
         const K: usize = 14;
 
+        type Base = <Affine1 as CurveAffine>::Base;
         type Scalar = <Affine1 as CurveAffine>::ScalarExt;
 
         fn get_witness_collector() -> (WitnessCollector<Scalar>, MainGateConfig<T>) {
@@ -1108,7 +1132,7 @@ pub mod verify_chip {
         impl Mock {
             fn new() -> Self {
                 let params = VerifierParam::<Affine1> {
-                    pp_digest: Affine1::identity(),
+                    pp_digest: (Base::ZERO, Base::ZERO),
                 };
 
                 let acc = nifs::protogalaxy::Accumulator::<Affine1>::new(

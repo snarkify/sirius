@@ -69,152 +69,16 @@ where
     CSup::Scalar: PrimeFieldBits + FromUniformBytes<64>,
 {
     pub fn new(
-        primary_sc: &SC,
-        ck1: CommitmentKey<CMain>,
-        ck2: CommitmentKey<CSup>,
-        k_table_size: u32,
+        _primary_sc: &SC,
+        _ck1: CommitmentKey<CMain>,
+        _ck2: CommitmentKey<CSup>,
+        _k_table_size: u32,
     ) -> Self
     where
         CMain::ScalarExt: Serialize,
         CSup::ScalarExt: Serialize,
     {
-        // Trace in C1::Base or C2::Scalar
-        let (support_S, support_initial_trace): (
-            PlonkStructure<CMain::Base>,
-            FoldablePlonkTrace<CSup>,
-        ) = {
-            // Since I want to scalar_multiply points for main::sfc, I take `CMain` as the main curve here
-            // CMain::Base or CSupport::Scalar (native for suppport_circuit)
-            let support_circuit_instances: Vec<Vec<CMain::Base>> = support_circuit::InstanceInput {
-                p0: CMain::identity(),
-                l0: CMain::Base::ZERO,
-                p1: CMain::identity(),
-                l1: CMain::Base::ZERO,
-            }
-            .into_instance();
-
-            let support_cr = CircuitRunner::<CMain::Base, _>::new(
-                SupportCircuit::<CMain>::MIN_K_TABLE_SIZE,
-                SupportCircuit::<CMain>::default(),
-                support_circuit_instances.clone(),
-            );
-            let S = support_cr.try_collect_plonk_structure().unwrap();
-
-            // The trace is generated for `CSup`, since all result types use `C::ScalarExt` in our
-            // case it will be `CSup::ScalarExt` or `CMain::Base`
-            (
-                S,
-                VanillaFS::<CSup>::generate_plonk_trace(
-                    &ck2,
-                    &support_circuit_instances,
-                    &support_cr.try_collect_witness().unwrap(),
-                    &nifs::sangria::ProverParam {
-                        S: support_cr.try_collect_plonk_structure().unwrap(),
-                        pp_digest: (CSup::Base::ZERO, CSup::Base::ZERO),
-                    },
-                    &mut ro(),
-                )
-                .unwrap(),
-            )
-        };
-
-        let (primary_S, primary_initial_trace) = {
-            let mut mock_sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
-                sc: primary_sc,
-                input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
-                    &PlonkStructure {
-                        k: k_table_size as usize,
-                        ..Default::default()
-                    },
-                    &support_S,
-                    &support_initial_trace.u,
-                ),
-                _p: PhantomData,
-            };
-
-            let mock_instances = mock_sfc.initial_instances();
-
-            // Correct `num_io`
-            mock_sfc.input = sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
-                &PlonkStructure {
-                    k: k_table_size as usize,
-                    num_io: mock_instances.iter().map(|col| col.len()).collect(),
-                    ..Default::default()
-                },
-                &support_S,
-                &support_initial_trace.u,
-            );
-
-            let mock_S = CircuitRunner::new(k_table_size, mock_sfc, mock_instances)
-                .try_collect_plonk_structure()
-                .unwrap();
-
-            let sfc = StepFoldingCircuit::<A1, CMain, CSup, SC> {
-                sc: primary_sc,
-                input: sfc::Input::<A1, CMain::ScalarExt>::new_initial::<CMain, CSup>(
-                    &mock_S,
-                    &support_S,
-                    &support_initial_trace.u,
-                ),
-                _p: PhantomData,
-            };
-
-            let primary_instances = sfc.initial_instances();
-            let primary_cr = CircuitRunner::new(k_table_size, sfc, primary_instances.clone());
-
-            (
-                primary_cr.try_collect_plonk_structure().unwrap(),
-                ProtoGalaxy::<CMain, 1>::generate_plonk_trace(
-                    &ck1,
-                    &primary_instances,
-                    &primary_cr.try_collect_witness().unwrap(),
-                    &nifs::protogalaxy::ProverParam {
-                        S: primary_cr.try_collect_plonk_structure().unwrap(),
-                        pp_digest: CMain::identity(),
-                    },
-                    &mut ro(),
-                )
-                .unwrap(),
-            )
-        };
-
-        let digest_bytes = {
-            use serde::Serialize;
-
-            #[derive(Serialize)]
-            struct Meaningful<'link, CMainScalar: PrimeField, CSupScalar: PrimeField>
-            where
-                CMainScalar: Serialize,
-                CSupScalar: Serialize,
-            {
-                primary_S: &'link PlonkStructure<CMainScalar>,
-                primary_k_table_size: &'link u32,
-                support_S: &'link PlonkStructure<CSupScalar>,
-            }
-
-            digest::DefaultHasher::digest_to_bits(&Meaningful {
-                primary_S: &primary_S,
-                primary_k_table_size: &k_table_size,
-                support_S: &support_S,
-            })
-            .unwrap()
-        };
-
-        Self {
-            primary_ck: ck1,
-            support_ck: ck2,
-            primary_k_table_size: k_table_size,
-
-            primary_initial_trace,
-            support_initial_trace,
-
-            primary_S,
-            support_S,
-
-            digest_bytes,
-
-            _p: PhantomData,
-        }
+        todo!("temporarily removed for the purposes of a simple merge into main")
     }
 
     pub fn cmain_pp_digest(&self) -> CMain {
@@ -242,7 +106,7 @@ where
     pub fn protogalaxy_prover_params(&self) -> nifs::protogalaxy::ProverParam<CMain> {
         nifs::protogalaxy::ProverParam {
             S: self.primary_S.clone(),
-            pp_digest: self.cmain_pp_digest(),
+            pp_digest: self.cmain_pp_digest_coordinates(),
         }
     }
 
