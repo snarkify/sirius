@@ -1177,7 +1177,7 @@ mod tests {
     /// as the number of required rows in the table grows.
     const NUM_OF_FOLD_ROUNDS: usize = 3;
     /// 2 ^ K is count of table rows in [`TableData`]
-    const K: u32 = 20;
+    const K: u32 = 21;
 
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(64) };
     const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
@@ -1292,7 +1292,7 @@ mod tests {
 
         let mut layouter = SingleChipLayouter::new(&mut ws, vec![]).unwrap();
 
-        let spec = Spec::<Base, T, 5>::new(10, 10);
+        let spec = Spec::<Base, T, { T - 1 }>::new(10, 10);
 
         for _round in 0..=NUM_OF_FOLD_ROUNDS {
             let plonk = generate_random_plonk_instance(&mut rnd);
@@ -1814,8 +1814,6 @@ mod tests {
     #[traced_test]
     #[test]
     fn fold_all() {
-        const T: usize = 6;
-
         let Fixture {
             mut ws,
             config,
