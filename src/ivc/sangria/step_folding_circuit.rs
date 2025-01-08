@@ -13,10 +13,10 @@ use crate::{
     },
     halo2curves::CurveAffine,
     ivc::{
-        consistency_markers_computation::AssignedConsistencyMarkersComputation,
         fold_relaxed_plonk_instance_chip::{
             AssignedRelaxedPlonkInstance, FoldRelaxedPlonkInstanceChip, FoldResult,
         },
+        sangria::consistency_markers_computation::AssignedConsistencyMarkersComputation,
         StepCircuit,
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},
@@ -173,7 +173,11 @@ where
             public_params_hash: C::identity(),
             z_0: [C::Base::ZERO; ARITY],
             z_i: [C::Base::ZERO; ARITY],
-            U: RelaxedPlonkInstance::new(num_challenges, round_sizes.len()),
+            U: RelaxedPlonkInstance::new(
+                num_challenges,
+                round_sizes.len(),
+                step_circuit_instances.len(),
+            ),
             u: FoldablePlonkInstance::new(PlonkInstance::new(
                 paired_num_io,
                 num_challenges,
@@ -312,6 +316,7 @@ where
                 U: RelaxedPlonkInstance::new(
                     self.input.U.challenges.len(),
                     self.input.U.W_commitments.len(),
+                    self.input.step_circuit_instances.len(),
                 ),
                 u,
                 step_circuit_instances: self

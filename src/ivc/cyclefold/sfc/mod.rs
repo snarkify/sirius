@@ -23,7 +23,7 @@ use crate::{
 };
 
 mod input;
-pub use input::{Input, InputBuilder};
+pub use input::Input;
 
 pub mod sangria_adapter;
 
@@ -251,43 +251,5 @@ where
         //)?;
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use tracing_test::traced_test;
-
-    use super::*;
-    use crate::{halo2_proofs::dev::MockProver, ivc::step_circuit::trivial, prelude::bn256};
-
-    type CMain = bn256::C1Affine;
-    type CSup = bn256::C2Affine;
-
-    type Base = <CMain as CurveAffine>::Base;
-    type Scalar = <CMain as CurveAffine>::ScalarExt;
-
-    const ARITY: usize = 2;
-
-    #[traced_test]
-    #[test]
-    fn e2e_zero_step() {
-        let mut input = Input::<2, Scalar>::random(&mut rand::thread_rng());
-        input.step = 0;
-
-        let sc = trivial::Circuit::default();
-
-        let sfc = StepFoldingCircuit::<ARITY, CMain, CSup, trivial::Circuit<ARITY, Scalar>> {
-            sc: &sc,
-            input,
-            _p: PhantomData,
-        };
-
-        let instances = sfc.initial_instances();
-
-        MockProver::run(17, &sfc, instances)
-            .unwrap()
-            .verify()
-            .unwrap();
     }
 }

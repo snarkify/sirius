@@ -110,7 +110,7 @@ where
                     &support_cr.try_collect_witness().unwrap(),
                     &nifs::sangria::ProverParam {
                         S: support_cr.try_collect_plonk_structure().unwrap(),
-                        pp_digest: CSup::identity(),
+                        pp_digest: (CSup::Base::ZERO, CSup::Base::ZERO),
                     },
                     &mut ro(),
                 )
@@ -249,7 +249,7 @@ where
     pub fn sangria_prover_params(&self) -> nifs::sangria::ProverParam<CSup> {
         nifs::sangria::ProverParam {
             S: self.support_S.clone(),
-            pp_digest: self.csup_pp_digest(),
+            pp_digest: self.csup_pp_digest_coordinates(),
         }
     }
 }

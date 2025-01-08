@@ -166,7 +166,7 @@ where
     const R_P: usize = 3;
 
     let mut f_tr = RelaxedPlonkTrace {
-        U: RelaxedPlonkInstance::new(S.num_challenges, S.round_sizes.len()),
+        U: RelaxedPlonkInstance::new(S.num_challenges, S.round_sizes.len(), S.num_io.len() - 1),
         W: RelaxedPlonkWitness::new(S.k, &S.round_sizes),
     };
 
