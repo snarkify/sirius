@@ -1,13 +1,13 @@
 use itertools::Itertools;
 use num_traits::Num;
-use tracing::error;
+use tracing::{debug, error, info_span};
 
 use super::{input, MAIN_GATE_T};
 use crate::{
-    constants::MAX_BITS,
+    constants::NUM_CHALLENGE_BITS,
     gadgets::{
         ecc::{AssignedPoint, EccChip},
-        nonnative::{self, bn::big_uint_mul_mod_chip::BigUintMulModChip},
+        nonnative,
     },
     halo2_proofs::{
         halo2curves::{
@@ -20,18 +20,10 @@ use crate::{
         cyclefold::{ro_chip, DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
         fold_relaxed_plonk_instance_chip::{self, BigUintView, FoldRelaxedPlonkInstanceChip},
     },
-    main_gate::{MainGate, MainGateConfig, RegionCtx},
+    main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx},
     nifs::sangria,
     poseidon::ROCircuitTrait,
 };
-
-fn bn_chip<F: PrimeField>(main_gate_config: MainGateConfig<MAIN_GATE_T>) -> BigUintMulModChip<F> {
-    BigUintMulModChip::new(
-        main_gate_config.into_smaller_size().unwrap(),
-        DEFAULT_LIMB_WIDTH,
-        DEFAULT_LIMBS_COUNT,
-    )
-}
 
 fn ecc_chip<CSup: CurveAffine>(
     main_gate_config: MainGateConfig<MAIN_GATE_T>,
@@ -56,28 +48,51 @@ fn module_as_bn<F1: PrimeField, F2: PrimeField>() -> Result<BigUint<F1>, big_uin
 pub fn fold<CMain: CurveAffine, CSup: CurveAffine<Base = CMain::ScalarExt>>(
     region: &mut RegionCtx<CMain::ScalarExt>,
     config: MainGateConfig<MAIN_GATE_T>,
-    input: &input::assigned::PairedTrace<CMain::ScalarExt>,
+    pp_digest: &(
+        AssignedValue<CMain::ScalarExt>,
+        AssignedValue<CMain::ScalarExt>,
+    ),
+    input: &input::assigned::SupportTrace<CMain::ScalarExt>,
 ) -> Result<input::assigned::SangriaAccumulatorInstance<CMain::ScalarExt>, Halo2PlonkError>
 where
     CMain::ScalarExt: FromUniformBytes<64> + PrimeFieldBits,
 {
-    let bn_chip = bn_chip(config.clone());
+    let bn_chip = super::bn_chip(config.clone());
     let ecc_chip = ecc_chip::<CSup>(config.clone());
     let mg = MainGate::new(config.clone());
 
-    let r = ro_chip(config.clone())
-        .absorb_iter(input.iter_wrap_values())
-        .squeeze(region)?;
-    let r_bits = mg.le_num_to_bits(region, r.clone(), MAX_BITS)?;
-    let r_as_bn = bn_chip.from_assigned_value_to_limbs(region, &r).unwrap();
+    let sangria_cha_span = info_span!("sangria_cha").entered();
 
-    let m_bn = module_as_bn::<CMain::ScalarExt, CMain::Base>().unwrap();
+    let r_bits = ro_chip(config.clone())
+        .absorb_base(pp_digest.0.clone().into())
+        .absorb_base(pp_digest.1.clone().into())
+        .absorb_iter(input.iter_wrap_values())
+        .inspect(|buf| debug!("buf before: {buf:?}"))
+        .squeeze_n_bits(region, NUM_CHALLENGE_BITS)
+        .inspect_err(|err| error!("Error while computing 'r' in fold: {err:?}"))?;
+
+    sangria_cha_span.exit();
+
+    let r = mg
+        .le_bits_to_num(region, &r_bits)
+        .inspect_err(|err| error!("Error while converting 'r' to bits in fold: {err:?}"))?;
+
+    debug!("sangria_cha: {:?}", r.value());
+
+    let r_as_bn = bn_chip
+        .from_assigned_value_to_limbs(region, &r)
+        .inspect_err(|err| error!("Error while converting 'r' to BN limbs in fold: {err:?}"))
+        .unwrap();
+
+    let m_bn = module_as_bn::<CMain::ScalarExt, CMain::Base>()
+        .inspect_err(|err| error!("Error while creating 'm_bn' in fold: {err:?}"))
+        .unwrap();
 
     let mut acc = input.input_accumulator.clone();
 
-    for input::assigned::PairedIncoming {
+    for input::assigned::SupportIncoming {
         instance:
-            input::assigned::PairedPlonkInstance {
+            input::assigned::SupportPlonkInstance {
                 W_commitments: input_W_commitments,
                 challenges: input_challenges,
                 instances: input_instances,
@@ -87,13 +102,14 @@ where
     {
         let input::assigned::SangriaAccumulatorInstance {
             ins:
-                input::assigned::PairedPlonkInstance {
+                input::assigned::SupportPlonkInstance {
                     W_commitments: acc_W_commitments,
                     instances: acc_instances,
                     challenges: acc_challenges,
                 },
             E_commitment: acc_E_commitment,
             u: acc_u,
+            step_circuit_instances_hash_accumulator: _,
         } = &mut acc;
 
         *acc_W_commitments = FoldRelaxedPlonkInstanceChip::<
@@ -115,9 +131,7 @@ where
                 .collect::<Box<[_]>>(),
             &r_bits,
         )
-        .inspect_err(|err| {
-            error!("while fold W: {err:?}");
-        })?
+        .inspect_err(|err| error!("Error while folding W commitments in fold: {err:?}"))?
         .into_iter()
         .map(|p| (p.x, p.y))
         .collect();
@@ -131,15 +145,27 @@ where
                         .iter_mut()
                         .zip_eq(input_instance)
                         .try_for_each(|(acc_cell, input_cell)| -> Result<(), Halo2PlonkError> {
-                            *acc_cell = fold_relaxed_plonk_instance_chip::fold_via_biguint(
+                            let bn_limbs = fold_relaxed_plonk_instance_chip::fold_via_biguint(
                                 region,
                                 &bn_chip,
-                                input_cell,
-                                acc_cell.to_vec(),
+                                &input_cell.1,
+                                acc_cell.1.to_vec(),
                                 &m_bn,
                                 &r_as_bn,
                                 DEFAULT_LIMB_WIDTH,
-                            )?;
+                            )
+                            .inspect_err(|err| {
+                                error!("Error while folding instance cells in fold: {err:?}")
+                            })?;
+
+                            let value = bn_chip
+                                .from_assigned_limbs_to_value(region, &bn_limbs)
+                                .map_err(|err| {
+                                    error!("bn error: {err:?}");
+                                    Halo2PlonkError::Synthesis
+                                })?;
+
+                            *acc_cell = (value, bn_limbs.try_into().unwrap());
 
                             Ok(())
                         })?;
@@ -147,29 +173,35 @@ where
                     Ok(())
                 },
             )
-            .inspect_err(|err| {
-                error!("while fold instances: {err:?}");
-            })?;
+            .inspect_err(|err| error!("Error while folding instances in fold: {err:?}"))?;
 
         acc_challenges
             .iter_mut()
             .zip_eq(input_challenges.iter())
             .try_for_each(|(acc_cha, inp_cha)| -> Result<(), Halo2PlonkError> {
-                *acc_cha = fold_relaxed_plonk_instance_chip::fold_via_biguint(
+                let bn_limbs = fold_relaxed_plonk_instance_chip::fold_via_biguint(
                     region,
                     &bn_chip,
-                    inp_cha,
-                    acc_cha.to_vec(),
+                    &inp_cha.1,
+                    acc_cha.1.to_vec(),
                     &m_bn,
                     &r_as_bn,
                     DEFAULT_LIMB_WIDTH,
-                )?;
+                )
+                .inspect_err(|err| error!("Error while folding challenges in fold: {err:?}"))?;
+
+                let value = bn_chip
+                    .from_assigned_limbs_to_value(region, &bn_limbs)
+                    .map_err(|err| {
+                        error!("bn error: {err:?}");
+                        Halo2PlonkError::Synthesis
+                    })?;
+
+                *acc_cha = (value, bn_limbs.try_into().unwrap());
 
                 Ok(())
             })
-            .inspect_err(|err| {
-                error!("while fold challenges: {err:?}");
-            })?;
+            .inspect_err(|err| error!("Error while folding challenges in fold: {err:?}"))?;
 
         *acc_E_commitment = fold_relaxed_plonk_instance_chip::fold_E(
             region,
@@ -190,12 +222,12 @@ where
             },
             &m_bn,
         )
-        .inspect_err(|err| {
-            error!("while fold E: {err:?}");
-        })?
+        .inspect_err(|err| error!("Error while folding E commitment in fold: {err:?}"))?
         .into();
 
-        *acc_u = mg.add(region, acc_u, &r)?;
+        *acc_u = mg
+            .add(region, acc_u, &r)
+            .inspect_err(|err| error!("Error while updating accumulator 'u' in fold: {err:?}"))?;
     }
 
     Ok(acc)
