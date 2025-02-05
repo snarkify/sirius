@@ -905,7 +905,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
                 Halo2PlonkError::Synthesis
             })?;
 
-        for (acc_W, incoming_W, trace, new_acc_W, index) in itertools::multizip((
+        for (acc_W, incoming_W, support_trace, new_acc_W, index) in itertools::multizip((
             self.self_trace.input_accumulator.ins.W_commitments.iter(),
             self.self_trace.incoming.W_commitments.iter(),
             self.support_trace.incoming.iter(),
@@ -914,7 +914,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         )) {
             info!("start {index} commitment check");
 
-            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1]: [_; support_circuit::INSTANCES_LEN] = trace.instance
+            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1]: [_; support_circuit::INSTANCES_LEN] = support_trace.instance
                 .instances
                 .first()
                 .expect("`SupportCircuit` always has instances.len() == 1 and it should always be used for sfc")
