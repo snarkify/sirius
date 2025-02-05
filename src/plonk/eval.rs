@@ -103,7 +103,7 @@ pub struct PlonkEvalDomain<'a, F: PrimeField> {
     pub(crate) W2s: &'a [Vec<F>],
 }
 
-impl<'a, F: PrimeField> GetDataForEval<F> for LookupEvalDomain<'a, F> {
+impl<F: PrimeField> GetDataForEval<F> for LookupEvalDomain<'_, F> {
     fn num_lookup(&self) -> usize {
         self.num_lookup
     }
@@ -133,7 +133,7 @@ impl<'a, F: PrimeField> GetDataForEval<F> for LookupEvalDomain<'a, F> {
     }
 }
 
-impl<'a, F: PrimeField> GetDataForEval<F> for PlonkEvalDomain<'a, F> {
+impl<F: PrimeField> GetDataForEval<F> for PlonkEvalDomain<'_, F> {
     fn num_lookup(&self) -> usize {
         self.num_lookup
     }
