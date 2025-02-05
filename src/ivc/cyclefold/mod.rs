@@ -11,7 +11,9 @@ mod support_circuit;
 mod sfc;
 
 #[allow(clippy::upper_case_acronyms)]
-mod incrementally_verifiable_computation;
+pub mod incrementally_verifiable_computation;
+
+pub use incrementally_verifiable_computation::{PublicParams, IVC};
 
 pub const T: usize = 5;
 pub const T_MAIN_GATE: usize = 5;

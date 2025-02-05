@@ -7,7 +7,9 @@ pub mod protogalaxy;
 
 pub mod cyclefold;
 
+pub use cyclefold::incrementally_verifiable_computation::IVC as CyclefoldIVC;
 pub use halo2_proofs::circuit::SimpleFloorPlanner;
+
 pub use sangria::incrementally_verifiable_computation::{
     Instances, StepCircuit, SynthesisError, IVC as SangriaIVC,
 };

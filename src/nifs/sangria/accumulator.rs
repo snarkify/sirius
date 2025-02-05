@@ -17,9 +17,7 @@ use crate::{
     ff::{Field, PrimeField},
     ivc::sangria::instances_accumulator_computation,
     main_gate::{AssignedValue, WrapValue},
-    plonk::{
-        self, GetChallenges, GetWitness, PlonkInstance, PlonkTrace, PlonkWitness,
-    },
+    plonk::{self, GetChallenges, GetWitness, PlonkInstance, PlonkTrace, PlonkWitness},
     poseidon::{AbsorbInRO, ROTrait},
     util::ScalarToBase,
 };
