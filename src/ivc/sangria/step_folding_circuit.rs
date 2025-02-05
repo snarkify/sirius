@@ -13,10 +13,12 @@ use crate::{
     },
     halo2curves::CurveAffine,
     ivc::{
-        fold_relaxed_plonk_instance_chip::{
-            AssignedRelaxedPlonkInstance, FoldRelaxedPlonkInstanceChip, FoldResult,
+        sangria::{
+            consistency_markers_computation::AssignedConsistencyMarkersComputation,
+            fold_relaxed_plonk_instance_chip::{
+                AssignedRelaxedPlonkInstance, FoldRelaxedPlonkInstanceChip, FoldResult,
+            },
         },
-        sangria::consistency_markers_computation::AssignedConsistencyMarkersComputation,
         StepCircuit,
     },
     main_gate::{AdviceCyclicAssignor, MainGate, MainGateConfig, RegionCtx},

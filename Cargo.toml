@@ -63,11 +63,11 @@ default-features = false
 features = ["prepush-hook", "run-cargo-fmt", "run-cargo-test", "run-cargo-clippy"]
 
 [[bench]]
-name = "trivial"
+name = "sangria_trivial"
 harness = false
 
 [[bench]]
-name = "poseidon"
+name = "sangria_poseidon"
 harness = false
 
 [features]

@@ -13,7 +13,10 @@ use sirius::{
         plonk::ConstraintSystem,
     },
     halo2curves::{bn256, grumpkin, CurveAffine, CurveExt},
-    ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
+    ivc::{
+        sangria::{CircuitPublicParamsInput, PublicParams, IVC},
+        step_circuit, StepCircuit, SynthesisError,
+    },
     main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
     poseidon::{self, poseidon_circuit::PoseidonChip, ROPair, Spec},
 };

@@ -172,7 +172,7 @@ mod tests {
     use super::*;
     use crate::{
         halo2_proofs::{dev::MockProver, halo2curves::group::prime::PrimeCurveAffine},
-        prelude::{bn256::C1Affine as Curve, Field},
+        sangria_prelude::{bn256::C1Affine as Curve, Field},
     };
 
     type Base = <Curve as CurveAffine>::Base;
