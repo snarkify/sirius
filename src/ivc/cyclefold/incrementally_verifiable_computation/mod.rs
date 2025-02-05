@@ -29,7 +29,7 @@ use crate::{
     plonk::{eval, PlonkTrace},
     polynomial::lagrange,
     poseidon::random_oracle::ROTrait,
-    prelude::CommitmentKey,
+    sangria_prelude::CommitmentKey,
     table::CircuitRunner,
     util,
 };
@@ -534,7 +534,7 @@ mod tests {
         commitment::CommitmentKey,
         halo2_proofs::arithmetic::Field,
         ivc::step_circuit::trivial,
-        prelude::bn256::{C1Affine, C1Scalar, C2Affine},
+        sangria_prelude::bn256::{C1Affine, C1Scalar, C2Affine},
     };
 
     /// Arity : Input/output size per fold-step for primary step-circuit

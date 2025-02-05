@@ -18,7 +18,9 @@ use crate::{
     },
     ivc::{
         cyclefold::{ro_chip, DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
-        fold_relaxed_plonk_instance_chip::{self, BigUintView, FoldRelaxedPlonkInstanceChip},
+        sangria::fold_relaxed_plonk_instance_chip::{
+            self, BigUintView, FoldRelaxedPlonkInstanceChip,
+        },
     },
     main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx},
     nifs::sangria,

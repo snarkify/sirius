@@ -210,7 +210,7 @@ mod tests {
     use super::*;
     use crate::{
         commitment::CommitmentKey,
-        ivc::fold_relaxed_plonk_instance_chip::FoldRelaxedPlonkInstanceChip,
+        ivc::sangria::fold_relaxed_plonk_instance_chip::FoldRelaxedPlonkInstanceChip,
         main_gate::AdviceCyclicAssignor,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, Spec},
         table::WitnessCollector,

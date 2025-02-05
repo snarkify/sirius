@@ -2,7 +2,7 @@ use std::{array, num::NonZeroUsize};
 
 use sirius::{
     commitment::CommitmentKey,
-    ivc::{step_circuit::trivial, IVC},
+    ivc::{step_circuit::trivial, SangriaIVC},
 };
 
 /// Arity : Input/output size per fold-step for primary step-circuit
@@ -31,7 +31,7 @@ const PRIMARY_CIRCUIT_TABLE_SIZE: usize = 17;
 /// Key size for Primary Circuit
 const SECONDARY_COMMITMENT_KEY_SIZE: usize = 21;
 
-use sirius::prelude::bn256::{new_default_pp, C1Affine, C1Scalar, C2Affine, C2Scalar};
+use sirius::sangria_prelude::bn256::{new_default_pp, C1Affine, C1Scalar, C2Affine, C2Scalar};
 
 fn main() {
     let sc1 = trivial::Circuit::<A1, C1Scalar>::default();
@@ -52,7 +52,7 @@ fn main() {
         &sc2,
     );
 
-    IVC::fold_with_debug_mode(
+    SangriaIVC::fold_with_debug_mode(
         &pp,
         &sc1,
         array::from_fn(|i| C1Scalar::from(i as u64)),

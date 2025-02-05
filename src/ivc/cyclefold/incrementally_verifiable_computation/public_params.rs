@@ -29,7 +29,7 @@ use crate::{
     plonk::{PlonkStructure, PlonkTrace},
     polynomial::Expression,
     poseidon::{PoseidonHash, ROTrait, Spec},
-    prelude::CommitmentKey,
+    sangria_prelude::CommitmentKey,
     table::CircuitRunner,
     util,
 };

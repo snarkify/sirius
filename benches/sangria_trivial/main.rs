@@ -11,7 +11,10 @@ use sirius::{
     ff::Field,
     group::{prime::PrimeCurve, Group},
     halo2curves::{bn256, grumpkin, CurveAffine, CurveExt},
-    ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, IVC},
+    ivc::{
+        sangria::{CircuitPublicParamsInput, PublicParams},
+        step_circuit, SangriaIVC,
+    },
     poseidon::{self, ROPair},
 };
 use tracing::*;
@@ -109,7 +112,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
 
         b.iter(|| {
-            IVC::fold(
+            SangriaIVC::fold(
                 &pp,
                 &sc1,
                 black_box(primary_z_0),
@@ -127,7 +130,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
 
         b.iter(|| {
-            IVC::fold(
+            SangriaIVC::fold(
                 &pp,
                 &sc1,
                 black_box(primary_z_0),

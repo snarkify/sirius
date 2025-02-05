@@ -25,14 +25,14 @@ pub use halo2_proofs::{
     halo2curves::{ff, group},
 };
 
-pub mod prelude {
+pub mod sangria_prelude {
     use std::num::NonZeroUsize;
 
     use crate::ff::{FromUniformBytes, PrimeFieldBits};
     pub use crate::{
         commitment::CommitmentKey,
         ff::{Field, PrimeField},
-        ivc::{StepCircuit, IVC},
+        ivc::{StepCircuit, SangriaIVC},
     };
 
     /// Within the IVC framework, on-circuit & off-circuit random oracle will be used
@@ -104,7 +104,7 @@ pub mod prelude {
         pub type C2Scalar = <G2 as Group>::Scalar;
 
         pub type PublicParams<'l, const A1: usize, C1, const A2: usize, C2> =
-            crate::ivc::PublicParams<
+            crate::ivc::sangria::PublicParams<
                 'l,
                 A1,
                 A2,
@@ -139,13 +139,13 @@ pub mod prelude {
             C2: StepCircuit<A2, C2Scalar>,
         {
             PublicParams::new(
-                crate::ivc::CircuitPublicParamsInput::new(
+                crate::ivc::sangria::CircuitPublicParamsInput::new(
                     primary_k_table_size,
                     primary_commitment_key,
                     super::default_random_oracle_constant(),
                     sc1,
                 ),
-                crate::ivc::CircuitPublicParamsInput::new(
+                crate::ivc::sangria::CircuitPublicParamsInput::new(
                     secondary_k_table_size,
                     secondary_commitment_key,
                     super::default_random_oracle_constant(),
@@ -181,7 +181,7 @@ pub mod prelude {
         pub type C2Scalar = <G2 as Group>::Scalar;
 
         pub type PublicParams<'l, const A1: usize, C1, const A2: usize, C2> =
-            crate::ivc::PublicParams<
+            crate::ivc::sangria::PublicParams<
                 'l,
                 A1,
                 A2,
@@ -216,13 +216,13 @@ pub mod prelude {
             C2: StepCircuit<A2, C2Scalar>,
         {
             PublicParams::new(
-                crate::ivc::CircuitPublicParamsInput::new(
+                crate::ivc::sangria::CircuitPublicParamsInput::new(
                     primary_k_table_size,
                     primary_commitment_key,
                     super::default_random_oracle_constant(),
                     sc1,
                 ),
-                crate::ivc::CircuitPublicParamsInput::new(
+                crate::ivc::sangria::CircuitPublicParamsInput::new(
                     secondary_k_table_size,
                     secondary_commitment_key,
                     super::default_random_oracle_constant(),

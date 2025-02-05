@@ -13,7 +13,10 @@ use sirius::{
     ff::PrimeField,
     group::{prime::PrimeCurve, Group},
     halo2curves::{bn256, grumpkin, CurveAffine, CurveExt},
-    ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, StepCircuit, SynthesisError, IVC},
+    ivc::{
+        sangria::{CircuitPublicParamsInput, PublicParams, IVC},
+        step_circuit, StepCircuit, SynthesisError,
+    },
     poseidon::{self, ROPair},
 };
 use tracing::*;
