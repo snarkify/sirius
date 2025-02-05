@@ -7,7 +7,7 @@ use sirius::{
     },
     sangria_prelude::{
         bn256::{new_default_pp, C1Affine, C1Scalar, C2Affine, C2Scalar},
-        CommitmentKey, PrimeField, StepCircuit, SangriaIVC,
+        CommitmentKey, PrimeField, SangriaIVC, StepCircuit,
     },
 };
 

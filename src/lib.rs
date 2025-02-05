@@ -25,6 +25,29 @@ pub use halo2_proofs::{
     halo2curves::{ff, group},
 };
 
+pub mod cyclefold_prelude {
+    /// All imports and alias related to what will use bn256 & grumpkin as the first and second
+    /// curve respectively
+    pub mod bn256 {
+        pub use bn256::G1;
+        pub use grumpkin::G1 as G2;
+
+        use crate::halo2curves::{
+            bn256,
+            group::{prime::PrimeCurve, Group},
+            grumpkin,
+        };
+
+        pub type C1Affine = <G1 as PrimeCurve>::Affine;
+        pub type C2Affine = <G2 as PrimeCurve>::Affine;
+
+        pub type C1Scalar = <G1 as Group>::Scalar;
+        pub type C2Scalar = <G2 as Group>::Scalar;
+    }
+
+    pub use crate::ivc::cyclefold::{PublicParams, IVC};
+}
+
 pub mod sangria_prelude {
     use std::num::NonZeroUsize;
 
@@ -32,7 +55,7 @@ pub mod sangria_prelude {
     pub use crate::{
         commitment::CommitmentKey,
         ff::{Field, PrimeField},
-        ivc::{StepCircuit, SangriaIVC},
+        ivc::{SangriaIVC, StepCircuit},
     };
 
     /// Within the IVC framework, on-circuit & off-circuit random oracle will be used

@@ -14,7 +14,7 @@ use sirius::{
     },
     halo2curves::{bn256, grumpkin, CurveAffine, CurveExt},
     ivc::{
-        sangria::{CircuitPublicParamsInput, PublicParams, IVC},
+        cyclefold::{PublicParams, IVC},
         step_circuit, StepCircuit, SynthesisError,
     },
     main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
