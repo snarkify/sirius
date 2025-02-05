@@ -1,24 +1,23 @@
-use std::{array, io, marker::PhantomData, num::NonZeroUsize, path::Path};
+use std::{array, io, marker::PhantomData, path::Path};
 
 use bn256::G1 as C1;
-use criterion::{black_box, criterion_group, Criterion};
-use grumpkin::G1 as C2;
+use criterion::{criterion_group, Criterion};
 use metadata::LevelFilter;
 use sirius::{
     commitment::CommitmentKey,
     ff::{Field, FromUniformBytes, PrimeFieldBits},
-    group::{prime::PrimeCurve, Group},
+    group::Group,
     halo2_proofs::{
         circuit::{AssignedCell, Layouter},
         plonk::ConstraintSystem,
     },
-    halo2curves::{bn256, grumpkin, CurveAffine, CurveExt},
+    halo2curves::{bn256, grumpkin, CurveAffine},
     ivc::{
         cyclefold::{PublicParams, IVC},
-        step_circuit, StepCircuit, SynthesisError,
+        StepCircuit, SynthesisError,
     },
     main_gate::{MainGate, MainGateConfig, RegionCtx, WrapValue},
-    poseidon::{self, poseidon_circuit::PoseidonChip, ROPair, Spec},
+    poseidon::{poseidon_circuit::PoseidonChip, Spec},
 };
 use tracing::*;
 use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
@@ -26,7 +25,6 @@ use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 const ARITY: usize = 1;
 
 const CIRCUIT_TABLE_SIZE1: usize = 17;
-const CIRCUIT_TABLE_SIZE2: usize = 17;
 const COMMITMENT_KEY_SIZE: usize = 21;
 
 // Spec for user defined poseidon circuit
@@ -76,22 +74,7 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPos
     }
 }
 
-// specs for IVC circuit
-const T: usize = 5;
-const RATE: usize = 4;
-
-type RandomOracle = poseidon::PoseidonRO<T, RATE>;
-
-type RandomOracleConstant<F> = <RandomOracle as ROPair<F>>::Args;
-
-const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
-const LIMBS_COUNT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
-
-type C1Affine = <C1 as PrimeCurve>::Affine;
-type C2Affine = <C2 as PrimeCurve>::Affine;
-
 type C1Scalar = <C1 as Group>::Scalar;
-type C2Scalar = <C2 as Group>::Scalar;
 
 const FOLDER: &str = ".cache/examples";
 
@@ -109,11 +92,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     // C1
     let sc1 = TestPoseidonCircuit::default();
-    // C2
-    let sc2 = step_circuit::trivial::Circuit::<ARITY, _>::default();
-
-    let primary_spec = RandomOracleConstant::<<C1 as CurveExt>::ScalarExt>::new(10, 10);
-    let secondary_spec = RandomOracleConstant::<<C2 as CurveExt>::ScalarExt>::new(10, 10);
 
     let primary_commitment_key =
         get_or_create_commitment_key::<bn256::G1Affine>(COMMITMENT_KEY_SIZE, "bn256")
@@ -122,32 +100,11 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         get_or_create_commitment_key::<grumpkin::G1Affine>(COMMITMENT_KEY_SIZE, "grumpkin")
             .expect("Failed to get primary key");
 
-    let pp = PublicParams::<
-        '_,
-        ARITY,
-        ARITY,
-        T,
-        C1Affine,
-        C2Affine,
-        TestPoseidonCircuit<_>,
-        step_circuit::trivial::Circuit<ARITY, _>,
-        RandomOracle,
-        RandomOracle,
-    >::new(
-        CircuitPublicParamsInput::new(
-            CIRCUIT_TABLE_SIZE1 as u32,
-            &primary_commitment_key,
-            primary_spec,
-            &sc1,
-        ),
-        CircuitPublicParamsInput::new(
-            CIRCUIT_TABLE_SIZE2 as u32,
-            &secondary_commitment_key,
-            secondary_spec,
-            &sc2,
-        ),
-        LIMB_WIDTH,
-        LIMBS_COUNT,
+    let mut pp = PublicParams::new(
+        &sc1,
+        primary_commitment_key,
+        secondary_commitment_key,
+        CIRCUIT_TABLE_SIZE1 as u32,
     )
     .unwrap();
 
@@ -159,36 +116,14 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function("fold_1_step", |b| {
         let mut rnd = rand::thread_rng();
         let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
-        let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
 
         b.iter(|| {
-            IVC::fold(
-                &pp,
-                &sc1,
-                black_box(primary_z_0),
-                &sc2,
-                black_box(secondary_z_0),
-                NonZeroUsize::new(1).unwrap(),
-            )
-            .unwrap();
-        })
-    });
-
-    group.bench_function("fold_2_step", |b| {
-        let mut rnd = rand::thread_rng();
-        let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
-        let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
-
-        b.iter(|| {
-            IVC::fold(
-                &pp,
-                &sc1,
-                black_box(primary_z_0),
-                &sc2,
-                black_box(secondary_z_0),
-                NonZeroUsize::new(2).unwrap(),
-            )
-            .unwrap();
+            IVC::new(&mut pp, &sc1, primary_z_0)
+                .expect("while step=0")
+                .next(&pp, &sc1)
+                .expect("while step=1")
+                .verify(&pp)
+                .expect("while verify");
         })
     });
 
