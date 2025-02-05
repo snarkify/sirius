@@ -18,7 +18,7 @@ use crate::{
     ivc::sangria::instances_accumulator_computation,
     main_gate::{AssignedValue, WrapValue},
     plonk::{
-        self, GetChallenges, GetWitness, PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness,
+        self, GetChallenges, GetWitness, PlonkInstance, PlonkTrace, PlonkWitness,
     },
     poseidon::{AbsorbInRO, ROTrait},
     util::ScalarToBase,
@@ -293,31 +293,6 @@ impl<C: CurveAffine, const MARKERS_LEN: usize> RelaxedPlonkTrace<C, MARKERS_LEN>
 }
 
 pub type RelaxedPlonkTraceArgs = plonk::PlonkTraceArgs;
-
-impl<C: CurveAffine> RelaxedPlonkTrace<C>
-where
-    C::Base: PrimeFieldBits + FromUniformBytes<64>,
-{
-    pub fn new(args: RelaxedPlonkTraceArgs) -> Self {
-        Self {
-            U: RelaxedPlonkInstance::new(
-                args.num_challenges,
-                args.num_witness,
-                args.num_io.len() - 1, // instances
-            ),
-            W: RelaxedPlonkWitness::new(args.k_table_size, &args.round_sizes),
-        }
-    }
-}
-
-impl<C: CurveAffine> From<&PlonkStructure<C::ScalarExt>> for RelaxedPlonkTrace<C>
-where
-    C::Base: PrimeFieldBits + FromUniformBytes<64>,
-{
-    fn from(value: &PlonkStructure<C::ScalarExt>) -> Self {
-        Self::new(RelaxedPlonkTraceArgs::from(value))
-    }
-}
 
 impl<F: PrimeField> GetWitness<F> for RelaxedPlonkWitness<F> {
     fn get_witness(&self) -> &[Vec<F>] {
