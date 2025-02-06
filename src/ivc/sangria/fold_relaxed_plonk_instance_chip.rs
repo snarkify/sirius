@@ -898,7 +898,12 @@ where
 
         let assigned_step_circuit_instances =
             match self.relaxed.step_circuit_instances_hash_accumulator {
-                SCInstancesHashAcc::None => SCInstancesHashAcc::None,
+                SCInstancesHashAcc::None => {
+                    assign_and_absorb_diff_field!(&C::Base::ZERO, || {
+                        "empty step_circuit_instances"
+                    })?;
+                    SCInstancesHashAcc::None
+                }
                 SCInstancesHashAcc::Hash(hash) => {
                     SCInstancesHashAcc::Hash(assign_and_absorb_diff_field!(&hash, || {
                         "step_circuit_instances"
