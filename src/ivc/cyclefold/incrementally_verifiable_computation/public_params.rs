@@ -77,7 +77,7 @@ where
             FoldablePlonkTrace<CSup>,
         ) = {
             // Since I want to scalar_multiply points for main::sfc, I take `CMain` as the main curve here
-            // CMain::Base or CSupport::Scalar (native for suppport_circuit)
+            // CMain::Base or CSupport::Scalar (native for support_circuit)
             let support_circuit_instances: Vec<Vec<CMain::Base>> = support_circuit::InstanceInput {
                 p0: CMain::identity(),
                 l0: CMain::Base::ZERO,
