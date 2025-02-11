@@ -525,7 +525,7 @@ impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for FoldablePlonkInstan
     fn get_consistency_markers(&self) -> [C::ScalarExt; 2] {
         match self.instances.first() {
             Some(instance) if instance.len() == 2 => instance.clone().try_into().unwrap(),
-            _ => unreachable!("folded plonk instancce always have markers"),
+            _ => unreachable!("folded plonk instance always have markers"),
         }
     }
 }
