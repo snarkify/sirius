@@ -14,7 +14,7 @@ pub enum Error {
     Eval(#[from] EvalError),
     #[error("Sps verification fail challenge not match at index {challenge_index}")]
     ChallengeNotMatch { challenge_index: usize },
-    #[error("For this challenges count table must have lookup aguments")]
+    #[error("For this challenges count table must have lookup arguments")]
     LackOfLookupArguments,
     #[error("Lack of advices, should call `TableData::assembly` first")]
     LackOfAdvices,
