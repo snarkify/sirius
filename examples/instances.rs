@@ -76,7 +76,7 @@ impl<const A: usize, F: PrimeField, const FAIL: bool> StepCircuit<A, F>
         }
     }
 
-    /// Sythesize the circuit for a computation step and return variable
+    /// Synthesize the circuit for a computation step and return variable
     /// that corresponds to the output of the step z_{i+1}
     /// this method will be called when we synthesize the IVC_Circuit
     ///
