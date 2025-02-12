@@ -26,7 +26,8 @@ use tracing::*;
 use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
 
 #[allow(dead_code)]
-mod poseidon;
+mod sangria_poseidon;
+use sangria_poseidon as poseidon;
 
 #[allow(dead_code)]
 mod merkle;

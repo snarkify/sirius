@@ -70,6 +70,10 @@ harness = false
 name = "sangria_poseidon"
 harness = false
 
+[[bench]]
+name = "cyclefold_poseidon"
+harness = false
+
 [features]
 # Allows cli-example to check memory usage with dhat
 dhat-heap = []
