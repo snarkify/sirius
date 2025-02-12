@@ -1,4 +1,4 @@
-use std::{array, path::Path};
+use std::{array, env, path::Path};
 
 use sirius::{commitment::CommitmentKey, ff::Field, ivc::step_circuit::trivial};
 
@@ -22,10 +22,35 @@ use sirius::cyclefold_prelude::{
     bn256::{C1Affine, C1Scalar, C2Affine},
     PublicParams, IVC,
 };
+use tracing::info_span;
+use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
 
 const FOLDER: &str = ".cache/examples";
 
 fn main() {
+    let builder = tracing_subscriber::fmt()
+        // Adds events to track the entry and exit of the span, which are used to build
+        // time-profiling
+        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+        // Changes the default level to INFO
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::DEBUG.into())
+                .from_env_lossy(),
+        );
+
+    // Structured logs are needed for time-profiling, while for simple run regular logs are
+    // more convenient.
+    //
+    // So this expr keeps track of the --json argument for turn-on json-logs
+    if env::args().any(|arg| arg.eq("--json")) {
+        builder.json().init();
+    } else {
+        builder.init();
+    }
+
+    let _s = info_span!("cyclefold_trivial").entered();
+
     let sc = trivial::Circuit::<A1, C1Scalar>::default();
 
     let primary_commitment_key = unsafe {
