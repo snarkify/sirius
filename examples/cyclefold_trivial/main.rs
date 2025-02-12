@@ -49,8 +49,6 @@ fn main() {
         builder.init();
     }
 
-    let _s = info_span!("cyclefold_trivial").entered();
-
     let sc = trivial::Circuit::<A1, C1Scalar>::default();
 
     let primary_commitment_key = unsafe {
@@ -78,6 +76,8 @@ fn main() {
         PRIMARY_CIRCUIT_TABLE_SIZE as u32,
     )
     .unwrap();
+
+    let _s = info_span!("cyclefold_trivial").entered();
 
     IVC::new(&mut pp, &sc, array::from_fn(|_| C1Scalar::ZERO))
         .expect("while step=0")

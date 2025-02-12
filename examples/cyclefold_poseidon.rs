@@ -202,7 +202,7 @@ fn main() {
 
     let mut ivc = cyclefold::IVC::new(&mut pp, &primary, primary_input).expect("while step=0");
 
-    for step in 1..=10 {
+    for step in 1..=2 {
         ivc = ivc
             .next(&pp, &primary)
             .unwrap_or_else(|err| panic!("while step={step}: {err:?}"));
