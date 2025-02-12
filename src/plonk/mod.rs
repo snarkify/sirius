@@ -682,6 +682,43 @@ impl<C: CurveAffine> PlonkInstance<C> {
     }
 }
 
+pub(crate) fn get_evaluate_witness_fn<'link, F: PrimeField>(
+    S: &'link PlonkStructure<F>,
+    trace: &'link (impl Sync + GetChallenges<F> + GetWitness<F>),
+) -> impl 'link + Send + Fn(usize) -> Result<F, eval::Error> {
+    let eval_domain = PlonkEvalDomain {
+        num_advice: S.num_advice_columns,
+        num_lookup: S.num_lookups(),
+        selectors: &S.selectors,
+        fixed: &S.fixed_columns,
+        challenges: trace.get_challenges(),
+        W1s: trace.get_witness(),
+        W2s: &[],
+    };
+
+    let evaluators = S
+        .gates
+        .iter()
+        .map(|gate| GraphEvaluator::new(gate))
+        .collect::<Box<[_]>>();
+
+    let total_row = eval_domain.row_size();
+    let max_high_limit = evaluators.len() * total_row;
+
+    // The index is pass-through, the first rows_count should go to evaluators[0], the second
+    // rows_count should go to the [1], etc.
+    move |index| {
+        if index > max_high_limit {
+            return Ok(F::ZERO);
+        }
+
+        let gate_index = index / total_row;
+        let row_index = index & total_row;
+
+        evaluators[gate_index].evaluate(&eval_domain, row_index)
+    }
+}
+
 // Evaluates the witness data for each gate in the PLONK structure.
 ///
 /// This function iterates through the gates of a provided [`PlonkStructure`],
@@ -707,22 +744,9 @@ pub(crate) fn iter_evaluate_witness<'link, F: PrimeField>(
     S: &'link PlonkStructure<F>,
     trace: &'link (impl Sync + GetChallenges<F> + GetWitness<F>),
 ) -> impl 'link + Send + Iterator<Item = Result<F, eval::Error>> {
-    S.gates.iter().flat_map(|gate| {
-        let eval_domain = PlonkEvalDomain {
-            num_advice: S.num_advice_columns,
-            num_lookup: S.num_lookups(),
-            selectors: &S.selectors,
-            fixed: &S.fixed_columns,
-            challenges: trace.get_challenges(),
-            W1s: trace.get_witness(),
-            W2s: &[],
-        };
+    let max_high_limit = S.gates.len() * (1 << S.k);
 
-        let evaluator = GraphEvaluator::new(gate);
-
-        (0..eval_domain.row_size())
-            .map(move |row_index| evaluator.evaluate(&eval_domain, row_index))
-    })
+    (0..max_high_limit).map(get_evaluate_witness_fn(S, trace))
 }
 
 #[cfg(test)]
