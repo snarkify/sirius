@@ -135,7 +135,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 /// `K` table size for primary circuit
 const PRIMARY_CIRCUIT_TABLE_SIZE: usize = 21;
 
-/// Разрмер commitment key
+/// Size of commitment key
 const COMMITMENT_KEY_SIZE: usize = 25;
 
 type C1Affine = <C1 as PrimeCurve>::Affine;
@@ -202,7 +202,7 @@ fn main() {
 
     let mut ivc = cyclefold::IVC::new(&mut pp, &primary, primary_input).expect("while step=0");
 
-    for step in 1..=2 {
+    for step in 1..=1 {
         ivc = ivc
             .next(&pp, &primary)
             .unwrap_or_else(|err| panic!("while step={step}: {err:?}"));

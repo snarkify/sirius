@@ -9,17 +9,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use git2::Repository;
 use halo2_proofs::halo2curves;
 use poseidon::poseidon_step_circuit::TestPoseidonCircuit;
 use sirius::{
     ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
-    ivc::{
-        sangria::{CircuitPublicParamsInput, PublicParams, IVC},
-        step_circuit::trivial,
-        StepCircuit,
-    },
+    ivc::{cyclefold, sangria, step_circuit::trivial, StepCircuit},
     poseidon::ROPair,
 };
 use tracing::*;
@@ -35,45 +31,124 @@ mod merkle;
 use merkle::{MerkleTreeUpdateCircuit, Tree};
 
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-struct Args {
-    #[arg(value_enum, default_value_t = Circuits::Poseidon)       ]
-    primary_circuit: Circuits,
+#[command(name = "sirius", version, about, long_about = None)]
+pub struct Args {
+    // Global options common to both modes
+    #[arg(long, default_value_t = NonZeroUsize::new(32).unwrap())]
+    pub limb_width: NonZeroUsize,
+    #[arg(long, default_value_t = NonZeroUsize::new(10).unwrap())]
+    pub limbs_count: NonZeroUsize,
+    #[arg(long, default_value_t = false)]
+    pub debug_mode: bool,
+    #[arg(long, default_value_t = NonZeroUsize::new(1).unwrap())]
+    pub fold_step_count: NonZeroUsize,
+    #[arg(long, default_value_t = false)]
+    pub json_logs: bool,
+    /// Push all logs into file, with name built from parameters.
+    #[arg(long, default_value_t = false)]
+    pub file_logs: bool,
+
+    #[command(subcommand)]
+    pub mode: Mode,
+}
+
+impl Args {
+    fn primary_commitment_key_size(&self) -> usize {
+        match &self.mode {
+            Mode::Sangria(args) => args.primary_commitment_key_size,
+            Mode::Cyclefold(args) => args.primary_commitment_key_size,
+        }
+    }
+    fn secondary_commitment_key_size(&self) -> usize {
+        match &self.mode {
+            Mode::Sangria(args) => args.secondary_commitment_key_size,
+            Mode::Cyclefold(_) => 23,
+        }
+    }
+
+    fn primary_repeat_count(&self) -> usize {
+        match &self.mode {
+            Mode::Sangria(args) => args.primary_repeat_count,
+            Mode::Cyclefold(args) => args.primary_repeat_count,
+        }
+    }
+    fn secondary_repeat_count(&self) -> usize {
+        match &self.mode {
+            Mode::Sangria(args) => args.secondary_repeat_count,
+            Mode::Cyclefold(_) => 0,
+        }
+    }
+    fn primary_circuit(&self) -> Circuits {
+        match &self.mode {
+            Mode::Sangria(args) => args.primary_circuit,
+            Mode::Cyclefold(args) => args.primary_circuit,
+        }
+    }
+    fn secondary_circuit(&self) -> Circuits {
+        match &self.mode {
+            Mode::Sangria(args) => args.primary_circuit,
+            Mode::Cyclefold(_) => Circuits::Trivial,
+        }
+    }
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Mode {
+    /// IVC using Sangria (requires both primary and secondary circuit options)
+    Sangria(SangriaArgs),
+    /// IVC using Cyclefold (only a primary circuit is needed)
+    Cyclefold(CyclefoldArgs),
+}
+
+#[derive(Parser, Debug)]
+pub struct SangriaArgs {
+    // Primary circuit options
+    #[arg(value_enum, default_value_t = Circuits::Poseidon)]
+    pub primary_circuit: Circuits,
     #[arg(long, default_value_t = 17)]
-    primary_circuit_k_table_size: u32,
+    pub primary_circuit_k_table_size: u32,
     #[arg(long, default_value_t = 21)]
-    primary_commitment_key_size: usize,
+    pub primary_commitment_key_size: usize,
     #[arg(long, default_value_t = 1)]
-    primary_repeat_count: usize,
+    pub primary_repeat_count: usize,
+    // Primary circuit parameters used only in Sangria
     #[arg(long, default_value_t = 10)]
-    primary_r_f: usize,
+    pub primary_r_f: usize,
     #[arg(long, default_value_t = 10)]
-    primary_r_p: usize,
-    #[arg(value_enum, default_value_t = Circuits::Trivial)        ]
-    secondary_circuit: Circuits,
+    pub primary_r_p: usize,
+
+    // Secondary circuit options (only used for Sangria)
+    #[arg(value_enum, default_value_t = Circuits::Trivial)]
+    pub secondary_circuit: Circuits,
     #[arg(long, default_value_t = 17)]
-    secondary_circuit_k_table_size: u32,
+    pub secondary_circuit_k_table_size: u32,
     #[arg(long, default_value_t = 21)]
-    secondary_commitment_key_size: usize,
+    pub secondary_commitment_key_size: usize,
     #[arg(long, default_value_t = 1)]
-    secondary_repeat_count: usize,
+    pub secondary_repeat_count: usize,
     #[arg(long, default_value_t = 10)]
-    secondary_r_f: usize,
+    pub secondary_r_f: usize,
     #[arg(long, default_value_t = 10)]
-    secondary_r_p: usize,
-    #[arg(long, default_value_t = NonZeroUsize::new(32).unwrap()) ]
-    limb_width: NonZeroUsize,
-    #[arg(long, default_value_t = NonZeroUsize::new(10).unwrap()) ]
-    limbs_count: NonZeroUsize,
-    #[arg(long, default_value_t = false)]
-    debug_mode: bool,
-    #[arg(long, default_value_t = NonZeroUsize::new(1).unwrap())  ]
-    fold_step_count: NonZeroUsize,
-    #[arg(long, default_value_t = false)]
-    json_logs: bool,
-    /// Push all logs into file, with name builded from params
-    #[arg(long, default_value_t = false)]
-    file_logs: bool,
+    pub secondary_r_p: usize,
+}
+
+#[derive(Parser, Debug)]
+pub struct CyclefoldArgs {
+    #[arg(value_enum, default_value_t = Circuits::Poseidon)]
+    pub primary_circuit: Circuits,
+    #[arg(long, default_value_t = 20)]
+    pub primary_circuit_k_table_size: u32,
+    #[arg(long, default_value_t = 25)]
+    pub primary_commitment_key_size: usize,
+    #[arg(long, default_value_t = 1)]
+    pub primary_repeat_count: usize,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
+pub enum Circuits {
+    Poseidon,
+    Trivial,
+    MerkleTree,
 }
 
 impl Args {
@@ -82,18 +157,25 @@ impl Args {
             return None;
         }
 
-        let Args {
-            primary_circuit,
-            primary_repeat_count,
-            secondary_circuit,
-            secondary_repeat_count,
-            fold_step_count,
-            ..
-        } = &self;
-
-        Some(build_log_folder().join(format!(
-                "sirius_{primary_circuit}-{primary_repeat_count}_{secondary_circuit}-{secondary_repeat_count}_{fold_step_count}.log"
-        )))
+        let fold_step_count = self.fold_step_count;
+        match &self.mode {
+            Mode::Sangria(SangriaArgs {
+                primary_circuit,
+                primary_repeat_count,
+                secondary_circuit,
+                secondary_repeat_count,
+                ..
+            }) => Some(build_log_folder().join(format!(
+                "sirius_sangria_{primary_circuit}-{primary_repeat_count}_{secondary_circuit}-{secondary_repeat_count}_{fold_step_count}.log"
+            ))),
+            Mode::Cyclefold(CyclefoldArgs {
+                primary_circuit,
+                primary_repeat_count,
+                ..
+            }) => Some(build_log_folder().join(format!(
+                "sirius_cyclefold_{primary_circuit}-{primary_repeat_count}_{fold_step_count}.log"
+            ))),
+        }
     }
 
     fn init_logger(&self) {
@@ -156,13 +238,6 @@ pub fn build_log_folder() -> PathBuf {
         .unwrap_or_else(|err| panic!("Failed to create log directory {branch_log_dir:?}: {err:?}"));
 
     branch_log_dir
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
-enum Circuits {
-    Poseidon,
-    Trivial,
-    MerkleTree,
 }
 
 impl fmt::Display for Circuits {
@@ -238,74 +313,111 @@ fn fold<
     let _span = info_span!("cli", primary = SC1::NAME, secondary = SC2::NAME).entered();
 
     let primary_commitment_key = poseidon::get_or_create_commitment_key::<C1Affine>(
-        args.primary_commitment_key_size,
+        args.primary_commitment_key_size(),
         "bn256",
     )
     .expect("Failed to get primary key");
     let secondary_commitment_key = poseidon::get_or_create_commitment_key::<C2Affine>(
-        args.secondary_commitment_key_size,
+        args.secondary_commitment_key_size(),
         "grumpkin",
     )
     .expect("Failed to get secondary key");
 
-    // Specifications for random oracle used as part of the IVC algorithm
-    let primary_spec = RandomOracleConstant::<C1Scalar>::new(args.primary_r_f, args.primary_r_p);
-    let secondary_spec =
-        RandomOracleConstant::<C2Scalar>::new(args.secondary_r_f, args.secondary_r_p);
+    match &args.mode {
+        Mode::Sangria(sangria_args) => {
+            // Specifications for random oracle used as part of the IVC algorithm
+            let primary_spec = RandomOracleConstant::<C1Scalar>::new(
+                sangria_args.primary_r_f,
+                sangria_args.primary_r_p,
+            );
+            let secondary_spec = RandomOracleConstant::<C2Scalar>::new(
+                sangria_args.secondary_r_f,
+                sangria_args.secondary_r_p,
+            );
 
-    let pp = PublicParams::<
-        '_,
-        1,
-        1,
-        MAIN_GATE_SIZE,
-        C1Affine,
-        C2Affine,
-        _,
-        _,
-        RandomOracle,
-        RandomOracle,
-    >::new(
-        CircuitPublicParamsInput::new(
-            args.primary_circuit_k_table_size,
-            &primary_commitment_key,
-            primary_spec,
-            &primary,
-        ),
-        CircuitPublicParamsInput::new(
-            args.secondary_circuit_k_table_size,
-            &secondary_commitment_key,
-            secondary_spec,
-            &secondary,
-        ),
-        args.limb_width,
-        args.limbs_count,
-    )
-    .unwrap();
+            let pp = sangria::PublicParams::<
+                '_,
+                1,
+                1,
+                MAIN_GATE_SIZE,
+                C1Affine,
+                C2Affine,
+                _,
+                _,
+                RandomOracle,
+                RandomOracle,
+            >::new(
+                sangria::CircuitPublicParamsInput::new(
+                    sangria_args.primary_circuit_k_table_size,
+                    &primary_commitment_key,
+                    primary_spec,
+                    &primary,
+                ),
+                sangria::CircuitPublicParamsInput::new(
+                    sangria_args.secondary_circuit_k_table_size,
+                    &secondary_commitment_key,
+                    secondary_spec,
+                    &secondary,
+                ),
+                args.limb_width,
+                args.limbs_count,
+            )
+            .unwrap();
 
-    let primary_input = SC1::get_default_input();
-    let secondary_input = SC2::get_default_input();
+            let primary_input = SC1::get_default_input();
+            let secondary_input = SC2::get_default_input();
 
-    let prove_span = info_span!("prove", steps = args.fold_step_count.get()).entered();
+            let prove_span = info_span!("prove", steps = args.fold_step_count.get()).entered();
 
-    let mut ivc = IVC::new(
-        &pp,
-        &primary,
-        [primary_input],
-        &secondary,
-        [secondary_input],
-        args.debug_mode,
-    )
-    .unwrap();
+            let mut ivc = sangria::IVC::new(
+                &pp,
+                &primary,
+                [primary_input],
+                &secondary,
+                [secondary_input],
+                args.debug_mode,
+            )
+            .unwrap();
 
-    for _step in 1..args.fold_step_count.into() {
-        primary.update_between_step();
-        secondary.update_between_step();
+            for _step in 1..args.fold_step_count.into() {
+                primary.update_between_step();
+                secondary.update_between_step();
 
-        ivc.fold_step(&pp, &primary, &secondary).unwrap();
+                ivc.fold_step(&pp, &primary, &secondary).unwrap();
+            }
+            prove_span.exit();
+
+            ivc.verify(&pp).unwrap()
+        }
+        Mode::Cyclefold(cyclefold_args) => {
+            let mut pp = cyclefold::PublicParams::new(
+                &primary,
+                primary_commitment_key,
+                secondary_commitment_key,
+                cyclefold_args.primary_circuit_k_table_size,
+            )
+            .unwrap();
+
+            let primary_input = SC1::get_default_input();
+
+            let prove_span = info_span!("prove", steps = args.fold_step_count.get()).entered();
+
+            let mut ivc =
+                cyclefold::IVC::new(&mut pp, &primary, [primary_input]).expect("while step=0");
+
+            for step in 1..args.fold_step_count.into() {
+                primary.update_between_step();
+
+                ivc = ivc
+                    .next(&pp, &primary)
+                    .unwrap_or_else(|err| panic!("while step={step}: {err:?}"));
+            }
+
+            prove_span.exit();
+
+            ivc.verify(&pp).expect("while verify");
+        }
     }
-    prove_span.exit();
-
-    ivc.verify(&pp).unwrap()
 }
 
 fn main() {
@@ -321,21 +433,21 @@ fn main() {
     // Such a redundant call design due to the fact that they are different function types for the
     // compiler due to generics
     let mut rng = rand::thread_rng();
-    match (args.primary_circuit, args.secondary_circuit) {
+    match (args.primary_circuit(), args.secondary_circuit()) {
         (Circuits::Poseidon, Circuits::Trivial) => fold(
             &args,
-            TestPoseidonCircuit::new(args.primary_repeat_count),
+            TestPoseidonCircuit::new(args.primary_repeat_count()),
             trivial::Circuit::default(),
         ),
         (Circuits::Poseidon, Circuits::Poseidon) => fold(
             &args,
-            TestPoseidonCircuit::new(args.primary_repeat_count),
-            TestPoseidonCircuit::new(args.secondary_repeat_count),
+            TestPoseidonCircuit::new(args.primary_repeat_count()),
+            TestPoseidonCircuit::new(args.secondary_repeat_count()),
         ),
         (Circuits::Trivial, Circuits::Poseidon) => fold(
             &args,
             trivial::Circuit::default(),
-            TestPoseidonCircuit::new(args.secondary_repeat_count),
+            TestPoseidonCircuit::new(args.secondary_repeat_count()),
         ),
         (Circuits::Trivial, Circuits::Trivial) => fold(
             &args,
@@ -346,7 +458,7 @@ fn main() {
             &args,
             merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
                 &mut rng,
-                args.primary_repeat_count,
+                args.primary_repeat_count(),
                 args.fold_step_count.get(),
             ),
             trivial::Circuit::default(),
@@ -355,17 +467,17 @@ fn main() {
             &args,
             merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
                 &mut rng,
-                args.primary_repeat_count,
+                args.primary_repeat_count(),
                 args.fold_step_count.get(),
             ),
-            TestPoseidonCircuit::new(args.secondary_repeat_count),
+            TestPoseidonCircuit::new(args.secondary_repeat_count()),
         ),
         (Circuits::Poseidon, Circuits::MerkleTree) => fold(
             &args,
-            TestPoseidonCircuit::new(args.primary_repeat_count),
+            TestPoseidonCircuit::new(args.primary_repeat_count()),
             merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
                 &mut rng,
-                args.secondary_repeat_count,
+                args.secondary_repeat_count(),
                 args.fold_step_count.get(),
             ),
         ),
@@ -374,7 +486,7 @@ fn main() {
             trivial::Circuit::default(),
             merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
                 &mut rng,
-                args.secondary_repeat_count,
+                args.secondary_repeat_count(),
                 args.fold_step_count.get(),
             ),
         ),
@@ -382,12 +494,12 @@ fn main() {
             &args,
             merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
                 &mut rng,
-                args.primary_repeat_count,
+                args.primary_repeat_count(),
                 args.fold_step_count.get(),
             ),
             merkle::MerkleTreeUpdateCircuit::new_with_random_updates(
                 &mut rng,
-                args.secondary_repeat_count,
+                args.secondary_repeat_count(),
                 args.fold_step_count.get(),
             ),
         ),
