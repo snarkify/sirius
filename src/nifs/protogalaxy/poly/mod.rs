@@ -128,9 +128,7 @@ pub(crate) fn compute_F<F: PrimeField>(
         right_w: Result<Node<F>, plonk::eval::Error>,
         challenges_powers: &[Box<[F]>],
     ) -> Result<Node<F>, plonk::eval::Error> {
-        let (left_w, right_w) = (left_w?, right_w?);
-
-        match (left_w, right_w) {
+        match (left_w?, right_w?) {
             (Node::Leaf(left), Node::Leaf(right)) => Ok(Node::Calculated {
                 points: challenges_powers
                     .iter()
@@ -169,7 +167,7 @@ pub(crate) fn compute_F<F: PrimeField>(
         start: usize,
         end: usize,
     ) -> Option<Result<Node<F>, plonk::eval::Error>> {
-        const THRESHOLD: usize = 2usize.pow(10);
+        const THRESHOLD: usize = 2usize.pow(18);
 
         if end - start < THRESHOLD {
             (start..end)
@@ -332,9 +330,9 @@ pub(crate) fn compute_G<F: PrimeField>(
     }
 
     fn reducer<F: PrimeField>(
+        left_w: Result<Node<F>, plonk::eval::Error>,
+        right_w: Result<Node<F>, plonk::eval::Error>,
         betas_stroke: &[F],
-        left: Result<Node<F>, plonk::eval::Error>,
-        right: Result<Node<F>, plonk::eval::Error>,
     ) -> Result<Node<F>, plonk::eval::Error> {
         let (
             Node {
@@ -345,7 +343,7 @@ pub(crate) fn compute_G<F: PrimeField>(
                 values: right,
                 height: r_height,
             },
-        ) = (left?, right?);
+        ) = (left_w?, right_w?);
 
         if l_height.eq(&r_height) {
             left.iter_mut().zip(right.iter()).for_each(|(left, right)| {
@@ -361,36 +359,18 @@ pub(crate) fn compute_G<F: PrimeField>(
         }
     }
 
-    let folded_traces =
-        FoldedWitness::new(&points_for_fft, ctx.lagrange_domain(), accumulator, traces);
-
-    let evaluators = folded_traces
-        .iter()
-        .map(|folded_trace| plonk::get_evaluate_witness_fn(ctx.S, folded_trace))
-        .collect::<Box<[_]>>();
-
-    let evaluate = |index| {
-        Ok(Node {
-            height: 0,
-            values: evaluators
-                .iter()
-                .map(|row_evaluate| (row_evaluate)(index))
-                .collect::<Result<Box<[_]>, plonk::eval::Error>>()?,
-        })
-    };
-
     fn tree_reduce<F: PrimeField>(
         eval: &(impl Sync + Send + Fn(usize) -> Result<Node<F>, plonk::eval::Error>),
         betas_stroke: &[F],
         start: usize,
         end: usize,
     ) -> Option<Result<Node<F>, plonk::eval::Error>> {
-        const THRESHOLD: usize = 2usize.pow(10);
+        const THRESHOLD: usize = 2usize.pow(18);
 
         if end - start < THRESHOLD {
             (start..end)
                 .map(eval)
-                .tree_reduce(|l, r| reducer(betas_stroke, l, r))
+                .tree_reduce(|l, r| reducer(l, r, betas_stroke))
         } else {
             let mid = start + ((end - start) / 2);
 
@@ -399,12 +379,28 @@ pub(crate) fn compute_G<F: PrimeField>(
                 || tree_reduce(eval, betas_stroke, mid, end),
             );
 
-            Some(reducer(betas_stroke, left?, right?))
+            Some(reducer(left?, right?, betas_stroke))
         }
     }
 
+    let folded_traces =
+        FoldedWitness::new(&points_for_fft, ctx.lagrange_domain(), accumulator, traces);
+
+    let evaluators = folded_traces
+        .iter()
+        .map(|folded_trace| plonk::get_evaluate_witness_fn(ctx.S, folded_trace))
+        .collect::<Box<[_]>>();
+
     let evaluated = tree_reduce(
-        &evaluate,
+        &|index| {
+            Ok(Node {
+                height: 0,
+                values: evaluators
+                    .iter()
+                    .map(|row_evaluate| (row_evaluate)(index))
+                    .collect::<Result<Box<[_]>, plonk::eval::Error>>()?,
+            })
+        },
         &betas_stroke,
         0,
         ctx.count_of_evaluation_with_padding,
