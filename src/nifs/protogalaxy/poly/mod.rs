@@ -383,28 +383,34 @@ pub(crate) fn compute_G<F: PrimeField>(
         }
     }
 
-    let folded_traces =
-        FoldedWitness::new(&points_for_fft, ctx.lagrange_domain(), accumulator, traces);
+    let folded_traces = {
+        let _s = info_span!("fold_witness").entered();
+        FoldedWitness::new(&points_for_fft, ctx.lagrange_domain(), accumulator, traces)
+    };
 
     let evaluators = folded_traces
         .iter()
         .map(|folded_trace| plonk::get_evaluate_witness_fn(ctx.S, folded_trace))
         .collect::<Box<[_]>>();
 
-    let evaluated = tree_reduce(
-        &|index| {
-            Ok(Node {
-                height: 0,
-                values: evaluators
-                    .iter()
-                    .map(|row_evaluate| (row_evaluate)(index))
-                    .collect::<Result<Box<[_]>, plonk::eval::Error>>()?,
-            })
-        },
-        &betas_stroke,
-        0,
-        ctx.count_of_evaluation_with_padding,
-    );
+    let evaluated = {
+        let _s = info_span!("tree_reduce_witness").entered();
+
+        tree_reduce(
+            &|index| {
+                Ok(Node {
+                    height: 0,
+                    values: evaluators
+                        .iter()
+                        .map(|row_evaluate| (row_evaluate)(index))
+                        .collect::<Result<Box<[_]>, plonk::eval::Error>>()?,
+                })
+            },
+            &betas_stroke,
+            0,
+            ctx.count_of_evaluation_with_padding,
+        )
+    };
 
     match evaluated {
         Some(Ok(Node {
