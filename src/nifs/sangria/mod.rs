@@ -6,7 +6,10 @@ use rayon::prelude::*;
 use some_to_err::ErrOr;
 use tracing::*;
 
-pub use self::accumulator::{FoldablePlonkInstance, FoldablePlonkTrace};
+pub use self::accumulator::{
+    FoldablePlonkInstance, FoldablePlonkTrace, RelaxedPlonkInstance, RelaxedPlonkTrace,
+};
+pub use crate::plonk::PlonkInstance;
 use crate::{
     commitment::{self, CommitmentKey},
     concat_vec,
@@ -17,12 +20,12 @@ use crate::{
         halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
         plonk::Error as Halo2Error,
     },
-    ivc::{instances_accumulator_computation, Instances},
-    nifs::sangria::accumulator::{RelaxedPlonkInstance, RelaxedPlonkTrace, RelaxedPlonkWitness},
+    ivc::{sangria::instances_accumulator_computation, Instances},
+    nifs::sangria::accumulator::RelaxedPlonkWitness,
     plonk::{
         self,
         eval::{Error as EvalError, GetDataForEval, PlonkEvalDomain},
-        PlonkInstance, PlonkStructure, PlonkWitness,
+        PlonkStructure, PlonkWitness,
     },
     polynomial::{
         graph_evaluator::GraphEvaluator,
@@ -55,19 +58,22 @@ pub type CrossTermCommits<C> = Vec<C>;
 /// - `cross_term_commits = [Comm(T_1),...,Comm(T_{d-1})]`
 ///
 /// Please refer to: [notes](https://hackmd.io/@chaosma/BJvWmnw_h#31-NIFS)
+///
+/// `MARKERS_LEN` - the first column of instance is folded separately, the length of this column is
+/// regulated by this parameter
 // TODO Replace links to either the documentation right here, or the official Snarkify resource
 #[derive(Clone, Debug)]
-pub struct VanillaFS<C: CurveAffine> {
+pub struct VanillaFS<C: CurveAffine, const MARKERS_LEN: usize = CONSISTENCY_MARKERS_COUNT> {
     _marker: PhantomData<C>,
 }
 
 pub struct ProverParam<C: CurveAffine> {
     pub(crate) S: PlonkStructure<C::ScalarExt>,
     /// digest of public parameter of IVC circuit
-    pub pp_digest: C,
+    pub pp_digest: (C::Base, C::Base),
 }
 
-impl<C: CurveAffine> VanillaFS<C>
+impl<C: CurveAffine, const MARKERS_LEN: usize> VanillaFS<C, MARKERS_LEN>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
@@ -96,7 +102,7 @@ where
     pub fn commit_cross_terms(
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
-        U1: &RelaxedPlonkInstance<C>,
+        U1: &RelaxedPlonkInstance<C, MARKERS_LEN>,
         W1: &RelaxedPlonkWitness<C::ScalarExt>,
         U2: &PlonkInstance<C>,
         W2: &PlonkWitness<C::ScalarExt>,
@@ -108,7 +114,7 @@ where
                 &U1.challenges,
                 &[U1.u],
                 &U2.challenges,
-                &[RelaxedPlonkInstance::<C>::DEFAULT_u]
+                &[RelaxedPlonkInstance::<C, MARKERS_LEN>::DEFAULT_u]
             ),
             selectors: &S.selectors,
             fixed: &S.fixed_columns,
@@ -154,17 +160,21 @@ where
     /// Absorb all fields into RandomOracle `RO` & generate challenge based on that
     #[instrument(skip_all)]
     pub(crate) fn generate_challenge(
-        pp_digest: &C,
+        pp_digest: &(C::Base, C::Base),
         ro_acc: &mut impl ROTrait<C::Base>,
-        U1: &RelaxedPlonkInstance<C>,
+        U1: &RelaxedPlonkInstance<C, MARKERS_LEN>,
         U2: &PlonkInstance<C>,
         cross_term_commits: &[C],
     ) -> Result<<C as CurveAffine>::ScalarExt, Error> {
+        let _span = info_span!("sangria_cha").entered();
+
         Ok(ro_acc
-            .absorb_point(pp_digest)
+            .absorb_field(pp_digest.0)
+            .absorb_field(pp_digest.1)
             .absorb(U1)
             .absorb(U2)
             .absorb_point_iter(cross_term_commits.iter())
+            .inspect(|buf| debug!("buf before: {buf:?}"))
             .squeeze::<C::ScalarExt>(NUM_CHALLENGE_BITS))
     }
 }
@@ -185,9 +195,17 @@ pub enum Error {
     NoConsistencyMarkers,
 }
 
-pub type VerifierParam<C> = C;
+pub struct VerifierParam<C: CurveAffine> {
+    pp_digest: (C::Base, C::Base),
+}
 
-impl<C: CurveAffine> VanillaFS<C>
+impl<C: CurveAffine> From<(C::Base, C::Base)> for VerifierParam<C> {
+    fn from(pp_digest: (C::Base, C::Base)) -> Self {
+        Self { pp_digest }
+    }
+}
+
+impl<C: CurveAffine, const MARKERS_LEN: usize> VanillaFS<C, MARKERS_LEN>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
@@ -195,7 +213,12 @@ where
         pp_digest: C,
         S: PlonkStructure<C::ScalarExt>,
     ) -> Result<(ProverParam<C>, VerifierParam<C>), Error> {
-        Ok((ProverParam { S, pp_digest }, pp_digest))
+        let pp_digest = {
+            let c = pp_digest.coordinates().unwrap();
+            (*c.x(), *c.y())
+        };
+
+        Ok((ProverParam { S, pp_digest }, VerifierParam { pp_digest }))
     }
 
     #[instrument(skip_all)]
@@ -205,7 +228,7 @@ where
         witness: &[Vec<C::ScalarExt>],
         pp: &ProverParam<C>,
         ro_nark: &mut impl ROTrait<C::Base>,
-    ) -> Result<FoldablePlonkTrace<C>, Error> {
+    ) -> Result<FoldablePlonkTrace<C, MARKERS_LEN>, Error> {
         pp.S.run_sps_protocol(ck, instances, witness, ro_nark)
             .map(FoldablePlonkTrace::new)?
             .ok_or(Error::NoConsistencyMarkers)
@@ -231,9 +254,9 @@ where
         ck: &CommitmentKey<C>,
         pp: &ProverParam<C>,
         ro_acc: &mut impl ROTrait<C::Base>,
-        accumulator: RelaxedPlonkTrace<C>,
-        incoming: &[FoldablePlonkTrace<C>; 1],
-    ) -> Result<(RelaxedPlonkTrace<C>, CrossTermCommits<C>), Error> {
+        accumulator: RelaxedPlonkTrace<C, MARKERS_LEN>,
+        incoming: &[FoldablePlonkTrace<C, MARKERS_LEN>; 1],
+    ) -> Result<(RelaxedPlonkTrace<C, MARKERS_LEN>, CrossTermCommits<C>), Error> {
         let incoming = &incoming[0];
 
         let U1 = &accumulator.U;
@@ -245,6 +268,7 @@ where
             Self::commit_cross_terms(ck, &pp.S, U1, W1, U2, W2)?;
 
         let r = VanillaFS::generate_challenge(&pp.pp_digest, ro_acc, U1, U2, &cross_term_commits)?;
+        debug!("sangria_cha: {r:?}");
 
         let U = U1.fold(U2, &cross_term_commits, &r);
         let W = W1.fold(W2, &cross_terms, &r);
@@ -281,7 +305,7 @@ where
 
         U2.sps_verify(ro_nark)?;
 
-        let r = VanillaFS::generate_challenge(vp, ro_acc, U1, U2, cross_term_commits)?;
+        let r = VanillaFS::generate_challenge(&vp.pp_digest, ro_acc, U1, U2, cross_term_commits)?;
 
         Ok(U1.fold(U2, cross_term_commits, &r))
     }
@@ -303,13 +327,13 @@ pub enum VerifyError {
     InstanceMismatch,
 }
 
-impl<C: CurveAffine> VanillaFS<C>
+impl<C: CurveAffine, const MARKERS_LEN: usize> VanillaFS<C, MARKERS_LEN>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
     pub fn is_sat_accumulation(
         S: &PlonkStructure<C::ScalarExt>,
-        acc: &RelaxedPlonkTrace<C>,
+        acc: &RelaxedPlonkTrace<C, MARKERS_LEN>,
     ) -> Result<(), VerifyError> {
         let RelaxedPlonkTrace { U, W } = acc;
 
@@ -360,7 +384,7 @@ where
 
     pub fn is_sat_permutation(
         S: &PlonkStructure<C::ScalarExt>,
-        acc: &RelaxedPlonkTrace<C>,
+        acc: &RelaxedPlonkTrace<C, MARKERS_LEN>,
     ) -> Result<(), VerifyError> {
         /// Under this collapsing scheme, `instance` columns other than consistency markers are not
         /// foldeded, but accumulated using hash. Therefore, they need to be cut out for
@@ -380,8 +404,8 @@ where
         /// While checking permutations, we need to line up all instance columns one after the other, but
         /// since we cut out all instance columns except the null column (consistency_marker) for the
         /// `Relaxed*` version we need to augment them based on [`PlonkStructure::num_io`].
-        fn iter_flat_instances_with_padding<'b, C: CurveAffine>(
-            U: &'b RelaxedPlonkInstance<C>,
+        fn iter_flat_instances_with_padding<'b, C: CurveAffine, const MARKERS_LEN: usize>(
+            U: &'b RelaxedPlonkInstance<C, MARKERS_LEN>,
             S: &'b PlonkStructure<C::ScalarExt>,
         ) -> impl 'b + Iterator<Item = C::ScalarExt> {
             U.consistency_markers.iter().copied().chain(
@@ -430,7 +454,7 @@ where
 
     pub fn is_sat_witness_commit(
         ck: &CommitmentKey<C>,
-        acc: &RelaxedPlonkTrace<C>,
+        acc: &RelaxedPlonkTrace<C, MARKERS_LEN>,
     ) -> Result<(), VerifyError> {
         let RelaxedPlonkTrace { U, W } = acc;
 
@@ -450,23 +474,31 @@ where
     }
 
     pub fn is_sat_pub_instances(
-        acc: &RelaxedPlonkTrace<C>,
+        acc: &RelaxedPlonkTrace<C, MARKERS_LEN>,
         pub_instances: &[Vec<Vec<<C as CurveAffine>::ScalarExt>>],
     ) -> Result<(), VerifyError> {
-        pub_instances
-            .iter()
-            .fold(
-                instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
-                |acc, instances| {
-                    instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
-                        &acc,
-                        instances.get_step_circuit_instances(),
+        match acc.U.step_circuit_instances_hash_accumulator {
+            accumulator::SCInstancesHashAcc::None => {
+                assert!(pub_instances.iter().all(|instances| instances.get_step_circuit_instances().is_empty()));
+                Ok(())
+            }
+            accumulator::SCInstancesHashAcc::Hash(step_circuit_instances_hash_accumulator) => {
+                pub_instances
+                    .iter()
+                    .fold(
+                        instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
+                        |acc, instances| {
+                            instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
+                                &acc,
+                                instances.get_step_circuit_instances(),
+                            )
+                        },
                     )
-                },
-            )
-            .ne(&acc.U.step_circuit_instances_hash_accumulator)
-            .then_some(VerifyError::InstanceMismatch)
-            .err_or(())
+                    .ne(&step_circuit_instances_hash_accumulator)
+                    .then_some(VerifyError::InstanceMismatch)
+                    .err_or(())
+            }
+        }
     }
 
     /// Comprehensive satisfaction check for an accumulator.
@@ -477,7 +509,7 @@ where
     pub fn is_sat(
         ck: &CommitmentKey<C>,
         S: &PlonkStructure<C::ScalarExt>,
-        acc: &RelaxedPlonkTrace<C>,
+        acc: &RelaxedPlonkTrace<C, MARKERS_LEN>,
         pub_instances: &[Vec<Vec<C::ScalarExt>>],
     ) -> Result<(), Vec<VerifyError>> {
         let mut errors = vec![];
@@ -507,6 +539,7 @@ where
 }
 
 /// Number of consistency markers in instance column
+/// This number is relevant for sangria IVC
 pub const CONSISTENCY_MARKERS_COUNT: usize = 2;
 
 /// As part of the vanilla folding scheme, we use the values in the zero instance of the column for
@@ -517,21 +550,25 @@ pub const CONSISTENCY_MARKERS_COUNT: usize = 2;
 ///     or
 ///     hash of the state at the end of previous folding step
 /// - X1 is a hash of the state at the end of the current folding step
-pub trait GetConsistencyMarkers<F> {
-    fn get_consistency_markers(&self) -> [F; CONSISTENCY_MARKERS_COUNT];
+pub trait GetConsistencyMarkers<const MARKERS: usize, F> {
+    fn get_consistency_markers(&self) -> [F; MARKERS];
 }
 
-impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for FoldablePlonkInstance<C> {
-    fn get_consistency_markers(&self) -> [C::ScalarExt; 2] {
+impl<C: CurveAffine, const MARKERS: usize> GetConsistencyMarkers<MARKERS, C::ScalarExt>
+    for FoldablePlonkInstance<C, MARKERS>
+{
+    fn get_consistency_markers(&self) -> [C::ScalarExt; MARKERS] {
         match self.instances.first() {
-            Some(instance) if instance.len() == 2 => instance.clone().try_into().unwrap(),
+            Some(instance) if instance.len() == MARKERS => instance.clone().try_into().unwrap(),
             _ => unreachable!("folded plonk instance always have markers"),
         }
     }
 }
 
-impl<C: CurveAffine> GetConsistencyMarkers<C::ScalarExt> for RelaxedPlonkInstance<C> {
-    fn get_consistency_markers(&self) -> [C::ScalarExt; 2] {
+impl<C: CurveAffine, const MARKERS: usize> GetConsistencyMarkers<MARKERS, C::ScalarExt>
+    for RelaxedPlonkInstance<C, MARKERS>
+{
+    fn get_consistency_markers(&self) -> [C::ScalarExt; MARKERS] {
         self.consistency_markers
     }
 }

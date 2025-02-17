@@ -15,7 +15,11 @@ use halo2_proofs::halo2curves;
 use poseidon::poseidon_step_circuit::TestPoseidonCircuit;
 use sirius::{
     ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
-    ivc::{step_circuit::trivial, CircuitPublicParamsInput, PublicParams, StepCircuit, IVC},
+    ivc::{
+        sangria::{CircuitPublicParamsInput, PublicParams, IVC},
+        step_circuit::trivial,
+        StepCircuit,
+    },
     poseidon::ROPair,
 };
 use tracing::*;

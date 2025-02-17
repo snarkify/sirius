@@ -93,14 +93,24 @@ where
     let mut ro_nark_prepare = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_nark_decider = create_ro::<C::Base, T, RATE, R_F, R_P>();
 
-    let (pp, _vp) = VanillaFS::setup_params(pp_digest, S.clone())?;
+    let (pp, _vp) = VanillaFS::<_, 2>::setup_params(pp_digest, S.clone())?;
 
-    let pair1 =
-        VanillaFS::generate_plonk_trace(&ck, &public_inputs1, &W1, &pp, &mut ro_nark_prepare)?;
+    let pair1 = VanillaFS::<_, 2>::generate_plonk_trace(
+        &ck,
+        &public_inputs1,
+        &W1,
+        &pp,
+        &mut ro_nark_prepare,
+    )?;
     let pair1_relaxed = RelaxedPlonkTrace::from_regular(pair1.clone(), S.k);
 
-    let pair2 =
-        VanillaFS::generate_plonk_trace(&ck, &public_inputs2, &W2, &pp, &mut ro_nark_prepare)?;
+    let pair2 = VanillaFS::<_, 2>::generate_plonk_trace(
+        &ck,
+        &public_inputs2,
+        &W2,
+        &pp,
+        &mut ro_nark_prepare,
+    )?;
     let pair2_relaxed = RelaxedPlonkTrace::from_regular(pair2.clone(), S.k);
 
     let mut errors = Vec::new();
@@ -108,13 +118,13 @@ where
     if let Err(err) = S.is_sat(&ck, &mut ro_nark_decider, &pair1.u, &pair1.w) {
         errors.push(("is_sat_pair1", err.into()));
     }
-    if let Err(err) = VanillaFS::is_sat_permutation(&S, &pair1_relaxed) {
+    if let Err(err) = VanillaFS::<_, 2>::is_sat_permutation(&S, &pair1_relaxed) {
         errors.push(("is_sat_perm_pair1", err));
     }
     if let Err(err) = S.is_sat(&ck, &mut ro_nark_decider, &pair2.u, &pair2.w) {
         errors.push(("is_sat_pair2", err.into()));
     }
-    if let Err(err) = VanillaFS::is_sat_permutation(&S, &pair2_relaxed) {
+    if let Err(err) = VanillaFS::<_, 2>::is_sat_permutation(&S, &pair2_relaxed) {
         errors.push(("is_sat_perm_pair2", err));
     }
 
@@ -156,7 +166,7 @@ where
     const R_P: usize = 3;
 
     let mut f_tr = RelaxedPlonkTrace {
-        U: RelaxedPlonkInstance::new(S.num_challenges, S.round_sizes.len()),
+        U: RelaxedPlonkInstance::new(S.num_challenges, S.round_sizes.len(), S.num_io.len() - 1),
         W: RelaxedPlonkWitness::new(S.k, &S.round_sizes),
     };
 
@@ -166,13 +176,13 @@ where
     let mut ro_acc_prover = create_ro::<C::Base, T, RATE, R_F, R_P>();
     let mut ro_acc_verifier = create_ro::<C::Base, T, RATE, R_F, R_P>();
 
-    let (pp, vp) = VanillaFS::setup_params(pp_digest, S.clone())?;
+    let (pp, vp) = VanillaFS::<_, 2>::setup_params(pp_digest, S.clone())?;
 
     let pair1 = [pair1];
     let (RelaxedPlonkTrace { U: U_from_prove, W }, cross_term_commits) =
         VanillaFS::prove(ck, &pp, &mut ro_acc_prover, f_tr.clone(), &pair1)?;
 
-    let U_from_verify = VanillaFS::verify(
+    let U_from_verify = VanillaFS::<_, 2>::verify(
         &vp,
         &mut ro_nark_verifier,
         &mut ro_acc_verifier,
@@ -209,7 +219,7 @@ where
         &pair2,
     )?;
 
-    let U_from_verify = VanillaFS::verify(
+    let U_from_verify = VanillaFS::<_, 2>::verify(
         &vp,
         &mut ro_nark_verifier,
         &mut ro_acc_verifier,
@@ -222,7 +232,7 @@ where
     f_tr.U = U_from_verify;
     f_tr.W = _W;
 
-    if let Err(err) = VanillaFS::is_sat(ck, S, &f_tr, &all_instances) {
+    if let Err(err) = VanillaFS::<_, 2>::is_sat(ck, S, &f_tr, &all_instances) {
         errors.extend(err.into_iter().map(|err| ("f_tr", err)));
     }
 

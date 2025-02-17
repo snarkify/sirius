@@ -27,7 +27,10 @@ mod sirius_mod {
         commitment::CommitmentKey,
         ff::Field,
         group::{prime::PrimeCurve, Group},
-        ivc::{step_circuit::trivial, CircuitPublicParamsInput, PublicParams, IVC},
+        ivc::{
+            sangria::{CircuitPublicParamsInput, PublicParams, IVC},
+            step_circuit::trivial,
+        },
     };
     use tracing::info_span;
 

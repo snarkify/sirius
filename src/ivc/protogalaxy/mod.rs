@@ -14,7 +14,7 @@ pub mod verify_chip {
             },
             plonk::Error as Halo2PlonkError,
         },
-        ivc::cyclefold::DEFAULT_LIMBS_COUNT_LIMIT,
+        ivc::cyclefold::{DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
         main_gate::{
             AdviceCyclicAssignor, AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue,
         },
@@ -25,7 +25,6 @@ pub mod verify_chip {
         plonk,
         polynomial::{lagrange::iter_cyclic_subgroup, univariate::UnivariatePoly},
         poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
-        prelude::DEFAULT_LIMB_WIDTH,
         util,
     };
 
@@ -57,7 +56,7 @@ pub mod verify_chip {
         SPS { err: Halo2PlonkError },
     }
 
-    pub type BigUint<F> = Vec<F>;
+    pub type BigUint<F> = [F; DEFAULT_LIMBS_COUNT.get()];
 
     #[derive(Debug, Clone)]
     pub struct BigUintPoint<F> {
@@ -127,7 +126,10 @@ pub mod verify_chip {
                 .map(|(l, r)| mg.conditional_select(region, l, r, cond))
                 .collect::<Result<Vec<_>, _>>()?;
 
-            Ok(Self { x, y })
+            Ok(Self {
+                x: x.try_into().unwrap(),
+                y: y.try_into().unwrap(),
+            })
         }
     }
 
@@ -138,18 +140,21 @@ pub mod verify_chip {
             let x = big_uint::BigUint::<C::ScalarExt>::from_different_field::<C::Base>(
                 coordinates.x(),
                 DEFAULT_LIMB_WIDTH,
-                DEFAULT_LIMBS_COUNT_LIMIT,
+                DEFAULT_LIMBS_COUNT,
             )?;
 
             let y = big_uint::BigUint::<C::ScalarExt>::from_different_field::<C::Base>(
                 coordinates.y(),
                 DEFAULT_LIMB_WIDTH,
-                DEFAULT_LIMBS_COUNT_LIMIT,
+                DEFAULT_LIMBS_COUNT,
             )?;
 
+            assert_eq!(x.limbs().len(), DEFAULT_LIMBS_COUNT.get());
+            assert_eq!(y.limbs().len(), DEFAULT_LIMBS_COUNT.get());
+
             Ok(Self {
-                x: x.limbs().to_vec(),
-                y: y.limbs().to_vec(),
+                x: x.limbs().try_into().unwrap(),
+                y: y.limbs().try_into().unwrap(),
             })
         }
 
@@ -160,24 +165,40 @@ pub mod verify_chip {
         ) -> Result<BigUintPoint<AssignedValue<F>>, Halo2PlonkError> {
             let mut assigner = main_gate_config.advice_cycle_assigner();
 
-            Ok(BigUintPoint {
-                x: assigner.assign_all_advice(region, || "x", self.x.into_iter())?,
-                y: assigner.assign_all_advice(region, || "y", self.y.into_iter())?,
-            })
+            let p = BigUintPoint {
+                x: assigner
+                    .assign_all_advice(region, || "x", self.x.into_iter())?
+                    .try_into()
+                    .unwrap(),
+                y: assigner
+                    .assign_all_advice(region, || "y", self.y.into_iter())?
+                    .try_into()
+                    .unwrap(),
+            };
+
+            region.next();
+
+            Ok(p)
         }
     }
 
     impl<F: PrimeField> BigUintPoint<F> {
         pub fn identity() -> Self {
             Self {
-                x: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH).limbs().to_vec(),
-                y: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH).limbs().to_vec(),
+                x: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
+                    .limbs()
+                    .try_into()
+                    .unwrap(),
+                y: big_uint::BigUint::zero(DEFAULT_LIMB_WIDTH, DEFAULT_LIMBS_COUNT)
+                    .limbs()
+                    .try_into()
+                    .unwrap(),
             }
         }
     }
 
     /// Assigned version of [`crate::plonk::PlonkInstance`]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct AssignedPlonkInstance<F: PrimeField> {
         pub W_commitments: Vec<BigUintPoint<AssignedValue<F>>>,
         pub instances: Vec<Vec<AssignedValue<F>>>,
@@ -307,7 +328,7 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::nifs::protogalaxy::accumulator::AccumulatorInstance`]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct AssignedAccumulatorInstance<F: PrimeField> {
         pub ins: AssignedPlonkInstance<F>,
         pub betas: Box<[AssignedValue<F>]>,
@@ -417,7 +438,7 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::polynomial::univariate::UnivariatePoly`]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct AssignedUnivariatePoly<F: PrimeField>(pub UnivariatePoly<AssignedValue<F>>);
 
     impl<F: PrimeField> From<UnivariatePoly<AssignedValue<F>>> for AssignedUnivariatePoly<F> {
@@ -502,11 +523,11 @@ pub mod verify_chip {
             let prev_col = &main_gate_config.input;
             let result_col = &main_gate_config.out;
 
-            challenge_powers.get_or_eval(region, main_gate, self.len().saturating_sub(1))?;
+            challenge_powers.get_or_eval(region, main_gate, self.len().saturating_add(1))?;
 
             self.0
                 .iter()
-                .zip_eq(challenge_powers.iter())
+                .zip_eq(challenge_powers.iter().take(self.0.len()))
                 .chunks(2)
                 .into_iter()
                 .try_fold(Option::<AssignedValue<F>>::None, |prev, chunks| {
@@ -526,13 +547,13 @@ pub mod verify_chip {
 
                     let assigned_coeffs = coeffs
                         .iter()
-                        .zip_eq(coeffs_col)
+                        .zip(coeffs_col)
                         .map(|(coeff, col)| region.assign_advice_from(|| "coeff", col, *coeff))
                         .collect::<Result<Box<[_]>, _>>()?;
 
                     let assigned_cha = cha_in_power
                         .iter()
-                        .zip_eq(cha_col)
+                        .zip(cha_col)
                         .map(|(cha_in_power, col)| {
                             region.assign_advice_from(|| "cha", col, *cha_in_power)
                         })
@@ -540,7 +561,7 @@ pub mod verify_chip {
 
                     let output = assigned_coeffs
                         .iter()
-                        .zip_eq(assigned_cha.iter())
+                        .zip(assigned_cha.iter())
                         .fold(assigned_prev.value().copied(), |res, (coeff, cha)| {
                             res + (coeff.value().copied() * cha.value())
                         });
@@ -570,7 +591,7 @@ pub mod verify_chip {
     }
 
     /// Assigned version of [`crate::nifs::protogalaxy::Proof]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct AssignedProof<F: PrimeField> {
         pub poly_F: AssignedUnivariatePoly<F>,
         pub poly_K: AssignedUnivariatePoly<F>,
@@ -619,9 +640,8 @@ pub mod verify_chip {
             vp: &protogalaxy::VerifierParam<C>,
         ) -> Result<Self, Error> {
             let protogalaxy::VerifierParam { pp_digest } = vp;
-            let c = pp_digest.coordinates().unwrap();
-            let x = util::fe_to_fe(c.x()).unwrap();
-            let y = util::fe_to_fe(c.y()).unwrap();
+            let x = util::fe_to_fe(&pp_digest.0).unwrap();
+            let y = util::fe_to_fe(&pp_digest.1).unwrap();
 
             let mut assigner = main_gate_config.advice_cycle_assigner::<C::ScalarExt>();
             Ok(Self {
@@ -679,15 +699,25 @@ pub mod verify_chip {
                 .absorb_iter(vp.iter_wrap_value())
                 .absorb_iter(accumulator.iter_wrap_values())
                 .absorb_iter(incoming.iter().flat_map(|tr| tr.iter_wrap_values()))
+                .inspect(|buf| trace!("buf before delta: {buf:?}"))
                 .squeeze(region)?;
 
             let alpha = ro_circuit
                 .absorb_iter(proof.poly_F.iter_wrap_value())
+                .inspect(|buf| trace!("buf before alpha: {buf:?}"))
                 .squeeze(region)?;
 
             let gamma = ro_circuit
                 .absorb_iter(proof.poly_K.iter_wrap_value())
+                .inspect(|buf| trace!("buf before gamma: {buf:?}"))
                 .squeeze(region)?;
+
+            debug!(
+                "challanges: delta: {delta:?}, alpha: {alpha:?}, gamma: {gamma:?}",
+                delta = delta.value(),
+                alpha = alpha.value(),
+                gamma = gamma.value(),
+            );
 
             Ok(AssignedChallanges {
                 delta,
@@ -730,7 +760,8 @@ pub mod verify_chip {
             calculate_exponentiation_sequence(region, main_gate, cha.delta, cha.betas.len())
                 .map_err(|err| Error::Deltas { err })?;
 
-        cha.betas
+        let bs = cha
+            .betas
             .iter()
             .zip_eq(deltas)
             .map(|(beta, delta_power)| {
@@ -738,7 +769,11 @@ pub mod verify_chip {
                 main_gate.add(region, beta, &alpha_mul_delta)
             })
             .collect::<Result<Box<[_]>, Halo2PlonkError>>()
-            .map_err(|err| Error::BetasStroke { err })
+            .map_err(|err| Error::BetasStroke { err })?;
+
+        region.next();
+
+        Ok(bs)
     }
 
     /// Evaluate the values of the Lagrange polynomial for a cyclic subgroup of length `n` (`2.pow(log_n)`) at
@@ -777,6 +812,7 @@ pub mod verify_chip {
 
         let X = cha.value();
 
+        region.next();
         let X_sub_value = main_gate.add_with_const(region, &X, -value)?;
 
         let (is_zero_X_sub_value, X_sub_value_inverted) =
@@ -964,6 +1000,7 @@ pub mod verify_chip {
     ///
     /// 5. **Fold the Instance:**
     ///     - [`ProtoGalaxy::fold_instance`]
+    #[instrument(skip_all)]
     pub fn verify<F, const L: usize, const T: usize>(
         region: &mut RegionCtx<F>,
         main_gate_config: MainGateConfig<T>,
@@ -1019,11 +1056,10 @@ pub mod verify_chip {
         )
         .map_err(|err| Error::WhileE { err })?;
 
-        let poly_L_values = (0..)
+        let poly_L_values = (0..(L + 1))
             .map(|index| {
                 eval_lagrange_poly::<F, T, L>(region, &main_gate, index, &mut gamma_powers)
             })
-            .take(L + 1)
             .collect::<Result<Box<[_]>, _>>()
             .map_err(|err| Error::Fold { err })?;
 
@@ -1057,7 +1093,7 @@ pub mod verify_chip {
                 dev::MockProver,
                 plonk::{Circuit, ConstraintSystem},
             },
-            halo2curves::{bn256::G1Affine as Affine1, group::prime::PrimeCurveAffine},
+            halo2curves::bn256::G1Affine as Affine1,
             ivc::cyclefold::{ro, ro_chip},
             main_gate::MainGate,
             nifs::{
@@ -1073,6 +1109,7 @@ pub mod verify_chip {
         const RATE: usize = T - 1;
         const K: usize = 14;
 
+        type Base = <Affine1 as CurveAffine>::Base;
         type Scalar = <Affine1 as CurveAffine>::ScalarExt;
 
         fn get_witness_collector() -> (WitnessCollector<Scalar>, MainGateConfig<T>) {
@@ -1095,7 +1132,7 @@ pub mod verify_chip {
         impl Mock {
             fn new() -> Self {
                 let params = VerifierParam::<Affine1> {
-                    pp_digest: Affine1::identity(),
+                    pp_digest: (Base::ZERO, Base::ZERO),
                 };
 
                 let acc = nifs::protogalaxy::Accumulator::<Affine1>::new(
@@ -1371,7 +1408,6 @@ pub mod verify_chip {
                 ) -> Result<(), Halo2PlonkError> {
                     let cha = Fr::from_u128(123);
 
-                    dbg!(<Fr as PrimeField>::S);
                     let lagrange_domain = PolyContext::<Fr>::get_lagrange_domain::<L>();
                     debug!("lagrange_domain: {lagrange_domain}");
 

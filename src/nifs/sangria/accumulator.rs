@@ -1,5 +1,5 @@
 use std::{
-    iter,
+    array, iter,
     ops::{self, Deref, DerefMut},
 };
 
@@ -11,20 +11,85 @@ use itertools::Itertools;
 use rayon::prelude::*;
 use tracing::{debug, instrument, warn};
 
-use super::{GetConsistencyMarkers, GetStepCircuitInstances};
+use super::{GetConsistencyMarkers, GetStepCircuitInstances, CONSISTENCY_MARKERS_COUNT};
 use crate::{
     commitment::CommitmentKey,
     ff::{Field, PrimeField},
-    ivc::instances_accumulator_computation,
-    plonk::{
-        self, GetChallenges, GetWitness, PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness,
-    },
+    ivc::sangria::instances_accumulator_computation,
+    main_gate::{AssignedValue, WrapValue},
+    plonk::{self, GetChallenges, GetWitness, PlonkInstance, PlonkTrace, PlonkWitness},
     poseidon::{AbsorbInRO, ROTrait},
     util::ScalarToBase,
 };
 
+/// Accumulator for step-circuit instance columns
+///
+/// Since the first column is folded directly via `r` and the rest (step-circuit instances columns)
+/// are accumulated via hash, in case of absence of any columns except the first one, we don't need
+/// additional costs for accumulation of other instance columns.
+///
+/// This will make it easier to use sangria IVC code in other IVCs, instead of calculating a chain
+/// of hashes from empty sets.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RelaxedPlonkInstance<C: CurveAffine> {
+pub enum SCInstancesHashAcc<F> {
+    /// If StepCircuit does not possess sc_instances will be None
+    None,
+    Hash(F),
+}
+
+impl<F: PrimeField, RO: ROTrait<F>> AbsorbInRO<F, RO> for SCInstancesHashAcc<F> {
+    fn absorb_into(&self, ro: &mut RO) {
+        match self {
+            Self::None => {
+                ro.absorb_field(F::ZERO);
+            }
+            Self::Hash(hash) => {
+                ro.absorb_field(*hash);
+            }
+        }
+    }
+}
+
+impl<'l, F: PrimeField> From<&'l SCInstancesHashAcc<AssignedValue<F>>> for WrapValue<F> {
+    fn from(val: &'l SCInstancesHashAcc<AssignedValue<F>>) -> Self {
+        match &val {
+            SCInstancesHashAcc::None => WrapValue::Zero,
+            SCInstancesHashAcc::Hash(hash) => WrapValue::Assigned(hash.clone()),
+        }
+    }
+}
+
+impl<F> SCInstancesHashAcc<F> {
+    pub fn as_ref(&self) -> SCInstancesHashAcc<&F> {
+        match self {
+            SCInstancesHashAcc::None => SCInstancesHashAcc::None,
+            SCInstancesHashAcc::Hash(h) => SCInstancesHashAcc::Hash(h),
+        }
+    }
+
+    pub fn zip<'l>(lhs: &'l Self, rhs: &'l Self) -> SCInstancesHashAcc<(&'l F, &'l F)> {
+        match (lhs, rhs) {
+            (Self::Hash(l), Self::Hash(r)) => SCInstancesHashAcc::Hash((l, r)),
+            _ => SCInstancesHashAcc::None,
+        }
+    }
+    pub fn map<O>(self, f: impl FnOnce(F) -> O) -> SCInstancesHashAcc<O> {
+        match self {
+            SCInstancesHashAcc::None => SCInstancesHashAcc::None,
+            SCInstancesHashAcc::Hash(h) => SCInstancesHashAcc::Hash(f(h)),
+        }
+    }
+}
+
+/// Accumulated version of Plonk Instance
+///
+/// `MARKERS_LEN` - the first column of instance is folded separately, the length of this column is
+/// regulated by this parameter
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RelaxedPlonkInstance<
+    C: CurveAffine,
+    const MARKERS_LEN: usize = CONSISTENCY_MARKERS_COUNT,
+> {
     /// `W_commitments = round_sizes.len()`, see [`PlonkStructure::round_sizes`]
     pub(crate) W_commitments: Vec<C>,
     /// First instance column [`crate::ivc::step_folding_circuit::StepFoldingCircuit`] reserved for
@@ -33,7 +98,7 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
     /// These are the two values that allow for proof of acceptance
     /// The null is a hash of all input parameters per folding step
     /// The first one is a hash of all output parameters for each folding step
-    pub(crate) consistency_markers: [C::ScalarExt; 2],
+    pub(crate) consistency_markers: [C::ScalarExt; MARKERS_LEN],
     /// Challenges generated in special soundness protocol (sps)
     /// we will have 0 ~ 3 challenges depending on different cases:
     /// name them as r1, r2, r3:
@@ -51,19 +116,26 @@ pub struct RelaxedPlonkInstance<C: CurveAffine> {
     ///
     /// Unlike consistency markers, instance columns belonging to the step circuit itself are not
     /// folded, but are accumulated using the hash function.
-    pub(crate) step_circuit_instances_hash_accumulator: C::ScalarExt,
+    pub(crate) step_circuit_instances_hash_accumulator: SCInstancesHashAcc<C::ScalarExt>,
 }
 
-impl<C: CurveAffine> From<FoldablePlonkInstance<C>> for RelaxedPlonkInstance<C>
+impl<C: CurveAffine, const MARKERS_LEN: usize> From<FoldablePlonkInstance<C, MARKERS_LEN>>
+    for RelaxedPlonkInstance<C, MARKERS_LEN>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    fn from(inner: FoldablePlonkInstance<C>) -> Self {
-        let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
-                &C::ScalarExt::ZERO,
-                inner.get_step_circuit_instances(),
-            );
+    fn from(inner: FoldablePlonkInstance<C, MARKERS_LEN>) -> Self {
+        let step_circuit_instances = inner.get_step_circuit_instances();
+        let step_circuit_instances_hash_accumulator = if step_circuit_instances.is_empty() {
+            SCInstancesHashAcc::None
+        } else {
+            SCInstancesHashAcc::Hash(
+                instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
+                    &C::ScalarExt::ZERO,
+                    step_circuit_instances,
+                ),
+            )
+        };
 
         let consistency_markers = inner.get_consistency_markers();
         let FoldablePlonkInstance(PlonkInstance {
@@ -83,16 +155,20 @@ where
     }
 }
 
-impl<C: CurveAffine> RelaxedPlonkInstance<C>
+impl<C: CurveAffine, const MARKERS_LEN: usize> RelaxedPlonkInstance<C, MARKERS_LEN>
 where
     C::Base: PrimeFieldBits + FromUniformBytes<64>,
 {
-    pub fn new(num_challenges: usize, num_witness: usize) -> Self {
-        let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>();
+    pub fn new(num_challenges: usize, num_witness: usize, num_sc_instances: usize) -> Self {
+        let step_circuit_instances_hash_accumulator = match num_sc_instances {
+            0 => SCInstancesHashAcc::None,
+            _any => SCInstancesHashAcc::Hash(
+                instances_accumulator_computation::get_initial_sc_instances_accumulator::<C>(),
+            ),
+        };
 
         Self {
-            consistency_markers: [C::ScalarExt::ZERO, C::ScalarExt::ZERO],
+            consistency_markers: array::from_fn(|_| C::ScalarExt::ZERO),
             W_commitments: vec![CommitmentKey::<C>::default_value(); num_witness],
             challenges: vec![C::ScalarExt::ZERO; num_challenges],
             E_commitment: CommitmentKey::<C>::default_value(),
@@ -124,7 +200,7 @@ where
     #[instrument(name = "fold_plonk_instance", skip_all)]
     pub fn fold(
         &self,
-        U2: &FoldablePlonkInstance<C>,
+        U2: &FoldablePlonkInstance<C, MARKERS_LEN>,
         cross_term_commits: &[C],
         r: &C::ScalarExt,
     ) -> Self {
@@ -146,7 +222,7 @@ where
         let consistency_markers = self
             .consistency_markers
             .iter()
-            .zip_eq(&U2.get_consistency_markers())
+            .zip_eq(GetConsistencyMarkers::<MARKERS_LEN, _>::get_consistency_markers(U2))
             .map(|(a, b)| *a + *r * b)
             .collect::<Vec<C::ScalarExt>>()
             .try_into()
@@ -167,11 +243,15 @@ where
             .map(|(tk, power_of_r)| best_multiexp(&[power_of_r], &[*tk]).into())
             .fold(self.E_commitment, |acc, x| (acc + x).into());
 
-        let step_circuit_instances_hash_accumulator =
-            instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
-                &self.step_circuit_instances_hash_accumulator,
-                U2.get_step_circuit_instances(),
-            );
+        let step_circuit_instances_hash_accumulator = self
+            .step_circuit_instances_hash_accumulator
+            .as_ref()
+            .map(|acc| {
+                instances_accumulator_computation::absorb_in_sc_instances_accumulator::<C>(
+                    acc,
+                    U2.get_step_circuit_instances(),
+                )
+            });
 
         RelaxedPlonkInstance {
             W_commitments,
@@ -190,13 +270,16 @@ where
 
 // TODO #31 docs
 #[derive(Debug, Clone)]
-pub struct RelaxedPlonkTrace<C: CurveAffine> {
-    pub U: RelaxedPlonkInstance<C>,
+pub struct RelaxedPlonkTrace<C: CurveAffine, const MARKERS_LEN: usize = CONSISTENCY_MARKERS_COUNT> {
+    pub U: RelaxedPlonkInstance<C, MARKERS_LEN>,
     pub W: RelaxedPlonkWitness<C::Scalar>,
 }
 
-impl<C: CurveAffine> RelaxedPlonkTrace<C> {
-    pub fn from_regular(tr: FoldablePlonkTrace<C>, k_table_size: usize) -> RelaxedPlonkTrace<C>
+impl<C: CurveAffine, const MARKERS_LEN: usize> RelaxedPlonkTrace<C, MARKERS_LEN> {
+    pub fn from_regular(
+        tr: FoldablePlonkTrace<C, { MARKERS_LEN }>,
+        k_table_size: usize,
+    ) -> RelaxedPlonkTrace<C, MARKERS_LEN>
     where
         C::Base: PrimeFieldBits + FromUniformBytes<64>,
     {
@@ -208,27 +291,6 @@ impl<C: CurveAffine> RelaxedPlonkTrace<C> {
 }
 
 pub type RelaxedPlonkTraceArgs = plonk::PlonkTraceArgs;
-
-impl<C: CurveAffine> RelaxedPlonkTrace<C>
-where
-    C::Base: PrimeFieldBits + FromUniformBytes<64>,
-{
-    pub fn new(args: RelaxedPlonkTraceArgs) -> Self {
-        Self {
-            U: RelaxedPlonkInstance::new(args.num_challenges, args.num_witness),
-            W: RelaxedPlonkWitness::new(args.k_table_size, &args.round_sizes),
-        }
-    }
-}
-
-impl<C: CurveAffine> From<&PlonkStructure<C::ScalarExt>> for RelaxedPlonkTrace<C>
-where
-    C::Base: PrimeFieldBits + FromUniformBytes<64>,
-{
-    fn from(value: &PlonkStructure<C::ScalarExt>) -> Self {
-        Self::new(RelaxedPlonkTraceArgs::from(value))
-    }
-}
 
 impl<F: PrimeField> GetWitness<F> for RelaxedPlonkWitness<F> {
     fn get_witness(&self) -> &[Vec<F>] {
@@ -254,7 +316,9 @@ impl<C: CurveAffine> GetChallenges<C::ScalarExt> for RelaxedPlonkTrace<C> {
     }
 }
 
-impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPlonkInstance<C> {
+impl<C: CurveAffine, RO: ROTrait<C::Base>, const MARKERS_LEN: usize> AbsorbInRO<C::Base, RO>
+    for RelaxedPlonkInstance<C, MARKERS_LEN>
+{
     fn absorb_into(&self, ro: &mut RO) {
         let Self {
             W_commitments,
@@ -266,14 +330,18 @@ impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO> for RelaxedPl
         } = self;
 
         ro.absorb_point_iter(W_commitments.iter())
-            .absorb_point(E_commitment)
             .absorb_field_iter(
                 consistency_markers
                     .iter()
                     .chain(challenges.iter())
                     .chain(iter::once(u))
-                    .chain(iter::once(step_circuit_instances_hash_accumulator))
                     .map(|m| C::scalar_to_base(m).unwrap()),
+            )
+            .absorb_point(E_commitment)
+            .absorb(
+                &step_circuit_instances_hash_accumulator
+                    .as_ref()
+                    .map(|acc| C::scalar_to_base(acc).unwrap()),
             );
     }
 }
@@ -340,21 +408,25 @@ impl<F: PrimeField> RelaxedPlonkWitness<F> {
 /// column has exactly two elements.
 ///
 /// # Consistency Markers
-/// - Ensures that `instances.first().len() == 2` for `PlonkInstance`.
+/// - Ensures that `instances.first().len() == MARKERS_LEN` for `PlonkInstance`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FoldablePlonkInstance<C: CurveAffine>(PlonkInstance<C>);
+pub struct FoldablePlonkInstance<
+    C: CurveAffine,
+    const MARKERS_LEN: usize = CONSISTENCY_MARKERS_COUNT,
+>(PlonkInstance<C>);
 
-impl<C: CurveAffine> FoldablePlonkInstance<C> {
+impl<C: CurveAffine, const MARKERS_LEN: usize> FoldablePlonkInstance<C, MARKERS_LEN> {
     /// Creates a new `FoldablePlonkInstance` from a `PlonkInstance`.
     ///
     /// # Consistency Markers
-    /// - Ensures that `instances.first().len() == 2` for `FoldablePlonkInstance`.
+    /// - Ensures that `instances.first().len() == MARKERS_LEN` for `FoldablePlonkInstance`.
     pub fn new(pl: PlonkInstance<C>) -> Option<Self> {
-        matches!(pl.instances.first(), Some(instance) if instance.len() == 2).then_some(Self(pl))
+        matches!(pl.instances.first(), Some(instance) if instance.len() == MARKERS_LEN)
+            .then_some(Self(pl))
     }
 }
 
-impl<C: CurveAffine> Deref for FoldablePlonkInstance<C> {
+impl<C: CurveAffine, const MARKERS_LEN: usize> Deref for FoldablePlonkInstance<C, MARKERS_LEN> {
     type Target = PlonkInstance<C>;
 
     fn deref(&self) -> &Self::Target {
@@ -362,7 +434,7 @@ impl<C: CurveAffine> Deref for FoldablePlonkInstance<C> {
     }
 }
 
-impl<C: CurveAffine> DerefMut for FoldablePlonkInstance<C> {
+impl<C: CurveAffine, const MARKERS_LEN: usize> DerefMut for FoldablePlonkInstance<C, MARKERS_LEN> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -374,18 +446,21 @@ impl<C: CurveAffine> DerefMut for FoldablePlonkInstance<C> {
 /// # Consistency Markers
 /// - Contains a `FoldablePlonkInstance` and a `PlonkWitness`.
 #[derive(Debug, Clone)]
-pub struct FoldablePlonkTrace<C: CurveAffine> {
+pub struct FoldablePlonkTrace<C: CurveAffine, const MARKERS_LEN: usize = CONSISTENCY_MARKERS_COUNT>
+{
     /// The foldable PLONK instance, ensuring the first instance column has exactly two elements.
     ///
     /// # Consistency Markers
     /// - Holds a `FoldablePlonkInstance` to enforce first-instance column length.
-    pub u: FoldablePlonkInstance<C>,
+    pub u: FoldablePlonkInstance<C, MARKERS_LEN>,
     pub w: PlonkWitness<C::Scalar>,
 }
 
-impl<C: CurveAffine> From<FoldablePlonkTrace<C>> for PlonkTrace<C> {
+impl<C: CurveAffine, const MARKERS_LEN: usize> From<FoldablePlonkTrace<C, MARKERS_LEN>>
+    for PlonkTrace<C>
+{
     /// Converts a `FoldablePlonkTrace` into a `PlonkTrace`.
-    fn from(value: FoldablePlonkTrace<C>) -> Self {
+    fn from(value: FoldablePlonkTrace<C, MARKERS_LEN>) -> Self {
         PlonkTrace {
             u: value.u.0,
             w: value.w,
@@ -393,7 +468,7 @@ impl<C: CurveAffine> From<FoldablePlonkTrace<C>> for PlonkTrace<C> {
     }
 }
 
-impl<C: CurveAffine> FoldablePlonkTrace<C> {
+impl<C: CurveAffine, const MARKERS_LEN: usize> FoldablePlonkTrace<C, MARKERS_LEN> {
     /// Creates a new `FoldablePlonkTrace` from a `PlonkTrace`.
     ///
     /// # Consistency Markers

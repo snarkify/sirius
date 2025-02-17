@@ -1,15 +1,18 @@
-use std::iter;
+use std::{fmt, iter};
 
-use halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
 use itertools::Itertools;
-use tracing::error;
+use tracing::{error, info, info_span, instrument, trace};
 
 use crate::{
     gadgets::nonnative::bn::big_uint_mul_mod_chip::BigUintMulModChip,
-    halo2_proofs::plonk::Error as Halo2PlonkError,
+    halo2_proofs::{
+        circuit::Value,
+        halo2curves::ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
+        plonk::Error as Halo2PlonkError,
+    },
     ivc::{
         self,
-        cyclefold::{ro_chip, DEFAULT_LIMBS_COUNT_LIMIT, DEFAULT_LIMB_WIDTH},
+        cyclefold::{ro_chip, support_circuit, DEFAULT_LIMBS_COUNT, DEFAULT_LIMB_WIDTH},
     },
     main_gate::{self, AdviceCyclicAssignor, AssignedValue, MainGate, RegionCtx, WrapValue},
     poseidon::ROCircuitTrait,
@@ -17,10 +20,13 @@ use crate::{
 
 pub type MainGateConfig = main_gate::MainGateConfig<{ super::super::MAIN_GATE_T }>;
 
-pub type BigUint<F> = Vec<F>;
+pub type BigUint<F> = [F; DEFAULT_LIMBS_COUNT.get()];
 
 pub type BigUintPoint<F> = ivc::protogalaxy::verify_chip::BigUintPoint<F>;
 pub type NativePlonkInstance<F> = ivc::protogalaxy::verify_chip::AssignedPlonkInstance<F>;
+
+const W_COMMITMENTS_MAX_LEN: usize = 3;
+const W_CHALLENGES_MAX_LEN: usize = 3;
 
 impl<F: PrimeField> NativePlonkInstance<F> {
     pub fn assign_advice_from_native(
@@ -28,17 +34,33 @@ impl<F: PrimeField> NativePlonkInstance<F> {
         original: &super::NativePlonkInstance<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let _s = info_span!("native_plonk_instance").entered();
+        let start_offset = region.offset();
+
+        trace!("start assign at {start_offset}");
+
         let super::NativePlonkInstance {
             W_commitments,
             instances,
             challenges,
         } = original;
 
+        trace!(
+            "W_commitments_len: {}, instances_len: {}, challenges_len: {}",
+            W_commitments.len(),
+            instances.len(),
+            challenges.len()
+        );
+
         let W_commitments = W_commitments
             .iter()
             .cloned()
             .map(|p| p.assign(region, main_gate_config))
             .collect::<Result<Vec<_>, _>>()?;
+
+        iter::repeat(BigUintPoint::identity())
+            .take(W_COMMITMENTS_MAX_LEN.saturating_sub(W_commitments.len()))
+            .try_for_each(|p| p.assign(region, main_gate_config).map(|_| ()))?;
 
         let mut assigner = main_gate_config.advice_cycle_assigner();
 
@@ -51,6 +73,19 @@ impl<F: PrimeField> NativePlonkInstance<F> {
 
         let challenges =
             assigner.assign_all_advice(region, || "challenges", challenges.iter().cloned())?;
+
+        assigner.assign_all_advice(
+            region,
+            || "zero",
+            iter::repeat(F::ZERO).take(W_CHALLENGES_MAX_LEN.saturating_sub(challenges.len())),
+        )?;
+
+        trace!(
+            "took {} rows total, finish at {}",
+            region.offset() - start_offset,
+            region.offset()
+        );
+        region.next();
 
         Ok(Self {
             W_commitments,
@@ -69,17 +104,28 @@ impl<F: PrimeField> ProtoGalaxyAccumulatorInstance<F> {
         original: &super::ProtoGalaxyAccumulatorInstance<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let _s = info_span!("protogalaxy_accumulator_instance").entered();
+        let start_offset = region.offset();
+
+        trace!("start assign at {start_offset}");
+
         let super::ProtoGalaxyAccumulatorInstance { ins, betas, e } = original;
         let ins = NativePlonkInstance::assign_advice_from_native(region, ins, main_gate_config)?;
 
+        trace!("len of betas: {}", betas.len());
         let mut assigner = main_gate_config.advice_cycle_assigner();
-        Ok(Self {
+        let self_ = Self {
             ins,
             betas: assigner
                 .assign_all_advice(region, || "betas", betas.iter().cloned())?
                 .into_boxed_slice(),
             e: assigner.assign_next_advice(region, || "e", *e)?,
-        })
+        };
+
+        trace!("took {} rows total", region.offset() - start_offset);
+        region.next();
+
+        Ok(self_)
     }
 
     pub fn conditional_select<const T: usize>(
@@ -122,17 +168,32 @@ impl<F: PrimeField> ProtogalaxyProof<F> {
         original: &super::nifs::protogalaxy::Proof<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let _s = info_span!("protogalaxy_proof").entered();
+        let start_offset = region.offset();
+
+        trace!("start assign at {start_offset}");
+
         let mut assigner = main_gate_config.advice_cycle_assigner();
         let super::nifs::protogalaxy::Proof { poly_F, poly_K } = original;
 
-        Ok(Self {
+        trace!("poly_F_len: {}, poly_K_len: {}", poly_F.len(), poly_K.len());
+
+        let self_ = Self {
             poly_F: assigner
                 .assign_all_advice(region, || "poly_F", poly_F.iter().cloned())?
                 .into(),
             poly_K: assigner
                 .assign_all_advice(region, || "poly_K", poly_K.iter().cloned())?
                 .into(),
-        })
+        };
+
+        trace!(
+            "`ProtogalaxyProof` took {} rows",
+            region.offset() - start_offset
+        );
+        region.next();
+
+        Ok(self_)
     }
 
     fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
@@ -148,6 +209,7 @@ impl<F: PrimeField> ProtogalaxyProof<F> {
 }
 
 /// Recursive trace of the circuit itself
+#[derive(Debug)]
 pub struct SelfTrace<F: PrimeField> {
     pub input_accumulator: ProtoGalaxyAccumulatorInstance<F>,
     pub incoming: NativePlonkInstance<F>,
@@ -160,13 +222,18 @@ impl<F: PrimeField> SelfTrace<F> {
         original: &super::SelfTrace<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let start_offset = region.offset();
+        let _s = info_span!("self_trace").entered();
+
+        trace!("start assign at {start_offset}");
+
         let super::SelfTrace {
             input_accumulator,
             incoming,
             proof,
         } = original;
 
-        Ok(Self {
+        let self_ = Self {
             input_accumulator: ProtoGalaxyAccumulatorInstance::assign_advice_from_native(
                 region,
                 input_accumulator,
@@ -178,7 +245,11 @@ impl<F: PrimeField> SelfTrace<F> {
                 main_gate_config,
             )?,
             proof: ProtogalaxyProof::assign_advice_from(region, proof, main_gate_config)?,
-        })
+        };
+
+        trace!("`SelfTrace` took {} rows", region.offset() - start_offset);
+
+        Ok(self_)
     }
 
     fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
@@ -195,25 +266,70 @@ impl<F: PrimeField> SelfTrace<F> {
     }
 }
 
+type BigUintView<F> = (AssignedValue<F>, BigUint<AssignedValue<F>>);
+
 #[derive(Clone)]
-pub struct PairedPlonkInstance<F: PrimeField> {
+pub struct SupportPlonkInstance<F: PrimeField> {
     pub(crate) W_commitments: Vec<(AssignedValue<F>, AssignedValue<F>)>,
-    pub(crate) instances: Vec<Vec<BigUint<AssignedValue<F>>>>,
-    pub(crate) challenges: Vec<BigUint<AssignedValue<F>>>,
+    pub(crate) instances: Vec<Vec<BigUintView<F>>>,
+    pub(crate) challenges: Vec<BigUintView<F>>,
 }
 
-impl<F: PrimeField> PairedPlonkInstance<F> {
+impl<F: PrimeField + fmt::Debug> fmt::Debug for SupportPlonkInstance<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[derive(Debug)]
+        pub struct SupportPlonkInstanceValue<'l, F: PrimeField> {
+            pub(crate) W_commitments: Vec<(Value<&'l F>, Value<&'l F>)>,
+            pub(crate) instances: Vec<Vec<(Value<F>, BigUint<Value<F>>)>>,
+            pub(crate) challenges: Vec<(Value<F>, BigUint<Value<F>>)>,
+        }
+
+        SupportPlonkInstanceValue {
+            W_commitments: self
+                .W_commitments
+                .iter()
+                .map(|(x, y)| (x.value(), y.value()))
+                .collect(),
+            instances: self
+                .instances
+                .iter()
+                .map(|instance| {
+                    instance
+                        .iter()
+                        .map(|(v, bn)| (v.value().copied(), bn.clone().map(|v| v.value().copied())))
+                        .collect()
+                })
+                .collect(),
+            challenges: self
+                .challenges
+                .iter()
+                .map(|(cha, bn)| (cha.value().copied(), bn.clone().map(|v| v.value().copied())))
+                .collect(),
+        }
+        .fmt(f)
+    }
+}
+
+impl<F: PrimeField> SupportPlonkInstance<F> {
     fn assign_advice_from(
         region: &mut RegionCtx<'_, F>,
-        original: &super::PairedPlonkInstance<F>,
+        original: &super::SupportPlonkInstance<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
-        let super::PairedPlonkInstance {
+        let _s = info_span!("support_plonk_instance").entered();
+        let start_offset = region.offset();
+
+        trace!("start assign at {}", start_offset);
+
+        let super::SupportPlonkInstance {
             W_commitments,
             instances,
             challenges,
         } = original;
+
         let mut assigner = main_gate_config.advice_cycle_assigner();
+
+        trace!("begin cycle is {}", region.offset());
 
         let W_commitments = W_commitments
             .iter()
@@ -224,32 +340,79 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
+        iter::repeat((F::ZERO, F::ZERO))
+            .take(W_COMMITMENTS_MAX_LEN - W_commitments.len())
+            .try_for_each(|(x, y)| -> Result<(), Halo2PlonkError> {
+                let _x = assigner.assign_next_advice(region, || "W_commitments_x", x)?;
+                let _y = assigner.assign_next_advice(region, || "W_commitments_y", y)?;
+
+                Ok(())
+            })?;
+
         let instances = instances
             .iter()
             .map(|instance| {
+                assigner.assign_all_advice(region, || "instance", instance.iter().copied())
+            })
+            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+
+        let challenges =
+            assigner.assign_all_advice(region, || "instance", challenges.iter().copied())?;
+
+        assigner.assign_all_advice(
+            region,
+            || "",
+            iter::repeat(F::ZERO).take(W_CHALLENGES_MAX_LEN - challenges.len()),
+        )?;
+
+        trace!("after cycle is {}", region.offset());
+        region.next();
+
+        let bn_chip = super::super::bn_chip(main_gate_config.clone());
+
+        let instances: Vec<Vec<BigUintView<F>>> = instances
+            .into_iter()
+            .map(|instance| {
                 instance
-                    .iter()
+                    .into_iter()
                     .map(|value| {
-                        assigner.assign_all_advice(
-                            region,
-                            || "instances",
-                            value.limbs().iter().copied(),
-                        )
+                        Ok((
+                            value.clone(),
+                            bn_chip
+                                .from_assigned_value_to_limbs(region, &value)
+                                .map_err(|err| {
+                                    error!("bn error: {err:?}");
+                                    Halo2PlonkError::Synthesis
+                                })?
+                                .try_into()
+                                .unwrap(),
+                        ))
                     })
-                    .collect::<Result<Vec<_>, _>>()
+                    .collect::<Result<Vec<_>, Halo2PlonkError>>()
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
         let challenges = challenges
-            .iter()
-            .map(|challenge| {
-                assigner.assign_all_advice(
-                    region,
-                    || "challenges",
-                    challenge.limbs().iter().cloned(),
-                )
+            .into_iter()
+            .map(|value| {
+                Ok((
+                    value.clone(),
+                    bn_chip
+                        .from_assigned_value_to_limbs(region, &value)
+                        .map_err(|err| {
+                            error!("bn error: {err:?}");
+                            Halo2PlonkError::Synthesis
+                        })?
+                        .try_into()
+                        .unwrap(),
+                ))
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+
+        trace!(
+            "`SupportPlonkInstance` took {} rows",
+            region.offset() - start_offset
+        );
 
         Ok(Self {
             W_commitments,
@@ -294,12 +457,18 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
                 l_instance
                     .iter()
                     .zip_eq(r_instance.iter())
-                    .map(|(l_val, r_val)| {
-                        l_val
+                    .map(|((l_val, l_bn), (r_val, r_bn))| {
+                        let bn = l_bn
                             .iter()
-                            .zip_eq(r_val.iter())
+                            .zip_eq(r_bn.iter())
                             .map(|(l, r)| mg.conditional_select(region, l, r, cond))
-                            .collect()
+                            .collect::<Result<Vec<_>, _>>()?
+                            .try_into()
+                            .unwrap();
+
+                        let val = mg.conditional_select(region, l_val, r_val, cond)?;
+
+                        Ok((val, bn))
                     })
                     .collect::<Result<Vec<_>, _>>()
             })
@@ -308,11 +477,18 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
         let challenges = lhs_challenges
             .iter()
             .zip(rhs_challenges.iter())
-            .map(|(lbn, rbn)| {
-                lbn.iter()
-                    .zip_eq(rbn.iter())
+            .map(|((l_val, l_bn), (r_val, r_bn))| {
+                let bn = l_bn
+                    .iter()
+                    .zip_eq(r_bn.iter())
                     .map(|(l, r)| mg.conditional_select(region, l, r, cond))
-                    .collect()
+                    .collect::<Result<Vec<_>, _>>()?
+                    .try_into()
+                    .unwrap();
+
+                let val = mg.conditional_select(region, l_val, r_val, cond)?;
+
+                Ok((val, bn))
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
 
@@ -336,18 +512,20 @@ impl<F: PrimeField> PairedPlonkInstance<F> {
             .chain(
                 instances
                     .iter()
-                    .flat_map(|big_uint| big_uint.iter().flatten()),
+                    .flat_map(|instance| instance.iter().map(|(value, _bn)| value)),
             )
-            .chain(challenges.iter().flat_map(|big_uint| big_uint.iter()))
+            .chain(challenges.iter().map(|(value, _bn)| value))
             .map(|v| WrapValue::Assigned(v.clone()))
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SangriaAccumulatorInstance<F: PrimeField> {
-    pub(crate) ins: PairedPlonkInstance<F>,
+    pub(crate) ins: SupportPlonkInstance<F>,
     pub(crate) E_commitment: (AssignedValue<F>, AssignedValue<F>),
     pub(crate) u: AssignedValue<F>,
+    // always zero for the support circuit
+    pub(crate) step_circuit_instances_hash_accumulator: AssignedValue<F>,
 }
 
 impl<F: PrimeField> SangriaAccumulatorInstance<F> {
@@ -356,11 +534,20 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
         original: &super::SangriaAccumulatorInstance<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
-        let ins = PairedPlonkInstance::assign_advice_from(region, &original.ins, main_gate_config)?;
+        let _s = info_span!("sangria_accumulator_instance").entered();
+
+        let start_offset = region.offset();
+        trace!("start assign at {}", region.offset());
+
+        let ins =
+            SupportPlonkInstance::assign_advice_from(region, &original.ins, main_gate_config)?;
 
         let mut assigner = main_gate_config.advice_cycle_assigner();
 
-        Ok(Self {
+        let step_circuit_instances_hash_accumulator =
+            assigner.assign_next_advice(region, || "", F::ZERO)?;
+
+        let self_ = Self {
             ins,
             E_commitment: (
                 assigner.assign_next_advice(
@@ -375,7 +562,17 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
                 )?,
             ),
             u: assigner.assign_next_advice(region, || "u", original.u)?,
-        })
+            step_circuit_instances_hash_accumulator,
+        };
+
+        trace!(
+            "`SangriaAccumulatorInstance` took {} rows",
+            region.offset() - start_offset
+        );
+
+        region.next();
+
+        Ok(self_)
     }
 
     pub fn conditional_select<const T: usize>(
@@ -389,14 +586,16 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
             ins: lhs_ins,
             E_commitment: lhs_E_commitment,
             u: lhs_u,
+            step_circuit_instances_hash_accumulator,
         } = lhs;
         let Self {
             ins: rhs_ins,
             E_commitment: rhs_E_commitment,
             u: rhs_u,
+            step_circuit_instances_hash_accumulator: _,
         } = rhs;
 
-        let ins = PairedPlonkInstance::conditional_select(region, mg, lhs_ins, rhs_ins, cond)?;
+        let ins = SupportPlonkInstance::conditional_select(region, mg, lhs_ins, rhs_ins, cond)?;
 
         let E_commitment = (
             mg.conditional_select(region, &lhs_E_commitment.0, &rhs_E_commitment.0, cond)?,
@@ -409,6 +608,8 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
             ins,
             E_commitment,
             u,
+            step_circuit_instances_hash_accumulator: step_circuit_instances_hash_accumulator
+                .clone(),
         })
     }
 
@@ -417,33 +618,94 @@ impl<F: PrimeField> SangriaAccumulatorInstance<F> {
             ins,
             E_commitment,
             u,
+            step_circuit_instances_hash_accumulator,
         } = self;
 
         ins.iter_wrap_values().chain(
-            [E_commitment.0.clone(), E_commitment.1.clone()]
-                .into_iter()
-                .chain(iter::once(u.clone()))
-                .map(|v| WrapValue::Assigned(v)),
+            [
+                u.clone(),
+                E_commitment.0.clone(),
+                E_commitment.1.clone(),
+                step_circuit_instances_hash_accumulator.clone(),
+            ]
+            .into_iter()
+            .map(|v| WrapValue::Assigned(v)),
         )
     }
 }
 
 pub type SangriaCrossTermCommits<F> = Vec<(AssignedValue<F>, AssignedValue<F>)>;
 
-pub struct PairedTrace<F: PrimeField> {
-    pub input_accumulator: SangriaAccumulatorInstance<F>,
-    // The size from one to three
-    // Depdend on `W_commitments_len`
-    pub incoming: Box<[PairedPlonkInstance<F>]>,
+#[derive(Debug)]
+pub struct SupportIncoming<F: PrimeField> {
+    pub instance: SupportPlonkInstance<F>,
     pub proof: SangriaCrossTermCommits<F>,
 }
 
-impl<F: PrimeField> PairedTrace<F> {
+impl<F: PrimeField> SupportIncoming<F> {
     fn assign_advice_from(
         region: &mut RegionCtx<'_, F>,
-        original: &super::PairedTrace<F>,
+        original: &super::SupportIncoming<F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let start_offset = region.offset();
+
+        let super::SupportIncoming { instance, proof } = original;
+
+        let instance =
+            SupportPlonkInstance::assign_advice_from(region, instance, main_gate_config)?;
+
+        let mut assigner = main_gate_config.advice_cycle_assigner();
+
+        let proof = proof
+            .iter()
+            .copied()
+            .map(|(commit_x, commit_y)| -> Result<_, Halo2PlonkError> {
+                Ok((
+                    assigner.assign_next_advice(region, || "commit.x", commit_x)?,
+                    assigner.assign_next_advice(region, || "commit.y", commit_y)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        trace!(
+            "`SupportIncoming` took {} rows",
+            region.offset() - start_offset
+        );
+        region.next();
+
+        Ok(Self { instance, proof })
+    }
+
+    pub fn iter_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
+        let Self { instance, proof } = self;
+        instance
+            .iter_wrap_values()
+            .chain(proof.iter().flat_map(|(a, b)| {
+                iter::once(WrapValue::Assigned(a.clone()))
+                    .chain(std::iter::once(WrapValue::Assigned(b.clone())))
+            }))
+    }
+}
+
+#[derive(Debug)]
+pub struct SupportTrace<F: PrimeField> {
+    pub input_accumulator: SangriaAccumulatorInstance<F>,
+    // The size from one to three
+    // Depdend on `W_commitments_len`
+    pub incoming: Box<[SupportIncoming<F>]>,
+}
+
+impl<F: PrimeField> SupportTrace<F> {
+    fn assign_advice_from(
+        region: &mut RegionCtx<'_, F>,
+        original: &super::SupportTrace<F>,
+        main_gate_config: &MainGateConfig,
+    ) -> Result<Self, Halo2PlonkError> {
+        let _s = info_span!("support_trace");
+
+        trace!("start assign at {}", region.offset());
+
         let input_accumulator = SangriaAccumulatorInstance::assign_advice_from(
             region,
             &original.input_accumulator,
@@ -453,33 +715,30 @@ impl<F: PrimeField> PairedTrace<F> {
         let incoming = original
             .incoming
             .iter()
-            .map(|paired_plonk_instance| {
-                PairedPlonkInstance::assign_advice_from(
+            .map(|support_plonk_instance| {
+                SupportIncoming::assign_advice_from(
                     region,
-                    paired_plonk_instance,
+                    support_plonk_instance,
                     main_gate_config,
                 )
             })
             .collect::<Result<Vec<_>, Halo2PlonkError>>()?
             .into_boxed_slice();
 
-        let mut assigner = main_gate_config.advice_cycle_assigner();
-
-        let proof = original
-            .proof
-            .iter()
-            .map(|(a, b)| {
-                Ok((
-                    assigner.assign_next_advice(region, || "proof_a", *a)?,
-                    assigner.assign_next_advice(region, || "proof_b", *b)?,
-                ))
-            })
-            .collect::<Result<Vec<_>, Halo2PlonkError>>()?;
+        iter::repeat_with(|| &original.incoming[0])
+            .take(W_COMMITMENTS_MAX_LEN - original.incoming.len())
+            .try_for_each(|support_plonk_instance| -> Result<(), Halo2PlonkError> {
+                SupportIncoming::assign_advice_from(
+                    region,
+                    support_plonk_instance,
+                    main_gate_config,
+                )?;
+                Ok(())
+            })?;
 
         Ok(Self {
             input_accumulator,
             incoming,
-            proof,
         })
     }
 
@@ -487,41 +746,22 @@ impl<F: PrimeField> PairedTrace<F> {
         let Self {
             input_accumulator,
             incoming,
-            proof,
         } = self;
 
-        input_accumulator
-            .iter_wrap_values()
-            .chain(
-                incoming
-                    .iter()
-                    .flat_map(|instance| instance.iter_wrap_values()),
-            )
-            .chain(proof.iter().flat_map(|(a, b)| {
-                iter::once(WrapValue::Assigned(a.clone()))
-                    .chain(std::iter::once(WrapValue::Assigned(b.clone())))
-            }))
-    }
-
-    pub fn get_self_W_commitment_from_paired(&self) -> Vec<BigUintPoint<AssignedValue<F>>> {
-        self.incoming
-            .iter()
-            .map(|tr| {
-                let (W, _other) = tr.instances[0].split_at(2);
-                BigUintPoint {
-                    x: W[0].clone(),
-                    y: W[1].clone(),
-                }
-            })
-            .collect::<Vec<_>>()
+        input_accumulator.iter_wrap_values().chain(
+            incoming
+                .iter()
+                .flat_map(|instance| instance.iter_wrap_values()),
+        )
     }
 }
 
+#[derive(Debug)]
 pub struct Input<const ARITY: usize, F: PrimeField> {
     pub pp_digest: (AssignedValue<F>, AssignedValue<F>),
 
     pub self_trace: SelfTrace<F>,
-    pub paired_trace: PairedTrace<F>,
+    pub support_trace: SupportTrace<F>,
 
     pub step: AssignedValue<F>,
     pub z_0: [AssignedValue<F>; ARITY],
@@ -534,11 +774,15 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         original: &super::Input<A, F>,
         main_gate_config: &MainGateConfig,
     ) -> Result<Self, Halo2PlonkError> {
+        let _s = info_span!("input_assign").entered();
+
+        let start_offset = region.offset();
+
         let self_trace =
             SelfTrace::assign_advice_from(region, &original.self_trace, main_gate_config)?;
 
-        let paired_trace =
-            PairedTrace::assign_advice_from(region, &original.paired_trace, main_gate_config)?;
+        let support_trace =
+            SupportTrace::assign_advice_from(region, &original.support_trace, main_gate_config)?;
 
         let mut assigner = main_gate_config.advice_cycle_assigner();
 
@@ -555,10 +799,13 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
 
         let z_i = assigner.assign_all_advice(region, || "z_i", original.z_i.iter().cloned())?;
 
+        region.next();
+        trace!("`Input` took {} rows", region.offset() - start_offset);
+
         Ok(Self {
             pp_digest: (pp_digest_0, pp_digest_1),
             self_trace,
-            paired_trace,
+            support_trace,
             step: step_assigned,
             z_0: z_0.try_into().unwrap(),
             z_i: z_i.try_into().unwrap(),
@@ -568,7 +815,7 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
     fn iter_consistency_marker_wrap_values(&self) -> impl '_ + Iterator<Item = WrapValue<F>> {
         let Self {
             self_trace,
-            paired_trace,
+            support_trace,
             pp_digest: (pp0, pp1),
             step,
             z_0,
@@ -578,13 +825,15 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         iter_consistency_marker_wrap_values(
             (pp0, pp1),
             &self_trace.input_accumulator,
-            &paired_trace.input_accumulator,
+            &support_trace.input_accumulator,
             step,
             z_0,
             z_i,
         )
     }
 
+    /// For all rounds except the zero round, check that the hash of self (input) is equal to the
+    /// hash of the previous step
     pub fn consistency_check(
         self,
         region: &mut RegionCtx<F>,
@@ -620,7 +869,8 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         Ok(self)
     }
 
-    pub fn pairing_check(
+    #[instrument(skip_all)]
+    pub fn support_circuit_consistency_check(
         &self,
         region: &mut RegionCtx<F>,
         main_gate_config: &MainGateConfig,
@@ -630,46 +880,62 @@ impl<const A: usize, F: PrimeField> Input<A, F> {
         let bn_chip = BigUintMulModChip::new(
             main_gate_config.into_smaller_size().unwrap(),
             DEFAULT_LIMB_WIDTH,
-            DEFAULT_LIMBS_COUNT_LIMIT,
+            DEFAULT_LIMBS_COUNT,
         );
 
-        let expected_l0 = bn_chip
-            .from_assigned_cell_to_limbs(region, &poly_L_values[0])
+        let mg = MainGate::new(main_gate_config.clone());
+        let is_zero_step = mg.is_zero_term(region, self.step.clone())?;
+
+        let zero = region.assign_advice(|| "", main_gate_config.state[0], Value::known(F::ZERO))?;
+        region.next();
+
+        let expected_l0 = mg.conditional_select(region, &zero, &poly_L_values[0], &is_zero_step)?;
+        let expected_l0_limbs = bn_chip
+            .from_assigned_value_to_limbs(region, &expected_l0)
             .map_err(|err| {
                 error!("while make from L0 biguint form: {err:?}");
                 Halo2PlonkError::Synthesis
             })?;
 
-        let expected_l1 = bn_chip
-            .from_assigned_cell_to_limbs(region, &poly_L_values[1])
+        let expected_l1 = mg.conditional_select(region, &zero, &poly_L_values[1], &is_zero_step)?;
+        let expected_l1_limbs = bn_chip
+            .from_assigned_value_to_limbs(region, &expected_l1)
             .map_err(|err| {
                 error!("while make from L1 biguint form: {err:?}");
                 Halo2PlonkError::Synthesis
             })?;
 
-        for (acc_W, incoming_W, trace, new_acc_W) in itertools::multizip((
+        for (acc_W, incoming_W, support_trace, new_acc_W, index) in itertools::multizip((
             self.self_trace.input_accumulator.ins.W_commitments.iter(),
             self.self_trace.incoming.W_commitments.iter(),
-            self.paired_trace.incoming.iter(),
+            self.support_trace.incoming.iter(),
             new_acc.ins.W_commitments.iter_mut(),
+            0..,
         )) {
-            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1] =
-                trace.instances[0].clone().try_into().unwrap();
+            info!("start {index} commitment check");
 
-            l0.iter()
-                .zip_eq(expected_l0.iter())
+            let [expected_x, expected_y, x0, y0, l0, x1, y1, l1]: [_; support_circuit::INSTANCES_LEN] = support_trace.instance
+                .instances
+                .first()
+                .expect("`SupportCircuit` always has instances.len() == 1 and it should always be used for sfc")
+                .clone()
+                .try_into()
+                .unwrap();
+
+            l0.1.iter()
+                .zip_eq(expected_l0_limbs.iter())
                 .try_for_each(|(l, r)| region.constrain_equal(l.cell(), r.cell()))?;
 
-            l1.iter()
-                .zip_eq(expected_l1.iter())
+            l1.1.iter()
+                .zip_eq(expected_l1_limbs.iter())
                 .try_for_each(|(l, r)| region.constrain_equal(l.cell(), r.cell()))?;
 
-            BigUintPoint::constrain_equal(region, acc_W, &BigUintPoint { x: x0, y: y0 })?;
-            BigUintPoint::constrain_equal(region, incoming_W, &BigUintPoint { x: x1, y: y1 })?;
+            BigUintPoint::constrain_equal(region, acc_W, &BigUintPoint { x: x0.1, y: y0.1 })?;
+            BigUintPoint::constrain_equal(region, incoming_W, &BigUintPoint { x: x1.1, y: y1.1 })?;
 
             *new_acc_W = BigUintPoint {
-                x: expected_x,
-                y: expected_y,
+                x: expected_x.1,
+                y: expected_y.1,
             };
         }
 
@@ -686,6 +952,11 @@ pub fn iter_consistency_marker_wrap_values<'l, const ARITY: usize, F: PrimeField
     z_i: &'l [AssignedValue<F>; ARITY],
 ) -> impl 'l + Iterator<Item = WrapValue<F>> {
     let (pp0, pp1) = pp_digest;
+
+    trace!(
+        "oncircuit input protogalaxy accumulator: {:?}",
+        self_accumulator
+    );
 
     self_accumulator
         .iter_wrap_values()

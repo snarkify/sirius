@@ -13,9 +13,11 @@ use crate::{
     },
     halo2curves::CurveAffine,
     ivc::{
-        consistency_markers_computation::AssignedConsistencyMarkersComputation,
-        fold_relaxed_plonk_instance_chip::{
-            AssignedRelaxedPlonkInstance, FoldRelaxedPlonkInstanceChip, FoldResult,
+        sangria::{
+            consistency_markers_computation::AssignedConsistencyMarkersComputation,
+            fold_relaxed_plonk_instance_chip::{
+                AssignedRelaxedPlonkInstance, FoldRelaxedPlonkInstanceChip, FoldResult,
+            },
         },
         StepCircuit,
     },
@@ -173,7 +175,11 @@ where
             public_params_hash: C::identity(),
             z_0: [C::Base::ZERO; ARITY],
             z_i: [C::Base::ZERO; ARITY],
-            U: RelaxedPlonkInstance::new(num_challenges, round_sizes.len()),
+            U: RelaxedPlonkInstance::new(
+                num_challenges,
+                round_sizes.len(),
+                step_circuit_instances.len(),
+            ),
             u: FoldablePlonkInstance::new(PlonkInstance::new(
                 paired_num_io,
                 num_challenges,
@@ -312,6 +318,7 @@ where
                 U: RelaxedPlonkInstance::new(
                     self.input.U.challenges.len(),
                     self.input.U.W_commitments.len(),
+                    self.input.step_circuit_instances.len(),
                 ),
                 u,
                 step_circuit_instances: self
@@ -517,20 +524,26 @@ where
                     )?;
                     ctx.next();
 
-                    let expected_X0 =
-                        AssignedConsistencyMarkersComputation::<'_, RO, ARITY, T, C> {
-                            random_oracle_constant: self.input.step_pp.ro_constant.clone(),
-                            public_params_hash: &w.public_params_hash,
-                            step: &assigned_step,
-                            z_0: &assigned_z_0,
-                            z_i: &assigned_z_i,
-                            relaxed: &w.assigned_relaxed,
-                        }
-                        .generate_with_inspect(
-                            &mut ctx,
-                            config.main_gate_config.clone(),
-                            |buf| debug!("expected X0 {buf:?}"),
-                        )?;
+                    let expected_X0 = AssignedConsistencyMarkersComputation::<
+                        '_,
+                        RO,
+                        ARITY,
+                        T,
+                        C,
+                        { sangria::CONSISTENCY_MARKERS_COUNT },
+                    > {
+                        random_oracle_constant: self.input.step_pp.ro_constant.clone(),
+                        public_params_hash: &w.public_params_hash,
+                        step: &assigned_step,
+                        z_0: &assigned_z_0,
+                        z_i: &assigned_z_i,
+                        relaxed: &w.assigned_relaxed,
+                    }
+                    .generate_with_inspect(
+                        &mut ctx,
+                        config.main_gate_config.clone(),
+                        |buf| debug!("expected X0 {buf:?}"),
+                    )?;
 
                     debug!("expected X0: {expected_X0:?}");
                     debug!(
@@ -583,7 +596,10 @@ where
                     let assigned_is_zero_step =
                         gate.is_zero_term(&mut region, assigned_step.clone())?;
 
-                    let new_U = AssignedRelaxedPlonkInstance::<C>::conditional_select(
+                    let new_U = AssignedRelaxedPlonkInstance::<
+                        C,
+                        { sangria::CONSISTENCY_MARKERS_COUNT },
+                    >::conditional_select(
                         &mut region,
                         &config.main_gate_config,
                         &U_new_base,
@@ -631,7 +647,14 @@ where
                 |region| {
                     let _s = debug_span!("generate output hash").entered();
 
-                    AssignedConsistencyMarkersComputation::<'_, RO, ARITY, T, C> {
+                    AssignedConsistencyMarkersComputation::<
+                        '_,
+                        RO,
+                        ARITY,
+                        T,
+                        C,
+                        { sangria::CONSISTENCY_MARKERS_COUNT },
+                    > {
                         random_oracle_constant: self.input.step_pp.ro_constant.clone(),
                         public_params_hash: &assigned_input_witness.public_params_hash,
                         step: &assigned_next_step,

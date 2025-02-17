@@ -1,17 +1,17 @@
-use halo2_proofs::{
-    dev::MockProver,
-    halo2curves::{
-        ff::{FromUniformBytes, PrimeFieldBits},
-        group::prime::PrimeCurveAffine,
-    },
-    plonk::Circuit,
-};
-use tracing::info_span;
+use tracing::{info, info_span};
 use tracing_test::traced_test;
 
 use super::*;
 use crate::{
     commitment,
+    halo2_proofs::{
+        dev::MockProver,
+        halo2curves::{
+            ff::{FromUniformBytes, PrimeFieldBits},
+            group::prime::PrimeCurveAffine,
+        },
+        plonk::Circuit,
+    },
     halo2curves::bn256::G1Affine as Affine,
     nifs::{
         self,
@@ -57,7 +57,7 @@ impl CircuitCtx {
     }
 }
 
-struct Mock<CIRCUIT: Circuit<Scalar>> {
+pub struct Mock<CIRCUIT: Circuit<Scalar>> {
     S: PlonkStructure<Scalar>,
     ck: CommitmentKey<Affine>,
 
@@ -88,6 +88,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
 
             CircuitRunner::new(k_table_size, circuit, instances)
         });
+        info!("circuit runners ready");
 
         let ck = commitment::setup_smallest_key(k_table_size, &circuits_runners[0].cs, b"");
         let S = circuits_runners[0]
@@ -131,10 +132,20 @@ impl<C: Circuit<Scalar>> Mock<C> {
             .try_into()
             .unwrap()
     }
-    pub fn new_accumulator(&self) -> Accumulator {
-        let acc = ProtoGalaxy::new_accumulator(AccumulatorArgs::from(&self.S), &self.pp, &mut ro());
+
+    pub fn new_accumulator(&self, trace: &PlonkTrace<Affine>) -> Accumulator {
+        let acc = ProtoGalaxy::new_accumulator(
+            AccumulatorArgs::from(&self.S),
+            &self.pp,
+            &mut ro(),
+            trace.clone(),
+        )
+        .unwrap();
 
         ProtoGalaxy::is_sat_accumulation(&self.S, &acc)
+            .expect("The newly created accumulator is not satisfactory");
+
+        ProtoGalaxy::is_sat_permutation(&self.S, &acc)
             .expect("The newly created accumulator is not satisfactory");
 
         acc
@@ -143,7 +154,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
     pub fn run(mut self) {
         let incoming = self.generate_plonk_traces();
 
-        let init_accumulator = self.new_accumulator();
+        let init_accumulator = self.new_accumulator(&incoming[0]);
 
         let (accumulator_from_prove, proof) = ProtoGalaxy::prove(
             &self.ck,
@@ -154,13 +165,7 @@ impl<C: Circuit<Scalar>> Mock<C> {
         )
         .expect("`protogalaxy::prove` failed");
 
-        let instances = self
-            .circuits_ctx
-            .iter()
-            .map(|ctx| ctx.instances.clone())
-            .collect::<Box<[_]>>();
-
-        ProtoGalaxy::is_sat(&self.ck, &self.S, &accumulator_from_prove, &instances)
+        ProtoGalaxy::is_sat(&self.ck, &self.S, &accumulator_from_prove)
             .expect("The accumulator after calling `prove` is not satisfactory");
 
         let accumulator_from_verify = ProtoGalaxy::verify(

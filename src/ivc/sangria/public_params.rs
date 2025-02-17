@@ -4,7 +4,10 @@ use halo2_proofs::plonk;
 use serde::Serialize;
 use tracing::*;
 
-use super::{step_folding_circuit::StepParams, StepCircuit};
+use super::{
+    super::{step_folding_circuit::StepParams, StepCircuit},
+    consistency_markers_computation::ConsistencyMarkerComputation,
+};
 use crate::{
     commitment::CommitmentKey,
     constants::NUM_HASH_BITS,
@@ -14,7 +17,6 @@ use crate::{
     halo2curves::CurveAffine,
     ivc::{
         self,
-        consistency_markers_computation::ConsistencyMarkerComputation,
         step_folding_circuit::{StepFoldingCircuit, StepInputs},
     },
     main_gate::MainGateConfig,
@@ -149,7 +151,7 @@ pub struct PublicParams<
     _p: PhantomData<(SC1, SC2)>,
 
     #[serde(skip_serializing)]
-    secondary_initial_plonk_trace: FoldablePlonkTrace<C2>,
+    secondary_initial_plonk_trace: FoldablePlonkTrace<C2, { CONSISTENCY_MARKERS_COUNT }>,
 
     #[serde(skip_serializing)]
     digest_1: C1,
@@ -294,9 +296,19 @@ where
             );
 
             let secondary_consistenty_markers: [C2::Scalar; 2] = [
-                C1::scalar_to_base(&secondary_initial_step_input.u.get_consistency_markers()[0])
-                    .unwrap(),
-                ConsistencyMarkerComputation::<'_, A2, C1, RP2::OffCircuit> {
+                C1::scalar_to_base(
+                    &GetConsistencyMarkers::<CONSISTENCY_MARKERS_COUNT, _>::get_consistency_markers(
+                        &secondary_initial_step_input.u,
+                    )[1],
+                )
+                .unwrap(),
+                ConsistencyMarkerComputation::<
+                    '_,
+                    A2,
+                    C1,
+                    RP2::OffCircuit,
+                    { CONSISTENCY_MARKERS_COUNT },
+                > {
                     random_oracle_constant: secondary.ro_constant.clone(),
                     public_params_hash: &secondary_initial_step_input.public_params_hash,
                     step: 1,
@@ -324,13 +336,18 @@ where
             );
 
             let secondary_S = secondary_cr.try_collect_plonk_structure()?;
-            let secondary_initial_plonk_trace = VanillaFS::generate_plonk_trace(
-                secondary.commitment_key,
-                &secondary_instances,
-                &secondary_cr.try_collect_witness()?,
-                &VanillaFS::setup_params(C2::identity(), secondary_S.clone())?.0,
-                &mut RP1::OffCircuit::new(primary.ro_constant.clone()),
-            )?;
+            let secondary_initial_plonk_trace =
+                VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::generate_plonk_trace(
+                    secondary.commitment_key,
+                    &secondary_instances,
+                    &secondary_cr.try_collect_witness()?,
+                    &VanillaFS::<_, { CONSISTENCY_MARKERS_COUNT }>::setup_params(
+                        C2::identity(),
+                        secondary_S.clone(),
+                    )?
+                    .0,
+                    &mut RP1::OffCircuit::new(primary.ro_constant.clone()),
+                )?;
 
             Result::<_, Error>::Ok((secondary_S, secondary_initial_plonk_trace))
         }?;
@@ -369,7 +386,9 @@ where
         Ok(self_)
     }
 
-    pub fn secondary_initial_plonk_trace(&self) -> &FoldablePlonkTrace<C2> {
+    pub fn secondary_initial_plonk_trace(
+        &self,
+    ) -> &FoldablePlonkTrace<C2, { CONSISTENCY_MARKERS_COUNT }> {
         &self.secondary_initial_plonk_trace
     }
 

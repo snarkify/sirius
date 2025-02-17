@@ -127,7 +127,10 @@ use sirius::{
     commitment::CommitmentKey,
     group::{prime::PrimeCurve, Group},
     halo2curves::{bn256, grumpkin, CurveAffine},
-    ivc::{step_circuit, CircuitPublicParamsInput, PublicParams, IVC},
+    ivc::{
+        sangria::{CircuitPublicParamsInput, PublicParams, IVC},
+        step_circuit,
+    },
     poseidon::{self, ROPair},
 };
 use tracing::*;

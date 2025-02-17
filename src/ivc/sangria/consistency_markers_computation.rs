@@ -10,7 +10,7 @@ use crate::{
     gadgets::{ecc::AssignedPoint, nonnative::bn::big_uint::BigUint},
     halo2curves::CurveAffine,
     main_gate::{AssignedValue, MainGate, MainGateConfig, RegionCtx, WrapValue},
-    nifs::sangria::accumulator::RelaxedPlonkInstance,
+    nifs::sangria::accumulator::{RelaxedPlonkInstance, SCInstancesHashAcc},
     poseidon::{AbsorbInRO, ROCircuitTrait, ROTrait},
     util::{self, ScalarToBase},
 };
@@ -21,6 +21,7 @@ pub(crate) struct AssignedConsistencyMarkersComputation<
     const A: usize,
     const T: usize,
     C: CurveAffine,
+    const MARKERS_LEN: usize,
 > where
     C::Base: FromUniformBytes<64> + PrimeFieldBits,
     RP: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
@@ -30,11 +31,11 @@ pub(crate) struct AssignedConsistencyMarkersComputation<
     pub step: &'l AssignedValue<C::Base>,
     pub z_0: &'l [AssignedValue<C::Base>; A],
     pub z_i: &'l [AssignedValue<C::Base>; A],
-    pub relaxed: &'l AssignedRelaxedPlonkInstance<C>,
+    pub relaxed: &'l AssignedRelaxedPlonkInstance<C, MARKERS_LEN>,
 }
 
-impl<const A: usize, const T: usize, C: CurveAffine, RO>
-    AssignedConsistencyMarkersComputation<'_, RO, A, T, C>
+impl<const A: usize, const T: usize, C: CurveAffine, RO, const MARKERS_LEN: usize>
+    AssignedConsistencyMarkersComputation<'_, RO, A, T, C, MARKERS_LEN>
 where
     C::Base: FromUniformBytes<64> + PrimeFieldBits,
     RO: ROCircuitTrait<C::Base, Config = MainGateConfig<T>>,
@@ -65,7 +66,7 @@ where
     }
 }
 
-pub(crate) struct ConsistencyMarkerComputation<'l, const A: usize, C, RP>
+pub(crate) struct ConsistencyMarkerComputation<'l, const A: usize, C, RP, const MARKERS_LEN: usize>
 where
     RP: ROTrait<C::Base>,
     C: CurveAffine + Serialize,
@@ -75,12 +76,13 @@ where
     pub step: usize,
     pub z_0: &'l [C::Base; A],
     pub z_i: &'l [C::Base; A],
-    pub relaxed: &'l RelaxedPlonkInstance<C>,
+    pub relaxed: &'l RelaxedPlonkInstance<C, MARKERS_LEN>,
     pub limb_width: NonZeroUsize,
     pub limbs_count: NonZeroUsize,
 }
 
-impl<C, RP, const A: usize> ConsistencyMarkerComputation<'_, A, C, RP>
+impl<C, RP, const A: usize, const MARKERS_LEN: usize>
+    ConsistencyMarkerComputation<'_, A, C, RP, MARKERS_LEN>
 where
     RP: ROTrait<C::Base>,
     C: CurveAffine + Serialize,
@@ -92,7 +94,8 @@ where
             pub(crate) consistency_markers: Vec<BigUint<C::Base>>,
             pub(crate) challenges: Vec<BigUint<C::Base>>,
             pub(crate) u: &'l C::ScalarExt,
-            pub(crate) step_circuit_instances_hash_accumulator: &'l C::ScalarExt,
+            pub(crate) step_circuit_instances_hash_accumulator:
+                SCInstancesHashAcc<&'l C::ScalarExt>,
         }
 
         impl<C: CurveAffine, RO: ROTrait<C::Base>> AbsorbInRO<C::Base, RO>
@@ -114,8 +117,11 @@ where
                             .copied(),
                     )
                     .absorb_field(C::scalar_to_base(self.u).unwrap())
-                    .absorb_field(
-                        C::scalar_to_base(self.step_circuit_instances_hash_accumulator).unwrap(),
+                    .absorb(
+                        &self
+                            .step_circuit_instances_hash_accumulator
+                            .as_ref()
+                            .map(|v| C::scalar_to_base(v).unwrap()),
                     );
             }
         }
@@ -154,7 +160,8 @@ where
                     .unwrap()
                 })
                 .collect(),
-            step_circuit_instances_hash_accumulator,
+            step_circuit_instances_hash_accumulator: step_circuit_instances_hash_accumulator
+                .as_ref(),
             u,
         };
 
@@ -190,6 +197,7 @@ mod tests {
     use crate::{
         ff::Field,
         halo2curves::{bn256, grumpkin},
+        nifs::sangria,
     };
 
     type C1 = <bn256::G1 as PrimeCurve>::Affine;
@@ -202,7 +210,7 @@ mod tests {
     use super::*;
     use crate::{
         commitment::CommitmentKey,
-        ivc::fold_relaxed_plonk_instance_chip::FoldRelaxedPlonkInstanceChip,
+        ivc::sangria::fold_relaxed_plonk_instance_chip::FoldRelaxedPlonkInstanceChip,
         main_gate::AdviceCyclicAssignor,
         poseidon::{poseidon_circuit::PoseidonChip, PoseidonHash, Spec},
         table::WitnessCollector,
@@ -224,7 +232,9 @@ mod tests {
             challenges: vec![Scalar::from_u128(0x123456); 10],
             E_commitment: CommitmentKey::<C1>::default_value(),
             u: Scalar::from_u128(u128::MAX),
-            step_circuit_instances_hash_accumulator: Scalar::from_u128(0xaaaaaaaaaaaaa),
+            step_circuit_instances_hash_accumulator: SCInstancesHashAcc::Hash(Scalar::from_u128(
+                0xaaaaaaaaaaaaa,
+            )),
         };
 
         let off_circuit_hash: Base = ConsistencyMarkerComputation::<
@@ -232,6 +242,7 @@ mod tests {
             10,
             C1,
             PoseidonHash<<C1 as CurveAffine>::Base, 10, 9>,
+            { sangria::CONSISTENCY_MARKERS_COUNT },
         > {
             random_oracle_constant: random_oracle_constant.clone(),
             public_params_hash: &public_params_hash,
@@ -288,7 +299,13 @@ mod tests {
                     .assign_current_relaxed(&mut ctx)
                     .unwrap();
 
-                    AssignedConsistencyMarkersComputation::<PoseidonChip<Base, 10, 9>, 10, 10, C1> {
+                    AssignedConsistencyMarkersComputation::<
+                        PoseidonChip<Base, 10, 9>,
+                        10,
+                        10,
+                        C1,
+                        { sangria::CONSISTENCY_MARKERS_COUNT },
+                    > {
                         random_oracle_constant: random_oracle_constant.clone(),
                         public_params_hash: &public_params_hash,
                         step: &step,

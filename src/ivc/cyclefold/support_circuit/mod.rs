@@ -3,7 +3,7 @@ use std::{marker::PhantomData, num::NonZeroUsize};
 use tracing::*;
 
 use crate::{
-    gadgets::ecc,
+    gadgets::ecc::{self, Point},
     halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner},
         halo2curves::{
@@ -21,6 +21,8 @@ type EccChip<C> = ecc::EccChip<C, tiny_gate::Gate<<C as CurveAffine>::Base>>;
 mod tiny_gate;
 use tiny_gate::{Config as GateConfig, Gate};
 
+pub const INSTANCES_LEN: usize = 8;
+
 #[derive(Default)]
 pub struct SupportCircuit<C: CurveAffine> {
     _p: PhantomData<C>,
@@ -32,26 +34,33 @@ pub struct InstanceInput<C: CurveAffine> {
 
     pub p1: C,
     pub l1: C::Base,
-
-    pub p_out: C,
 }
 
-impl<C: CurveAffine> InstanceInput<C> {
+impl<C: CurveAffine> InstanceInput<C>
+where
+    C::Base: PrimeFieldBits,
+{
     pub fn into_instance(self) -> Vec<Vec<C::Base>> {
         let p0 = self.p0.coordinates().unwrap();
         let p1 = self.p1.coordinates().unwrap();
-        let p_out = self.p_out.coordinates().unwrap();
 
-        vec![vec![
-            *p_out.x(),
-            *p_out.y(),
+        let (p_out_x, p_out_y) = Point::from(self.p0)
+            .scalar_mul(&self.l0)
+            .add(&Point::from(self.p1).scalar_mul(&self.l1))
+            .into_pair();
+
+        let instance: [C::Base; INSTANCES_LEN] = [
+            p_out_x,
+            p_out_y,
             *p0.x(),
             *p0.y(),
             self.l0,
             *p1.x(),
             *p1.y(),
             self.l1,
-        ]]
+        ];
+
+        vec![instance.to_vec()]
     }
 }
 
@@ -103,7 +112,7 @@ where
                     .assign_values_from_instance(&mut ctx, config.instance, 0)
                     .unwrap();
 
-                trace!("instances assigned");
+                trace!("instances assigned ({})", ctx.offset());
 
                 let [p0, p1] = [
                     AssignedPoint::<C> { x: x0, y: y0 },
@@ -117,26 +126,32 @@ where
                     .gate
                     .le_num_to_bits(&mut ctx, &l0, num_bits)
                     .unwrap();
-                let lhs = ecc_chip
-                    .scalar_mul_non_zero(&mut ctx, &p0, &l0_bits)
-                    .unwrap();
-                trace!("p0 * l0_bits = [{:?},{:?}]", lhs.x.value(), lhs.y.value());
+
+                trace!("l0 -> l0_bits, ({})", ctx.offset());
+
+                let lhs = ecc_chip.scalar_mul(&mut ctx, &p0, &l0_bits).unwrap();
+
+                trace!(
+                    "p0 * l0_bits = [{:?},{:?}] ({})",
+                    lhs.x.value(),
+                    lhs.y.value(),
+                    ctx.offset()
+                );
 
                 let l1_bits = ecc_chip
                     .gate
                     .le_num_to_bits(&mut ctx, &l1, num_bits)
                     .unwrap();
-                trace!("l1 bits ready");
-                let rhs = ecc_chip
-                    .scalar_mul_non_zero(&mut ctx, &p1, &l1_bits)
-                    .unwrap();
-                trace!("p1 * l1_bits");
+                trace!("l1 -> l1_bits({})", ctx.offset());
+
+                let rhs = ecc_chip.scalar_mul(&mut ctx, &p1, &l1_bits).unwrap();
+                trace!("p1 * l1_bits ({})", ctx.offset());
 
                 let AssignedPoint {
                     x: actual_x,
                     y: actual_y,
                 } = ecc_chip.add(&mut ctx, &lhs, &rhs).unwrap();
-                trace!("add finished");
+                trace!("add finished ({})", ctx.offset());
 
                 ctx.constrain_equal(expected_x.cell(), actual_x.cell())
                     .unwrap();
@@ -156,9 +171,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        gadgets::ecc::tests::Point,
-        halo2_proofs::dev::MockProver,
-        prelude::{bn256::C1Affine as Curve, Field},
+        halo2_proofs::{dev::MockProver, halo2curves::group::prime::PrimeCurveAffine},
+        sangria_prelude::{bn256::C1Affine as Curve, Field},
     };
 
     type Base = <Curve as CurveAffine>::Base;
@@ -179,23 +193,30 @@ mod tests {
         let tmp = p0 * l0;
         trace!("p0 * l0_bits = {:?}", tmp);
 
-        let p_out = Point::from(p0)
-            .scalar_mul(&l0)
-            .add(&Point::from(p1).scalar_mul(&l1))
-            .into_curve();
-
         let l0 = Base::from_repr(l0.to_repr()).unwrap();
         let l1 = Base::from_repr(l1.to_repr()).unwrap();
 
         MockProver::run(
             SupportCircuit::<Curve>::MIN_K_TABLE_SIZE,
             &circuit,
-            InstanceInput {
-                p0,
-                l0,
-                p1,
-                l1,
-                p_out,
+            InstanceInput { p0, l0, p1, l1 }.into_instance(),
+        )
+        .unwrap()
+        .verify()
+        .unwrap();
+    }
+
+    #[traced_test]
+    #[test]
+    fn e2e_zero() {
+        MockProver::run(
+            SupportCircuit::<Curve>::MIN_K_TABLE_SIZE,
+            &SupportCircuit::<Curve>::default(),
+            InstanceInput::<Curve> {
+                p0: Curve::identity(),
+                l0: Field::ZERO,
+                p1: Curve::identity(),
+                l1: Field::ZERO,
             }
             .into_instance(),
         )

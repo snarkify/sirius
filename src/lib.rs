@@ -25,14 +25,37 @@ pub use halo2_proofs::{
     halo2curves::{ff, group},
 };
 
-pub mod prelude {
+pub mod cyclefold_prelude {
+    /// All imports and alias related to what will use bn256 & grumpkin as the first and second
+    /// curve respectively
+    pub mod bn256 {
+        pub use bn256::G1;
+        pub use grumpkin::G1 as G2;
+
+        use crate::halo2curves::{
+            bn256,
+            group::{prime::PrimeCurve, Group},
+            grumpkin,
+        };
+
+        pub type C1Affine = <G1 as PrimeCurve>::Affine;
+        pub type C2Affine = <G2 as PrimeCurve>::Affine;
+
+        pub type C1Scalar = <G1 as Group>::Scalar;
+        pub type C2Scalar = <G2 as Group>::Scalar;
+    }
+
+    pub use crate::ivc::cyclefold::{PublicParams, IVC};
+}
+
+pub mod sangria_prelude {
     use std::num::NonZeroUsize;
 
     use crate::ff::{FromUniformBytes, PrimeFieldBits};
     pub use crate::{
         commitment::CommitmentKey,
         ff::{Field, PrimeField},
-        ivc::{StepCircuit, IVC},
+        ivc::{SangriaIVC, StepCircuit},
     };
 
     /// Within the IVC framework, on-circuit & off-circuit random oracle will be used
@@ -104,7 +127,7 @@ pub mod prelude {
         pub type C2Scalar = <G2 as Group>::Scalar;
 
         pub type PublicParams<'l, const A1: usize, C1, const A2: usize, C2> =
-            crate::ivc::PublicParams<
+            crate::ivc::sangria::PublicParams<
                 'l,
                 A1,
                 A2,
@@ -139,13 +162,13 @@ pub mod prelude {
             C2: StepCircuit<A2, C2Scalar>,
         {
             PublicParams::new(
-                crate::ivc::CircuitPublicParamsInput::new(
+                crate::ivc::sangria::CircuitPublicParamsInput::new(
                     primary_k_table_size,
                     primary_commitment_key,
                     super::default_random_oracle_constant(),
                     sc1,
                 ),
-                crate::ivc::CircuitPublicParamsInput::new(
+                crate::ivc::sangria::CircuitPublicParamsInput::new(
                     secondary_k_table_size,
                     secondary_commitment_key,
                     super::default_random_oracle_constant(),
@@ -181,7 +204,7 @@ pub mod prelude {
         pub type C2Scalar = <G2 as Group>::Scalar;
 
         pub type PublicParams<'l, const A1: usize, C1, const A2: usize, C2> =
-            crate::ivc::PublicParams<
+            crate::ivc::sangria::PublicParams<
                 'l,
                 A1,
                 A2,
@@ -216,13 +239,13 @@ pub mod prelude {
             C2: StepCircuit<A2, C2Scalar>,
         {
             PublicParams::new(
-                crate::ivc::CircuitPublicParamsInput::new(
+                crate::ivc::sangria::CircuitPublicParamsInput::new(
                     primary_k_table_size,
                     primary_commitment_key,
                     super::default_random_oracle_constant(),
                     sc1,
                 ),
-                crate::ivc::CircuitPublicParamsInput::new(
+                crate::ivc::sangria::CircuitPublicParamsInput::new(
                     secondary_k_table_size,
                     secondary_commitment_key,
                     super::default_random_oracle_constant(),

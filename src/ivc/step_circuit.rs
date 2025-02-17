@@ -1,6 +1,6 @@
 use tracing::*;
 
-use super::fold_relaxed_plonk_instance_chip;
+use super::sangria::fold_relaxed_plonk_instance_chip;
 pub use crate::halo2_proofs::{
     circuit::{AssignedCell, Layouter},
     plonk::ConstraintSystem,

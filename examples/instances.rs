@@ -10,9 +10,9 @@ use sirius::{
         step_circuit::{trivial, AssignedCell, ConstraintSystem, Layouter},
         SynthesisError,
     },
-    prelude::{
+    sangria_prelude::{
         bn256::{new_default_pp, C1Affine, C1Scalar, C2Affine, C2Scalar},
-        CommitmentKey, PrimeField, StepCircuit, IVC,
+        CommitmentKey, PrimeField, SangriaIVC, StepCircuit,
     },
 };
 use tracing::debug;
@@ -155,7 +155,7 @@ fn main() {
         &sc2,
     );
 
-    IVC::fold_with_debug_mode(
+    SangriaIVC::fold_with_debug_mode(
         &pp,
         &sc1,
         array::from_fn(|i| C1Scalar::from(i as u64)),
