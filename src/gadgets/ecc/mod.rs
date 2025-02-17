@@ -57,7 +57,6 @@ impl<C: CurveAffine, G: EccGate<C::Base>> EccChip<C, G> {
         self.gate.negate(ctx, p)
     }
 
-    #[instrument(skip_all)]
     pub fn add(
         &self,
         ctx: &mut RegionCtx<'_, C::Base>,

@@ -9,7 +9,7 @@
 //!
 //! Additionally, it defines a method is_sat on PlonkStructure to determine if
 //! a given Plonk instance and witness satisfy the circuit constraints.
-use std::{iter, num::NonZeroUsize, time::Instant};
+use std::{cell::OnceCell, iter, num::NonZeroUsize, time::Instant};
 
 use count_to_non_zero::*;
 use halo2_proofs::arithmetic::CurveAffine;
@@ -75,7 +75,9 @@ pub(crate) struct CompressedGates<F: PrimeField> {
     /// A degree-grouped version of the `homogeneous` expression, adds another expression, but
     /// implicitly
     #[serde(skip_serializing)]
-    grouped: GroupedPoly<F>,
+    grouped: OnceCell<GroupedPoly<F>>,
+
+    index: QueryIndexContext,
 }
 
 impl<F: PrimeField> CompressedGates<F> {
@@ -97,16 +99,11 @@ impl<F: PrimeField> CompressedGates<F> {
         );
         ctx.num_challenges = homogeneous.num_challenges();
 
-        let grouped = GroupedPoly::new(&homogeneous, ctx);
-        info!(
-            "homogeneous made grouped in {} ns",
-            timer.elapsed().as_nanos()
-        );
-
         Self {
             compressed,
-            grouped,
+            grouped: OnceCell::new(),
             homogeneous,
+            index: *ctx,
         }
     }
     pub fn compressed(&self) -> &Expression<F> {
@@ -118,7 +115,8 @@ impl<F: PrimeField> CompressedGates<F> {
     }
 
     pub fn grouped(&self) -> &GroupedPoly<F> {
-        &self.grouped
+        self.grouped
+            .get_or_init(|| GroupedPoly::new(self.homogeneous(), &self.index))
     }
 }
 
