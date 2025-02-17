@@ -9,7 +9,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use itertools::multizip;
 use sirius::{
     commitment::CommitmentKey,
-    ff::{FromUniformBytes, PrimeField},
+    ff::PrimeField,
     gadgets::poseidon_step_circuit::TestPoseidonCircuit,
     halo2_proofs::{
         circuit::{AssignedCell, Layouter},
@@ -18,10 +18,10 @@ use sirius::{
     halo2curves::{bn256, grumpkin, CurveAffine},
     ivc::{self, cyclefold, sangria, StepCircuit, SynthesisError},
 };
+use tracing::info_span;
 
 /// Base arity for the step circuit.
 const BASE_ARITY: usize = 1;
-
 /// Number of fold steps to perform in the IVC.
 const FOLD_STEP_COUNT: usize = 5;
 
@@ -125,112 +125,145 @@ fn get_or_create_commitment_key<C: CurveAffine>(k: usize, label: &'static str) -
     }
 }
 
-/// Runs an IVC instance using the given gate count and mode.
-/// The gate count is provided as a const generic parameter.
-fn run_ivc_with_gate_count<const GATES_COUNT: usize, const OVERALL_ARITY: usize>(mode: Mode)
-where
-    bn256::Fr: FromUniformBytes<64>,
-{
-    // OVERALL_ARITY = BASE_ARITY * GATES_COUNT.
-    assert_eq!(OVERALL_ARITY, BASE_ARITY * GATES_COUNT);
+/// Macro for benchmarking Sangria.
+/// Performs all heavy setup (circuit creation, public parameter generation, etc.) outside the measurement,
+/// and then inside `b.iter` only creates a new IVC and folds it.
+macro_rules! bench_sangria {
+    ($group:expr, $gates:expr, $k:expr) => {{
+        let bench_name = format!("Sangria_gates_{}", $gates);
+        // OVERALL_ARITY = BASE_ARITY * $gates.
+        const OVERALL_ARITY: usize = $gates * BASE_ARITY;
+        // Build an array of step circuits.
+        let circuits = array::from_fn(|_| TestPoseidonCircuit::<bn256::Fr>::default());
+        let multi_circuit =
+            MultiStepCircuit::<_, BASE_ARITY, $gates, OVERALL_ARITY, bn256::Fr>::new(circuits);
 
-    // Build an array of step circuits.
-    let circuits = array::from_fn(|_| TestPoseidonCircuit::<bn256::Fr>::default());
-    let multi_circuit =
-        MultiStepCircuit::<_, BASE_ARITY, GATES_COUNT, OVERALL_ARITY, bn256::Fr>::new(circuits);
+        // Create an input for the multi-step circuit.
+        let z_in = array::from_fn(|i| bn256::Fr::from(i as u64));
 
-    // Create an input for the multi-step circuit.
-    let z_in = array::from_fn(|i| bn256::Fr::from(i as u64));
+        // Get commitment keys.
+        let primary_commitment_key = get_or_create_commitment_key::<bn256::G1Affine>(25, "bn256");
+        let secondary_commitment_key =
+            get_or_create_commitment_key::<grumpkin::G1Affine>(25, "grumpkin");
 
-    // Get commitment keys.
-    let primary_commitment_key = get_or_create_commitment_key::<bn256::G1Affine>(25, "bn256");
-    let secondary_commitment_key =
-        get_or_create_commitment_key::<grumpkin::G1Affine>(25, "grumpkin");
+        // Create public parameters and other inputs before the timed section.
+        let _ = info_span!("sangria", gates_count = $gates).entered();
+        let pp = sirius::sangria_prelude::bn256::new_default_pp::<OVERALL_ARITY, _, 1, _>(
+            $k,
+            &primary_commitment_key,
+            &multi_circuit,
+            17,
+            &secondary_commitment_key,
+            &ivc::step_circuit::trivial::Circuit::default(),
+        );
+        let trivial_input = array::from_fn(|i| bn256::Fq::from(i as u64));
 
-    match mode {
-        Mode::Sangria => {
-            let pp = sirius::sangria_prelude::bn256::new_default_pp::<OVERALL_ARITY, _, 1, _>(
-                17,
-                &primary_commitment_key,
-                &multi_circuit,
-                17,
-                &secondary_commitment_key,
-                &ivc::step_circuit::trivial::Circuit::default(),
-            );
-            let primary_input = z_in;
-            let secondary_input = array::from_fn(|i| bn256::Fq::from(i as u64));
-
-            let mut ivc = sangria::IVC::new(
-                &pp,
-                &multi_circuit,
-                primary_input,
-                &ivc::step_circuit::trivial::Circuit::default(),
-                secondary_input,
-                false,
-            )
-            .expect("Failed to create Sangria IVC");
-            for _ in 0..FOLD_STEP_COUNT {
-                ivc.fold_step(
-                    &pp,
-                    &multi_circuit,
-                    &ivc::step_circuit::trivial::Circuit::default(),
-                )
-                .expect("Sangria fold step failed");
-            }
-            ivc.verify(&pp).expect("Sangria IVC verification failed");
-        }
-        Mode::Cyclefold => {
-            let mut pp = cyclefold::PublicParams::new(
-                &multi_circuit,
-                primary_commitment_key,
-                secondary_commitment_key,
-                20,
-            )
-            .expect("Failed to create Cyclefold public params");
-            let primary_input = z_in;
-            let mut ivc = cyclefold::IVC::new(&mut pp, &multi_circuit, primary_input)
-                .expect("Failed to create Cyclefold IVC");
-            for _ in 0..FOLD_STEP_COUNT {
-                ivc = ivc
-                    .next(&pp, &multi_circuit)
-                    .expect("Cyclefold next step failed");
-            }
-            ivc.verify(&pp).expect("Cyclefold IVC verification failed");
-        }
-    }
-}
-
-/// Macro to generate a benchmark function for a given IVC mode and a specific constant gate count.
-macro_rules! bench_ivc {
-    ($group:expr, $mode:expr, $gates:expr) => {{
-        let bench_name = format!("{:?}_gates_{}", $mode, $gates);
         $group.bench_function(&bench_name, |b| {
             b.iter(|| {
-                run_ivc_with_gate_count::<$gates, { $gates * BASE_ARITY }>($mode);
+                let _ = info_span!("bench_sangria", gates_count = $gates).entered();
+                // Only the IVC creation and fold steps are measured.
+                let mut ivc = sangria::IVC::new(
+                    &pp,
+                    &multi_circuit,
+                    z_in,
+                    &ivc::step_circuit::trivial::Circuit::default(),
+                    trivial_input,
+                    false,
+                )
+                .expect("Failed to create Sangria IVC");
+                for _ in 0..FOLD_STEP_COUNT {
+                    ivc.fold_step(
+                        &pp,
+                        &multi_circuit,
+                        &ivc::step_circuit::trivial::Circuit::default(),
+                    )
+                    .expect("Sangria fold step failed");
+                }
+            });
+        });
+    }};
+}
+
+/// Macro for benchmarking Cyclefold.
+/// Performs all heavy setup (circuit creation, public parameter generation, etc.) outside the measurement,
+/// and then inside `b.iter` only creates a new IVC and runs the next (fold) steps.
+macro_rules! bench_cyclefold {
+    ($group:expr, $gates:expr, $k:expr) => {{
+        let bench_name = format!("Cyclefold_gates_{}", $gates);
+        const OVERALL_ARITY: usize = $gates * BASE_ARITY;
+        // Build an array of step circuits.
+        let circuits = array::from_fn(|_| TestPoseidonCircuit::<bn256::Fr>::default());
+        let multi_circuit =
+            MultiStepCircuit::<_, BASE_ARITY, $gates, OVERALL_ARITY, bn256::Fr>::new(circuits);
+
+        // Create an input for the multi-step circuit.
+        let z_in = array::from_fn(|i| bn256::Fr::from(i as u64));
+
+        // Get commitment keys.
+        let primary_commitment_key = get_or_create_commitment_key::<bn256::G1Affine>(25, "bn256");
+        let secondary_commitment_key =
+            get_or_create_commitment_key::<grumpkin::G1Affine>(25, "grumpkin");
+
+        // Create public parameters before the timed section.
+        let _ = info_span!("cyclefold", gates_count = $gates).entered();
+        let mut pp = cyclefold::PublicParams::new(
+            &multi_circuit,
+            primary_commitment_key,
+            secondary_commitment_key,
+            $k,
+        )
+        .expect("Failed to create Cyclefold public params");
+
+        $group.bench_function(&bench_name, |b| {
+            b.iter(|| {
+                let _ = info_span!("bench_cyclefold", gates_count = $gates).entered();
+                let mut ivc = cyclefold::IVC::new(&mut pp, &multi_circuit, z_in)
+                    .expect("Failed to create Cyclefold IVC");
+                for _ in 0..FOLD_STEP_COUNT {
+                    ivc = ivc
+                        .next(&pp, &multi_circuit)
+                        .expect("Cyclefold next step failed");
+                }
             });
         });
     }};
 }
 
 /// The main benchmark function.
-/// Separate sets of gate counts are used for Sangria and Cyclefold.
+/// Uses separate macros for Sangria and Cyclefold benchmarks.
 pub fn benchmark_ivc(c: &mut Criterion) {
+    #[cfg(test)]
+    {
+        use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
+
+        tracing_subscriber::fmt()
+            // Adds events to track the entry and exit of the span, which are used to build time-profiling
+            .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+            // Changes the default level to INFO
+            .with_env_filter(
+                EnvFilter::builder()
+                    .with_default_directive(LevelFilter::DEBUG.into())
+                    .from_env_lossy(),
+            )
+            .init();
+    }
+
     // For Sangria, use these gate counts.
     {
         let mut group = c.benchmark_group("Sangria_IVC");
-        bench_ivc!(group, Mode::Sangria, 5);
-        bench_ivc!(group, Mode::Sangria, 10);
-        bench_ivc!(group, Mode::Sangria, 20);
+        bench_sangria!(group, 1, 20);
+        bench_sangria!(group, 5, 21);
+        bench_sangria!(group, 10, 20);
         group.finish();
     }
 
-    // For Cyclefold, use a different set of gate counts.
+    // For Cyclefold, use these gate counts.
     {
         let mut group = c.benchmark_group("Cyclefold_IVC");
-        bench_ivc!(group, Mode::Cyclefold, 6);
-        bench_ivc!(group, Mode::Cyclefold, 12);
-        bench_ivc!(group, Mode::Cyclefold, 24);
-        bench_ivc!(group, Mode::Cyclefold, 48);
+        bench_cyclefold!(group, 5, 21);
+        bench_cyclefold!(group, 10, 21);
+        bench_cyclefold!(group, 20, 22);
+        bench_cyclefold!(group, 100, 22);
         group.finish();
     }
 }

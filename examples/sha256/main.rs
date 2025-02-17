@@ -267,7 +267,7 @@ const ARITY: usize = BLOCK_SIZE / 2;
 
 const PRIMARY_CIRCUIT_TABLE_SIZE: usize = 21;
 const COMMITMENT_KEY_SIZE: usize = 26;
-const FOLD_STEP_COUNT: usize = 5;
+const FOLD_STEP_COUNT: usize = 2;
 
 impl<F: PrimeField> StepCircuit<ARITY, F> for TestSha256Circuit<F> {
     type Config = Table16Config;

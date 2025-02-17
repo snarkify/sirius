@@ -377,7 +377,17 @@ where
 
         {
             let _primary_span = info_span!("digest").entered();
-            let digest = digest::DefaultHasher::digest_to_bits(&self_)?;
+            let digest = digest::DefaultHasher::digest_to_bits(&PublicParamsDigestWrapper::<
+                C1,
+                C2,
+                RP1,
+                RP2,
+            > {
+                //primary_plonk_struct: self_.primary.S().clone(),
+                //secondary_plonk_struct: self_.secondary.S().clone(),
+                primary_params: self_.primary.params(),
+                secondary_params: self_.secondary.params(),
+            })?;
 
             self_.digest_1 = into_curve_from_bits(digest.deref(), NUM_HASH_BITS);
             self_.digest_2 = into_curve_from_bits(digest.deref(), NUM_HASH_BITS);
@@ -420,8 +430,11 @@ where
     RP1: ROPair<C1::Scalar>,
     RP2: ROPair<C2::Scalar>,
 {
-    primary_plonk_struct: PlonkStructure<C1::Scalar>,
-    secondary_plonk_struct: PlonkStructure<C2::Scalar>,
+    // TODO PTR Temporarily turned off because there are so many fixed columns for bench that a
+    // hang occurs during the serialization step
+    //
+    //primary_plonk_struct: PlonkStructure<C1::Scalar>,
+    //secondary_plonk_struct: PlonkStructure<C2::Scalar>,
     primary_params: &'l StepParams<C1::Scalar, RP1::OnCircuit>,
     secondary_params: &'l StepParams<C2::Scalar, RP2::OnCircuit>,
 }
