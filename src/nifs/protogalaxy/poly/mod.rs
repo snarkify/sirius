@@ -518,7 +518,18 @@ fn get_count_of_valuation<F: PrimeField>(S: &PlonkStructure<F>) -> Option<NonZer
 pub fn get_count_of_valuation_with_padding<F: PrimeField>(
     S: &PlonkStructure<F>,
 ) -> Option<NonZeroUsize> {
-    get_count_of_valuation(S).and_then(|v| v.checked_next_power_of_two())
+    get_count_of_valuation(S).and_then(|count_of_eval| {
+        let with_padding = count_of_eval.checked_next_power_of_two();
+
+        debug!(
+            "the padding added {:?} rows.",
+            with_padding
+                .as_ref()
+                .map(|with_padding| with_padding.get() - count_of_eval.get())
+        );
+
+        with_padding
+    })
 }
 
 fn get_points_count<F: PrimeField>(S: &PlonkStructure<F>, traces_len: usize) -> usize {

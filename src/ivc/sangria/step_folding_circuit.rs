@@ -155,12 +155,8 @@ where
 
         PairedCircuit::configure(&mut cs);
 
-        let ConstraintSystemMetainfo {
-            num_challenges,
-            round_sizes,
-            folding_degree,
-            ..
-        } = ConstraintSystemMetainfo::build(k_table_size as usize, &cs);
+        let constraint_system_metainfo =
+            ConstraintSystemMetainfo::build(k_table_size as usize, &cs);
 
         let Some((consistency_markers, step_circuit_instances)) = native_num_io.split_first()
         else {
@@ -176,21 +172,26 @@ where
             z_0: [C::Base::ZERO; ARITY],
             z_i: [C::Base::ZERO; ARITY],
             U: RelaxedPlonkInstance::new(
-                num_challenges,
-                round_sizes.len(),
+                constraint_system_metainfo.num_challenges,
+                constraint_system_metainfo.round_sizes.len(),
                 step_circuit_instances.len(),
             ),
             u: FoldablePlonkInstance::new(PlonkInstance::new(
                 paired_num_io,
-                num_challenges,
-                round_sizes.len(),
+                constraint_system_metainfo.num_challenges,
+                constraint_system_metainfo.round_sizes.len(),
             ))
             .expect("you can't use plonk instance without consistency markers"),
             step_circuit_instances: step_circuit_instances
                 .iter()
                 .map(|len| vec![C::Base::ZERO; *len])
                 .collect(),
-            cross_term_commits: vec![C::identity(); folding_degree.saturating_sub(1)],
+            cross_term_commits: vec![
+                C::identity();
+                constraint_system_metainfo
+                    .folding_degree()
+                    .saturating_sub(1)
+            ],
         }
     }
 }
