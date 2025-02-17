@@ -74,6 +74,10 @@ harness = false
 name = "cyclefold_poseidon"
 harness = false
 
+[[bench]]
+name = "ivc_gate_scaling"
+harness = false
+
 [features]
 # Allows cli-example to check memory usage with dhat
 dhat-heap = []

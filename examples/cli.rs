@@ -12,9 +12,9 @@ use std::{
 use clap::{Parser, Subcommand, ValueEnum};
 use git2::Repository;
 use halo2_proofs::halo2curves;
-use poseidon::poseidon_step_circuit::TestPoseidonCircuit;
 use sirius::{
     ff::{FromUniformBytes, PrimeField, PrimeFieldBits},
+    gadgets::poseidon_step_circuit::TestPoseidonCircuit,
     ivc::{cyclefold, sangria, step_circuit::trivial, StepCircuit},
     poseidon::ROPair,
 };
