@@ -138,7 +138,7 @@ const PRIMARY_CIRCUIT_TABLE_SIZE: usize = 17;
 /// `K` table size for secondary circuit
 const SECONDARY_CIRCUIT_TABLE_SIZE: usize = 17;
 
-/// Разрмер commitment key
+/// Size of commitment key
 const COMMITMENT_KEY_SIZE: usize = 21;
 
 use poseidon_step_circuit::{TestPoseidonCircuit, ARITY};

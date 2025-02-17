@@ -1,4 +1,4 @@
-use std::{array, num::NonZeroUsize};
+use std::{array, env, num::NonZeroUsize};
 
 use sirius::{
     commitment::CommitmentKey,
@@ -32,8 +32,31 @@ const PRIMARY_CIRCUIT_TABLE_SIZE: usize = 17;
 const SECONDARY_COMMITMENT_KEY_SIZE: usize = 21;
 
 use sirius::sangria_prelude::bn256::{new_default_pp, C1Affine, C1Scalar, C2Affine, C2Scalar};
+use tracing::info_span;
+use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
 
 fn main() {
+    let builder = tracing_subscriber::fmt()
+        // Adds events to track the entry and exit of the span, which are used to build
+        // time-profiling
+        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+        // Changes the default level to INFO
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::DEBUG.into())
+                .from_env_lossy(),
+        );
+
+    // Structured logs are needed for time-profiling, while for simple run regular logs are
+    // more convenient.
+    //
+    // So this expr keeps track of the --json argument for turn-on json-logs
+    if env::args().any(|arg| arg.eq("--json")) {
+        builder.json().init();
+    } else {
+        builder.init();
+    }
+
     let sc1 = trivial::Circuit::<A1, C1Scalar>::default();
     let sc2 = trivial::Circuit::<A2, C2Scalar>::default();
 
@@ -52,13 +75,15 @@ fn main() {
         &sc2,
     );
 
+    let _s = info_span!("sangria_trivial").entered();
+
     SangriaIVC::fold_with_debug_mode(
         &pp,
         &sc1,
         array::from_fn(|i| C1Scalar::from(i as u64)),
         &sc2,
         array::from_fn(|i| C2Scalar::from(i as u64)),
-        NonZeroUsize::new(5).unwrap(),
+        NonZeroUsize::new(1).unwrap(),
     )
     .unwrap();
 }
