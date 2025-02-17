@@ -13,7 +13,6 @@ use crate::{
     group::ff::WithSmallOrderMulGroup,
     plonk::{self, eval, GetChallenges, GetWitness, PlonkStructure},
     polynomial::{expression::QueryIndexContext, lagrange, univariate::UnivariatePoly},
-    util::TryMultiProduct,
 };
 
 mod folded_witness;
@@ -124,47 +123,76 @@ pub(crate) fn compute_F<F: PrimeField>(
         },
     }
 
-    let evaluated = plonk::iter_evaluate_witness::<F>(ctx.S, trace)
-        .chain(iter::repeat(Ok(F::ZERO)))
-        .take(count_of_evaluation.get())
-        .map(|result_with_evaluated_gate| result_with_evaluated_gate.map(Node::Leaf))
-        // TODO #324 Migrate to a parallel algorithm
-        // TODO #324 Implement `try_tree_reduce` to stop on the first error
-        .tree_reduce(|left_w, right_w| {
-            let (left_w, right_w) = (left_w?, right_w?);
+    fn reducer<F: PrimeField>(
+        left_w: Result<Node<F>, plonk::eval::Error>,
+        right_w: Result<Node<F>, plonk::eval::Error>,
+        challenges_powers: &[Box<[F]>],
+    ) -> Result<Node<F>, plonk::eval::Error> {
+        let (left_w, right_w) = (left_w?, right_w?);
 
-            match (left_w, right_w) {
-                (Node::Leaf(left), Node::Leaf(right)) => Ok(Node::Calculated {
-                    points: challenges_powers
-                        .iter()
-                        .map(|challenge_powers| left + (right * challenge_powers[0]))
-                        .collect(),
-                    height: NonZeroUsize::new(1).unwrap(),
-                }),
-                (
-                    Node::Calculated {
-                        points: mut left,
-                        height: l_height,
-                    },
-                    Node::Calculated {
-                        points: right,
-                        height: r_height,
-                    },
-                    // The tree must be binary, so we only calculate at the one node level
-                ) if l_height.eq(&r_height) => {
-                    itertools::multizip((challenges_powers.iter(), left.iter_mut(), right.iter()))
-                        .for_each(|(challenge_powers, left, right)| {
-                            *left += *right * challenge_powers[l_height.get()]
-                        });
+        match (left_w, right_w) {
+            (Node::Leaf(left), Node::Leaf(right)) => Ok(Node::Calculated {
+                points: challenges_powers
+                    .iter()
+                    .map(|challenge_powers| left + (right * challenge_powers[0]))
+                    .collect(),
+                height: NonZeroUsize::new(1).unwrap(),
+            }),
+            (
+                Node::Calculated {
+                    points: mut left,
+                    height: l_height,
+                },
+                Node::Calculated {
+                    points: right,
+                    height: r_height,
+                },
+                // The tree must be binary, so we only calculate at the one node level
+            ) if l_height.eq(&r_height) => {
+                itertools::multizip((challenges_powers.iter(), left.iter_mut(), right.iter()))
+                    .for_each(|(challenge_powers, left, right)| {
+                        *left += *right * challenge_powers[l_height.get()]
+                    });
 
-                    Ok(Node::Calculated {
-                        points: left,
-                        height: l_height.saturating_add(1),
-                    })
-                }
-                other => unreachable!("this case must be unreachable: {other:?}"),
+                Ok(Node::Calculated {
+                    points: left,
+                    height: l_height.saturating_add(1),
+                })
             }
-        });
+            other => unreachable!("this case must be unreachable: {other:?}"),
+        }
+    }
+
+    fn tree_reduce<F: PrimeField>(
+        eval: &(impl Sync + Send + Fn(usize) -> Result<F, plonk::eval::Error>),
+        challenges_powers: &[Box<[F]>],
+        start: usize,
+        end: usize,
+    ) -> Option<Result<Node<F>, plonk::eval::Error>> {
+        const THRESHOLD: usize = 2usize.pow(10);
+
+        if end - start < THRESHOLD {
+            (start..end)
+                .map(|i| (eval)(i).map(Node::Leaf))
+                .tree_reduce(|l, r| reducer(l, r, challenges_powers))
+        } else {
+            let mid = start + ((end - start) / 2);
+
+            let (left, right) = rayon::join(
+                || tree_reduce(eval, challenges_powers, start, mid),
+                || tree_reduce(eval, challenges_powers, mid, end),
+            );
+
+            Some(reducer(left?, right?, challenges_powers))
+        }
+    }
+
+    let evaluated = tree_reduce(
+        &plonk::get_evaluate_witness_fn(ctx.S, trace),
+        &challenges_powers,
+        0,
+        count_of_evaluation.get(),
+    );
 
     match evaluated {
         Some(Ok(Node::Calculated { mut points, .. })) => {
@@ -303,40 +331,84 @@ pub(crate) fn compute_G<F: PrimeField>(
         height: usize,
     }
 
-    let evaluated =
-        FoldedWitness::new(&points_for_fft, ctx.lagrange_domain(), accumulator, traces)
-        .iter() // folded witness iter per each X
-        .map(|folded_trace| plonk::iter_evaluate_witness::<F>(ctx.S, folded_trace)
-            .chain(iter::repeat(Ok(F::ZERO)))
-            .take(ctx.count_of_evaluation_with_padding)
-        )
-        .try_multi_product()
-        .map(|points| points.map(|points| Node { values: points, height: 0 }))
-        .tree_reduce(|left, right| {
-            let (
-                Node {
-                    values: mut left,
-                    height: l_height,
-                },
-                Node {
-                    values: right,
-                    height: r_height,
-                },
-            ) = (left?, right?);
+    fn reducer<F: PrimeField>(
+        betas_stroke: &[F],
+        left: Result<Node<F>, plonk::eval::Error>,
+        right: Result<Node<F>, plonk::eval::Error>,
+    ) -> Result<Node<F>, plonk::eval::Error> {
+        let (
+            Node {
+                values: mut left,
+                height: l_height,
+            },
+            Node {
+                values: right,
+                height: r_height,
+            },
+        ) = (left?, right?);
 
-            if l_height.eq(&r_height) {
-                left.iter_mut().zip(right.iter()).for_each(|(left, right)| {
-                    *left += *right * betas_stroke[l_height];
-                });
+        if l_height.eq(&r_height) {
+            left.iter_mut().zip(right.iter()).for_each(|(left, right)| {
+                *left += *right * betas_stroke[l_height];
+            });
 
-                Ok(Node {
-                    values: left,
-                    height: l_height.saturating_add(1),
-                })
-            } else {
-                unreachable!("different heights should not be here because the tree is binary: {l_height} != {r_height}")
-            }
-        });
+            Ok(Node {
+                values: left,
+                height: l_height.saturating_add(1),
+            })
+        } else {
+            unreachable!("different heights should not be here because the tree is binary: {l_height} != {r_height}")
+        }
+    }
+
+    let folded_traces =
+        FoldedWitness::new(&points_for_fft, ctx.lagrange_domain(), accumulator, traces);
+
+    let evaluators = folded_traces
+        .iter()
+        .map(|folded_trace| plonk::get_evaluate_witness_fn(ctx.S, folded_trace))
+        .collect::<Box<[_]>>();
+
+    let evaluate = |index| {
+        Ok(Node {
+            height: 0,
+            values: evaluators
+                .iter()
+                .map(|row_evaluate| (row_evaluate)(index))
+                .collect::<Result<Box<[_]>, plonk::eval::Error>>()?,
+        })
+    };
+
+    fn tree_reduce<F: PrimeField>(
+        eval: &(impl Sync + Send + Fn(usize) -> Result<Node<F>, plonk::eval::Error>),
+        betas_stroke: &[F],
+        start: usize,
+        end: usize,
+    ) -> Option<Result<Node<F>, plonk::eval::Error>> {
+        const THRESHOLD: usize = 2usize.pow(10);
+
+        if end - start < THRESHOLD {
+            (start..end)
+                .map(eval)
+                .tree_reduce(|l, r| reducer(betas_stroke, l, r))
+        } else {
+            let mid = start + ((end - start) / 2);
+
+            let (left, right) = rayon::join(
+                || tree_reduce(eval, betas_stroke, start, mid),
+                || tree_reduce(eval, betas_stroke, mid, end),
+            );
+
+            Some(reducer(betas_stroke, left?, right?))
+        }
+    }
+
+    let evaluated = tree_reduce(
+        &evaluate,
+        &betas_stroke,
+        0,
+        ctx.count_of_evaluation_with_padding,
+    );
 
     match evaluated {
         Some(Ok(Node {

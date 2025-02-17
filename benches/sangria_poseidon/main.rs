@@ -153,7 +153,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     prepare_span.exit();
 
-    let mut group = c.benchmark_group("ivc_of_poseidon");
+    let mut group = c.benchmark_group("sangria_ivc_of_poseidon");
     group.significance_level(0.1).sample_size(10);
 
     group.bench_function("fold_1_step", |b| {
@@ -169,24 +169,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 &sc2,
                 black_box(secondary_z_0),
                 NonZeroUsize::new(1).unwrap(),
-            )
-            .unwrap();
-        })
-    });
-
-    group.bench_function("fold_2_step", |b| {
-        let mut rnd = rand::thread_rng();
-        let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
-        let secondary_z_0 = array::from_fn(|_| C2Scalar::random(&mut rnd));
-
-        b.iter(|| {
-            IVC::fold(
-                &pp,
-                &sc1,
-                black_box(primary_z_0),
-                &sc2,
-                black_box(secondary_z_0),
-                NonZeroUsize::new(2).unwrap(),
             )
             .unwrap();
         })

@@ -127,10 +127,7 @@ use sirius::{
     commitment::CommitmentKey,
     group::{prime::PrimeCurve, Group},
     halo2curves::{bn256, grumpkin, CurveAffine},
-    ivc::{
-        sangria::{CircuitPublicParamsInput, PublicParams, IVC},
-        step_circuit,
-    },
+    ivc::{sangria, step_circuit},
     poseidon::{self, ROPair},
 };
 use tracing::*;
@@ -216,7 +213,7 @@ fn main() {
         get_or_create_commitment_key::<C2Affine>(COMMITMENT_KEY_SIZE, "grumpkin")
             .expect("Failed to get secondary key");
 
-    let pp = PublicParams::<
+    let pp = sangria::PublicParams::<
         '_,
         ARITY,
         ARITY,
@@ -228,13 +225,13 @@ fn main() {
         RandomOracle,
         RandomOracle,
     >::new(
-        CircuitPublicParamsInput::new(
+        sangria::CircuitPublicParamsInput::new(
             PRIMARY_CIRCUIT_TABLE_SIZE as u32,
             &primary_commitment_key,
             primary_spec,
             &primary,
         ),
-        CircuitPublicParamsInput::new(
+        sangria::CircuitPublicParamsInput::new(
             SECONDARY_CIRCUIT_TABLE_SIZE as u32,
             &secondary_commitment_key,
             secondary_spec,
@@ -248,7 +245,7 @@ fn main() {
     let primary_input = array::from_fn(|i| C1Scalar::from(i as u64));
     let secondary_input = array::from_fn(|i| C2Scalar::from(i as u64));
 
-    IVC::fold_with_debug_mode(
+    sangria::IVC::fold_with_debug_mode(
         &pp,
         &primary,
         primary_input,

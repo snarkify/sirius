@@ -1,7 +1,7 @@
 use std::{array, io, marker::PhantomData, path::Path};
 
 use bn256::G1 as C1;
-use criterion::{criterion_group, Criterion};
+use criterion::{black_box, criterion_group, Criterion};
 use metadata::LevelFilter;
 use sirius::{
     commitment::CommitmentKey,
@@ -24,8 +24,8 @@ use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 const ARITY: usize = 1;
 
-const CIRCUIT_TABLE_SIZE1: usize = 17;
-const COMMITMENT_KEY_SIZE: usize = 21;
+const CIRCUIT_TABLE_SIZE1: usize = 20;
+const COMMITMENT_KEY_SIZE: usize = 24;
 
 // Spec for user defined poseidon circuit
 const T1: usize = 3;
@@ -110,7 +110,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     prepare_span.exit();
 
-    let mut group = c.benchmark_group("ivc_of_poseidon");
+    let mut group = c.benchmark_group("cyclefold_ivc_of_poseidon");
     group.significance_level(0.1).sample_size(10);
 
     group.bench_function("fold_1_step", |b| {
@@ -118,12 +118,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         let primary_z_0 = array::from_fn(|_| C1Scalar::random(&mut rnd));
 
         b.iter(|| {
-            IVC::new(&mut pp, &sc1, primary_z_0)
+            IVC::new(&mut pp, &sc1, black_box(primary_z_0))
                 .expect("while step=0")
                 .next(&pp, &sc1)
-                .expect("while step=1")
-                .verify(&pp)
-                .expect("while verify");
+                .expect("while step=1");
         })
     });
 
