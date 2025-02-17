@@ -706,7 +706,7 @@ pub(crate) fn get_evaluate_witness_fn<'link, F: PrimeField>(
     // The index is pass-through, the first rows_count should go to evaluators[0], the second
     // rows_count should go to the [1], etc.
     move |index| {
-        if index > max_high_limit {
+        if index >= max_high_limit {
             return Ok(F::ZERO);
         }
 
