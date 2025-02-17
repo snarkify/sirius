@@ -1,7 +1,8 @@
-use std::iter;
+use std::{cell::UnsafeCell, iter};
 
 use itertools::*;
 use rayon::prelude::*;
+use tracing::*;
 
 use crate::{
     ff::PrimeField,
@@ -61,90 +62,75 @@ impl<F: PrimeField> GetWitness<F> for FoldedWitness<F> {
 ///
 /// Since the number of rows is large, we do this in one pass, counting the points for each
 /// challenge at each iteration, and laying them out in separate [`PlonkWitness`] at the end.
+#[instrument(skip_all)]
 fn fold_witnesses<F: PrimeField>(
     polys_L_in_challenges: &[Box<[F]>],
     accumulator: &(impl GetWitness<F> + Sync),
     witnesses: &[impl Sync + GetWitness<F>],
 ) -> Vec<PlonkWitness<F>> {
-    let witness_placeholder = accumulator.get_witness().to_vec();
-
-    // TODO Create on the fly to avoid multiple rows iterations
-    let mut result_matrix_by_challenge = vec![
-        PlonkWitness {
-            W: witness_placeholder
-        };
-        polys_L_in_challenges.len()
-    ];
-
-    accumulator
+    let witness_placeholder = accumulator
         .get_witness()
         .iter()
-        .enumerate()
-        .flat_map(|(column, witness)| {
-            let rows_count = witness.len();
-            iter::repeat(column).zip(0..rows_count)
-        })
-        .map(|(col, row)| {
-            iter::once(accumulator.get_witness())
-                .chain(witnesses.iter().map(GetWitness::get_witness))
-                .map(|witness| witness[col][row])
-                .zip(
-                    polys_L_in_challenges
-                        .iter()
-                        .map(|m| m.iter().copied())
-                        .multi_product(),
-                )
-                // Element of iterator:
-                // ```
-                // (w0_00, [L0(X0),  L0(X1), ...])
-                // (w0_01, [L0(X0),  L0(X1), ...])
-                // ...
-                // (w1_00, [L1(X0),  L1(X1), ...])
-                // (w1_01, [L1(X0),  L1(X1), ...])
-                // ...
-                // ```
-                //
-                // The next `fold` call doing next action:
-                // (w0_ij, [L0(X0),  L0(X1), ...]) + (w1_ij, [L1(X0),  L1(X1), ...])
-                .fold(
-                    vec![F::ZERO; polys_L_in_challenges.len()].into_boxed_slice(),
-                    // every element of this collection - one cell for each `X_challenge`
-                    |mut cells_by_challenge, (witness, lagrange_by_challenge)| {
-                        cells_by_challenge
-                            .iter_mut()
-                            .zip(lagrange_by_challenge.iter())
-                            .for_each(|(res, poly_L_i_in_X)| {
-                                *res += *poly_L_i_in_X * witness;
-                            });
+        .map(|col| vec![F::ZERO; col.len()])
+        .collect();
 
-                        cells_by_challenge
-                    },
-                )
-        })
-        .zip(
-            // Here we take an iterator that on each iteration returns [column][row] elements for
-            // each witness for its challenge
-            //
-            // next -> [
-            //     result[0][col][row],
-            //     result[1][col][row],
-            //     ...,
-            //     result[challenges_len][col][row]
-            // ]
-            result_matrix_by_challenge
-                .iter_mut()
-                .map(|matrix| matrix.W.iter_mut().flat_map(|col| col.iter_mut()))
-                .multi_product(),
-        )
-        .par_bridge()
-        .for_each(|(elements, mut results)| {
-            results
-                .iter_mut()
-                .zip(elements.iter())
-                .for_each(|(result, cell)| **result = *cell);
+    /// To parallelize the [`PlonkWitness`] change, we make an unsafe wrapper.
+    /// It manually implements `Sync` to bypass the borrow-checker.
+    ///
+    /// Since we are sure that the subsequent loop only works with unique col,row pair each time
+    /// and they do not overlap, we can take over this responsibility here.
+    struct Wrapper<F: PrimeField> {
+        data: UnsafeCell<Vec<PlonkWitness<F>>>,
+    }
+
+    impl<F: PrimeField> Wrapper<F> {
+        /// Safety: this function ignores borrow-checker, you must make sure yourself that there is
+        /// no data race when calling it.
+        unsafe fn get<'o>(&self, cha: usize, col: usize, row: usize) -> &'o mut F {
+            self.data
+                .get()
+                .as_mut()
+                .unwrap()
+                .get_unchecked_mut(cha)
+                .W
+                .get_unchecked_mut(col)
+                .get_unchecked_mut(row)
+        }
+    }
+
+    unsafe impl<F: PrimeField + Send> Sync for Wrapper<F> {}
+
+    // TODO Make perf-allocation
+    let result_matrix_by_challenge = Wrapper {
+        data: UnsafeCell::new(vec![
+            PlonkWitness {
+                W: witness_placeholder
+            };
+            polys_L_in_challenges.len()
+        ]),
+    };
+    accumulator
+        .get_witness()
+        .par_iter()
+        .enumerate()
+        .flat_map(|(column, witness)| rayon::iter::repeatn(column, witness.len()).enumerate())
+        .for_each(|(row, col)| {
+            for (cha_i, poly_L_i) in polys_L_in_challenges.iter().enumerate() {
+                iter::once(accumulator.get_witness())
+                    .chain(witnesses.iter().map(GetWitness::get_witness))
+                    .map(|w| w[col][row])
+                    .zip_eq(poly_L_i)
+                    .for_each(|(witness, poly_L_i_in_cha)| {
+                        // Safety: each [col,row] pair is unique, so it's safe to change it directly here
+                        unsafe {
+                            *result_matrix_by_challenge.get(cha_i, col, row) +=
+                                *poly_L_i_in_cha * witness;
+                        }
+                    });
+            }
         });
 
-    result_matrix_by_challenge
+    result_matrix_by_challenge.data.into_inner()
 }
 
 fn fold_plonk_challenges<F: PrimeField>(
