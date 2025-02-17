@@ -115,4 +115,3 @@ impl<F: PrimeFieldBits + FromUniformBytes<64>> StepCircuit<ARITY, F> for TestPos
             })
     }
 }
-
