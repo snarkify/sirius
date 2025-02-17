@@ -147,7 +147,12 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
         ro_acc: &mut impl ROTrait<C::ScalarExt>,
         plonk_trace: PlonkTrace<C>,
     ) -> Result<Accumulator<C>, eval::Error> {
-        let mut accumulator = Accumulator::new(args, Self::get_count_of_valuation(&params.S));
+        let mut accumulator = Accumulator::new(
+            args,
+            get_count_of_valuation_with_padding(&params.S)
+                .unwrap()
+                .get(),
+        );
 
         let beta = Challenges::<C::ScalarExt>::generate_one::<C::ScalarExt, _, C>(
             params,
