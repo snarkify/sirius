@@ -9,7 +9,7 @@ use crate::{
     ff::PrimeField,
     halo2_proofs::arithmetic::{self, CurveAffine, Field},
     ivc::protogalaxy::verify_chip::BigUintPoint,
-    nifs::protogalaxy::poly::PolyContext,
+    nifs::protogalaxy::poly::{get_count_of_valuation_with_padding, PolyContext},
     plonk::{self, eval, PlonkInstance, PlonkStructure, PlonkTrace, PlonkWitness},
     polynomial::{lagrange, sparse, univariate::UnivariatePoly},
     poseidon::{AbsorbInRO, ROTrait},
@@ -562,41 +562,76 @@ pub enum VerifyError<F: PrimeField> {
     WhileCalcE(eval::Error),
 }
 
+#[instrument(skip_all)]
 pub fn evaluate_e_from_trace<C: CurveAffine>(
     plonk_structure_S: &PlonkStructure<C::ScalarExt>,
     trace: &PlonkTrace<C>,
     betas: &[C::ScalarExt],
 ) -> Result<C::ScalarExt, eval::Error> {
+    // `n` in paper
+    let Some(count_of_evaluation) = get_count_of_valuation_with_padding(plonk_structure_S) else {
+        return Ok(C::ScalarExt::ZERO);
+    };
+
     struct Node<F: PrimeField> {
         value: F,
         height: usize,
     }
 
-    Ok(plonk::iter_evaluate_witness::<C::ScalarExt>(plonk_structure_S, trace)
-            .map(|result_with_evaluated_gate| {
-                result_with_evaluated_gate.map(|value| Node { value, height: 0 })
-            })
-            // TODO #324 Migrate to a parallel algorithm
-            // TODO #324 Implement `try_tree_reduce` to stop on the first error
-            .tree_reduce(|left_w, right_w| {
-                let (mut left_n, right_n) = (left_w?, right_w?);
+    fn reducer<F: PrimeField>(
+        left_w: Result<Node<F>, plonk::eval::Error>,
+        right_w: Result<Node<F>, plonk::eval::Error>,
+        betas: &[F],
+    ) -> Result<Node<F>, plonk::eval::Error> {
+        let (mut left_n, right_n) = (left_w?, right_w?);
 
-                if left_n.height != right_n.height {
-                    unreachable!(
-                        "must be unreachable, since the number of rows is the degree of 2, but: {l_height} != {r_height}",
-                        l_height = left_n.height,
-                        r_height = right_n.height
-                    )
-                }
+        if left_n.height != right_n.height {
+            unreachable!(
+                    "must be unreachable, since the number of rows is the degree of 2, but: {l_height} != {r_height}",
+                    l_height = left_n.height,
+                    r_height = right_n.height
+                )
+        }
 
-                left_n.value += right_n.value * betas[right_n.height];
-                left_n.height += 1;
+        left_n.value += right_n.value * betas[right_n.height];
+        left_n.height += 1;
 
-                Ok(left_n)
-            })
-            .transpose()?
-            .map(|n| n.value)
-            .unwrap())
+        Ok(left_n)
+    }
+
+    fn tree_reduce<F: PrimeField>(
+        eval: &(impl Sync + Send + Fn(usize) -> Result<F, plonk::eval::Error>),
+        challenges_powers: &[F],
+        start: usize,
+        end: usize,
+    ) -> Option<Result<Node<F>, plonk::eval::Error>> {
+        const THRESHOLD: usize = 2usize.pow(18);
+
+        if end - start < THRESHOLD {
+            (start..end)
+                .map(|i| (eval)(i).map(|value| Node { value, height: 0 }))
+                .tree_reduce(|l, r| reducer(l, r, challenges_powers))
+        } else {
+            let mid = start + ((end - start) / 2);
+
+            let (left, right) = rayon::join(
+                || tree_reduce(eval, challenges_powers, start, mid),
+                || tree_reduce(eval, challenges_powers, mid, end),
+            );
+
+            Some(reducer(left?, right?, challenges_powers))
+        }
+    }
+
+    Ok(tree_reduce(
+        &plonk::get_evaluate_witness_fn(plonk_structure_S, trace),
+        betas,
+        0,
+        count_of_evaluation.get(),
+    )
+    .transpose()?
+    .unwrap()
+    .value)
 }
 
 impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
