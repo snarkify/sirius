@@ -23,7 +23,7 @@ use tracing::info_span;
 /// Base arity for the step circuit.
 const BASE_ARITY: usize = 1;
 /// Number of fold steps to perform in the IVC.
-const FOLD_STEP_COUNT: usize = 5;
+const FOLD_STEP_COUNT: usize = 1;
 
 /// A multi-step circuit that composes an array of sub-circuits.
 /// It is parameterized by:
@@ -252,8 +252,8 @@ pub fn benchmark_ivc(c: &mut Criterion) {
     {
         let mut group = c.benchmark_group("Sangria_IVC");
         bench_sangria!(group, 1, 20);
-        bench_sangria!(group, 5, 21);
-        bench_sangria!(group, 10, 20);
+        bench_sangria!(group, 5, 22);
+        bench_sangria!(group, 10, 24);
         group.finish();
     }
 
