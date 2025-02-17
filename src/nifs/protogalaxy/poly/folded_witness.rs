@@ -109,24 +109,33 @@ fn fold_witnesses<F: PrimeField>(
             polys_L_in_challenges.len()
         ]),
     };
+
+    const CHUNK_SIZE: usize = 2usize.pow(10);
+
     accumulator
         .get_witness()
         .par_iter()
         .enumerate()
-        .flat_map(|(column, witness)| rayon::iter::repeatn(column, witness.len()).enumerate())
-        .for_each(|(row, col)| {
-            for (cha_i, poly_L_i) in polys_L_in_challenges.iter().enumerate() {
-                iter::once(accumulator.get_witness())
-                    .chain(witnesses.iter().map(GetWitness::get_witness))
-                    .map(|w| w[col][row])
-                    .zip_eq(poly_L_i)
-                    .for_each(|(witness, poly_L_i_in_cha)| {
-                        // Safety: each [col,row] pair is unique, so it's safe to change it directly here
-                        unsafe {
-                            *result_matrix_by_challenge.get(cha_i, col, row) +=
-                                *poly_L_i_in_cha * witness;
-                        }
-                    });
+        .flat_map(|(column, witness)| {
+            rayon::iter::repeatn(column, witness.len())
+                .enumerate()
+                .chunks(CHUNK_SIZE)
+        })
+        .for_each(|chunk| {
+            for (row, col) in chunk {
+                for (cha_i, poly_L_i) in polys_L_in_challenges.iter().enumerate() {
+                    iter::once(accumulator.get_witness())
+                        .chain(witnesses.iter().map(GetWitness::get_witness))
+                        .map(|w| w[col][row])
+                        .zip_eq(poly_L_i)
+                        .for_each(|(witness, poly_L_i_in_cha)| {
+                            // Safety: each [col,row] pair is unique, so it's safe to change it directly here
+                            unsafe {
+                                *result_matrix_by_challenge.get(cha_i, col, row) +=
+                                    *poly_L_i_in_cha * witness;
+                            }
+                        });
+                }
             }
         });
 
