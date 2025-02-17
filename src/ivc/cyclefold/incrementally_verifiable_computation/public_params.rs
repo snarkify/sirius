@@ -108,7 +108,7 @@ where
         ) = {
             let _support = info_span!("support").entered();
             // Since I want to scalar_multiply points for main::sfc, I take `CMain` as the main curve here
-            // CMain::Base or CSupport::Scalar (native for suppport_circuit)
+            // CMain::Base or CSupport::Scalar (native for support_circuit)
             //
             // For step zero, cyclefold::sfc expects `C::identity` to be multiplied by zero
             let support_circuit_instances: Vec<Vec<CMain::Base>> = support_circuit::InstanceInput {

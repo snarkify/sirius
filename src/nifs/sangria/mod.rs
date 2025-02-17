@@ -560,7 +560,7 @@ impl<C: CurveAffine, const MARKERS: usize> GetConsistencyMarkers<MARKERS, C::Sca
     fn get_consistency_markers(&self) -> [C::ScalarExt; MARKERS] {
         match self.instances.first() {
             Some(instance) if instance.len() == MARKERS => instance.clone().try_into().unwrap(),
-            _ => unreachable!("folded plonk instancce always have markers"),
+            _ => unreachable!("folded plonk instance always have markers"),
         }
     }
 }
