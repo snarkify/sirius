@@ -142,17 +142,17 @@ macro_rules! bench_sangria {
         let z_in = array::from_fn(|i| bn256::Fr::from(i as u64));
 
         // Get commitment keys.
-        let primary_commitment_key = get_or_create_commitment_key::<bn256::G1Affine>(25, "bn256");
+        let primary_commitment_key = get_or_create_commitment_key::<bn256::G1Affine>(28, "bn256");
         let secondary_commitment_key =
-            get_or_create_commitment_key::<grumpkin::G1Affine>(25, "grumpkin");
+            get_or_create_commitment_key::<grumpkin::G1Affine>(28, "grumpkin");
 
         // Create public parameters and other inputs before the timed section.
         let _ = info_span!("sangria", gates_count = $gates).entered();
         let pp = sirius::sangria_prelude::bn256::new_default_pp::<OVERALL_ARITY, _, 1, _>(
-            $k,
+            17,
             &primary_commitment_key,
             &multi_circuit,
-            17,
+            $k,
             &secondary_commitment_key,
             &ivc::step_circuit::trivial::Circuit::default(),
         );
@@ -200,9 +200,9 @@ macro_rules! bench_cyclefold {
         let z_in = array::from_fn(|i| bn256::Fr::from(i as u64));
 
         // Get commitment keys.
-        let primary_commitment_key = get_or_create_commitment_key::<bn256::G1Affine>(25, "bn256");
+        let primary_commitment_key = get_or_create_commitment_key::<bn256::G1Affine>(28, "bn256");
         let secondary_commitment_key =
-            get_or_create_commitment_key::<grumpkin::G1Affine>(25, "grumpkin");
+            get_or_create_commitment_key::<grumpkin::G1Affine>(28, "grumpkin");
 
         // Create public parameters before the timed section.
         let _ = info_span!("cyclefold", gates_count = $gates).entered();
@@ -251,19 +251,52 @@ pub fn benchmark_ivc(c: &mut Criterion) {
     // For Sangria, use these gate counts.
     {
         let mut group = c.benchmark_group("Sangria_IVC");
-        bench_sangria!(group, 1, 20);
-        bench_sangria!(group, 5, 22);
-        bench_sangria!(group, 10, 24);
+        bench_sangria!(group, 1, 17);
+        bench_sangria!(group, 2, 18);
+        bench_sangria!(group, 3, 18);
+        bench_sangria!(group, 4, 18);
+        bench_sangria!(group, 5, 18);
+        bench_sangria!(group, 6, 18);
+        bench_sangria!(group, 7, 18);
+        bench_sangria!(group, 8, 18);
+        bench_sangria!(group, 9, 18);
+        bench_sangria!(group, 10, 18);
+        bench_sangria!(group, 11, 18);
+        bench_sangria!(group, 12, 18);
+        bench_sangria!(group, 13, 18);
+        bench_sangria!(group, 14, 18);
+        bench_sangria!(group, 15, 18);
+        bench_sangria!(group, 16, 18);
+        bench_sangria!(group, 17, 18);
+        bench_sangria!(group, 18, 18);
+        bench_sangria!(group, 19, 18);
+        bench_sangria!(group, 20, 18);
         group.finish();
     }
 
     // For Cyclefold, use these gate counts.
     {
         let mut group = c.benchmark_group("Cyclefold_IVC");
+        bench_cyclefold!(group, 1, 21);
+        bench_cyclefold!(group, 2, 21);
+        bench_cyclefold!(group, 3, 21);
+        bench_cyclefold!(group, 4, 21);
         bench_cyclefold!(group, 5, 21);
+        bench_cyclefold!(group, 6, 21);
+        bench_cyclefold!(group, 7, 21);
+        bench_cyclefold!(group, 8, 21);
+        bench_cyclefold!(group, 9, 21);
         bench_cyclefold!(group, 10, 21);
-        bench_cyclefold!(group, 20, 22);
-        bench_cyclefold!(group, 100, 22);
+        bench_cyclefold!(group, 11, 21);
+        bench_cyclefold!(group, 12, 21);
+        bench_cyclefold!(group, 13, 21);
+        bench_cyclefold!(group, 14, 21);
+        bench_cyclefold!(group, 15, 21);
+        bench_cyclefold!(group, 16, 21);
+        bench_cyclefold!(group, 17, 21);
+        bench_cyclefold!(group, 18, 21);
+        bench_cyclefold!(group, 19, 21);
+        bench_cyclefold!(group, 20, 21);
         group.finish();
     }
 }
