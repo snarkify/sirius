@@ -32,7 +32,8 @@ type C1Scalar = <C1 as Group>::Scalar;
 const ROWS: usize = 20838;
 
 pub fn run(repeat_count: usize) {
-    info!("start merkle-circuit prove&verify with halo2-ipa");
+    let _s = info_span!("halo2-ipa").entered();
+
     let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
         &mut rand::thread_rng(),
         repeat_count,
