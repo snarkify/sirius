@@ -105,7 +105,7 @@ fn get_or_create_pk(
 }
 
 pub fn run(repeat_count: usize, clean_cache: bool) {
-    info!("start merkle-circuit prove&verify with halo2-kzg");
+    let _s = info_span!("halo2-ipa").entered();
 
     let circuit = MerkleTreeUpdateCircuit::<C1Scalar>::new_with_random_updates(
         &mut rand::thread_rng(),

@@ -10,7 +10,7 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use git2::Repository;
-use tracing::info;
+use tracing::{info, info_span};
 use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan, EnvFilter};
 
 pub mod circuit;
@@ -20,7 +20,7 @@ mod ipa;
 mod kzg;
 
 mod sirius_mod {
-    use std::{io, num::NonZeroUsize, path::Path};
+    use std::{array, io, num::NonZeroUsize, path::Path};
 
     use halo2_proofs::halo2curves::{bn256, grumpkin, CurveAffine};
     use sirius::{
@@ -40,11 +40,6 @@ mod sirius_mod {
     };
 
     const ARITY: usize = 1;
-
-    const CIRCUIT_TABLE_SIZE1: usize = 17;
-    const CIRCUIT_TABLE_SIZE2: usize = 17;
-
-    const COMMITMENT_KEY_SIZE: usize = 23;
 
     const LIMBS_COUNT_LIMIT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(10) };
     const LIMB_WIDTH: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(32) };
@@ -70,13 +65,61 @@ mod sirius_mod {
         unsafe { CommitmentKey::load_or_setup_cache(Path::new(FOLDER), label, k) }
     }
 
-    pub fn run(repeat_count: usize) {
+    pub fn run_cyclefold(fold_step_count: usize) {
+        const CIRCUIT_TABLE_SIZE1: usize = 21;
+        const COMMITMENT_KEY_SIZE: usize = 25;
+
+        use sirius::cyclefold_prelude::*;
+
+        let mut rng = rand::thread_rng();
+
+        let _span = info_span!("merkle_example").entered();
+
+        let mut sc1 =
+            MerkleTreeUpdateCircuit::new_with_random_updates(&mut rng, 1, fold_step_count);
+
+        let primary_commitment_key =
+            get_or_create_commitment_key::<C1Affine>(COMMITMENT_KEY_SIZE, "bn256")
+                .expect("Failed to get primary key");
+        let secondary_commitment_key =
+            get_or_create_commitment_key::<C2Affine>(COMMITMENT_KEY_SIZE, "grumpkin")
+                .expect("Failed to get secondary key");
+
+        let mut pp = PublicParams::new(
+            &sc1,
+            primary_commitment_key,
+            secondary_commitment_key,
+            CIRCUIT_TABLE_SIZE1 as u32,
+        )
+        .unwrap();
+
+        let primary_input = array::from_fn(|i| C1Scalar::from(i as u64));
+
+        let mut ivc = IVC::new(&mut pp, &sc1, primary_input).expect("while step=0");
+
+        for step in 0..fold_step_count {
+            sc1.pop_front_proof_batch();
+            ivc = ivc
+                .next(&pp, &sc1)
+                .unwrap_or_else(|err| panic!("while step={step}: {err:?}"));
+        }
+
+        ivc.verify(&pp).expect("while verify");
+    }
+
+    pub fn run_sangria(fold_step_count: usize) {
+        const COMMITMENT_KEY_SIZE: usize = 23;
+
+        const CIRCUIT_TABLE_SIZE1: usize = 17;
+        const CIRCUIT_TABLE_SIZE2: usize = 17;
+
         let mut rng = rand::thread_rng();
 
         let _span = info_span!("merkle_example").entered();
         let prepare_span = info_span!("prepare").entered();
 
-        let mut sc1 = MerkleTreeUpdateCircuit::new_with_random_updates(&mut rng, 1, repeat_count);
+        let mut sc1 =
+            MerkleTreeUpdateCircuit::new_with_random_updates(&mut rng, 1, fold_step_count);
 
         let sc2 = trivial::Circuit::<ARITY, _>::default();
 
@@ -131,7 +174,7 @@ mod sirius_mod {
         )
         .unwrap();
 
-        for _ in 0..repeat_count {
+        for _ in 0..fold_step_count {
             sc1.pop_front_proof_batch();
             ivc.fold_step(&pp, &sc1, &sc2).unwrap();
         }
@@ -146,7 +189,7 @@ struct Args {
     #[command(subcommand)]
     mode: Option<ProofSystem>,
     #[arg(long, default_value_t = 1, global = true)]
-    repeat_count: usize,
+    fold_step_count: usize,
     #[arg(long, default_value_t = false, global = true)]
     json_logs: bool,
     #[arg(long, default_value_t = false, global = true)]
@@ -189,15 +232,20 @@ impl Args {
         }
 
         let Args {
-            mode, repeat_count, ..
+            mode,
+            fold_step_count,
+            ..
         } = &self;
 
         Some(build_log_folder().join(match mode {
-            None | Some(ProofSystem::Sirius) => {
-                format!("sirius_merkle-1_trivial-1_{repeat_count}.log")
+            None | Some(ProofSystem::SiriusSangria) => {
+                format!("sangria_merkle-1_trivial-1_{fold_step_count}.log")
             }
-            Some(ProofSystem::Halo2Kzg) => format!("halo2_kzg_merkle_{repeat_count}.log"),
-            Some(ProofSystem::Halo2Ipa) => format!("halo2_ipa_merkle_{repeat_count}.log"),
+            Some(ProofSystem::SiriusCyclefold) => {
+                format!("cyclefold_merkle-1_trivial-1_{fold_step_count}.log")
+            }
+            Some(ProofSystem::Halo2Kzg) => format!("halo2_kzg_merkle_{fold_step_count}.log"),
+            Some(ProofSystem::Halo2Ipa) => format!("halo2_ipa_merkle_{fold_step_count}.log"),
         }))
     }
 
@@ -237,7 +285,8 @@ impl Args {
 #[derive(Default, Debug, Subcommand, Clone, Copy)]
 enum ProofSystem {
     #[default]
-    Sirius,
+    SiriusSangria,
+    SiriusCyclefold,
     Halo2Kzg,
     Halo2Ipa,
 }
@@ -248,7 +297,8 @@ impl fmt::Display for ProofSystem {
             f,
             "{}",
             match self {
-                Self::Sirius => "sirius",
+                Self::SiriusSangria => "sirius_sangria",
+                Self::SiriusCyclefold => "sirius_cyclefold",
                 Self::Halo2Kzg => "halo2_kzg",
                 Self::Halo2Ipa => "halo2_ipa",
             }
@@ -263,9 +313,11 @@ fn main() {
     let args = Args::parse();
     args.init_logger();
 
+    let _span = info_span!("merkle_example").entered();
     match args.mode.unwrap_or_default() {
-        ProofSystem::Sirius => sirius_mod::run(args.repeat_count),
-        ProofSystem::Halo2Ipa => ipa::run(args.repeat_count),
-        ProofSystem::Halo2Kzg => kzg::run(args.repeat_count, args.clean_cache),
+        ProofSystem::SiriusSangria => sirius_mod::run_sangria(args.fold_step_count),
+        ProofSystem::SiriusCyclefold => sirius_mod::run_cyclefold(args.fold_step_count),
+        ProofSystem::Halo2Ipa => ipa::run(args.fold_step_count),
+        ProofSystem::Halo2Kzg => kzg::run(args.fold_step_count, args.clean_cache),
     }
 }
