@@ -29,18 +29,30 @@ The `Sirius` folding framework is designed with a three-tiered architecture.
 - **Folding Scheme Layer**: At the heart of the framework is the folding scheme IVC circuit that accumulates the computations of multiple steps. At each step, the prover first calculates the instance-witness pairs from the previous step and folds them into the accumulator, then computes the cross terms and error vector for the folded instance-witness pairs. An IVC circuit then takes the outputs from the prover and performs the following steps: apply the step function `F`, fold the previous step's instance into the accumulator instance, and verify the inputs of the IVC circuit.
 - **SNARK Layer**: The SNARK layer leverages Polynomial Interactive Oracle Proofs (PIOP) and Polynomial Commitment Schemes (PCS) to generate zkSNARKs for succinct and zero-knowledge verification. Polynomial relation checks of the IVC decider are converted to the _multivariate sum-check protocol_. The evaluation phase of the sum-check protocol depends on the polynomial commitment scheme (PCS) we choose, e.g. [Hyrax](https://eprint.iacr.org/2017/1132.pdf). It is worth noting that when the polynomials are sparse, we can use the Spark compiler from [Spartan](https://eprint.iacr.org/2019/550) to handle them efficiently. 
 
+## Emerging Architectures for IVC
+
+Sirius has evolved to support multiple IVC schemes that combine folding techniques with novel optimizations:
+
+### Sangria
+
+Sangria adapts Nova's folding scheme for the more flexible PLONKish arithmetization. By incorporating relaxed gate equations with a scaling factor `u` and an error vector `e`, Sangria supports custom gates and higher-arity circuits while managing the additional cross-terms introduced by higher-degree constraints.
+
+### Cyclefold + Protogalaxy
+
+Cyclefold represents a significant advancement in our folding scheme evolution. Its key insight is that folding-based recursive arguments can function without needing a full cycle of elliptic curves for every operation. Instead, Cyclefold delegates expensive non-native scalar multiplication and point addition operations to a compact "co-processor" circuit defined over a secondary elliptic curve. This dramatically reduces the size of the verifier circuit on the non-pairing-friendly curve and simplifies security reasoning.
+
+While Cyclefold targets the efficiency of recursive proof composition, Protogalaxy NIFS focuses on optimizing high-degree gate constraints. In many PLONKish circuits, custom gates may have degrees higher than two—and naive folding would increase cryptographic work linearly with the degree. Protogalaxy NIFS introduces optimizations that reduce this overhead nearly to a constant cost per high-degree gate.
+
+Together, these IVC schemes form the foundation of Sirius, offering different trade-offs between flexibility, efficiency, and security to meet diverse application needs.
+
 # Roadmap
 - [x] 2023Q4 - [halo2](https://github.com/privacy-scaling-explorations/halo2) frontend support
 - [x] 2023Q4 - folding scheme for plonkish custom gates
 - [x] 2023Q4 - folding scheme for lookup arguments
 - [x] 2024Q1 - IVC circuit
 - [x] 2024Q1 - IVC Benchmarks
-- [ ] [2024Q2](https://github.com/snarkify/sirius/milestone/2) - high-degree gates optimization from [Protogalaxy](https://eprint.iacr.org/2023/1106)
-- [ ] [2024Q3](https://github.com/snarkify/sirius/milestone/3) - IVC with cyclefold
-- [ ] 2024Q3 - [Snarkify Cloud](https://cloud.snarkify.io/) integration and GPU acceleration
-- [ ] 2024Q4 - Agg circuit
-- [ ] 2024Q4 - IOP + PCS SNARK support ([Spartan](https://eprint.iacr.org/2019/550) / [Hyperplonk](https://eprint.iacr.org/2022/1355))
-- [ ] 2025Q1 - on-chain verifier support
+- [x] [2024Q2](https://github.com/snarkify/sirius/milestone/2) - high-degree gates optimization from [Protogalaxy](https://eprint.iacr.org/2023/1106)
+- [x] [2024Q3](https://github.com/snarkify/sirius/milestone/3) - IVC with cyclefold
 
 _The estimated timeline is subject to change_.
 
@@ -53,12 +65,15 @@ Use [rustup](https://rustup.rs/)
 ## Add dependency
 
 ```bash
-cargo add --git https://github.com/snarkify/sirius.git --tag v0.1.0 sirius
+cargo add --git https://github.com/snarkify/sirius.git --tag v0.2.0 sirius
 ```
 
 ## Implement `StepCircuit` trait
 
-```rust
+```rust,no_run
+use sirius::ff::PrimeField;
+use sirius::ivc::step_circuit::{ConstraintSystem, Layouter, AssignedCell, SynthesisError};
+
 /// To allow your circuit to be folded, impl this trait
 /// `ARITY` - size of input & output
 pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
@@ -81,65 +96,108 @@ pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
 
 For runnable examples, please check [examples](examples) folder.
 
-An example of using the API of IVC:
-```rust
-fn main() {
-    let primary = poseidon_step_circuit::TestPoseidonCircuit::default();
-    let secondary = step_circuit::trivial::Circuit::<ARITY2, _>::default();
+Sirius supports multiple IVC schemes: **Sangria** & **Cyclefold**
 
-    // Specifications for random oracle used as part of the IVC algorithm
-    let primary_spec = RandomOracleConstant::<C1Scalar>::new(10, 10);
-    let secondary_spec = RandomOracleConstant::<C2Scalar>::new(10, 10);
+### Run `Sangria IVC`
 
-    let primary_commitment_key = get_or_create_commitment_key::<C1Affine>(COMMITMENT_KEY_SIZE, "bn256");
-    let secondary_commitment_key = get_or_create_commitment_key::<C2Affine>(COMMITMENT_KEY_SIZE, "grumpkin");
+```rust,no_run
+// Example showing how to use Sangria IVC
+use std::{array, num::NonZeroUsize};
+use sirius::{
+    commitment::CommitmentKey,
+    ivc::{step_circuit::trivial, SangriaIVC},
+    sangria_prelude::bn256::{new_default_pp, C1Affine, C1Scalar, C2Affine, C2Scalar},
+    ff::Field,
+};
 
-    let pp = PublicParams::<
-        '_,
-        ARITY1,
-        ARITY2,
-        MAIN_GATE_SIZE,
-        C1Affine,
-        C2Affine,
-        TestPoseidonCircuit<_>,
-        step_circuit::trivial::Circuit<ARITY, _>,
-        RandomOracle,
-        RandomOracle,
-    >::new(
-        CircuitPublicParamsInput::new(
-            PRIMARY_CIRCUIT_TABLE_SIZE as u32,
-            &primary_commitment_key,
-            primary_spec,
-            &primary,
-        ),
-        CircuitPublicParamsInput::new(
-            SECONDARY_CIRCUIT_TABLE_SIZE as u32,
-            &secondary_commitment_key,
-            secondary_spec,
-            &secondary,
-        ),
-        LIMB_WIDTH,
-        LIMBS_COUNT,
-    )
-    .expect("failed to create public params");
+// Example constants - in a real application, define these appropriately
+const A1: usize = 5; // Arity for primary circuit
+const A2: usize = 1; // Arity for secondary circuit
+const PRIMARY_COMMITMENT_KEY_SIZE: usize = 21;
+const SECONDARY_COMMITMENT_KEY_SIZE: usize = 21;
+const PRIMARY_CIRCUIT_TABLE_SIZE: u32 = 17;
+const SECONDARY_CIRCUIT_TABLE_SIZE: u32 = 17;
 
-    let primary_input = array::from_fn(|i| C1Scalar::from_u128(i as u128));
-    let secondary_input = array::from_fn(|i| C2Scalar::from_u128(i as u128));
-    let fold_step_count = NonZeroUsize::new(10).unwrap();
+// Initialize your primary and secondary circuits
+let sc1 = trivial::Circuit::<A1, C1Scalar>::default();
+let sc2 = trivial::Circuit::<A2, C2Scalar>::default();
 
-    IVC::fold(
-        &pp,
-        primary,
-        primary_input,
-        secondary,
-        secondary_input,
-        fold_step_count,
-    )
-    .expect("failed to run IVC");
-}
+// Set up commitment keys
+let primary_commitment_key =
+    CommitmentKey::<C1Affine>::setup(PRIMARY_COMMITMENT_KEY_SIZE, b"bn256");
+let secondary_commitment_key =
+    CommitmentKey::<C2Affine>::setup(SECONDARY_COMMITMENT_KEY_SIZE, b"grumpkin");
+
+// Set up public parameters with helper function
+let pp = new_default_pp::<A1, _, A2, _>(
+    SECONDARY_CIRCUIT_TABLE_SIZE,
+    &primary_commitment_key,
+    &sc1,
+    PRIMARY_CIRCUIT_TABLE_SIZE,
+    &secondary_commitment_key,
+    &sc2,
+);
+
+SangriaIVC::fold_with_debug_mode(
+    &pp,
+    &sc1,
+    array::from_fn(|i| C1Scalar::from(i as u64)),
+    &sc2,
+    array::from_fn(|i| C2Scalar::from(i as u64)),
+    NonZeroUsize::new(10).unwrap(), // fold step count
+)
+.unwrap();
 ```
 
-This code will run `fold_step_count` of folding steps, and also check the proof after execution.
+### Run `Cyclefold IVC`
+
+```rust,no_run
+// Example showing how to use Cyclefold IVC
+use std::array;
+use sirius::{
+    commitment::CommitmentKey,
+    ivc::step_circuit::trivial,
+    cyclefold_prelude::{
+        bn256::{C1Affine, C1Scalar, C2Affine},
+        PublicParams, IVC,
+    },
+    ff::Field,
+};
+
+// Example constants - in a real application, define these appropriately
+const A1: usize = 5; // Arity for circuit
+const PRIMARY_COMMITMENT_KEY_SIZE: usize = 21;
+const SECONDARY_COMMITMENT_KEY_SIZE: usize = 21;
+const PRIMARY_CIRCUIT_TABLE_SIZE: u32 = 17;
+
+// Initialize your circuit (only one needed)
+let sc = trivial::Circuit::<A1, C1Scalar>::default();
+
+// Set up commitment keys
+let primary_commitment_key =
+    CommitmentKey::<C1Affine>::setup(PRIMARY_COMMITMENT_KEY_SIZE, b"bn256");
+let secondary_commitment_key =
+    CommitmentKey::<C2Affine>::setup(SECONDARY_COMMITMENT_KEY_SIZE, b"grumpkin");
+
+// Set up public parameters
+let mut pp = PublicParams::new(
+    &sc,
+    primary_commitment_key,
+    secondary_commitment_key,
+    PRIMARY_CIRCUIT_TABLE_SIZE,
+)
+.unwrap();
+
+// Initialize IVC, run one step, and verify
+IVC::new(&mut pp, &sc, array::from_fn(|_| C1Scalar::ZERO))
+    .expect("while step=0")
+    .next(&pp, &sc)
+    .expect("while step=1")
+    .verify(&pp)
+    .expect("while verify");
+```
+
+Both examples show how to initialize and run IVC instances. The Cyclefold scheme is simpler as it requires only one circuit, while Sangria uses a two-circuit approach. The examples demonstrate setting up commitment keys, creating public parameters, and running computation steps with verification.
 
 # Run examples
 
