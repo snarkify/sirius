@@ -46,7 +46,7 @@ pub enum Error {
 }
 
 #[derive(Serialize)]
-pub(crate) struct CircuitPublicParams<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, RP>
+pub struct CircuitPublicParams<'key, const ARITY: usize, const MAIN_GATE_T: usize, C, RP>
 where
     C: CurveAffine,
     C::Scalar: PrimeFieldBits + FromUniformBytes<64> + Serialize,
@@ -146,8 +146,8 @@ pub struct PublicParams<
     RP1: ROPair<C1::Scalar>,
     RP2: ROPair<C2::Scalar>,
 {
-    pub(crate) primary: CircuitPublicParams<'key, A1, MAIN_GATE_T, C1, RP1>,
-    pub(crate) secondary: CircuitPublicParams<'key, A2, MAIN_GATE_T, C2, RP2>,
+    pub primary: CircuitPublicParams<'key, A1, MAIN_GATE_T, C1, RP1>,
+    pub secondary: CircuitPublicParams<'key, A2, MAIN_GATE_T, C2, RP2>,
     _p: PhantomData<(SC1, SC2)>,
 
     #[serde(skip_serializing)]

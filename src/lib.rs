@@ -2,6 +2,7 @@
 #![allow(unstable_name_collisions)]
 #![allow(dead_code)] // TODO: remove it later
 #![allow(non_snake_case)] // UPPER_CASE is used for ease of compatibility with Nova documentation
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))]
 
 pub mod commitment;
 pub mod constants;

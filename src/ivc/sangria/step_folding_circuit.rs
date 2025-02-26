@@ -33,7 +33,7 @@ use crate::{
 
 #[derive(Serialize)]
 #[serde(bound(serialize = "RO::Args: Serialize"))]
-pub(crate) struct StepParams<F, RO>
+pub struct StepParams<F, RO>
 where
     F: PrimeFieldBits + FromUniformBytes<64>,
     RO: ROCircuitTrait<F>,
