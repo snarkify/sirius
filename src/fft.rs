@@ -45,7 +45,7 @@ fn bitreverse(input: usize, limit: usize) -> usize {
     );
 
     let mask = (1 << limit) - 1;
-    input.reverse_bits() >> (usize::BITS as usize - limit) & mask
+    (input.reverse_bits() >> ((usize::BITS as usize) - limit)) & mask
 }
 
 /// Performs a radix-$2$ Fast-Fourier Transformation (FFT) on a vector of size
