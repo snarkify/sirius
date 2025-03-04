@@ -194,7 +194,7 @@ struct Args {
     json_logs: bool,
     #[arg(long, default_value_t = false, global = true)]
     clean_cache: bool,
-    /// Push all logs into file, with name builded from params
+    /// Push all logs into file, with name built from parameters
     #[arg(long, default_value_t = false, global = true)]
     file_logs: bool,
 }
@@ -271,7 +271,10 @@ impl Args {
             } else {
                 builder.with_writer(file).init();
             }
-            println!("logs will be writed to: {}", log_filename.to_string_lossy());
+            println!(
+                "The logs will be written to the file: {}",
+                log_filename.to_string_lossy()
+            );
         } else if self.json_logs {
             builder.json().init();
         } else {

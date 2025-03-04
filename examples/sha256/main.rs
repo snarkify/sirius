@@ -1,8 +1,15 @@
 #![allow(dead_code)]
 
-use std::{array, env, io, iter, marker::PhantomData, path::Path};
+use std::{
+    array,
+    fs::{self, File},
+    io, iter,
+    marker::PhantomData,
+    path::{Path, PathBuf},
+};
 
 use bn256::G1 as C1;
+use git2::Repository;
 use grumpkin::G1 as C2;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
@@ -254,8 +261,92 @@ pub mod sha256 {
     }
 }
 
+use clap::Parser;
 pub use sha256::{BlockWord, Sha256, Table16Chip, Table16Config};
 use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Use JSON format for logs
+    #[arg(long, default_value_t = false)]
+    json_logs: bool,
+
+    /// Push all logs into file, with name built from parameters
+    #[arg(long, default_value_t = false)]
+    file_logs: bool,
+}
+
+pub fn build_log_folder() -> PathBuf {
+    const LOGS_SUBFOLDER: &str = ".logs";
+
+    let Ok(repo) = Repository::discover(".") else {
+        return Path::new(LOGS_SUBFOLDER).to_path_buf();
+    };
+
+    // Get the current branch name
+    let branch_name = repo
+        .head()
+        .ok()
+        .and_then(|head| head.shorthand().map(String::from))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let branch_log_dir = repo
+        .workdir()
+        .unwrap()
+        .join(LOGS_SUBFOLDER)
+        .join(branch_name);
+
+    fs::create_dir_all(&branch_log_dir)
+        .unwrap_or_else(|err| panic!("Failed to create log directory {branch_log_dir:?}: {err:?}"));
+
+    branch_log_dir
+}
+
+impl Args {
+    fn build_log_filename(&self) -> Option<PathBuf> {
+        if !self.file_logs {
+            return None;
+        }
+
+        Some(build_log_folder().join(format!("sha256_{}.log", FOLD_STEP_COUNT)))
+    }
+
+    fn init_logger(&self) {
+        let mut builder = tracing_subscriber::fmt()
+            // Adds events to track the entry and exit of the span, which are used to build
+            // time-profiling
+            .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
+            // Changes the default level to INFO
+            .with_env_filter(
+                EnvFilter::builder()
+                    .with_default_directive(LevelFilter::INFO.into())
+                    .from_env_lossy(),
+            );
+
+        if let Some(log_filename) = self.build_log_filename() {
+            let file = File::create(&log_filename).expect("Unable to create log file");
+
+            builder = builder.with_ansi(false);
+
+            if self.json_logs {
+                builder.json().with_writer(file).init();
+            } else {
+                builder.with_writer(file).init();
+            }
+            println!(
+                "The logs will be written to the file: {}",
+                log_filename.to_string_lossy()
+            );
+        } else if self.json_logs {
+            builder.json().init();
+        } else {
+            builder.init();
+        }
+
+        info!("Starting with args: {self:?}");
+    }
+}
 
 #[derive(Default, Debug)]
 struct TestSha256Circuit<F: PrimeField> {
@@ -339,26 +430,8 @@ fn get_or_create_commitment_key<C: CurveAffine>(
 }
 
 fn main() {
-    let builder = tracing_subscriber::fmt()
-        // Adds events to track the entry and exit of the span, which are used to build
-        // time-profiling
-        .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
-        // Changes the default level to INFO
-        .with_env_filter(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy(),
-        );
-
-    // Structured logs are needed for time-profiling, while for simple run regular logs are
-    // more convenient.
-    //
-    // So this expr keeps track of the --json argument for turn-on json-logs
-    if env::args().any(|arg| arg.eq("--json")) {
-        builder.json().init();
-    } else {
-        builder.init();
-    }
+    let args = Args::parse();
+    args.init_logger();
 
     // To osterize the total execution time of the example
     let _span = info_span!("sha256_example").entered();
