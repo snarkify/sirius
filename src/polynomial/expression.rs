@@ -331,7 +331,7 @@ impl<F: PrimeField> Expression<F> {
                 let a = Self::from_halo2_expr(a, num_selector, num_fixed);
                 a * *k
             }
-            _other => Self::Constant(F::ONE + F::ONE),
+            other => unimplemented!("Not supported type of halo2 expression: {other:?}"),
         }
     }
 
