@@ -74,20 +74,30 @@ cargo add --git https://github.com/snarkify/sirius.git --tag v0.2.0 sirius
 use sirius::ff::PrimeField;
 use sirius::ivc::step_circuit::{ConstraintSystem, Layouter, AssignedCell, SynthesisError};
 
-/// To allow your circuit to be folded, impl this trait
-/// `ARITY` - size of input & output
+/// The StepCircuit trait is the foundation for creating circuits that can be folded.
+/// It represents a single step of computation in an IVC chain.
+///
+/// `ARITY` - The number of input/output elements in your circuit
+/// `F` - The field type used for circuit arithmetic
 pub trait StepCircuit<const ARITY: usize, F: PrimeField> {
+    /// Configuration type for your circuit gates and constraints
     type Config: Clone;
+    
+    /// Define the circuit's constraints and gates
+    /// This is similar to halo2's configure method
     fn configure(cs: &mut ConstraintSystem<F>) -> Self::Config;
-    /// This method represents step function `F: z_i -> z_{i+1}`
+    
+    /// This method implements the actual step function transformation: z_i → z_{i+1}
     ///
-    /// Unlike `halo2::Circuit`, it takes array of assigned cells
-    /// and returns array of assigned cells
+    /// Unlike standard `halo2::Circuit`, this method:
+    /// - Takes an array of assigned input values (z_in)
+    /// - Must return an array of assigned output values of the same size
+    /// - Uses the same layouter pattern as halo2 for region assignments
     fn synthesize_step(
         &self,
-        config: Self::Config,
+        config: Self::Config,                // Circuit configuration from configure()
         layouter: &mut impl Layouter<F>,
-        z_in: &[AssignedCell<F, F>; ARITY],
+        z_in: &[AssignedCell<F, F>; ARITY],  // Input values from previous step (or initial values)
     ) -> Result<[AssignedCell<F, F>; ARITY], SynthesisError>;
 }
 ``` 
@@ -101,7 +111,8 @@ Sirius supports multiple IVC schemes: **Sangria** & **Cyclefold**
 ### Run `Sangria IVC`
 
 ```rust,no_run
-// Example showing how to use Sangria IVC
+/// Example demonstrating how to use Sangria IVC for incrementally verifiable computation
+
 use std::{array, num::NonZeroUsize};
 use sirius::{
     commitment::CommitmentKey,
@@ -110,50 +121,62 @@ use sirius::{
     ff::Field,
 };
 
-// Example constants - in a real application, define these appropriately
-const A1: usize = 5; // Arity for primary circuit
-const A2: usize = 1; // Arity for secondary circuit
-const PRIMARY_COMMITMENT_KEY_SIZE: usize = 21;
-const SECONDARY_COMMITMENT_KEY_SIZE: usize = 21;
-const PRIMARY_CIRCUIT_TABLE_SIZE: u32 = 17;
-const SECONDARY_CIRCUIT_TABLE_SIZE: u32 = 17;
+/// Sangria uses a two-circuit architecture:
+/// 1. Primary circuit performs the actual computational steps
+/// 2. Secondary circuit handles cryptographic operations for folding
+const PRIMARY_ARITY: usize = 5;   // Number of state elements for main computation circuit
+const SECONDARY_ARITY: usize = 1; // Number of state elements for helper circuit 
 
-// Initialize your primary and secondary circuits
-let sc1 = trivial::Circuit::<A1, C1Scalar>::default();
-let sc2 = trivial::Circuit::<A2, C2Scalar>::default();
+/// Configuration parameters - must be tuned based on circuit complexity
+/// These are minimum values for the trivial example
+const PRIMARY_COMMITMENT_KEY_SIZE: usize = 21;   // Controls polynomial degree (primary curve)
+const SECONDARY_COMMITMENT_KEY_SIZE: usize = 21; // Controls polynomial degree (secondary curve)
 
-// Set up commitment keys
-let primary_commitment_key =
-    CommitmentKey::<C1Affine>::setup(PRIMARY_COMMITMENT_KEY_SIZE, b"bn256");
-let secondary_commitment_key =
-    CommitmentKey::<C2Affine>::setup(SECONDARY_COMMITMENT_KEY_SIZE, b"grumpkin");
+const PRIMARY_CIRCUIT_TABLE_SIZE: u32 = 17;      // Minimum required table size for primary
+const SECONDARY_CIRCUIT_TABLE_SIZE: u32 = 17;    // Minimum required table size for secondary
 
-// Set up public parameters with helper function
-let pp = new_default_pp::<A1, _, A2, _>(
+// Step 1: Initialize primary and secondary circuits
+// Primary circuit operates on bn256 curve with 5 state elements
+let primary_circuit = trivial::Circuit::<PRIMARY_ARITY, C1Scalar>::default();
+
+// Secondary circuit operates on grumpkin curve with 1 state element
+let secondary_circuit = trivial::Circuit::<SECONDARY_ARITY, C2Scalar>::default();
+
+// Step 2: Set up commitment keys for polynomial commitments on both curves
+let primary_key = CommitmentKey::<C1Affine>::setup(PRIMARY_COMMITMENT_KEY_SIZE, b"bn256");
+let secondary_key = CommitmentKey::<C2Affine>::setup(SECONDARY_COMMITMENT_KEY_SIZE, b"grumpkin");
+
+// Step 3: Create the public parameters that define the Sangria IVC instance
+let public_params = new_default_pp::<PRIMARY_ARITY, _, SECONDARY_ARITY, _>(
     SECONDARY_CIRCUIT_TABLE_SIZE,
-    &primary_commitment_key,
-    &sc1,
+    &primary_key,
+    &primary_circuit,
     PRIMARY_CIRCUIT_TABLE_SIZE,
-    &secondary_commitment_key,
-    &sc2,
+    &secondary_key,
+    &secondary_circuit,
 );
 
-SangriaIVC::fold_with_debug_mode(
-    &pp,
-    &sc1,
-    array::from_fn(|i| C1Scalar::from(i as u64)),
-    &sc2,
-    array::from_fn(|i| C2Scalar::from(i as u64)),
-    NonZeroUsize::new(10).unwrap(), // fold step count
+// Step 4: Execute folding for 10 steps, starting with specified initial values
+// This performs z_0 → z_1 → z_2 → ... → z_10 with proof accumulation
+let result = SangriaIVC::fold_with_debug_mode(
+    &public_params,
+    &primary_circuit,
+    array::from_fn(|i| C1Scalar::from(i as u64)),   // Primary initial state [0,1,2,3,4]
+    &secondary_circuit,
+    array::from_fn(|i| C2Scalar::from(i as u64)),   // Secondary initial state [0]
+    NonZeroUsize::new(10).unwrap(),                 // Number of fold steps to perform
 )
 .unwrap();
 ```
 
+For a complete working example with detailed comments about private inputs between steps, see the full implementation at [examples/sangria_trivial.rs](examples/sangria_trivial.rs)
+
 ### Run `Cyclefold IVC`
 
 ```rust,no_run
-// Example showing how to use Cyclefold IVC
+/// Example demonstrating how to use Cyclefold IVC for incrementally verifiable computation
 use std::array;
+
 use sirius::{
     commitment::CommitmentKey,
     ivc::step_circuit::trivial,
@@ -164,40 +187,64 @@ use sirius::{
     ff::Field,
 };
 
-// Example constants - in a real application, define these appropriately
-const A1: usize = 5; // Arity for circuit
-const PRIMARY_COMMITMENT_KEY_SIZE: usize = 21;
-const SECONDARY_COMMITMENT_KEY_SIZE: usize = 21;
-const PRIMARY_CIRCUIT_TABLE_SIZE: u32 = 17;
+const CIRCUIT_ARITY: usize = 5;   // Number of state elements in computation circuit
 
-// Initialize your circuit (only one needed)
-let sc = trivial::Circuit::<A1, C1Scalar>::default();
+/// Configuration parameters - must be tuned based on circuit complexity
+/// For production use, these values typically need to be larger
+const PRIMARY_COMMITMENT_KEY_SIZE: usize = 23;   // Controls polynomial degree (primary curve)
+const SECONDARY_COMMITMENT_KEY_SIZE: usize = 23; // Controls polynomial degree (secondary curve)
+const PRIMARY_CIRCUIT_TABLE_SIZE: u32 = 20;      // Minimum required table size
 
-// Set up commitment keys
-let primary_commitment_key =
-    CommitmentKey::<C1Affine>::setup(PRIMARY_COMMITMENT_KEY_SIZE, b"bn256");
-let secondary_commitment_key =
-    CommitmentKey::<C2Affine>::setup(SECONDARY_COMMITMENT_KEY_SIZE, b"grumpkin");
+// Step 1: Initialize the main computation circuit
+// This circuit operates on the bn256 curve with 5 state elements
+let circuit = trivial::Circuit::<CIRCUIT_ARITY, C1Scalar>::default();
 
-// Set up public parameters
-let mut pp = PublicParams::new(
-    &sc,
-    primary_commitment_key,
-    secondary_commitment_key,
+// Step 2: Set up commitment keys for both curves
+// Primary key for the main circuit (bn256 curve)
+let primary_key = CommitmentKey::<C1Affine>::setup(PRIMARY_COMMITMENT_KEY_SIZE, b"bn256");
+// Secondary key for the co-processor (grumpkin curve)
+let secondary_key = CommitmentKey::<C2Affine>::setup(SECONDARY_COMMITMENT_KEY_SIZE, b"grumpkin");
+
+// Step 3: Create public parameters for Cyclefold IVC
+// Note: Parameters are mutable during initialization (unlike Sangria)
+let mut public_params = PublicParams::new(
+    &circuit,
+    primary_key,
+    secondary_key,
     PRIMARY_CIRCUIT_TABLE_SIZE,
 )
 .unwrap();
 
-// Initialize IVC, run one step, and verify
-IVC::new(&mut pp, &sc, array::from_fn(|_| C1Scalar::ZERO))
-    .expect("while step=0")
-    .next(&pp, &sc)
-    .expect("while step=1")
-    .verify(&pp)
-    .expect("while verify");
+// Step 4: Initialize and execute IVC step-by-step with verification
+// This demonstrates the incremental nature of Cyclefold IVC
+let ivc_result = IVC::new(&mut public_params, &circuit, array::from_fn(|_| C1Scalar::ZERO)) // Initialize with z_0 = [0,0,0,0,0]
+    .expect("Failed to initialize IVC (step=0)")
+    .next(&public_params, &circuit)                                         // Compute z_1 = F(z_0, w_1)
+    .expect("Failed to compute next step (step=1)")
+    .verify(&public_params)                                                 // Verify the computation
+    .expect("Failed to verify computation");
 ```
 
-Both examples show how to initialize and run IVC instances. The Cyclefold scheme is simpler as it requires only one circuit, while Sangria uses a two-circuit approach. The examples demonstrate setting up commitment keys, creating public parameters, and running computation steps with verification.
+For a complete working example with detailed comments about private inputs between steps, see the full implementation at [examples/cyclefold_trivial.rs](examples/cyclefold_trivial.rs)
+
+## Key Differences Between Sangria and Cyclefold
+
+Both examples demonstrate how to set up and run IVC instances, but they highlight important architectural differences:
+
+**Sangria IVC**:
+- Uses a **two-circuit approach**: primary for actual computation, secondary for cryptographic operations
+- Requires separate configuration of both circuits with matching commitment settings
+- Executes all steps at once via `fold_with_debug_mode` (i.e., runs 10 steps in a single call)
+- The public parameters are immutable
+
+**Cyclefold IVC**:
+- Uses a **single main circuit** with a specialized co-processor architecture
+- The co-processor handles expensive elliptic curve operations internally
+- Follows a step-by-step execution model via `new()`, `next()`, and `verify()`
+- The public parameters are mutable during initialization
+- Typically offers better performance for recursive proof composition
+
+Choose between them based on your specific requirements for efficiency, flexibility, and complexity.
 
 # Run examples
 
@@ -269,4 +316,3 @@ If you're as enthusiastic about `Sirius` as we are, we invite you to join our de
 :point_right: [Join our developer community](https://t.me/+oQ04SUgs6KMyMzlh)
 
 Thank you for your interest in contributing to `Sirius`! :sparkles:
-
