@@ -2,7 +2,7 @@
 
 This report describes **how** we implemented the integrated **CycleFold + Protogalaxy** protocol in practice, referencing the architecture shown in the diagram above. After discussing the design decisions and code structure, we highlight off‐circuit polynomial computations, on‐circuit verifications (using the **CycleFold‐SupportCircuit**), and how we achieve data‐parallelism with **Rayon** in Rust.
 
-![Cyclefold Diagram](img/cyclefold.png)
+![Cyclefold Diagram](../img/cyclefold.png)
 
 ---
 
@@ -176,21 +176,13 @@ An identity circuit that simply passes inputs through unchanged. This circuit pr
 
 A circuit implementing the Poseidon hash function with configurable parameters (POSEIDON_PERMUTATION_WIDTH=3, R_F1=4, R_P1=3). This benchmark evaluates how efficiently the IVC handle a common cryptographic primitive used in ZK applications.
 
-#### Simple hash function call
+The `Repeat Count` here is count of nested calls of the hash function.
 
-| Step        | Time in seconds |
-| ---         | ---             |
-| IVC::new    | 8.92            |
-| IVC::next   | 6.42            |
-| IVC::verify | 2.17            |
-
-#### 20 nested hash function calls
-
-| Step        | Time in seconds |
-| ---         | ---             |
-| IVC::new    | 8.92            |
-| IVC::next   | 6.59            |
-| IVC::verify | 2.17            |
+| Repeat Count | ivc_new | ivc_next | ivc_verify |
+| -----------  | ------- | -------- | ---------- |
+| 0            | 8.88    | 6.04     | 2.00       |
+| 100          | 8.94    | 6.51     | 2.06       |
+| 200          | 8.97    | 6.72     | 2.17       |
 
 ### SHA256 Circuit
 
@@ -206,13 +198,15 @@ A circuit implementing the sha256 hash function. This circuit was taken from [ha
 
 A circuit proving Merkle tree update operations, verifying correctness of multiple update paths from leaves to root while maintaining proper hash relationships between nodes.
 
-#### Simple Merkle Proof Check
+`Batch Size` here is count of merkle-tree proofs inside one step.
 
-| Step        | Time in seconds |
-| ---         | ---             |
-| IVC::new    | 24              |
-| IVC::next   | 16.5            |
-| IVC::verify | 4               |
+| Batch Size  | ivc_new | ivc_next | ivc_verify |
+| ----------- | ------- | -------- | ---------- |
+| 1           | 24.7000 | 16.4000  | 3.9800     |
+| 2           | 30.0000 | 19.5000  | 3.9700     |
+| 3           | 35.7000 | 22.4000  | 4.0100     |
+| 4           | 41.7000 | 25.7000  | 4.1900     |
+| 5           | 47.8000 | 28.7000  | 4.3500     |
 
 ### IVC Gate Scaling
 
@@ -220,4 +214,6 @@ A benchmark measuring how Sangria IVC and CycleFold IVC performance scales with 
 
 The benchmark uses a circuit that performs not nested calls to the target circuit, but parallel calls. Thus, the growth of the number of gates is provided by multiple independent synthetize to the poseidon circuit, which allows to test without implementing additional circuit dynamics in time.
 
-WIP
+![Sangria vs Cyclefold Diagram](img/ivc_sangria_vs_cyclefold.png)
+
+As can be seen in the graph, the cyclefold scheme is much more successful for a large number of gates and the pattern of growth is linear
