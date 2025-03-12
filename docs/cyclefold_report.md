@@ -196,16 +196,28 @@ A circuit implementing the Poseidon hash function with configurable parameters (
 
 A circuit implementing the sha256 hash function. This circuit was taken from [halo2 example](https://github.com/zcash/halo2/blob/fed6b000857f27e23ddb07454da8bde4697204f7/halo2_gadgets/src/sha256.rs), so its design is maximally unsuitable for Sangria IVC, due to the large number of gates. However, Cyclefold IVC can fold it.
 
-WIP
+| Step        | Time in seconds |
+| ---         | ---             |
+| IVC::new    | 105             |
+| IVC::next   | 91              |
+| IVC::verify | 10.7            |
 
 ### Merkle Tree Circuit
 
 A circuit proving Merkle tree update operations, verifying correctness of multiple update paths from leaves to root while maintaining proper hash relationships between nodes.
 
-WIP
+#### Simple Merkle Proof Check
+
+| Step        | Time in seconds |
+| ---         | ---             |
+| IVC::new    | 24              |
+| IVC::next   | 16.5            |
+| IVC::verify | 4               |
 
 ### IVC Gate Scaling
 
 A benchmark measuring how Sangria IVC and CycleFold IVC performance scales with increasing circuit complexity. Tests different gate counts over multiple fold steps to determine execution time growth patterns as circuits become more complex.
+
+The benchmark uses a circuit that performs not nested calls to the target circuit, but parallel calls. Thus, the growth of the number of gates is provided by multiple independent synthetize to the poseidon circuit, which allows to test without implementing additional circuit dynamics in time.
 
 WIP
