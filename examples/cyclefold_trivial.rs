@@ -80,6 +80,9 @@ fn main() {
 
     // Step 2: Set up commitment keys, using caching for better performance
     // Primary key is on the bn256 curve
+    //
+    // Safety: This call is safe as long as the cache files remain unmodified. For more detail,
+    // refer to the safety documentation
     let primary_key = unsafe {
         CommitmentKey::<C1Affine>::load_or_setup_cache(
             Path::new(FOLDER),
@@ -90,6 +93,9 @@ fn main() {
     };
 
     // Secondary key is on the grumpkin curve (used by the co-processor)
+    //
+    // Safety: This call is safe as long as the cache files remain unmodified. For more detail,
+    // refer to the safety documentation
     let secondary_key = unsafe {
         CommitmentKey::<C2Affine>::load_or_setup_cache(
             Path::new(FOLDER),
