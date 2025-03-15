@@ -121,7 +121,7 @@ use sirius::{
     ff::Field,
 };
 
-/// Sangria uses a two-circuit architecture:
+/// Sangria uses a dual-circuit architecture:
 /// 1. Primary circuit performs the actual computational steps
 /// 2. Secondary circuit handles cryptographic operations for folding
 const PRIMARY_ARITY: usize = 5;   // Number of state elements for main computation circuit
@@ -232,7 +232,7 @@ For a complete working example with detailed comments about private inputs betwe
 Both examples demonstrate how to set up and run IVC instances, but they highlight important architectural differences:
 
 **Sangria IVC**:
-- Uses a **two-circuit approach**: primary for actual computation, secondary for cryptographic operations
+- Uses a **dual-circuit approach**: primary for actual computation, secondary for cryptographic operations
 - Requires separate configuration of both circuits with matching commitment settings
 - Executes all steps at once via `fold_with_debug_mode` (i.e., runs 10 steps in a single call)
 - The public parameters are immutable
