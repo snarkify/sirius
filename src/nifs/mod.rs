@@ -7,7 +7,7 @@
 //!
 //! For more details look at:
 //! - Paragraph '3. Folding scheme' at [Nova whitepaper](https://eprint.iacr.org/2021/370)
-//! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
+//! - [nifs module](https://github.com/microsoft/Nova/blob/main/src/nova/nifs.rs) at [Nova codebase](https://github.com/microsoft/Nova)
 
 pub mod protogalaxy;
 pub mod sangria;
