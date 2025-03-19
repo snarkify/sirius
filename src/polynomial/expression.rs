@@ -13,7 +13,7 @@ use crate::{ff::PrimeField, plonk::PlonkStructure, util::trim_leading_zeros};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum ColumnIndex {
     Challenge { column_index: usize },
-    Polynominal { rotation: i32, column_index: usize },
+    Polynomial { rotation: i32, column_index: usize },
 }
 
 impl PartialOrd for ColumnIndex {
@@ -24,7 +24,7 @@ impl PartialOrd for ColumnIndex {
 impl Ord for ColumnIndex {
     fn cmp(&self, other: &Self) -> Ordering {
         let to_tuple = |s: &Self| match s {
-            Self::Polynominal {
+            Self::Polynomial {
                 rotation,
                 column_index,
             } => (*rotation, *column_index, 0),
@@ -136,7 +136,7 @@ impl<F: PrimeField> Expression<F> {
         match self {
             Expression::Constant(_) => (),
             Expression::Polynomial(poly) => {
-                set.insert(ColumnIndex::Polynominal {
+                set.insert(ColumnIndex::Polynomial {
                     rotation: poly.rotation.0,
                     column_index: poly.index,
                 });
