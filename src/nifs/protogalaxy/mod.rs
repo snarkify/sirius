@@ -154,7 +154,7 @@ impl<C: CurveAffine, const L: usize> ProtoGalaxy<C, L> {
                 .get(),
         );
 
-        let beta = Challenges::<C::ScalarExt>::generate_one::<C::ScalarExt, _, C>(
+        let beta = Challenges::<C::ScalarExt>::generate_one::<_, _, C>(
             params,
             ro_acc,
             &accumulator,
