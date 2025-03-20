@@ -2,7 +2,7 @@
 
 This report describes **how** we implemented the integrated **CycleFold + Protogalaxy** protocol in practice, referencing the architecture shown in the diagram above. After discussing the design decisions and code structure, we highlight off‐circuit polynomial computations, on‐circuit verifications (using the **CycleFold‐SupportCircuit**), and how we achieve data‐parallelism with **Rayon** in Rust.
 
-![Cyclefold Diagram](../img/cyclefold.png)
+![Cyclefold Diagram](img/cyclefold.png)
 
 ---
 
